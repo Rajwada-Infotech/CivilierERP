@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const multer = require("multer");
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
@@ -9,7 +11,12 @@ const { bumpCacheVersion } = require("../redis");
 
 router.use(authMiddleware);
 
-const LOAN_TYPES = ["Inter-Company", "Intra-Company", "Customer Loan"];
+const LOAN_TYPES = ["Inter-Company", "Bank Loan", "Customer Loan"];
+const INTEREST_TYPES = ["SI", "CI"];
+// Flexible repayment (multi-EMI select, lump sum, early payoff) is only
+// meaningful for a real external loan — an Inter-Company transfer is
+// settled internally, not "repaid" through this flow.
+const REPAYABLE_TYPES = ["Bank Loan", "Customer Loan"];
 
 // Get-or-create the system-generated ledger head that represents a company
 // or customer as a Loan counterparty — mirrors ensureProjectLedgerHeads in
@@ -53,10 +60,16 @@ async function ensureLoanLedgerHead(pool, keyPrefix, counterpartyId, counterpart
   return inserted.recordset[0].LHeadId;
 }
 
-// Standard reducing-balance EMI. Falls back to a flat principal-only split
-// (no interest) when no rate is given. Always generates at least 1
-// installment (a tenure-less loan is treated as a single bullet payment).
-function buildEmiSchedule(amount, annualRatePct, tenureMonths, startDate) {
+// Builds the EMI schedule. Three modes:
+//   - No interest (hasInterest=false or rate<=0): flat principal-only split.
+//   - Simple Interest (SI): interest = P x r x (months/12), split evenly
+//     across every installment; principal is also split evenly. Each EMI
+//     is the same amount (classic SI loan behaviour).
+//   - Compound Interest (CI): standard reducing-balance amortization —
+//     interest shrinks each period as principal is paid down.
+// Always generates at least 1 installment (a tenure-less loan is treated as
+// a single bullet payment).
+function buildEmiSchedule(amount, annualRatePct, tenureMonths, startDate, interestType = "CI") {
   const n = Math.max(1, parseInt(tenureMonths, 10) || 1);
   const start = new Date(startDate);
   const rows = [];
@@ -74,6 +87,31 @@ function buildEmiSchedule(amount, annualRatePct, tenureMonths, startDate) {
     return rows;
   }
 
+  if (interestType === "SI") {
+    const totalInterest = Math.round(amount * (annualRatePct / 100) * (n / 12) * 100) / 100;
+    const flatPrincipal = Math.round((amount / n) * 100) / 100;
+    const flatInterest = Math.round((totalInterest / n) * 100) / 100;
+    let allocatedPrincipal = 0;
+    let allocatedInterest = 0;
+    for (let i = 1; i <= n; i++) {
+      const principal = i === n ? Math.round((amount - allocatedPrincipal) * 100) / 100 : flatPrincipal;
+      const interest = i === n ? Math.round((totalInterest - allocatedInterest) * 100) / 100 : flatInterest;
+      allocatedPrincipal += principal;
+      allocatedInterest += interest;
+      const due = new Date(start);
+      due.setMonth(due.getMonth() + i);
+      rows.push({
+        installmentNo: i,
+        dueDate: due,
+        emiAmount: Math.round((principal + interest) * 100) / 100,
+        principal,
+        interest,
+      });
+    }
+    return rows;
+  }
+
+  // Compound Interest — reducing-balance amortization.
   const r = annualRatePct / 12 / 100;
   const emi = (amount * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
   let balance = amount;
@@ -158,10 +196,15 @@ router.get("/customer-options", requirePageRight("loan-sanction", "view"), async
 router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const nocSearch = typeof req.query.noc === "string" && req.query.noc.trim() ? req.query.noc.trim() : null;
+    const request = pool.request();
+    if (nocSearch) request.input("NocSearch", sql.NVarChar(255), `%${nocSearch}%`);
+    const result = await request.query(`
       SELECT
-        ls.LoanId, ls.LoanNo, ls.LoanType,
+        ls.LoanId, ls.LoanNo, ls.LoanType, ls.LoanDocNo,
+        ls.InterestType, ls.HasInterest,
         ls.LenderCompanyId, lc.name AS LenderCompanyName,
+        ls.LenderBankId, lb.LHeadName AS LenderBankName,
         ls.BorrowerCompanyId, bc.name AS BorrowerCompanyName,
         ls.BorrowerCustomerId, ls.BorrowerCustomerSource,
         COALESCE(cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerCustomerName,
@@ -169,13 +212,17 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
         ls.Purpose, ls.Status, ls.Remarks,
         ls.LenderLHeadId, ls.BorrowerLHeadId,
         ls.CreatedBy, ls.CreatedAt, ls.UpdatedBy, ls.UpdatedAt,
+        ls.ClosedAt, ls.NOCAttachmentId, noc.FileName AS NOCFileName,
         (SELECT COUNT(*) FROM dbo.LoanEMISchedule e WHERE e.LoanId = ls.LoanId) AS TotalEMIs,
         (SELECT COUNT(*) FROM dbo.LoanEMISchedule e WHERE e.LoanId = ls.LoanId AND e.IsPaid = 1) AS PaidEMIs
       FROM dbo.LoanSanction ls
       LEFT JOIN dbo.enterprise lc ON lc.id = ls.LenderCompanyId AND lc.business_type = 'C'
+      LEFT JOIN dbo.AccountHeadMaster lb ON lb.LHeadId = ls.LenderBankId
       LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
       LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
+      LEFT JOIN dbo.LoanNOCAttachments noc ON noc.AttachmentId = ls.NOCAttachmentId
+      ${nocSearch ? "WHERE noc.FileName LIKE @NocSearch" : ""}
       ORDER BY ls.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -208,6 +255,112 @@ router.get("/emi-reminders", async (req, res) => {
   }
 });
 
+// ── GET /emi-payable — all unpaid EMIs for Bank Loan / Customer Loan ──────
+// Feeds the "pay these EMIs" picker (multi-select or lump sum). Only the
+// two loan types that use the flexible repayment flow show up here — an
+// Inter-Company transfer is settled via the simple per-EMI checkbox on
+// the EMI Schedule tab instead.
+// Registered before "/:id" so it isn't swallowed by the param route.
+router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        e.EMIId, e.LoanId, e.InstallmentNo, e.DueDate, e.EMIAmount,
+        e.PrincipalComponent, e.InterestComponent,
+        ls.LoanNo, ls.LoanType,
+        COALESCE(bc.name, cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerName,
+        CASE WHEN e.DueDate < CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS IsOverdue
+      FROM dbo.LoanEMISchedule e
+      JOIN dbo.LoanSanction ls ON ls.LoanId = e.LoanId
+      LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
+      LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
+      LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
+      WHERE e.IsPaid = 0 AND ls.LoanType IN ('Bank Loan', 'Customer Loan') AND ls.Status <> 'Closed'
+      ORDER BY e.DueDate ASC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /company-exposure/:companyId — live lender/borrower summary ───────
+// Powers the Exposure tab: while sanctioning a loan, picking a Lender
+// Company shows what they've already lent out + any EMI currently due to
+// them; picking a Borrower Company shows what that company already owes.
+// Registered before "/:id" so it isn't swallowed by the param route.
+router.get("/company-exposure/:companyId", requirePageRight("loan-sanction", "view"), async (req, res) => {
+  const companyId = parseInt(req.params.companyId, 10);
+  if (!Number.isFinite(companyId)) return res.status(400).json({ error: "Invalid company id" });
+  try {
+    const pool = getPool();
+
+    // Per-loan "paid so far" is computed in a derived table first — SQL
+    // Server rejects an aggregate (outer SUM) wrapping an expression that
+    // itself contains a correlated-subquery aggregate, so the paid total
+    // has to be resolved to a plain scalar column before the outer SUM.
+    const asLender = await pool.request().input("id", sql.Int, companyId).query(`
+      SELECT
+        COUNT(*) AS loanCount,
+        ISNULL(SUM(x.Amount), 0) AS totalLent,
+        ISNULL(SUM(CASE WHEN x.Status <> 'Closed' THEN x.Amount - x.PaidSoFar ELSE 0 END), 0) AS totalOutstanding
+      FROM (
+        SELECT ls.LoanId, ls.Amount, ls.Status,
+          ISNULL((SELECT SUM(e.EMIAmount) FROM dbo.LoanEMISchedule e WHERE e.LoanId = ls.LoanId AND e.IsPaid = 1), 0) AS PaidSoFar
+        FROM dbo.LoanSanction ls
+        WHERE ls.LenderCompanyId = @id
+      ) x
+    `);
+
+    const asBorrower = await pool.request().input("id", sql.Int, companyId).query(`
+      SELECT
+        COUNT(*) AS loanCount,
+        ISNULL(SUM(x.Amount), 0) AS totalBorrowed,
+        ISNULL(SUM(CASE WHEN x.Status <> 'Closed' THEN x.Amount - x.PaidSoFar ELSE 0 END), 0) AS totalOutstanding
+      FROM (
+        SELECT ls.LoanId, ls.Amount, ls.Status,
+          ISNULL((SELECT SUM(e.EMIAmount) FROM dbo.LoanEMISchedule e WHERE e.LoanId = ls.LoanId AND e.IsPaid = 1), 0) AS PaidSoFar
+        FROM dbo.LoanSanction ls
+        WHERE ls.BorrowerCompanyId = @id
+      ) x
+    `);
+
+    const nextDueAsBorrower = await pool.request().input("id", sql.Int, companyId).query(`
+      SELECT TOP 1 e.DueDate, e.EMIAmount, ls.LoanNo
+      FROM dbo.LoanEMISchedule e
+      JOIN dbo.LoanSanction ls ON ls.LoanId = e.LoanId
+      WHERE ls.BorrowerCompanyId = @id AND e.IsPaid = 0
+      ORDER BY e.DueDate ASC
+    `);
+
+    const nextDueAsLender = await pool.request().input("id", sql.Int, companyId).query(`
+      SELECT TOP 1 e.DueDate, e.EMIAmount, ls.LoanNo
+      FROM dbo.LoanEMISchedule e
+      JOIN dbo.LoanSanction ls ON ls.LoanId = e.LoanId
+      WHERE ls.LenderCompanyId = @id AND e.IsPaid = 0
+      ORDER BY e.DueDate ASC
+    `);
+
+    res.json({
+      asLender: {
+        loanCount: asLender.recordset[0].loanCount,
+        totalLent: asLender.recordset[0].totalLent,
+        totalOutstanding: asLender.recordset[0].totalOutstanding,
+        nextDue: nextDueAsLender.recordset[0] ?? null,
+      },
+      asBorrower: {
+        loanCount: asBorrower.recordset[0].loanCount,
+        totalBorrowed: asBorrower.recordset[0].totalBorrowed,
+        totalOutstanding: asBorrower.recordset[0].totalOutstanding,
+        nextDue: nextDueAsBorrower.recordset[0] ?? null,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /:id ──────────────────────────────────────────────────────────────
 router.get("/:id", requirePageRight("loan-sanction", "view"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -218,13 +371,27 @@ router.get("/:id", requirePageRight("loan-sanction", "view"), async (req, res) =
       SELECT
         ls.*,
         lc.name AS LenderCompanyName,
+        lb.LHeadName AS LenderBankName,
         bc.name AS BorrowerCompanyName,
-        COALESCE(cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerCustomerName
+        COALESCE(cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerCustomerName,
+        lender_gl.LHeadCode AS LenderLHeadCode,
+        lender_grp.Name AS LenderGroupName,
+        lender_parent.Name AS LenderParentGroupName,
+        borrower_gl.LHeadCode AS BorrowerLHeadCode,
+        borrower_grp.Name AS BorrowerGroupName,
+        borrower_parent.Name AS BorrowerParentGroupName
       FROM dbo.LoanSanction ls
       LEFT JOIN dbo.enterprise lc ON lc.id = ls.LenderCompanyId AND lc.business_type = 'C'
+      LEFT JOIN dbo.AccountHeadMaster lb ON lb.LHeadId = ls.LenderBankId
       LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
       LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
+      LEFT JOIN dbo.AccountHeadMaster lender_gl ON lender_gl.LHeadId = ls.LenderLHeadId
+      LEFT JOIN dbo.AccountGroup lender_grp ON lender_grp.AGId = lender_gl.LBelongsTo
+      LEFT JOIN dbo.AccountGroup lender_parent ON lender_parent.AGId = lender_grp.ParentGroupId
+      LEFT JOIN dbo.AccountHeadMaster borrower_gl ON borrower_gl.LHeadId = ls.BorrowerLHeadId
+      LEFT JOIN dbo.AccountGroup borrower_grp ON borrower_grp.AGId = borrower_gl.LBelongsTo
+      LEFT JOIN dbo.AccountGroup borrower_parent ON borrower_parent.AGId = borrower_grp.ParentGroupId
       WHERE ls.LoanId = @id
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Loan not found" });
@@ -242,10 +409,35 @@ router.get("/:id/schedule", requirePageRight("loan-sanction", "view"), async (re
     const pool = getPool();
     const result = await pool.request().input("id", sql.Int, id).query(`
       SELECT EMIId, LoanId, InstallmentNo, DueDate, EMIAmount, PrincipalComponent, InterestComponent,
-             IsPaid, PaidDate, PaidBy, CreatedAt
+             IsPaid, PaidDate, PaidBy, PaymentId, CreatedAt
       FROM dbo.LoanEMISchedule
       WHERE LoanId = @id
       ORDER BY InstallmentNo ASC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/payments — the chain of actual payment transactions ─────────
+// Each row is one payment ACTION (which may have covered several EMIs, or
+// been a lump sum) — distinct from /schedule, which is the installment
+// PLAN. This is what the Repayment History tab renders as its chain.
+router.get("/:id/payments", requirePageRight("loan-sanction", "view"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("id", sql.Int, id).query(`
+      SELECT
+        p.PaymentId, p.LoanId, p.PaymentRef, p.PaymentDate, p.PaymentType,
+        p.PrincipalInterestAmount, p.LateFee, p.TotalAmount, p.ExcessCredited,
+        p.ClosedLoan, p.Notes, p.CreatedBy, p.CreatedAt,
+        (SELECT COUNT(*) FROM dbo.LoanEMISchedule e WHERE e.PaymentId = p.PaymentId) AS EmisCovered
+      FROM dbo.LoanPayment p
+      WHERE p.LoanId = @id
+      ORDER BY p.PaymentDate ASC, p.PaymentId ASC
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -268,12 +460,16 @@ router.get("/:id/schedule", requirePageRight("loan-sanction", "view"), async (re
 router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) => {
   const {
     loanType,
+    loanDocNo,
     lenderCompanyId,
+    lenderBankId,
     borrowerCompanyId,
     borrowerCustomerId,
     borrowerCustomerSource,
     loanDate,
     amount,
+    hasInterest,
+    interestType,
     interestRate,
     tenureMonths,
     purpose,
@@ -282,11 +478,16 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
   const createdBy = req.user?.email || req.user?.name || "system";
 
   if (!loanType || !LOAN_TYPES.includes(loanType)) {
-    return res.status(400).json({ error: "loanType must be Inter-Company, Intra-Company, or Customer Loan" });
+    return res.status(400).json({ error: "loanType must be Inter-Company, Bank Loan, or Customer Loan" });
   }
-  if (!lenderCompanyId) return res.status(400).json({ error: "Lender company is required" });
   const isCustomerLoan = loanType === "Customer Loan";
+  const isBankLoan = loanType === "Bank Loan";
   const custSource = borrowerCustomerSource === "CRM" ? "CRM" : "AH";
+  const useInterest = hasInterest !== false && hasInterest !== "false";
+  const iType = INTEREST_TYPES.includes(interestType) ? interestType : "CI";
+
+  if (isBankLoan && !lenderBankId) return res.status(400).json({ error: "Lender bank is required" });
+  if (!isBankLoan && !lenderCompanyId) return res.status(400).json({ error: "Lender company is required" });
   if (isCustomerLoan && !borrowerCustomerId) {
     return res.status(400).json({ error: "Borrower customer is required" });
   }
@@ -302,11 +503,21 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
   try {
     await tx.begin();
 
-    const lenderRes = await new sql.Request(tx)
-      .input("lenderId", sql.Int, parseInt(lenderCompanyId, 10))
-      .query("SELECT id, name FROM dbo.enterprise WHERE business_type = 'C' AND id = @lenderId");
-    const lenderCompany = lenderRes.recordset[0];
-    if (!lenderCompany) throw Object.assign(new Error("Lender company not found"), { status: 400 });
+    let lenderCompany = null;
+    let lenderBank = null;
+    if (isBankLoan) {
+      const bankRes = await new sql.Request(tx)
+        .input("bankId", sql.Int, parseInt(lenderBankId, 10))
+        .query("SELECT LHeadId AS id, LHeadName AS name FROM dbo.AccountHeadMaster WHERE LHeadId = @bankId AND LHeadType = 'B'");
+      lenderBank = bankRes.recordset[0];
+      if (!lenderBank) throw Object.assign(new Error("Lender bank not found"), { status: 400 });
+    } else {
+      const lenderRes = await new sql.Request(tx)
+        .input("lenderId", sql.Int, parseInt(lenderCompanyId, 10))
+        .query("SELECT id, name FROM dbo.enterprise WHERE business_type = 'C' AND id = @lenderId");
+      lenderCompany = lenderRes.recordset[0];
+      if (!lenderCompany) throw Object.assign(new Error("Lender company not found"), { status: 400 });
+    }
 
     let borrowerCompany = null;
     let borrowerCustomer = null;
@@ -331,35 +542,49 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
       if (!borrowerCompany) throw Object.assign(new Error("Borrower company not found"), { status: 400 });
     }
 
+    const effectiveRate = useInterest && interestRate != null && interestRate !== "" ? parseFloat(interestRate) : null;
+
     const insertResult = await new sql.Request(tx)
       .input("LoanNo", sql.NVarChar(50), "PENDING")
       .input("LoanType", sql.NVarChar(20), loanType)
-      .input("LenderCompanyId", sql.Int, lenderCompany.id)
+      .input("LoanDocNo", sql.NVarChar(100), loanDocNo || null)
+      .input("LenderCompanyId", sql.Int, lenderCompany ? lenderCompany.id : null)
+      .input("LenderBankId", sql.Int, lenderBank ? lenderBank.id : null)
       .input("BorrowerCompanyId", sql.Int, borrowerCompany ? borrowerCompany.id : null)
-      .input("BorrowerCustomerId", sql.Int, borrowerCustomer ? borrowerCustomer.LHeadId : null)
+      .input("BorrowerCustomerId", sql.Int, borrowerCustomer ? borrowerCustomer.custId : null)
+      .input("BorrowerCustomerSource", sql.NVarChar(10), isCustomerLoan ? custSource : null)
       .input("LoanDate", sql.Date, loanDate)
       .input("Amount", sql.Decimal(18, 2), amt)
-      .input("InterestRate", sql.Decimal(5, 2), interestRate != null && interestRate !== "" ? parseFloat(interestRate) : null)
+      .input("HasInterest", sql.Bit, useInterest ? 1 : 0)
+      .input("InterestType", sql.NVarChar(10), iType)
+      .input("InterestRate", sql.Decimal(5, 2), effectiveRate)
       .input("TenureMonths", sql.Int, tenureMonths != null && tenureMonths !== "" ? parseInt(tenureMonths, 10) : null)
       .input("Purpose", sql.NVarChar(500), purpose || null)
       .input("Remarks", sql.NVarChar(500), remarks || null)
       .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
         INSERT INTO dbo.LoanSanction
-          (LoanNo, LoanType, LenderCompanyId, BorrowerCompanyId, BorrowerCustomerId, LoanDate, Amount,
-           InterestRate, TenureMonths, Purpose, Status, Remarks, CreatedBy, CreatedAt)
+          (LoanNo, LoanType, LoanDocNo, LenderCompanyId, LenderBankId, BorrowerCompanyId, BorrowerCustomerId,
+           BorrowerCustomerSource, LoanDate, Amount, HasInterest, InterestType, InterestRate, TenureMonths,
+           Purpose, Status, Remarks, CreatedBy, CreatedAt)
         OUTPUT INSERTED.LoanId
         VALUES
-          (@LoanNo, @LoanType, @LenderCompanyId, @BorrowerCompanyId, @BorrowerCustomerId, @LoanDate, @Amount,
-           @InterestRate, @TenureMonths, @Purpose, 'Sanctioned', @Remarks, @CreatedBy, SYSDATETIME())
+          (@LoanNo, @LoanType, @LoanDocNo, @LenderCompanyId, @LenderBankId, @BorrowerCompanyId, @BorrowerCustomerId,
+           @BorrowerCustomerSource, @LoanDate, @Amount, @HasInterest, @InterestType, @InterestRate, @TenureMonths,
+           @Purpose, 'Sanctioned', @Remarks, @CreatedBy, SYSDATETIME())
       `);
     const loanId = insertResult.recordset[0].LoanId;
     const loanNo = `LN-${String(loanId).padStart(6, "0")}`;
 
-    const borrowerName = borrowerCompany ? borrowerCompany.name : borrowerCustomer.LHeadName;
-    const borrowerKeyPrefix = borrowerCompany ? "C" : "CUST";
-    const borrowerKeyId = borrowerCompany ? borrowerCompany.id : borrowerCustomer.LHeadId;
+    const borrowerName = borrowerCompany ? borrowerCompany.name : borrowerCustomer.custName;
+    const borrowerKeyPrefix = borrowerCompany ? "C" : custSource === "CRM" ? "CRMCUST" : "CUST";
+    const borrowerKeyId = borrowerCompany ? borrowerCompany.id : borrowerCustomer.custId;
 
-    const lenderLHeadId = await ensureLoanLedgerHead(pool, "C", lenderCompany.id, lenderCompany.name, createdBy);
+    // Bank Loan: the bank already has its own real ledger head — reuse it
+    // directly as the lender GL account instead of spawning a "Loan - Bank"
+    // shadow account for something that already has a proper one.
+    const lenderLHeadId = isBankLoan
+      ? lenderBank.id
+      : await ensureLoanLedgerHead(pool, "C", lenderCompany.id, lenderCompany.name, createdBy);
     const borrowerLHeadId = await ensureLoanLedgerHead(pool, borrowerKeyPrefix, borrowerKeyId, borrowerName, createdBy);
 
     await new sql.Request(tx)
@@ -374,6 +599,7 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
 
     // Borrower receives the loan as an available "on account" balance —
     // same CREDIT/DEBIT ledger the vendor on-account flow uses.
+    const lenderName = isBankLoan ? lenderBank.name : lenderCompany.name;
     await new sql.Request(tx)
       .input("PartyId", sql.Int, borrowerLHeadId)
       .input("PartyType", sql.NVarChar(20), "Loan")
@@ -384,7 +610,7 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
       .input("RefDocNo", sql.NVarChar(100), loanNo)
       .input("RefId", sql.Int, loanId)
       .input("CompanyId", sql.Int, borrowerCompany ? borrowerCompany.id : null)
-      .input("Notes", sql.NVarChar(500), `${loanType} loan sanctioned from ${lenderCompany.name}`)
+      .input("Notes", sql.NVarChar(500), `${loanType} loan sanctioned from ${lenderName}`)
       .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
         INSERT INTO dbo.OnAccountLedger
           (PartyId, PartyType, TxnDate, TxnType, Amount, RefType, RefDocNo, RefId, CompanyId, Notes, CreatedBy)
@@ -395,7 +621,7 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
           WHERE LHeadId = @PartyId;
       `);
 
-    const schedule = buildEmiSchedule(amt, parseFloat(interestRate) || 0, tenureMonths, loanDate);
+    const schedule = buildEmiSchedule(amt, effectiveRate || 0, tenureMonths, loanDate, iType);
     await insertEmiSchedule(tx, loanId, schedule);
 
     await tx.commit();
@@ -494,6 +720,358 @@ router.put("/:id/emi/:emiId/pay", requirePageRight("loan-sanction", "edit"), asy
   } catch (err) {
     await tx.rollback().catch(() => {});
     res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── POST /:id/pay — flexible repayment: single EMI, multiple EMIs, or a
+//    lump sum. Bank Loan / Customer Loan only (see REPAYABLE_TYPES).
+//
+// Body: { emiIds?: number[], lumpSumAmount?: number, lateFee?: number,
+//         paymentDate, notes? }
+// Exactly one of emiIds / lumpSumAmount is expected.
+//
+// Payoff validator (as specified): once the running total actually paid
+// toward principal+interest (across every LoanPayment row for this loan,
+// including this one) reaches or exceeds the full schedule total, the loan
+// is marked Closed regardless of which individual installments that total
+// lines up against — a 4-month, interest-bearing loan can be paid off in
+// month 1 with one lump sum. Any amount paid beyond what was actually owed
+// is credited to the LENDER's own ledger (the receiver of the payment) as
+// an on-account credit, adjustable later via the On A/C Adjustment page —
+// it is never silently dropped.
+// Late fee is tracked separately and does NOT count toward the payoff
+// total — it's an additional charge, not principal/interest.
+router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, res) => {
+  const loanId = parseInt(req.params.id, 10);
+  const { emiIds, lumpSumAmount, lateFee, paymentDate, notes } = req.body;
+  const actor = req.user?.email || req.user?.name || "system";
+  if (!Number.isFinite(loanId)) return res.status(400).json({ error: "Invalid id" });
+
+  const fee = lateFee != null && lateFee !== "" ? parseFloat(lateFee) : 0;
+  const isLumpSum = lumpSumAmount != null && lumpSumAmount !== "";
+  const requestedEmiIds = Array.isArray(emiIds) ? emiIds.map((n) => parseInt(n, 10)).filter(Number.isFinite) : [];
+  if (!isLumpSum && requestedEmiIds.length === 0) {
+    return res.status(400).json({ error: "Select at least one EMI, or enter a lump sum amount" });
+  }
+  if (!paymentDate) return res.status(400).json({ error: "Payment date is required" });
+
+  const pool = getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    await tx.begin();
+
+    const loanRes = await new sql.Request(tx)
+      .input("LoanId", sql.Int, loanId)
+      .query("SELECT LoanId, LoanNo, LoanType, Status, BorrowerLHeadId, LenderLHeadId FROM dbo.LoanSanction WHERE LoanId = @LoanId");
+    const loan = loanRes.recordset[0];
+    if (!loan) throw Object.assign(new Error("Loan not found"), { status: 404 });
+    if (!REPAYABLE_TYPES.includes(loan.LoanType)) {
+      throw Object.assign(
+        new Error("Flexible repayment (EMI select / lump sum) is only available for Bank Loan and Customer Loan. Use the EMI Schedule checkbox for other loan types."),
+        { status: 400 },
+      );
+    }
+    if (loan.Status === "Closed") {
+      throw Object.assign(new Error("This loan is already closed."), { status: 409 });
+    }
+
+    const allEmisRes = await new sql.Request(tx)
+      .input("LoanId", sql.Int, loanId)
+      .query("SELECT EMIId, EMIAmount, IsPaid FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId ORDER BY InstallmentNo ASC");
+    const allEmis = allEmisRes.recordset;
+    const unpaidEmis = allEmis.filter((e) => !e.IsPaid);
+    const totalScheduleAmount = allEmis.reduce((s, e) => s + Number(e.EMIAmount), 0);
+
+    const alreadyPaidRes = await new sql.Request(tx)
+      .input("LoanId", sql.Int, loanId)
+      .query("SELECT ISNULL(SUM(PrincipalInterestAmount), 0) AS paid FROM dbo.LoanPayment WHERE LoanId = @LoanId");
+    const alreadyPaid = Number(alreadyPaidRes.recordset[0].paid);
+
+    let principalInterestAmount;
+    let emiIdsToMark = [];
+
+    if (isLumpSum) {
+      principalInterestAmount = parseFloat(lumpSumAmount);
+      if (!principalInterestAmount || principalInterestAmount <= 0) {
+        throw Object.assign(new Error("Lump sum amount must be greater than 0"), { status: 400 });
+      }
+      // Greedily apply the lump sum to unpaid EMIs in due-date order for
+      // as far as it covers full installments — this is just how the
+      // payment gets attributed to the plan; the payoff check below is
+      // what actually decides closure, independent of exact EMI matching.
+      let remaining = principalInterestAmount;
+      for (const emi of unpaidEmis) {
+        if (remaining >= Number(emi.EMIAmount) - 0.01) {
+          emiIdsToMark.push(emi.EMIId);
+          remaining -= Number(emi.EMIAmount);
+        } else {
+          break;
+        }
+      }
+    } else {
+      const matched = allEmis.filter((e) => requestedEmiIds.includes(e.EMIId));
+      if (matched.length !== requestedEmiIds.length) {
+        throw Object.assign(new Error("One or more selected EMIs were not found on this loan"), { status: 400 });
+      }
+      const alreadyPaidSelected = matched.filter((e) => e.IsPaid);
+      if (alreadyPaidSelected.length > 0) {
+        throw Object.assign(new Error("One or more selected EMIs are already paid"), { status: 409 });
+      }
+      principalInterestAmount = matched.reduce((s, e) => s + Number(e.EMIAmount), 0);
+      emiIdsToMark = matched.map((e) => e.EMIId);
+    }
+
+    const newTotalPaid = alreadyPaid + principalInterestAmount;
+    const willClose = newTotalPaid >= totalScheduleAmount - 0.01;
+    const excess = willClose ? Math.max(0, Math.round((newTotalPaid - totalScheduleAmount) * 100) / 100) : 0;
+    const totalAmount = Math.round((principalInterestAmount + fee) * 100) / 100;
+
+    const paymentRef = `PAY-${loan.LoanNo}-${Date.now().toString().slice(-6)}`;
+    const paymentType = isLumpSum ? "LumpSum" : "EMI";
+
+    const paymentInsert = await new sql.Request(tx)
+      .input("LoanId", sql.Int, loanId)
+      .input("PaymentRef", sql.NVarChar(100), paymentRef)
+      .input("PaymentDate", sql.Date, paymentDate)
+      .input("PaymentType", sql.NVarChar(20), paymentType)
+      .input("PrincipalInterestAmount", sql.Decimal(18, 2), principalInterestAmount)
+      .input("LateFee", sql.Decimal(18, 2), fee)
+      .input("TotalAmount", sql.Decimal(18, 2), totalAmount)
+      .input("ExcessCredited", sql.Decimal(18, 2), excess)
+      .input("ClosedLoan", sql.Bit, willClose ? 1 : 0)
+      .input("Notes", sql.NVarChar(500), notes || null)
+      .input("CreatedBy", sql.NVarChar(150), actor).query(`
+        INSERT INTO dbo.LoanPayment
+          (LoanId, PaymentRef, PaymentDate, PaymentType, PrincipalInterestAmount, LateFee, TotalAmount, ExcessCredited, ClosedLoan, Notes, CreatedBy)
+        OUTPUT INSERTED.PaymentId
+        VALUES
+          (@LoanId, @PaymentRef, @PaymentDate, @PaymentType, @PrincipalInterestAmount, @LateFee, @TotalAmount, @ExcessCredited, @ClosedLoan, @Notes, @CreatedBy)
+      `);
+    const paymentId = paymentInsert.recordset[0].PaymentId;
+
+    // If the payoff closes the loan, every remaining EMI is settled by this
+    // payment (that's the whole point of an early lump-sum payoff) —
+    // otherwise, only the specific EMIs this payment actually covers.
+    const emisToUpdate = willClose ? unpaidEmis.map((e) => e.EMIId) : emiIdsToMark;
+    for (const emiId of emisToUpdate) {
+      await new sql.Request(tx)
+        .input("EMIId", sql.Int, emiId)
+        .input("PaymentId", sql.Int, paymentId)
+        .input("PaidDate", sql.Date, paymentDate)
+        .input("PaidBy", sql.NVarChar(150), actor).query(`
+          UPDATE dbo.LoanEMISchedule
+          SET IsPaid = 1, PaidDate = @PaidDate, PaidBy = @PaidBy, PaymentId = @PaymentId
+          WHERE EMIId = @EMIId
+        `);
+    }
+
+    // Borrower's loan balance goes down by the principal+interest portion —
+    // late fee is a separate charge, not a reduction of the loan itself.
+    if (loan.BorrowerLHeadId) {
+      await new sql.Request(tx)
+        .input("PartyId", sql.Int, loan.BorrowerLHeadId)
+        .input("PartyType", sql.NVarChar(20), "Loan")
+        .input("TxnDate", sql.Date, paymentDate)
+        .input("TxnType", sql.NVarChar(10), "DEBIT")
+        .input("Amount", sql.Decimal(18, 2), principalInterestAmount)
+        .input("RefType", sql.NVarChar(30), "LoanPayment")
+        .input("RefDocNo", sql.NVarChar(100), paymentRef)
+        .input("RefId", sql.Int, paymentId)
+        .input("Notes", sql.NVarChar(500), `${paymentType} payment ${paymentRef} for ${loan.LoanNo}${willClose ? " (loan closed)" : ""}`)
+        .input("CreatedBy", sql.NVarChar(150), actor).query(`
+          INSERT INTO dbo.OnAccountLedger
+            (PartyId, PartyType, TxnDate, TxnType, Amount, RefType, RefDocNo, RefId, Notes, CreatedBy)
+          VALUES
+            (@PartyId, @PartyType, @TxnDate, @TxnType, @Amount, @RefType, @RefDocNo, @RefId, @Notes, @CreatedBy);
+          UPDATE dbo.AccountHeadMaster
+            SET OnAccountBalance = ISNULL(OnAccountBalance, 0) - @Amount
+            WHERE LHeadId = @PartyId;
+        `);
+    }
+
+    // Overpayment on early closure goes to the LENDER (the receiver of the
+    // money) as an on-account credit — never dropped, adjustable later.
+    if (excess > 0 && loan.LenderLHeadId) {
+      await new sql.Request(tx)
+        .input("PartyId", sql.Int, loan.LenderLHeadId)
+        .input("PartyType", sql.NVarChar(20), "Loan")
+        .input("TxnDate", sql.Date, paymentDate)
+        .input("TxnType", sql.NVarChar(10), "CREDIT")
+        .input("Amount", sql.Decimal(18, 2), excess)
+        .input("RefType", sql.NVarChar(30), "LoanOverpayment")
+        .input("RefDocNo", sql.NVarChar(100), paymentRef)
+        .input("RefId", sql.Int, paymentId)
+        .input("Notes", sql.NVarChar(500), `Overpayment on early closure of ${loan.LoanNo} — available for adjustment`)
+        .input("CreatedBy", sql.NVarChar(150), actor).query(`
+          INSERT INTO dbo.OnAccountLedger
+            (PartyId, PartyType, TxnDate, TxnType, Amount, RefType, RefDocNo, RefId, Notes, CreatedBy)
+          VALUES
+            (@PartyId, @PartyType, @TxnDate, @TxnType, @Amount, @RefType, @RefDocNo, @RefId, @Notes, @CreatedBy);
+          UPDATE dbo.AccountHeadMaster
+            SET OnAccountBalance = ISNULL(OnAccountBalance, 0) + @Amount
+            WHERE LHeadId = @PartyId;
+        `);
+    }
+
+    if (willClose) {
+      await new sql.Request(tx)
+        .input("LoanId", sql.Int, loanId)
+        .input("PaymentId", sql.Int, paymentId).query(`
+          UPDATE dbo.LoanSanction
+          SET Status = 'Closed', ClosedAt = SYSDATETIME(), ClosurePaymentId = @PaymentId, UpdatedAt = SYSDATETIME()
+          WHERE LoanId = @LoanId
+        `);
+    }
+
+    await tx.commit();
+    await Promise.all([
+      bumpCacheVersion("loan-sanction"),
+      bumpCacheVersion("on-account"),
+    ]);
+    res.status(201).json({
+      paymentId,
+      paymentRef,
+      totalAmount,
+      loanClosed: willClose,
+      excessCredited: excess,
+    });
+  } catch (err) {
+    await tx.rollback().catch(() => {});
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── POST /:id/document — upload a supporting document against the loan
+//    (agreement, sanction letter, etc.) — unlike the NOC, this can be
+//    uploaded any time, not just once the loan is closed.
+router.post("/:id/document", requirePageRight("loan-sanction", "edit"), upload.single("file"), async (req, res) => {
+  const loanId = parseInt(req.params.id, 10);
+  const actor = req.user?.email || req.user?.name || "system";
+  if (!Number.isFinite(loanId)) return res.status(400).json({ error: "Invalid id" });
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+  try {
+    const pool = getPool();
+    const loanRes = await pool.request().input("LoanId", sql.Int, loanId)
+      .query("SELECT LoanId FROM dbo.LoanSanction WHERE LoanId = @LoanId");
+    if (!loanRes.recordset[0]) return res.status(404).json({ error: "Loan not found" });
+
+    const insertRes = await pool
+      .request()
+      .input("LoanId", sql.Int, loanId)
+      .input("DocType", sql.NVarChar(30), req.body.docType || "Agreement")
+      .input("FileName", sql.NVarChar(255), req.file.originalname)
+      .input("MimeType", sql.NVarChar(100), req.file.mimetype)
+      .input("FileSize", sql.Int, req.file.size)
+      .input("FileData", sql.VarBinary(sql.MAX), req.file.buffer)
+      .input("UploadedBy", sql.NVarChar(150), actor).query(`
+        INSERT INTO dbo.LoanDocumentAttachments (LoanId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
+        OUTPUT INSERTED.AttachmentId
+        VALUES (@LoanId, @DocType, @FileName, @MimeType, @FileSize, @FileData, @UploadedBy)
+      `);
+    const attachId = insertRes.recordset[0].AttachmentId;
+    await bumpCacheVersion("loan-sanction");
+    res.status(201).json({ attachmentId: attachId, fileName: req.file.originalname });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/documents — list supporting documents uploaded against a loan
+router.get("/:id/documents", requirePageRight("loan-sanction", "view"), async (req, res) => {
+  const loanId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(loanId)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("LoanId", sql.Int, loanId).query(`
+      SELECT AttachmentId, LoanId, DocType, FileName, MimeType, FileSize, UploadedBy, UploadedAt
+      FROM dbo.LoanDocumentAttachments
+      WHERE LoanId = @LoanId
+      ORDER BY UploadedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /document/:attachId — stream a stored loan document ────────────────
+router.get("/document/:attachId", requirePageRight("loan-sanction", "view"), async (req, res) => {
+  const attachId = parseInt(req.params.attachId, 10);
+  if (!Number.isFinite(attachId)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("AttachmentId", sql.Int, attachId)
+      .query("SELECT FileName, MimeType, FileData FROM dbo.LoanDocumentAttachments WHERE AttachmentId = @AttachmentId");
+    const attachment = result.recordset[0];
+    if (!attachment) return res.status(404).json({ error: "Attachment not found" });
+    res.setHeader("Content-Type", attachment.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(attachment.FileName)}"`);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(attachment.FileData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /:id/noc — upload the No Objection Certificate once a loan is
+//    closed. Mirrors routes/grns.js's attachment upload pattern exactly.
+router.post("/:id/noc", requirePageRight("loan-sanction", "edit"), upload.single("file"), async (req, res) => {
+  const loanId = parseInt(req.params.id, 10);
+  const actor = req.user?.email || req.user?.name || "system";
+  if (!Number.isFinite(loanId)) return res.status(400).json({ error: "Invalid id" });
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+  try {
+    const pool = getPool();
+    const loanRes = await pool.request().input("LoanId", sql.Int, loanId)
+      .query("SELECT LoanId, Status FROM dbo.LoanSanction WHERE LoanId = @LoanId");
+    const loan = loanRes.recordset[0];
+    if (!loan) return res.status(404).json({ error: "Loan not found" });
+    if (loan.Status !== "Closed") {
+      return res.status(400).json({ error: "NOC can only be uploaded once the loan is fully paid and closed." });
+    }
+
+    const insertRes = await pool
+      .request()
+      .input("LoanId", sql.Int, loanId)
+      .input("FileName", sql.NVarChar(255), req.file.originalname)
+      .input("MimeType", sql.NVarChar(100), req.file.mimetype)
+      .input("FileSize", sql.Int, req.file.size)
+      .input("FileData", sql.VarBinary(sql.MAX), req.file.buffer)
+      .input("UploadedBy", sql.NVarChar(150), actor).query(`
+        INSERT INTO dbo.LoanNOCAttachments (LoanId, FileName, MimeType, FileSize, FileData, UploadedBy)
+        OUTPUT INSERTED.AttachmentId
+        VALUES (@LoanId, @FileName, @MimeType, @FileSize, @FileData, @UploadedBy)
+      `);
+    const attachId = insertRes.recordset[0].AttachmentId;
+
+    await pool.request().input("LoanId", sql.Int, loanId).input("AttachmentId", sql.Int, attachId)
+      .query("UPDATE dbo.LoanSanction SET NOCAttachmentId = @AttachmentId WHERE LoanId = @LoanId");
+
+    await bumpCacheVersion("loan-sanction");
+    res.status(201).json({ attachmentId: attachId, fileName: req.file.originalname });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /noc/:attachId — stream a stored NOC file ───────────────────────────
+router.get("/noc/:attachId", requirePageRight("loan-sanction", "view"), async (req, res) => {
+  const attachId = parseInt(req.params.attachId, 10);
+  if (!Number.isFinite(attachId)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("AttachmentId", sql.Int, attachId)
+      .query("SELECT FileName, MimeType, FileData FROM dbo.LoanNOCAttachments WHERE AttachmentId = @AttachmentId");
+    const attachment = result.recordset[0];
+    if (!attachment) return res.status(404).json({ error: "Attachment not found" });
+    res.setHeader("Content-Type", attachment.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(attachment.FileName)}"`);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(attachment.FileData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

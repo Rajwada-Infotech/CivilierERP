@@ -20,7 +20,7 @@ const fmt = (n: number) =>
 
 const LOAN_TYPE_COLORS: Record<LoanType, string> = {
   "Inter-Company": "#3b82f6",
-  "Intra-Company": "#22c55e",
+  "Bank Loan": "#0ea5e9",
   "Customer Loan": "#f59e0b",
 };
 

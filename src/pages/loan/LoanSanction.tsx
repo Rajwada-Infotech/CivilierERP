@@ -30,6 +30,12 @@ import {
   AlertTriangle,
   Percent,
   ChevronDown,
+  Scale,
+  TrendingUp,
+  Landmark,
+  Upload,
+  FileCheck2,
+  Receipt,
 } from "lucide-react";
 import { MoneyRecive } from "iconsax-react";
 import { getCompanyOptions, type CompanyOption } from "@/api/bankMasterApi";
@@ -41,14 +47,26 @@ import {
   toggleEmiPaid,
   deleteLoanSanction,
   getCustomerOptions,
+  getBankOptions,
+  getCompanyExposure,
+  getLoanPayments,
+  uploadLoanNoc,
+  getLoanDocuments,
+  uploadLoanDocument,
   type LoanSanction,
   type LoanEMI,
   type LoanType,
+  type InterestCalcType,
   type CustomerOption,
+  type BankOption,
+  type CompanyExposure,
 } from "@/api/loanSanctionApi";
 
 const ACCENT = "#22c55e";
-const LOAN_TYPES: LoanType[] = ["Inter-Company", "Intra-Company", "Customer Loan"];
+const LOAN_TYPES: LoanType[] = ["Inter-Company", "Bank Loan", "Customer Loan"];
+// Flexible repayment (multi-select EMIs, lump sum, early payoff) only
+// applies to a real external loan — mirrors backend REPAYABLE_TYPES.
+const REPAYABLE_TYPES: LoanType[] = ["Bank Loan", "Customer Loan"];
 
 // Common lending benchmarks — shown as quick picks in the dropdown-cum-text
 // field, but the field always accepts a typed custom value too.
@@ -58,21 +76,34 @@ const STANDARD_TENURES = [3, 6, 12, 18, 24, 36, 48, 60];
 // Mirrors backend/routes/loanSanction.js's buildEmiSchedule EMI formula —
 // this is only a live estimate shown while filling the form; the real
 // schedule is generated server-side on sanction.
-function estimateEmi(amount: number, annualRatePct: number, tenureMonths: number): number {
+function estimateEmi(
+  amount: number,
+  annualRatePct: number,
+  tenureMonths: number,
+  interestType: InterestCalcType = "CI",
+): number {
   const n = Math.max(1, tenureMonths || 1);
   if (!annualRatePct || annualRatePct <= 0) return amount / n;
+  if (interestType === "SI") {
+    const totalInterest = amount * (annualRatePct / 100) * (n / 12);
+    return amount / n + totalInterest / n;
+  }
   const r = annualRatePct / 12 / 100;
   return (amount * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
 }
 
 const EMPTY_FORM = {
   loanType: "Inter-Company" as LoanType,
+  loanDocNo: "",
   lenderCompanyId: "",
+  lenderBankId: "",
   borrowerCompanyId: "",
   borrowerCustomerId: "",
   borrowerCustomerSource: "AH" as "AH" | "CRM",
   loanDate: new Date().toISOString().slice(0, 10),
   amount: "",
+  hasInterest: false,
+  interestType: "CI" as InterestCalcType,
   interestRate: "",
   tenureMonths: "",
   purpose: "",
@@ -91,7 +122,7 @@ const fmtDate = (d?: string | null) =>
 
 const LOAN_TYPE_COLORS: Record<LoanType, string> = {
   "Inter-Company": "#3b82f6",
-  "Intra-Company": "#22c55e",
+  "Bank Loan": "#0ea5e9",
   "Customer Loan": "#f59e0b",
 };
 
@@ -99,11 +130,19 @@ export default function LoanSanctionPage() {
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [viewingLoan, setViewingLoan] = useState<LoanSanction | null>(null);
-  const [tab, setTab] = useState<"overview" | "schedule" | "chain" | "posting">("overview");
+  const [tab, setTab] = useState<"overview" | "exposure" | "schedule" | "chain" | "posting">("overview");
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<LoanSanction | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [uploadingNoc, setUploadingNoc] = useState(false);
+  const nocInputRef = useRef<HTMLInputElement>(null);
+
+  // Loan document attachment (agreement / sanction letter etc.)
+  const [pendingDocumentFile, setPendingDocumentFile] = useState<File | null>(null);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
+  const documentInputRef = useRef<HTMLInputElement>(null);
 
   const { data: loans = [], isLoading } = useQuery({
     queryKey: ["loan-sanctions"],
@@ -120,10 +159,54 @@ export default function LoanSanctionPage() {
     queryFn: getCustomerOptions,
   });
 
+  const { data: banks = [] } = useQuery({
+    queryKey: ["bank-options-loan"],
+    queryFn: getBankOptions,
+  });
+
   const { data: schedule = [], isLoading: scheduleLoading } = useQuery({
     queryKey: ["loan-schedule", viewingLoan?.LoanId],
     queryFn: () => getLoanSchedule(viewingLoan!.LoanId),
     enabled: !!viewingLoan,
+  });
+
+  const isRepayable = !!viewingLoan && REPAYABLE_TYPES.includes(viewingLoan.LoanType);
+
+  const { data: payments = [] } = useQuery({
+    queryKey: ["loan-payments", viewingLoan?.LoanId],
+    queryFn: () => getLoanPayments(viewingLoan!.LoanId),
+    enabled: !!viewingLoan && isRepayable,
+  });
+
+  const { data: loanDocuments = [] } = useQuery({
+    queryKey: ["loan-documents", viewingLoan?.LoanId],
+    queryFn: () => getLoanDocuments(viewingLoan!.LoanId),
+    enabled: !!viewingLoan,
+  });
+
+  // Exposure tab — live lookup of what's already lent/owed by whichever
+  // company is currently selected as Lender / Borrower (create mode) or was
+  // sanctioned against (view mode).
+  const exposureLenderCompanyId = viewingLoan
+    ? viewingLoan.LenderCompanyId
+    : form.loanType !== "Bank Loan"
+      ? form.lenderCompanyId
+      : null;
+  const exposureBorrowerCompanyId = viewingLoan
+    ? viewingLoan.BorrowerCompanyId
+    : form.loanType !== "Customer Loan"
+      ? form.borrowerCompanyId
+      : null;
+
+  const { data: lenderExposure, isLoading: lenderExposureLoading } = useQuery({
+    queryKey: ["loan-company-exposure", exposureLenderCompanyId],
+    queryFn: () => getCompanyExposure(Number(exposureLenderCompanyId)),
+    enabled: !!exposureLenderCompanyId,
+  });
+  const { data: borrowerExposure, isLoading: borrowerExposureLoading } = useQuery({
+    queryKey: ["loan-company-exposure", exposureBorrowerCompanyId],
+    queryFn: () => getCompanyExposure(Number(exposureBorrowerCompanyId)),
+    enabled: !!exposureBorrowerCompanyId,
   });
 
   // Deep-link support for the Reminder Bell ("/loan/sanction?view=<id>")
@@ -137,19 +220,22 @@ export default function LoanSanctionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loans]);
 
-  const set = (key: keyof typeof form, value: string) =>
+  const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
   const companyName = (id: string) =>
     companies.find((c: CompanyOption) => String(c.id) === id)?.label ?? "";
   const customerName = (id: string) =>
     customers.find((c: CustomerOption) => String(c.id) === id)?.label ?? "";
+  const bankName = (id: string) =>
+    banks.find((b: BankOption) => String(b.id) === id)?.label ?? "";
 
   const openCreate = () => {
     setViewingLoan(null);
     setForm(EMPTY_FORM);
     setTab("overview");
     setShowForm(true);
+    setPendingDocumentFile(null);
   };
 
   const openView = (loan: LoanSanction) => {
@@ -165,7 +251,9 @@ export default function LoanSanctionPage() {
 
   const handleSave = async () => {
     const isCustomerLoan = form.loanType === "Customer Loan";
-    if (!form.lenderCompanyId) return toast.error("Select the lender company");
+    const isBankLoan = form.loanType === "Bank Loan";
+    if (isBankLoan && !form.lenderBankId) return toast.error("Select the lender bank");
+    if (!isBankLoan && !form.lenderCompanyId) return toast.error("Select the lender company");
     if (isCustomerLoan && !form.borrowerCustomerId) return toast.error("Select the borrower customer");
     if (!isCustomerLoan && !form.borrowerCompanyId) return toast.error("Select the borrower company");
     if (!form.loanDate) return toast.error("Loan date is required");
@@ -175,18 +263,30 @@ export default function LoanSanctionPage() {
     try {
       const res = await createLoanSanction({
         loanType: form.loanType,
-        lenderCompanyId: form.lenderCompanyId,
+        loanDocNo: form.loanDocNo || null,
+        lenderCompanyId: isBankLoan ? null : form.lenderCompanyId,
+        lenderBankId: isBankLoan ? form.lenderBankId : null,
         borrowerCompanyId: isCustomerLoan ? null : form.borrowerCompanyId,
         borrowerCustomerId: isCustomerLoan ? form.borrowerCustomerId : null,
         borrowerCustomerSource: isCustomerLoan ? form.borrowerCustomerSource : null,
         loanDate: form.loanDate,
         amount: form.amount,
-        interestRate: form.interestRate || null,
+        hasInterest: form.hasInterest,
+        interestType: form.interestType,
+        interestRate: form.hasInterest ? form.interestRate || null : null,
         tenureMonths: form.tenureMonths || null,
         purpose: form.purpose || null,
         remarks: form.remarks || null,
       });
       toast.success(`Loan ${res.loanNo} sanctioned`);
+      if (pendingDocumentFile) {
+        try {
+          await uploadLoanDocument(res.loanId, pendingDocumentFile);
+          toast.success("Document attached");
+        } catch (docErr: any) {
+          toast.error(`Loan sanctioned, but the document could not be attached: ${docErr.message}. Attach it from the loan's detail view.`);
+        }
+      }
       await qc.invalidateQueries({ queryKey: ["loan-sanctions"] });
       closeForm();
     } catch (e: any) {
@@ -205,6 +305,39 @@ export default function LoanSanctionPage() {
       toast.success(emi.IsPaid ? "EMI marked unpaid" : "EMI marked paid");
     } catch (e: any) {
       toast.error(e.message ?? "Could not update this EMI");
+    }
+  };
+
+  const handleUploadNoc = async (file: File) => {
+    if (!viewingLoan) return;
+    setUploadingNoc(true);
+    try {
+      await uploadLoanNoc(viewingLoan.LoanId, file);
+      toast.success("NOC uploaded — available in Records module");
+      await qc.invalidateQueries({ queryKey: ["loan-sanctions"] });
+      const fresh = await getLoanSanctions();
+      const updated = fresh.find((l) => l.LoanId === viewingLoan.LoanId);
+      if (updated) setViewingLoan(updated);
+    } catch (e: any) {
+      toast.error(friendlyErrorMessage(e, "Could not upload NOC"));
+    } finally {
+      setUploadingNoc(false);
+      if (nocInputRef.current) nocInputRef.current.value = "";
+    }
+  };
+
+  const handleUploadDocument = async (file: File) => {
+    if (!viewingLoan) return;
+    setUploadingDocument(true);
+    try {
+      await uploadLoanDocument(viewingLoan.LoanId, file);
+      toast.success("Document uploaded — available in Records module");
+      await qc.invalidateQueries({ queryKey: ["loan-documents", viewingLoan.LoanId] });
+    } catch (e: any) {
+      toast.error(friendlyErrorMessage(e, "Could not upload document"));
+    } finally {
+      setUploadingDocument(false);
+      if (documentInputRef.current) documentInputRef.current.value = "";
     }
   };
 
@@ -249,7 +382,11 @@ export default function LoanSanctionPage() {
     {
       id: "lender",
       header: "Lender",
-      cell: ({ row }) => <span className="text-sm text-foreground">{row.original.LenderCompanyName || "—"}</span>,
+      cell: ({ row }) => (
+        <span className="text-sm text-foreground">
+          {row.original.LenderCompanyName || row.original.LenderBankName || "—"}
+        </span>
+      ),
     },
     {
       id: "borrower",
@@ -330,20 +467,31 @@ export default function LoanSanctionPage() {
     "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 placeholder:text-muted-foreground";
   const labelCls = "text-xs font-semibold uppercase tracking-widest text-muted-foreground";
   const readOnly = !!viewingLoan;
+  const isInterCompanyType = (viewingLoan?.LoanType ?? form.loanType) === "Inter-Company";
   const isCustomerLoan = form.loanType === "Customer Loan";
+  const isBankLoan = form.loanType === "Bank Loan";
 
-  const displayLender = readOnly ? viewingLoan?.LenderCompanyName ?? "" : companyName(form.lenderCompanyId);
+  const displayLender = readOnly
+    ? viewingLoan?.LenderCompanyName ?? viewingLoan?.LenderBankName ?? ""
+    : isBankLoan
+      ? bankName(form.lenderBankId)
+      : companyName(form.lenderCompanyId);
   const displayBorrower = readOnly
     ? viewingLoan?.BorrowerCompanyName ?? viewingLoan?.BorrowerCustomerName ?? ""
     : isCustomerLoan
       ? customerName(form.borrowerCustomerId)
       : companyName(form.borrowerCompanyId);
   const displayAmount = readOnly ? viewingLoan?.Amount ?? null : Number(form.amount) || null;
+  const displayHasInterest = readOnly ? viewingLoan?.HasInterest !== false : form.hasInterest;
+  const displayInterestType = readOnly ? viewingLoan?.InterestType ?? "CI" : form.interestType;
   const estimatedEmi = estimateEmi(
     Number(form.amount) || 0,
-    Number(form.interestRate) || 0,
+    form.hasInterest ? Number(form.interestRate) || 0 : 0,
     Number(form.tenureMonths) || 1,
+    form.interestType,
   );
+  const estimatedTotalRepayable = estimatedEmi * (Number(form.tenureMonths) || 1);
+  const estimatedTotalInterest = Math.max(0, estimatedTotalRepayable - (Number(form.amount) || 0));
 
   const totalEmis = schedule.length;
   const paidEmis = schedule.filter((e) => e.IsPaid).length;
@@ -353,6 +501,7 @@ export default function LoanSanctionPage() {
 
   const tabs: { id: typeof tab; label: string; icon: typeof FileText }[] = [
     { id: "overview", label: "Overview", icon: FileText },
+    { id: "exposure", label: "Exposure", icon: Scale },
     { id: "schedule", label: "EMI Schedule", icon: CalendarClock },
     { id: "chain", label: "Repayment History", icon: History },
     { id: "posting", label: "Posting", icon: Wallet },
@@ -419,6 +568,24 @@ export default function LoanSanctionPage() {
                     {viewingLoan.LoanType}
                   </span>
                 )}
+                {viewingLoan && viewingLoan.Status === "Closed" && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle2 size={10} /> Closed
+                  </span>
+                )}
+                {viewingLoan && viewingLoan.Status !== "Closed" && nextDue && (
+                  <span
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${
+                      new Date(nextDue.DueDate) < new Date(new Date().toDateString())
+                        ? "bg-red-500/15 text-red-600 dark:text-red-400"
+                        : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                    }`}
+                  >
+                    <Clock size={10} />
+                    Due {fmtDate(nextDue.DueDate)}
+                    {new Date(nextDue.DueDate) < new Date(new Date().toDateString()) ? " · OVERDUE" : ""}
+                  </span>
+                )}
               </div>
             </div>
             {viewingLoan && (
@@ -433,7 +600,7 @@ export default function LoanSanctionPage() {
           </div>
 
           {/* Tab bar */}
-          <div className="flex items-center gap-1 px-6 sm:px-8 pt-2 border-b border-border bg-card overflow-x-auto">
+          <div className="flex flex-wrap items-center gap-0.5 sm:gap-1 px-2 sm:px-8 pt-2 border-b border-border bg-card">
             {tabs.map((t) => {
               const disabled = !viewingLoan && (t.id === "schedule" || t.id === "chain");
               return (
@@ -442,7 +609,7 @@ export default function LoanSanctionPage() {
                   type="button"
                   disabled={disabled}
                   onClick={() => setTab(t.id)}
-                  className={`flex items-center gap-1.5 px-5 py-3.5 text-xs font-semibold rounded-t-lg border-b-2 whitespace-nowrap transition-colors ${
+                  className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-5 py-2.5 sm:py-3.5 text-[11px] sm:text-xs font-semibold rounded-t-lg border-b-2 whitespace-nowrap transition-colors ${
                     disabled
                       ? "opacity-40 cursor-not-allowed border-transparent text-muted-foreground"
                       : tab === t.id
@@ -462,25 +629,82 @@ export default function LoanSanctionPage() {
             {tab === "overview" && (
               <div className="space-y-8">
                 {!readOnly && (
-                  <div className="space-y-2">
-                    <label className={labelCls}>Loan Type <span className="text-red-500">*</span></label>
-                    <div className="grid grid-cols-3 gap-3">
-                      {LOAN_TYPES.map((lt) => (
+                  <>
+                    <div className="space-y-2">
+                      <label className={labelCls}>Loan Type <span className="text-red-500">*</span></label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {LOAN_TYPES.map((lt) => (
+                          <button
+                            key={lt}
+                            type="button"
+                            onClick={() => {
+                              set("loanType", lt);
+                              // Inter-Company defaults to a simple transfer —
+                              // interest & tenure only apply once explicitly toggled on.
+                              if (lt === "Inter-Company") {
+                                set("hasInterest", false);
+                              } else if (form.loanType === "Inter-Company") {
+                                set("hasInterest", true);
+                              }
+                            }}
+                            className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                              form.loanType === lt
+                                ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                : "border-border text-muted-foreground hover:bg-muted/40"
+                            }`}
+                          >
+                            {lt}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className={labelCls}>Loan Doc No.</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          className={inputCls}
+                          placeholder="e.g. an external reference or agreement number"
+                          value={form.loanDocNo}
+                          onChange={(e) => set("loanDocNo", e.target.value)}
+                        />
+                        <input
+                          ref={documentInputRef}
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) setPendingDocumentFile(f);
+                          }}
+                        />
                         <button
-                          key={lt}
                           type="button"
-                          onClick={() => set("loanType", lt)}
-                          className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                            form.loanType === lt
-                              ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                          onClick={() => documentInputRef.current?.click()}
+                          title="Attach loan document (agreement, sanction letter etc.)"
+                          className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${
+                            pendingDocumentFile
+                              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                               : "border-border text-muted-foreground hover:bg-muted/40"
                           }`}
                         >
-                          {lt}
+                          <Upload size={12} />
+                          {pendingDocumentFile ? "Attached" : "Attach"}
                         </button>
-                      ))}
+                      </div>
+                      {pendingDocumentFile && (
+                        <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                          <FileText size={11} /> {pendingDocumentFile.name}
+                          <button
+                            type="button"
+                            onClick={() => setPendingDocumentFile(null)}
+                            className="text-muted-foreground hover:text-destructive underline underline-offset-2"
+                          >
+                            remove
+                          </button>
+                        </p>
+                      )}
                     </div>
-                  </div>
+                  </>
                 )}
 
                 {readOnly ? (
@@ -488,7 +712,7 @@ export default function LoanSanctionPage() {
                     {/* Parties */}
                     <SectionLabel icon={Building2} label="Parties" />
                     <div className="grid grid-cols-2 gap-3">
-                      <InfoCard label="Lender" value={displayLender || "—"} />
+                      <InfoCard label={isBankLoan ? "Lender (Bank)" : "Lender"} value={displayLender || "—"} />
                       <InfoCard
                         label={isCustomerLoan ? "Borrower (Customer)" : "Borrower (Company)"}
                         value={displayBorrower || "—"}
@@ -500,14 +724,70 @@ export default function LoanSanctionPage() {
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <InfoCard label="Amount" value={fmt(displayAmount)} accent />
                       <InfoCard label="Loan Date" value={fmtDate(viewingLoan?.LoanDate)} />
-                      <InfoCard
-                        label="Interest Rate"
-                        value={viewingLoan?.InterestRate != null ? `${viewingLoan.InterestRate}% p.a.` : "—"}
-                      />
+                      <InfoCard label="Loan Doc No." value={viewingLoan?.LoanDocNo || "—"} />
                       <InfoCard
                         label="Tenure"
                         value={viewingLoan?.TenureMonths != null ? `${viewingLoan.TenureMonths} months` : "—"}
                       />
+                      <InfoCard
+                        label="Interest"
+                        value={
+                          displayHasInterest
+                            ? `${viewingLoan?.InterestRate ?? "—"}% p.a. (${displayInterestType === "SI" ? "Simple" : "Compound"})`
+                            : "Interest-free"
+                        }
+                      />
+                      <InfoCard
+                        label="Total Interest"
+                        value={fmt(schedule.reduce((s, e) => s + Number(e.InterestComponent), 0))}
+                      />
+                      <InfoCard
+                        label="Total Repayable"
+                        value={fmt(schedule.reduce((s, e) => s + Number(e.EMIAmount), 0))}
+                        accent
+                      />
+                    </div>
+
+                    {/* Documents — the agreement/sanction letter attached against Loan Doc No. */}
+                    <SectionLabel icon={FileText} label="Documents" />
+                    <div className="space-y-2">
+                      {loanDocuments.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No documents attached yet.</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {loanDocuments.map((d) => (
+                            <a
+                              key={d.AttachmentId}
+                              href={`/api/loan-sanction/document/${d.AttachmentId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs hover:bg-muted/40 transition-colors"
+                            >
+                              <FileText size={12} className="text-muted-foreground shrink-0" />
+                              <span className="flex-1 truncate font-medium text-foreground">{d.FileName}</span>
+                              <span className="text-[10px] text-muted-foreground shrink-0">{d.DocType}</span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                      <input
+                        ref={documentInputRef}
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleUploadDocument(f);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={uploadingDocument}
+                        onClick={() => documentInputRef.current?.click()}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border text-muted-foreground hover:bg-muted/40 disabled:opacity-60 transition-colors"
+                      >
+                        <Upload size={12} /> {uploadingDocument ? "Uploading…" : "Attach Document"}
+                      </button>
                     </div>
 
                     {(viewingLoan?.Purpose || viewingLoan?.Remarks) && (
@@ -524,19 +804,36 @@ export default function LoanSanctionPage() {
                   <>
                     <div className="grid grid-cols-2 gap-5">
                       <div className="space-y-2">
-                        <label className={labelCls}>Lender Company <span className="text-red-500">*</span></label>
-                        <select
-                          className={inputCls}
-                          value={form.lenderCompanyId}
-                          onChange={(e) => set("lenderCompanyId", e.target.value)}
-                        >
-                          <option value="">— Select —</option>
-                          {companies.map((c: CompanyOption) => (
-                            <option key={c.id} value={c.id}>
-                              {c.label}
-                            </option>
-                          ))}
-                        </select>
+                        <label className={labelCls}>
+                          Lender {isBankLoan ? "Bank" : "Company"} <span className="text-red-500">*</span>
+                        </label>
+                        {isBankLoan ? (
+                          <select
+                            className={inputCls}
+                            value={form.lenderBankId}
+                            onChange={(e) => set("lenderBankId", e.target.value)}
+                          >
+                            <option value="">— Select —</option>
+                            {banks.map((b: BankOption) => (
+                              <option key={b.id} value={b.id}>
+                                {b.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <select
+                            className={inputCls}
+                            value={form.lenderCompanyId}
+                            onChange={(e) => set("lenderCompanyId", e.target.value)}
+                          >
+                            <option value="">— Select —</option>
+                            {companies.map((c: CompanyOption) => (
+                              <option key={c.id} value={c.id}>
+                                {c.label}
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <label className={labelCls}>Borrower {isCustomerLoan ? "Customer" : "Company"} <span className="text-red-500">*</span></label>
@@ -588,40 +885,85 @@ export default function LoanSanctionPage() {
                         />
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-5">
-                      <div className="space-y-2">
-                        <label className={labelCls}>Interest Rate (% p.a.)</label>
-                        <ComboField
-                          value={form.interestRate}
-                          onChange={(v) => set("interestRate", v.replace(/[^0-9.]/g, ""))}
-                          options={STANDARD_INTEREST_RATES.map((r) => ({ value: String(r), label: `${r}% p.a.` }))}
-                          placeholder="Select or type a rate"
-                          inputClassName={inputCls}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className={labelCls}>Tenure (months)</label>
-                        <ComboField
-                          value={form.tenureMonths}
-                          onChange={(v) => set("tenureMonths", v.replace(/[^0-9]/g, ""))}
-                          options={STANDARD_TENURES.map((t) => ({ value: String(t), label: `${t} months` }))}
-                          placeholder="Select or type a tenure"
-                          inputClassName={inputCls}
-                        />
-                      </div>
-                    </div>
-                    {(form.interestRate || form.tenureMonths) && form.amount && (
-                      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3.5 py-2.5 flex items-center gap-2">
-                        <Percent size={13} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <div className="flex items-center justify-between rounded-lg border border-border px-3.5 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {isInterCompanyType ? "Activate Interest & Tenure" : "Interest-bearing loan"}
+                        </p>
                         <p className="text-xs text-muted-foreground">
-                          Estimated EMI:{" "}
-                          <span className="font-semibold text-foreground">
-                            {fmt(estimatedEmi)}
-                          </span>{" "}
-                          / month for {form.tenureMonths || 1} month
-                          {Number(form.tenureMonths) === 1 ? "" : "s"}
-                          {form.interestRate ? ` at ${form.interestRate}% p.a.` : " (flat, no interest)"} — full
-                          breakdown generated on sanctioning.
+                          {isInterCompanyType
+                            ? "Off = a simple transfer with no schedule; on = structured with interest and a repayment tenure"
+                            : "Turn off for an interest-free loan"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => set("hasInterest", !form.hasInterest)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                          form.hasInterest ? "bg-emerald-500" : "bg-muted"
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
+                            form.hasInterest ? "translate-x-6" : "translate-x-1"
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {(!isInterCompanyType || form.hasInterest) && (
+                      <div className="grid grid-cols-2 gap-5">
+                        {form.hasInterest && (
+                          <div className="space-y-2">
+                            <label className={labelCls}>Interest Rate (% p.a.)</label>
+                            <ComboField
+                              value={form.interestRate}
+                              onChange={(v) => set("interestRate", v.replace(/[^0-9.]/g, ""))}
+                              options={STANDARD_INTEREST_RATES.map((r) => ({ value: String(r), label: `${r}% p.a.` }))}
+                              placeholder="Select or type a rate"
+                              inputClassName={inputCls}
+                            />
+                          </div>
+                        )}
+                        <div className="space-y-2">
+                          <label className={labelCls}>Tenure (months)</label>
+                          <ComboField
+                            value={form.tenureMonths}
+                            onChange={(v) => set("tenureMonths", v.replace(/[^0-9]/g, ""))}
+                            options={STANDARD_TENURES.map((t) => ({ value: String(t), label: `${t} months` }))}
+                            placeholder="Select or type a tenure"
+                            inputClassName={inputCls}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {(form.interestRate || form.tenureMonths) && form.amount && (
+                      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3.5 py-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Percent size={13} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <p className="text-xs text-muted-foreground">
+                            Estimated EMI:{" "}
+                            <span className="font-semibold text-foreground">{fmt(estimatedEmi)}</span> / month for{" "}
+                            {form.tenureMonths || 1} month{Number(form.tenureMonths) === 1 ? "" : "s"}
+                            {form.hasInterest && form.interestRate ? ` at ${form.interestRate}% p.a.` : " (flat, no interest)"}.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 pt-1 border-t border-emerald-500/15">
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                              Total Interest
+                            </p>
+                            <p className="text-sm font-semibold text-foreground">{fmt(estimatedTotalInterest)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                              Total Repayable
+                            </p>
+                            <p className="text-sm font-semibold text-foreground">{fmt(estimatedTotalRepayable)}</p>
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          Full installment-by-installment breakdown is generated on sanctioning.
                         </p>
                       </div>
                     )}
@@ -650,6 +992,66 @@ export default function LoanSanctionPage() {
               </div>
             )}
 
+            {/* Exposure tab — live lender/borrower lookup: how much a company
+                has already lent out (+ any EMI due to them), and how much a
+                company already owes (+ their next due EMI). Updates live as
+                the Lender/Borrower Company is picked in Overview. */}
+            {tab === "exposure" && (
+              <div className="space-y-6">
+                {!exposureLenderCompanyId && !exposureBorrowerCompanyId ? (
+                  <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+                    Select a Lender and/or Borrower Company in Overview to see their loan exposure here.
+                  </div>
+                ) : (
+                  <>
+                    {exposureLenderCompanyId && (
+                      <div className="space-y-3">
+                        <SectionLabel icon={TrendingUp} label={`${displayLender || "Lender"} — as Lender`} />
+                        {lenderExposureLoading ? (
+                          <p className="text-xs text-muted-foreground">Loading…</p>
+                        ) : (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            <InfoCard label="Total Lent (all loans)" value={fmt(lenderExposure?.asLender.totalLent ?? 0)} accent />
+                            <InfoCard label="Currently Outstanding" value={fmt(lenderExposure?.asLender.totalOutstanding ?? 0)} />
+                            <InfoCard
+                              label="Next EMI Receivable"
+                              value={
+                                lenderExposure?.asLender.nextDue
+                                  ? `${fmt(lenderExposure.asLender.nextDue.EMIAmount)} on ${fmtDate(lenderExposure.asLender.nextDue.DueDate)}`
+                                  : "None due"
+                              }
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {exposureBorrowerCompanyId && (
+                      <div className="space-y-3">
+                        <SectionLabel icon={TrendingDown} label={`${displayBorrower || "Borrower"} — as Borrower`} />
+                        {borrowerExposureLoading ? (
+                          <p className="text-xs text-muted-foreground">Loading…</p>
+                        ) : (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            <InfoCard label="Total Borrowed (all loans)" value={fmt(borrowerExposure?.asBorrower.totalBorrowed ?? 0)} accent />
+                            <InfoCard label="Currently Owed" value={fmt(borrowerExposure?.asBorrower.totalOutstanding ?? 0)} />
+                            <InfoCard
+                              label="Next EMI Payable"
+                              value={
+                                borrowerExposure?.asBorrower.nextDue
+                                  ? `${fmt(borrowerExposure.asBorrower.nextDue.EMIAmount)} on ${fmtDate(borrowerExposure.asBorrower.nextDue.DueDate)}`
+                                  : "None due"
+                              }
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             {/* EMI Schedule tab — the full repayment PLAN (all installments, editable) */}
             {tab === "schedule" && viewingLoan && (
               <div className="space-y-4">
@@ -665,7 +1067,14 @@ export default function LoanSanctionPage() {
                   />
                 </div>
 
-                <div className="rounded-xl border border-border overflow-hidden">
+                {isRepayable && viewingLoan.Status !== "Closed" && (
+                  <div className="rounded-xl border border-border bg-muted/10 p-3.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <Wallet size={13} className="shrink-0" />
+                    EMIs are paid from the <span className="font-semibold text-foreground">Finance → Payment</span> page (Loan EMIs tab) — this view is read-only.
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-border overflow-hidden overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-muted/30 text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -693,6 +1102,7 @@ export default function LoanSanctionPage() {
                       ) : (
                         schedule.map((emi) => {
                           const isNext = nextDue?.EMIId === emi.EMIId;
+                          const isOverdue = !emi.IsPaid && new Date(emi.DueDate) < new Date(new Date().toDateString());
                           return (
                             <tr
                               key={emi.EMIId}
@@ -709,6 +1119,11 @@ export default function LoanSanctionPage() {
                                       NEXT
                                     </span>
                                   )}
+                                  {isOverdue && (
+                                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-red-500/15 text-red-600 dark:text-red-400">
+                                      OVERDUE
+                                    </span>
+                                  )}
                                 </span>
                               </td>
                               <td className="px-3 py-2.5 text-right font-mono">{fmt(emi.PrincipalComponent)}</td>
@@ -717,12 +1132,20 @@ export default function LoanSanctionPage() {
                               </td>
                               <td className="px-3 py-2.5 text-right font-mono font-medium">{fmt(emi.EMIAmount)}</td>
                               <td className="px-3 py-2.5 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={emi.IsPaid}
-                                  onChange={() => handleTogglePaid(emi)}
-                                  className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
-                                />
+                                {isRepayable ? (
+                                  emi.IsPaid ? (
+                                    <CheckCircle2 size={15} className="text-emerald-500 inline-block" />
+                                  ) : (
+                                    <Circle size={15} className="text-muted-foreground/40 inline-block" />
+                                  )
+                                ) : (
+                                  <input
+                                    type="checkbox"
+                                    checked={emi.IsPaid}
+                                    onChange={() => handleTogglePaid(emi)}
+                                    className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
+                                  />
+                                )}
                               </td>
                             </tr>
                           );
@@ -731,6 +1154,53 @@ export default function LoanSanctionPage() {
                     </tbody>
                   </table>
                 </div>
+
+                {viewingLoan.Status === "Closed" && (
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <FileCheck2 size={16} className="text-emerald-500 shrink-0" />
+                      <div>
+                        <p className="text-xs font-semibold text-foreground">Loan fully repaid and closed</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {viewingLoan.NOCFileName
+                            ? `NOC on file: ${viewingLoan.NOCFileName}`
+                            : "Upload the No Objection Certificate (NOC) once received."}
+                        </p>
+                      </div>
+                    </div>
+                    {viewingLoan.NOCFileName ? (
+                      <a
+                        href={`/api/loan-sanction/noc/${viewingLoan.NOCAttachmentId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border hover:bg-muted/40 transition-colors"
+                      >
+                        <FileText size={12} /> View NOC
+                      </a>
+                    ) : (
+                      <>
+                        <input
+                          ref={nocInputRef}
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleUploadNoc(f);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          disabled={uploadingNoc}
+                          onClick={() => nocInputRef.current?.click()}
+                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 transition-colors"
+                        >
+                          <Upload size={12} /> {uploadingNoc ? "Uploading…" : "Upload NOC"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -764,28 +1234,55 @@ export default function LoanSanctionPage() {
                   ) : null}
                 </div>
 
-                {/* Event timeline — sanction + only PAID events (actual history) */}
+                {/* Event timeline — sanction + actual payment transactions (or, for
+                    non-repayable loan types, the simple per-EMI paid history) */}
                 <div>
                   <ChainNode
                     icon={<MoneyRecive size={13} className="text-emerald-500" />}
                     title={`Loan Sanctioned — ${viewingLoan.LoanNo}`}
                     subtitle={`${fmt(viewingLoan.Amount)} disbursed to ${displayBorrower} on ${fmtDate(viewingLoan.LoanDate)}`}
                     done
-                    isLast={paidEmis === 0}
+                    isLast={isRepayable ? payments.length === 0 : paidEmis === 0}
                   />
-                  {schedule
-                    .filter((e) => e.IsPaid)
-                    .map((emi, i, arr) => (
-                      <ChainNode
-                        key={emi.EMIId}
-                        icon={<CheckCircle2 size={13} className="text-emerald-500" />}
-                        title={`EMI ${emi.InstallmentNo} Paid`}
-                        subtitle={`${fmt(emi.EMIAmount)} · Paid ${fmtDate(emi.PaidDate)}${emi.PaidBy ? ` by ${emi.PaidBy}` : ""}`}
-                        done
-                        isLast={i === arr.length - 1 && !!nextDue === false}
-                      />
-                    ))}
-                  {nextDue && (
+                  {isRepayable
+                    ? payments.map((p, i, arr) => (
+                        <ChainNode
+                          key={p.PaymentId}
+                          icon={<Receipt size={13} className="text-emerald-500" />}
+                          title={`${p.PaymentType === "LumpSum" ? "Lump Sum Payment" : `${p.EmisCovered} EMI${p.EmisCovered === 1 ? "" : "s"} Paid`} — ${p.PaymentRef}`}
+                          subtitle={`${fmt(p.TotalAmount)}${p.LateFee > 0 ? ` (incl. ${fmt(p.LateFee)} late fee)` : ""} · Paid ${fmtDate(p.PaymentDate)}${p.CreatedBy ? ` by ${p.CreatedBy}` : ""}${p.ExcessCredited > 0 ? ` · ${fmt(p.ExcessCredited)} excess credited to lender's on-account` : ""}${p.ClosedLoan ? " · Loan closed" : ""}`}
+                          done
+                          isLast={i === arr.length - 1 && viewingLoan.Status === "Closed"}
+                        />
+                      ))
+                    : schedule
+                        .filter((e) => e.IsPaid)
+                        .map((emi, i, arr) => (
+                          <ChainNode
+                            key={emi.EMIId}
+                            icon={<CheckCircle2 size={13} className="text-emerald-500" />}
+                            title={`EMI ${emi.InstallmentNo} Paid`}
+                            subtitle={`${fmt(emi.EMIAmount)} · Paid ${fmtDate(emi.PaidDate)}${emi.PaidBy ? ` by ${emi.PaidBy}` : ""}`}
+                            done
+                            isLast={i === arr.length - 1 && !!nextDue === false}
+                          />
+                        ))}
+                  {isRepayable && viewingLoan.Status === "Closed" && (
+                    <ChainNode
+                      icon={<FileCheck2 size={13} className="text-emerald-500" />}
+                      title="Loan Fully Repaid — Closed"
+                      subtitle={
+                        viewingLoan.NOCFileName
+                          ? `NOC on file: ${viewingLoan.NOCFileName}`
+                          : viewingLoan.ClosedAt
+                            ? `Closed ${fmtDate(viewingLoan.ClosedAt)} — NOC not yet uploaded`
+                            : "NOC not yet uploaded"
+                      }
+                      done
+                      isLast
+                    />
+                  )}
+                  {!isRepayable && nextDue && (
                     <ChainNode
                       icon={<Circle size={13} className="text-amber-500" />}
                       title={`EMI ${nextDue.InstallmentNo} Pending`}
@@ -800,6 +1297,15 @@ export default function LoanSanctionPage() {
                           Mark Paid
                         </button>
                       }
+                    />
+                  )}
+                  {isRepayable && !nextDue && viewingLoan.Status !== "Closed" && payments.length === 0 && (
+                    <ChainNode
+                      icon={<Circle size={13} className="text-amber-500" />}
+                      title="No payments yet"
+                      subtitle="Pay from Finance → Payment (Loan EMIs tab) — an installment or a lump sum."
+                      done={false}
+                      isLast
                     />
                   )}
                 </div>
@@ -820,18 +1326,63 @@ export default function LoanSanctionPage() {
                     <thead>
                       <tr className="bg-muted/30 text-[10px] uppercase tracking-widest text-muted-foreground">
                         <th className="text-left px-3 py-2">Account</th>
+                        <th className="text-left px-3 py-2">Account Group</th>
                         <th className="text-right px-3 py-2">Debit</th>
                         <th className="text-right px-3 py-2">Credit</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                       <tr>
-                        <td className="px-3 py-2.5">Loan — {displayBorrower || "Borrower"}</td>
+                        <td className="px-3 py-2.5">
+                          Loan — {displayBorrower || "Borrower"}
+                          {readOnly && viewingLoan?.BorrowerLHeadCode && (
+                            <span className="block text-[10px] text-muted-foreground font-mono mt-0.5">
+                              {viewingLoan.BorrowerLHeadCode}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                          {readOnly ? (
+                            viewingLoan?.BorrowerGroupName ? (
+                              <>
+                                {viewingLoan.BorrowerParentGroupName && `${viewingLoan.BorrowerParentGroupName} / `}
+                                {viewingLoan.BorrowerGroupName}
+                              </>
+                            ) : (
+                              "—"
+                            )
+                          ) : (
+                            "Loans and Advances"
+                          )}
+                        </td>
                         <td className="px-3 py-2.5 text-right font-mono">{fmt(displayAmount)}</td>
                         <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">—</td>
                       </tr>
                       <tr>
-                        <td className="px-3 py-2.5">Loan — {displayLender || "Lender"}</td>
+                        <td className="px-3 py-2.5">
+                          Loan — {displayLender || "Lender"}
+                          {readOnly && viewingLoan?.LenderLHeadCode && (
+                            <span className="block text-[10px] text-muted-foreground font-mono mt-0.5">
+                              {viewingLoan.LenderLHeadCode}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                          {readOnly ? (
+                            viewingLoan?.LenderGroupName ? (
+                              <>
+                                {viewingLoan.LenderParentGroupName && `${viewingLoan.LenderParentGroupName} / `}
+                                {viewingLoan.LenderGroupName}
+                              </>
+                            ) : (
+                              "—"
+                            )
+                          ) : isBankLoan ? (
+                            "Bank's own account group"
+                          ) : (
+                            "Loans and Advances"
+                          )}
+                        </td>
                         <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">—</td>
                         <td className="px-3 py-2.5 text-right font-mono">{fmt(displayAmount)}</td>
                       </tr>
@@ -840,7 +1391,8 @@ export default function LoanSanctionPage() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   All postings use system-generated GL accounts, auto-created per counterparty on
-                  first use. Additional posting fields will be added here later.
+                  first use{isBankLoan ? " — for a Bank Loan, the lender's own existing GL account (and its real account group) is reused directly, not a shadow account" : ""}.
+                  Additional posting fields will be added here later.
                 </p>
               </div>
             )}
@@ -897,6 +1449,7 @@ export default function LoanSanctionPage() {
           </div>
         </DialogContent>
       </Dialog>
+
     </GlassShell>
   );
 }
