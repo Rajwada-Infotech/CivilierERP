@@ -29,6 +29,30 @@ function isBookingCancelled(a: { BookingStatus?: string | null; BookingIsActive?
   return a.BookingIsActive === false || ["Cancelled", "Rejected"].includes(a.BookingStatus || "");
 }
 
+// Consolidated Agreement Date status — replaces the old spread of separate
+// "Agreement Date" / "Proposed Date (Company)" / "Proposed Date (Customer)"
+// raw-value lines with one badge cluster. "Accepted by Company/Customer"
+// both light up together the instant AgreementDate is confirmed — matching
+// proposals is a single mutual event (finalizeAgreementDate on the backend),
+// there's no separate per-side "accept" action, so both badges reflect that
+// same moment rather than implying an extra step that doesn't exist.
+const DATE_BADGE_COLORS: Record<string, string> = {
+  purple: "text-purple-600 bg-purple-50 border-purple-200",
+  blue:   "text-blue-600 bg-blue-50 border-blue-200",
+  green:  "text-green-600 bg-green-50 border-green-200",
+};
+// Only ever rendered once actually true — a grey placeholder for a status
+// that hasn't happened yet ("Proposed by Customer" showing before anyone
+// has proposed anything) is misleading, not informative.
+function DateStatusBadge({ label, date, color, active }: { label: string; date?: string | null; color: "purple" | "blue" | "green"; active: boolean }) {
+  if (!active) return null;
+  return (
+    <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${DATE_BADGE_COLORS[color]}`}>
+      {label}{date ? `: ${String(date).slice(0, 10)}` : ""}
+    </span>
+  );
+}
+
 // Mirrors the backend's mark-executed check (crmAgreements.js) — mandatory
 // documents must be Verified before execution, not just present.
 function unverifiedMandatoryDocs(documents: any[] | undefined): any[] {
@@ -706,8 +730,12 @@ const CrmAgreement: React.FC = () => {
                       {detail.agreement?.CustomerApprovalStatus || "Pending"}
                     </span>
                   </div>
-                  <div><span className="text-xs text-muted-foreground">Proposed Date (Company): </span>{detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0,10) : "—"}</div>
-                  <div><span className="text-xs text-muted-foreground">Proposed Date (Customer): </span>{detail.agreement?.ProposedDateByCustomer ? String(detail.agreement.ProposedDateByCustomer).slice(0,10) : "—"}</div>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <DateStatusBadge label="Proposed by Company" date={detail.agreement?.ProposedDateByCompany} color="purple" active={!!detail.agreement?.ProposedDateByCompany} />
+                  <DateStatusBadge label="Proposed by Customer" date={detail.agreement?.ProposedDateByCustomer} color="blue" active={!!detail.agreement?.ProposedDateByCustomer} />
+                  <DateStatusBadge label="Accepted by Company" color="green" active={!!detail.agreement?.AgreementDate} />
+                  <DateStatusBadge label="Accepted by Customer" color="green" active={!!detail.agreement?.AgreementDate} />
                 </div>
                 {!detail.agreement?.AgreementDate && detail.agreement?.ProposedDateByCompany && detail.agreement?.ProposedDateByCustomer && (
                   new Date(detail.agreement.ProposedDateByCompany).toDateString() === new Date(detail.agreement.ProposedDateByCustomer).toDateString() ? (
