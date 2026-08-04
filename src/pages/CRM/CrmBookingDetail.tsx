@@ -134,19 +134,22 @@ function InvoicePdfDialog({ bookingId, invoice, onClose }: { bookingId: number; 
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> {invoice.InvoiceNo}</DialogTitle>
+          <div className="flex items-center justify-between gap-3 pr-6">
+            <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> {invoice.InvoiceNo}</DialogTitle>
+            {blobUrl && (
+              <a href={blobUrl} download={`${invoice.InvoiceNo}.pdf`}
+                className="shrink-0 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 flex items-center gap-1.5">
+                <Download size={14} /> Download PDF
+              </a>
+            )}
+          </div>
         </DialogHeader>
         <div className="flex items-center justify-center min-h-[300px] bg-muted/20 rounded-lg overflow-hidden border border-border">
           {!blobUrl ? <span className="text-sm text-muted-foreground">Loading preview…</span>
             : <iframe src={blobUrl} title={invoice.InvoiceNo} className="w-full h-[60vh] border-0" />}
         </div>
-        <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
-          <span>{invoice.InvoiceType} · {fmt(invoice.Amount)}</span>
-          {blobUrl && (
-            <a href={blobUrl} download={`${invoice.InvoiceNo}.pdf`} className="text-primary hover:underline flex items-center gap-1">
-              <Download size={12} /> Download
-            </a>
-          )}
+        <div className="text-xs text-muted-foreground pt-1">
+          {invoice.InvoiceType} · {fmt(invoice.Amount)}
         </div>
       </DialogContent>
     </Dialog>
@@ -785,6 +788,32 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // regular form comes back automatically.
   const hasBookingInvoice = (invoices as any[]).some((inv: any) => inv.InvoiceType === "Booking");
   const bookingInvoiceOnly = !hasBookingInvoice && uninvoicedPaidMilestones.length === 0;
+  // Nothing to raise right now: the Booking invoice already exists (nothing
+  // to force), and no other milestone is sitting paid-but-uninvoiced. Hiding
+  // the button here (instead of opening a dialog whose only option is a
+  // dead-end "no paid milestone waiting" dropdown) is what keeps this
+  // action honest — it reappears the moment a milestone payment actually
+  // needs invoicing. Maintenance/Other invoices are ad-hoc and don't belong
+  // at this early booking-review stage either; they become reachable again
+  // once a milestone is genuinely awaiting invoicing.
+  const canGenerateAnything = !hasBookingInvoice || uninvoicedPaidMilestones.length > 0;
+
+  const [forcingBookingInvoice, setForcingBookingInvoice] = useState(false);
+  const handleForceBookingInvoice = async () => {
+    setForcingBookingInvoice(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/invoices/force-booking`, { method: "POST" });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error);
+      toast.success(`Invoice ${resData.InvoiceNo} generated — visible to the customer in their portal`);
+      setInvoiceDialog(false);
+      qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setForcingBookingInvoice(false);
+    }
+  };
 
   const handleGenerateInvoice = async () => {
     if (invoiceForm.InvoiceType === "Milestone") {
@@ -1622,7 +1651,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-4 pt-4 mt-1 border-t border-border">
                 <div className="flex items-center justify-between gap-2 pt-3">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={15} className="text-primary" /> Invoices</h3>
-                  {canEdit && booking.Status !== "Approved" && (
+                  {canEdit && booking.Status !== "Approved" && canGenerateAnything && (
                     <button onClick={openInvoiceDialog}
                       className="px-3 py-1.5 text-xs border border-border rounded-lg font-medium hover:bg-muted">
                       + Generate Invoice
@@ -1685,25 +1714,39 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setInvoiceDialog(false)}>
                     <div className="bg-background border border-border rounded-xl p-6 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
                       <h3 className="text-sm font-semibold">Generate Invoice</h3>
-                      {bookingInvoiceOnly ? (
-                        <>
-                          <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs text-sky-800">
-                            <FileText size={14} className="shrink-0 mt-0.5" />
+                      {!hasBookingInvoice && (
+                        <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs text-sky-800">
+                          <FileText size={14} className="shrink-0 mt-0.5" />
+                          <div className="space-y-1.5 w-full">
                             <span>
                               <span className="font-medium">Booking Invoice — auto-generated.</span>{" "}
-                              This booking has only its Booking Amount paid so far, and that invoice is
-                              created automatically the moment you click <span className="font-medium">Confirm &amp; Book</span> —
-                              it never needs to be raised manually here. Once another milestone is paid, you'll be
-                              able to generate its invoice from this same dialog.
+                              It's created automatically the moment the Booking Amount is fully paid and you
+                              click <span className="font-medium">Confirm &amp; Book</span> — it never needs to be raised manually here.
                             </span>
+                            {bookingAmountPaidInFull ? (
+                              <>
+                                <p className="text-amber-700 font-medium">
+                                  The Booking Amount is fully paid but no Booking invoice exists yet — auto-generation
+                                  may not have run. Use this only to recover from that.
+                                </p>
+                                <button onClick={handleForceBookingInvoice} disabled={forcingBookingInvoice}
+                                  className="px-2.5 py-1 text-xs bg-amber-600 text-white rounded-md font-medium hover:bg-amber-700 disabled:opacity-40">
+                                  {forcingBookingInvoice ? "Generating…" : "Force Generate Booking Invoice"}
+                                </button>
+                              </>
+                            ) : (
+                              <span className="text-sky-700">It will auto-generate once the Booking Amount is fully paid.</span>
+                            )}
                           </div>
-                          <div className="flex justify-end pt-1">
-                            <button onClick={() => setInvoiceDialog(false)}
-                              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-                              Close
-                            </button>
-                          </div>
-                        </>
+                        </div>
+                      )}
+                      {bookingInvoiceOnly ? (
+                        <div className="flex justify-end pt-1">
+                          <button onClick={() => setInvoiceDialog(false)}
+                            className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+                            Close
+                          </button>
+                        </div>
                       ) : (
                         <>
                           <div className="space-y-2">
@@ -1787,12 +1830,17 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     className="px-4 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted flex items-center gap-1">
                     Save &amp; Next <ArrowRight size={14} />
                   </button>
-                ) : canEdit && booking.Status !== "Approved" ? (
+                ) : canEdit && booking.Status !== "Approved" && !booking.ReadyForApprovalAt ? (
                   <button onClick={handleFinalBook} disabled={bookingRequesting || !mandatoryReady}
                     title={!mandatoryReady ? pendingStepMessage?.text : undefined}
                     className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">
                     {bookingRequesting ? "Submitting..." : "Confirm & Book"}
                     {!bookingRequesting && <Check size={14} />}
+                  </button>
+                ) : canEdit && booking.Status !== "Approved" && booking.ReadyForApprovalAt ? (
+                  <button disabled
+                    className="px-4 py-1.5 text-sm bg-emerald-100 text-emerald-700 rounded-lg font-medium cursor-default flex items-center gap-1">
+                    <Check size={14} /> Booked — Sent for Approval
                   </button>
                 ) : null}
               </div>

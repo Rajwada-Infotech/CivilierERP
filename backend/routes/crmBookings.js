@@ -1,6 +1,4 @@
 const express = require("express");
-const path = require("path");
-const fs = require("fs");
 const multer = require("multer");
 const router = express.Router();
 const { getPool, sql } = require("../db");
@@ -26,18 +24,8 @@ const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, 
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
-const UPLOAD_DIR = path.join(__dirname, "../uploads/crm-booking-attachments");
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-    cb(null, `${Date.now()}_${Math.round(Math.random() * 1e9)}_${safe}`);
-  },
-});
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024, files: 10 },
   fileFilter: (_req, file, cb) => {
     const ALLOWED = [
@@ -885,6 +873,36 @@ router.get("/:id/invoices", requirePageRight("crm-bookings", "view"), async (req
   }
 });
 
+// POST /:id/invoices/force-booking — recovery path only. The Booking
+// invoice is meant to be 100% auto-generated the instant the booking
+// payment clears and staff hit Confirm & Book (maybeAutoGenerateBookingInvoice,
+// called from ready-for-approval below). This route exists purely for the
+// case where that auto-generation somehow didn't fire (e.g. the PDF render
+// failed, or an older booking predates the auto-flow) — it calls the exact
+// same function, which is itself idempotent (no-ops if an invoice already
+// exists, or if the booking amount isn't actually fully paid yet), so this
+// can never create a duplicate or jump ahead of the real payment gate.
+router.post("/:id/invoices/force-booking", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const activeErr = await requireActiveBooking(pool, id);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const existing = await pool.request().input("bid", sql.Int, id)
+      .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Booking'");
+    if (existing.recordset.length) return res.status(400).json({ error: "A Booking invoice already exists for this booking" });
+
+    const result = await maybeAutoGenerateBookingInvoice(pool, id, actorId(req));
+    if (!result) return res.status(400).json({ error: "Cannot generate the Booking invoice yet — the Booking Amount isn't fully paid" });
+
+    res.status(201).json({ success: true, id: result.id, InvoiceNo: result.InvoiceNo });
+  } catch (e) {
+    console.error("[crm-bookings] POST /:id/invoices/force-booking error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /:id/invoices — generate a real, permanently-numbered invoice.
 // Visible to the customer in their portal immediately (no separate "send"
 // step — an invoice is a record of a real transaction, not a draft that
@@ -1147,14 +1165,14 @@ router.post("/:id/attachments", requirePageRight("crm-bookings", "edit"), upload
         .input("bid",   sql.Int,           id)
         .input("label", sql.NVarChar(200), req.body.Label || null)
         .input("fname", sql.NVarChar(300), file.originalname)
-        .input("sname", sql.NVarChar(300), file.filename)
+        .input("fb64",  sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
         .input("fsize", sql.Int,           file.size)
         .input("mime",  sql.NVarChar(150), file.mimetype)
         .input("cb",    sql.Int,           actorId(req))
         .query(`
-          INSERT INTO dbo.CrmBookingAttachment (BookingId, Label, FileName, StoredName, FileSize, MimeType, UploadedBy, UploadedAt)
+          INSERT INTO dbo.CrmBookingAttachment (BookingId, Label, FileName, FileBase64, FileSize, MimeType, UploadedBy, UploadedAt)
           OUTPUT INSERTED.Id
-          VALUES (@bid, @label, @fname, @sname, @fsize, @mime, @cb, SYSDATETIME())
+          VALUES (@bid, @label, @fname, @fb64, @fsize, @mime, @cb, SYSDATETIME())
         `);
       inserted.push(result.recordset[0].Id);
     }
@@ -1172,15 +1190,12 @@ router.get("/:id/attachments/file/:attId", requirePageRight("crm-bookings", "vie
     const bookingId = parseInt(req.params.id);
     const attId = parseInt(req.params.attId);
     const result = await pool.request().input("id", sql.Int, attId).input("bid", sql.Int, bookingId)
-      .query("SELECT StoredName, FileName, MimeType FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
-    if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });
+      .query("SELECT FileBase64, FileName, MimeType FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
+    if (!result.recordset.length || !result.recordset[0].FileBase64) return res.status(404).json({ error: "Attachment not found" });
     const row = result.recordset[0];
-    const resolvedPath = path.resolve(UPLOAD_DIR, row.StoredName);
-    if (!resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) return res.status(403).json({ error: "Access denied" });
-    if (!fs.existsSync(resolvedPath)) return res.status(404).json({ error: "File not found on disk" });
     res.setHeader("Content-Type", row.MimeType || "application/octet-stream");
     res.setHeader("Content-Disposition", `inline; filename="${row.FileName.replace(/"/g, "")}"`);
-    fs.createReadStream(resolvedPath).pipe(res);
+    res.send(Buffer.from(row.FileBase64, "base64"));
   } catch (e) {
     console.error("[crm-bookings] GET /:id/attachments/file/:attId error:", e.message);
     res.status(500).json({ error: e.message });
@@ -1197,11 +1212,9 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
     if (statusCheck.recordset[0]?.Status === "Approved") return res.status(400).json({ error: "This Booking is Approved — attachments can no longer be removed." });
 
     const result = await pool.request().input("id", sql.Int, attId).input("bid", sql.Int, bookingId)
-      .query("SELECT StoredName FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
+      .query("SELECT Id FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
     if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });
     await pool.request().input("id", sql.Int, attId).query("DELETE FROM dbo.CrmBookingAttachment WHERE Id = @id");
-    const resolvedPath = path.resolve(UPLOAD_DIR, result.recordset[0].StoredName);
-    if (resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) fs.unlink(resolvedPath, () => {});
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-bookings] DELETE /:id/attachments/:attId error:", e.message);
