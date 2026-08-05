@@ -29,6 +29,11 @@ export interface DbCheque {
   ChequeLotNumber: string | null;
   ChequeStartNumber: number | null;
   ChequeEndNumber: number | null;
+  // Full padded cheque-number string (leading zeros preserved), optionally
+  // followed by the 9-char city/bank/branch MICR suffix. Use this for display —
+  // ChequeStartNumber/ChequeEndNumber are numeric and lose leading zeros.
+  ChequeStartMICR: string | null;
+  ChequeEndMICR: string | null;
   TotalCheques: number | null;
   Remarks: string | null;
   Status: boolean;

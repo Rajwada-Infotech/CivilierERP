@@ -794,10 +794,18 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><CalendarClock size={11} /> Preferred Agreement Date</label>
+                  {/* Purely an informal note for whoever preps the real
+                      Agreement later — this is never what actually sets
+                      AgreementDate. The real date is only ever proposed
+                      once the Agreement exists (CrmAgreement.tsx's Propose
+                      Agreement Date flow, requiring both sides to match and
+                      a super_admin sign-off). Labeled explicitly so this
+                      never reads as if it's already the confirmed date. */}
+                  <label className="text-xs text-muted-foreground flex items-center gap-1 mb-1"><CalendarClock size={11} /> Discussed Agreement Date (note only)</label>
                   <input type="date" value={form.PreferredAgreementDate}
                     onChange={(e) => setForm((f) => ({ ...f, PreferredAgreementDate: e.target.value }))}
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                  <p className="text-[10px] text-muted-foreground mt-1">Not the formal proposal — that happens later on the Agreement page.</p>
                 </div>
               </div>
 
@@ -1274,7 +1282,7 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
                   className={inputCls} />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Preferred Agreement Date</label>
+                <label className="text-xs text-muted-foreground block mb-1">Discussed Agreement Date (note only)</label>
                 <input type="date" value={form.PreferredAgreementDate} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, PreferredAgreementDate: e.target.value }))}
                   className={inputCls} />
               </div>
@@ -1337,6 +1345,7 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
 };
 
 const CrmWelcomeCall: React.FC = () => {
+  const navigate = useNavigate();
   const [sp] = useSearchParams();
   const bkgFilter = sp.get("bookingId");
   const [search, setSearch] = useState("");
@@ -1497,7 +1506,7 @@ const CrmWelcomeCall: React.FC = () => {
                     {c.DurationSeconds && <span>{Math.floor(c.DurationSeconds / 60)}m {c.DurationSeconds % 60}s</span>}
                     {c.CalledByName && <span>by {c.CalledByName}</span>}
                     {c.NextCallDate && <span className="text-orange-600">Follow-up: {String(c.NextCallDate).slice(0, 10)}</span>}
-                    {c.PreferredAgreementDate && <span className="text-purple-600">Preferred agreement date: {String(c.PreferredAgreementDate).slice(0, 10)}</span>}
+                    {c.PreferredAgreementDate && <span className="text-purple-600">Discussed agreement date (note only): {String(c.PreferredAgreementDate).slice(0, 10)}</span>}
                     {c.Notes && <span className="truncate max-w-xs">{c.Notes}</span>}
                     {custom.map((f, i) => <span key={i}>{f.key}: {f.value}</span>)}
                   </div>
@@ -1508,8 +1517,16 @@ const CrmWelcomeCall: React.FC = () => {
         </div>
       )}
 
+      {/* Same pattern as CrmBooking.tsx's own ?applicationId= deep link:
+          closing the dialog clears the URL back to the plain page instead
+          of leaving ?bookingId=X sitting there — deepLinkOpened is
+          deliberately NOT reset here, since bkgFilter itself clears once
+          the URL updates and the effect above already guards on `!bkgFilter`. */}
       {activeBooking && (
-        <IntakeDialog booking={activeBooking} onClose={() => setActiveBooking(null)} />
+        <IntakeDialog booking={activeBooking} onClose={() => {
+          setActiveBooking(null);
+          if (bkgFilter) navigate("/crm/welcome-calls", { replace: true });
+        }} />
       )}
       {editingCall && (
         <EditCallDialog call={editingCall} onClose={() => setEditingCall(null)} onSaved={() => refetchHistory()} />

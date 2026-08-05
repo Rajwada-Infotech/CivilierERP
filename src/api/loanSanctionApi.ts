@@ -74,6 +74,10 @@ export interface LoanSanctionPayload {
   interestType?: InterestCalcType;
   interestRate?: number | string | null;
   tenureMonths?: number | string | null;
+  // Only applied when the loan has no EMI breakdown (n=1 installment,
+  // typically an Inter-Company simple transfer) — lets the user set the
+  // whole-loan repayment due date directly instead of loanDate + 1 month.
+  dueDate?: string | null;
   purpose?: string | null;
   remarks?: string | null;
 }

@@ -62,6 +62,10 @@ import {
   RefreshCw,
   History,
   Users,
+  Layers,
+  ListChecks,
+  IndianRupee,
+  MessageSquare,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -812,8 +816,15 @@ const Payment: React.FC = () => {
   };
 
   // ── Loan EMI source ──────────────────────────────────────────────────────
+  // selectedLoanEmi is the anchor row clicked in the picker — it identifies
+  // the loan and seeds the initial selection, but the modal lets the user
+  // widen this to multiple EMIs on the same loan, or switch to a lump sum
+  // covering the whole (or partial) outstanding balance.
   const [selectedLoanEmi, setSelectedLoanEmi] = useState<PayableEmi | null>(null);
   const [loanPaymentDetailsOpen, setLoanPaymentDetailsOpen] = useState(false);
+  const [loanPayMode, setLoanPayMode] = useState<"emis" | "lumpsum">("emis");
+  const [selectedLoanEmiIds, setSelectedLoanEmiIds] = useState<number[]>([]);
+  const [loanLumpSumAmount, setLoanLumpSumAmount] = useState("");
   const [loanLateFee, setLoanLateFee] = useState("");
   const [loanPaymentNotes, setLoanPaymentNotes] = useState("");
   const { data: loanEmiOptions = [], isLoading: loanEmisLoading } = useQuery<PayableEmi[]>({
@@ -821,9 +832,29 @@ const Payment: React.FC = () => {
     queryFn: getPayableEmis,
     staleTime: 60_000,
   });
+  // Every other pending EMI on the same loan — lets the modal offer "pay
+  // multiple EMIs at once" without a second fetch.
+  const loanSiblingEmis = selectedLoanEmi
+    ? loanEmiOptions.filter((e) => e.LoanId === selectedLoanEmi.LoanId).sort((a, b) => a.InstallmentNo - b.InstallmentNo)
+    : [];
+  const loanSelectedEmisTotal = loanSiblingEmis
+    .filter((e) => selectedLoanEmiIds.includes(e.EMIId))
+    .reduce((s, e) => s + Number(e.EMIAmount), 0);
+  const loanOutstandingTotal = loanSiblingEmis.reduce((s, e) => s + Number(e.EMIAmount), 0);
+
+  const applyLoanPaymentAmount = useCallback((mode: "emis" | "lumpsum", emiIds: number[], lumpSum: string, sibs: PayableEmi[]) => {
+    const total = mode === "lumpsum"
+      ? Number(lumpSum) || 0
+      : sibs.filter((e) => emiIds.includes(e.EMIId)).reduce((s, e) => s + Number(e.EMIAmount), 0);
+    setForm((prev) => ({ ...prev, amount: total }));
+  }, []);
+
   const handleLoanEmiSelect = (emi: PayableEmi) => {
     setSelectedLoanEmi(emi);
     setSelectedContract(null);
+    setLoanPayMode("emis");
+    setSelectedLoanEmiIds([emi.EMIId]);
+    setLoanLumpSumAmount("");
     setLoanLateFee("");
     setLoanPaymentNotes("");
     setForm((prev) => ({
@@ -834,10 +865,26 @@ const Payment: React.FC = () => {
       contractId: "",
       amount: Number(emi.EMIAmount),
     }));
-    // Late fee / loan-specific charges are collected separately — a Loan
-    // EMI payment isn't just an amount, it may also carry a late charge the
-    // regular payment form has no field for.
+    // Late fee / loan-specific charges — and now multi-EMI / lump-sum
+    // selection — are handled in a dedicated modal, not the regular
+    // payment form.
     setLoanPaymentDetailsOpen(true);
+  };
+  const toggleLoanEmiSelected = (emiId: number) => {
+    setSelectedLoanEmiIds((prev) => {
+      const next = prev.includes(emiId) ? prev.filter((id) => id !== emiId) : [...prev, emiId];
+      applyLoanPaymentAmount("emis", next, loanLumpSumAmount, loanSiblingEmis);
+      return next;
+    });
+  };
+  const setLoanPayModeAndSync = (mode: "emis" | "lumpsum") => {
+    setLoanPayMode(mode);
+    if (mode === "lumpsum" && !loanLumpSumAmount) {
+      setLoanLumpSumAmount(String(loanOutstandingTotal));
+      applyLoanPaymentAmount("lumpsum", selectedLoanEmiIds, String(loanOutstandingTotal), loanSiblingEmis);
+    } else {
+      applyLoanPaymentAmount(mode, selectedLoanEmiIds, loanLumpSumAmount, loanSiblingEmis);
+    }
   };
   // Only clears the loan-side selection state — deliberately does NOT touch
   // paymentName/amount, since this also fires defensively whenever an
@@ -845,6 +892,8 @@ const Payment: React.FC = () => {
   // must not stomp on the fields that selection just set.
   const clearLoanEmiLink = () => {
     setSelectedLoanEmi(null);
+    setSelectedLoanEmiIds([]);
+    setLoanLumpSumAmount("");
     setLoanLateFee("");
     setLoanPaymentNotes("");
   };
@@ -871,7 +920,7 @@ const Payment: React.FC = () => {
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setSelectedContract(null);
-    setSelectedLoanEmi(null);
+    clearLoanEmiLink();
     setLoanPaymentDetailsOpen(false);
     setFormLiveRemaining(null);
     setFormKnownTotalPaid(null);
@@ -881,7 +930,7 @@ const Payment: React.FC = () => {
 
   const openEdit = (rec: PaymentRecord) => {
     setSelectedContract(null);
-    setSelectedLoanEmi(null);
+    clearLoanEmiLink();
     setLoanPaymentDetailsOpen(false);
     setEditingId(rec.id);
     const { id, ...rest } = rec;
@@ -907,7 +956,7 @@ const Payment: React.FC = () => {
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setSelectedContract(null);
-    setSelectedLoanEmi(null);
+    clearLoanEmiLink();
     setLoanPaymentDetailsOpen(false);
   };
 
@@ -1604,6 +1653,7 @@ const Payment: React.FC = () => {
       docDate: form.date || "",
       docTypeId: form.docType || null,
       remarks: form.paymentName || null,
+      notes: form.notes || null,
       // PaymentPayloadSchema fields
       supplierId: form.expenseRef || null,
       partyId: form.partyId ?? null,
@@ -1657,7 +1707,8 @@ const Payment: React.FC = () => {
         if (selectedLoanEmi) {
           try {
             const res = await payLoan(selectedLoanEmi.LoanId, {
-              emiIds: [selectedLoanEmi.EMIId],
+              emiIds: loanPayMode === "emis" ? selectedLoanEmiIds : undefined,
+              lumpSumAmount: loanPayMode === "lumpsum" ? loanLumpSumAmount : undefined,
               paymentDate: form.date,
               lateFee: loanLateFee || undefined,
               notes: loanPaymentNotes || `Paid via Payment — ${form.paymentName}`,
@@ -1665,13 +1716,13 @@ const Payment: React.FC = () => {
             toast.success(
               res.loanClosed
                 ? `Loan ${selectedLoanEmi.LoanNo} fully repaid and closed. Ref: ${res.paymentRef}`
-                : `EMI settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef}`,
+                : `Loan payment settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef}`,
             );
             queryClient.invalidateQueries({ queryKey: ["payment-loan-emis"] });
             queryClient.invalidateQueries({ queryKey: ["loan-sanctions"] });
           } catch (loanErr: any) {
             toast.error(
-              `Payment saved, but the loan EMI could not be settled: ${loanErr.message}. Settle it manually from the Loan Sanction page.`,
+              `Payment saved, but the loan payment could not be settled: ${loanErr.message}. Settle it manually from the Loan Sanction page.`,
             );
           }
         } else {
@@ -2002,7 +2053,14 @@ const Payment: React.FC = () => {
                           onLoanEmiClear={clearLoanEmiLink}
                         />
                         {selectedLoanEmi && (
-                          <p className="text-[11px] text-muted-foreground flex items-center gap-2">
+                          <p className="text-[11px] text-muted-foreground flex items-center gap-2 flex-wrap">
+                            <span>
+                              {loanPayMode === "lumpsum"
+                                ? "Lump sum"
+                                : `${selectedLoanEmiIds.length} EMI${selectedLoanEmiIds.length === 1 ? "" : "s"} selected`}
+                              {" · "}
+                              <span className="font-mono font-medium text-foreground/80">{formatINR(form.amount ?? 0)}</span>
+                            </span>
                             <span>
                               Late fee: <span className="font-mono font-medium text-foreground/80">{loanLateFee ? formatINR(Number(loanLateFee)) : "—"}</span>
                             </span>
@@ -2579,6 +2637,16 @@ const Payment: React.FC = () => {
                     </div>
                   </Field>
                 </div>
+
+                <Field label="Remarks">
+                  <textarea
+                    value={form.notes}
+                    onChange={(e) => set("notes", e.target.value)}
+                    placeholder="Any additional notes for this payment (optional)"
+                    rows={2}
+                    className="w-full px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                  />
+                </Field>
 
                 {oaAdjustmentsForInvoice.length > 0 && (
                   <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 space-y-1">
@@ -4253,37 +4321,43 @@ const Payment: React.FC = () => {
               </button>
             </div>
 
-            {/* Tab strip */}
-            {viewingRec.expenseRef && (
-              <div className="flex border-b border-border px-5 bg-muted/10">
-                {(["details", "chain", "posting"] as const).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setDetailTab(t)}
-                    className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
-                      detailTab === t
-                        ? "border-primary text-primary"
-                        : "border-transparent text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {t === "details" ? "Details" : t === "chain" ? "Payment Chain" : "Posting"}
-                    {t === "chain" && paymentChainData && (
-                      <span className="ml-1.5 text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-semibold">
-                        {paymentChainData.payments.length}
-                      </span>
-                    )}
-                    {t === "posting" && pmtPostingData?.isPosted && (
-                      <span className="ml-1.5 text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.5 rounded-full font-semibold">✓</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* Tab strip — shown for every payment, including direct/TOD
+                ones with no linked invoice: Posting always applies (via the
+                per-payment fallback URL below), and Payment Chain shows an
+                explanatory empty state instead of just vanishing. */}
+            <div className="flex border-b border-border px-5 bg-muted/10">
+              {(["details", "chain", "posting"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setDetailTab(t)}
+                  className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                    detailTab === t
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t === "details" ? "Details" : t === "chain" ? "Payment Chain" : "Posting"}
+                  {t === "chain" && paymentChainData && (
+                    <span className="ml-1.5 text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-semibold">
+                      {paymentChainData.payments.length}
+                    </span>
+                  )}
+                  {t === "posting" && pmtPostingData?.isPosted && (
+                    <span className="ml-1.5 text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.5 rounded-full font-semibold">✓</span>
+                  )}
+                </button>
+              ))}
+            </div>
 
             {/* Body */}
             <div className="p-5 space-y-4 flex-1 overflow-y-auto">
 
               {/* ── Payment Chain Tab ── */}
+              {detailTab === "chain" && !viewingRec.expenseRef && (
+                <p className="text-center text-xs text-muted-foreground py-8">
+                  This is a direct payment with no linked invoice — there's no payment chain to show.
+                </p>
+              )}
               {detailTab === "chain" && viewingRec.expenseRef && (
                 <div className="space-y-3">
                   {/* Invoice summary */}
@@ -4721,6 +4795,9 @@ const Payment: React.FC = () => {
                     value: viewingRec.projectSite || "—",
                   },
                   { label: "Expense Ref", value: viewingRec.expenseRef || "—" },
+                  ...(viewingRec.notes
+                    ? [{ label: "Remarks", value: viewingRec.notes }]
+                    : []),
                   ...(viewingRec.bankName
                     ? [{ label: "Bank", value: viewingRec.bankName }]
                     : []),
@@ -5013,59 +5090,208 @@ const Payment: React.FC = () => {
         </div>
       )}
 
-      {/* Loan Payment Details — late fee / notes specific to a Loan EMI payment.
-          Separate from the main payment form since a loan repayment carries
-          charges (bank-applied or company-set late fee) that don't apply to
-          invoice/contract payments. */}
-      {loanPaymentDetailsOpen && selectedLoanEmi && (
+      {/* Loan Payment Details — pick single/multiple EMIs or a lump sum for
+          this loan, plus late fee / notes. Separate from the main payment
+          form since a loan repayment carries charges (bank-applied or
+          company-set late fee) and a payoff shape that invoice/contract
+          payments don't have. */}
+      {loanPaymentDetailsOpen && selectedLoanEmi && (() => {
+        const base = loanPayMode === "lumpsum" ? Number(loanLumpSumAmount) || 0 : loanSelectedEmisTotal;
+        const fee = Number(loanLateFee) || 0;
+        const willPayOff = loanPayMode === "lumpsum" && loanOutstandingTotal > 0 && Number(loanLumpSumAmount) >= loanOutstandingTotal;
+        return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-xl bg-card border border-border shadow-xl p-6 space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="p-2 rounded-lg bg-amber-500/10 shrink-0">
-                <Receipt size={16} className="text-amber-600" />
-              </div>
-              <div>
-                <h3 className="font-heading font-semibold text-foreground">
-                  Loan Payment Details
-                </h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {selectedLoanEmi.LoanNo} · EMI {selectedLoanEmi.InstallmentNo} · {formatINR(selectedLoanEmi.EMIAmount)}
-                </p>
+          <div className="w-full max-w-md rounded-2xl bg-card border border-border shadow-2xl max-h-[88vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="px-6 pt-6 pb-5 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border-b border-border">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/15 shrink-0">
+                  <Receipt size={18} className="text-amber-600" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-heading font-bold text-foreground text-base">
+                    Loan Payment Details
+                  </h3>
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    <span className="font-mono text-xs font-semibold text-foreground/80">{selectedLoanEmi.LoanNo}</span>
+                    <span className="text-muted-foreground/50">·</span>
+                    <span className="text-xs text-muted-foreground truncate">{selectedLoanEmi.BorrowerName}</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                      {selectedLoanEmi.LoanType}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
-                Late Fee ({selectedLoanEmi.LoanType === "Bank Loan" ? "bank-applied" : "company-set"}, optional)
-              </label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={loanLateFee}
-                onChange={(e) => setLoanLateFee(e.target.value)}
-                placeholder="0"
-                className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              {selectedLoanEmi.IsOverdue && (
-                <p className="text-[11px] text-red-500">This installment is overdue — a late fee may apply.</p>
+            {/* Body */}
+            <div className="px-6 py-5 space-y-5 overflow-y-auto">
+              {/* Payment mode toggle */}
+              <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-muted/50">
+                <button
+                  type="button"
+                  onClick={() => setLoanPayModeAndSync("emis")}
+                  className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    loanPayMode === "emis" ? "bg-card shadow-sm text-primary border border-border" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <ListChecks size={13} /> Select EMI(s)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoanPayModeAndSync("lumpsum")}
+                  className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    loanPayMode === "lumpsum" ? "bg-card shadow-sm text-primary border border-border" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Layers size={13} /> Lump Sum
+                </button>
+              </div>
+
+              {loanPayMode === "emis" ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                      Installments
+                    </label>
+                    <span className="text-[11px] text-muted-foreground">
+                      {selectedLoanEmiIds.length} selected
+                    </span>
+                  </div>
+                  <div className="rounded-xl border border-border divide-y divide-border max-h-48 overflow-y-auto">
+                    {loanSiblingEmis.map((e) => {
+                      const checked = selectedLoanEmiIds.includes(e.EMIId);
+                      return (
+                        <label
+                          key={e.EMIId}
+                          className={`flex items-center gap-2.5 px-3 py-2.5 text-sm cursor-pointer transition-colors ${
+                            checked ? "bg-primary/5" : "hover:bg-muted/40"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleLoanEmiSelected(e.EMIId)}
+                            className="w-4 h-4 rounded accent-primary cursor-pointer shrink-0"
+                          />
+                          <span className="flex-1 min-w-0">
+                            <span className="flex items-center gap-1.5">
+                              <span className="font-medium">EMI {e.InstallmentNo}</span>
+                              {!!e.IsOverdue && (
+                                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-red-500/15 text-red-600 dark:text-red-400">
+                                  OVERDUE
+                                </span>
+                              )}
+                            </span>
+                            <span className="block text-[11px] text-muted-foreground">
+                              Due {new Date(e.DueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                            </span>
+                          </span>
+                          <span className="font-mono text-xs font-semibold shrink-0">{formatINR(e.EMIAmount)}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                    Lump Sum Amount
+                  </label>
+                  <div className="relative">
+                    <IndianRupee size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      autoComplete="off"
+                      value={loanLumpSumAmount}
+                      onChange={(e) => {
+                        setLoanLumpSumAmount(e.target.value);
+                        applyLoanPaymentAmount("lumpsum", selectedLoanEmiIds, e.target.value, loanSiblingEmis);
+                      }}
+                      placeholder="Enter amount"
+                      className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Outstanding on this loan: <span className="font-mono font-medium text-foreground/80">{formatINR(loanOutstandingTotal)}</span>
+                  </p>
+                  {willPayOff && (
+                    <p className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                      <CheckCircle2 size={12} /> This pays it off — the loan will close automatically.
+                    </p>
+                  )}
+                </div>
               )}
+
+              {/* Late fee */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                  Late Fee <span className="normal-case text-muted-foreground/70">({selectedLoanEmi.LoanType === "Bank Loan" ? "bank-applied" : "company-set"}, optional)</span>
+                </label>
+                <div className="relative">
+                  <IndianRupee size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    autoComplete="off"
+                    value={loanLateFee}
+                    onChange={(e) => setLoanLateFee(e.target.value)}
+                    placeholder="0"
+                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+                {!!selectedLoanEmi.IsOverdue && (
+                  <p className="flex items-center gap-1.5 text-[11px] text-red-500">
+                    <AlertCircle size={11} /> This loan has an overdue installment — a late fee may apply.
+                  </p>
+                )}
+              </div>
+
+              {/* Breakdown — makes clear the late fee is added on top of the
+                  EMI/lump-sum amount, not folded into it, before this gets
+                  recorded as a single loan payment (principal+interest,
+                  late fee, and grand total tracked separately). */}
+              <div className="rounded-xl border border-primary/20 bg-primary/[0.04] px-4 py-3.5 space-y-2 text-xs tabular-nums">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    {loanPayMode === "lumpsum" ? "Lump sum amount" : "Selected EMI(s)"}
+                  </span>
+                  <span className="font-mono font-medium text-foreground">{formatINR(base)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Late fee</span>
+                  <span className="font-mono font-medium text-foreground">{formatINR(fee)}</span>
+                </div>
+                <div className="flex items-center justify-between pt-2 border-t border-primary/15">
+                  <span className="font-heading font-semibold text-foreground text-[13px]">Total to pay</span>
+                  <span className="font-mono font-bold text-primary text-base">{formatINR(base + fee)}</span>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                  Notes (optional)
+                </label>
+                <div className="relative">
+                  <MessageSquare size={13} className="absolute left-3 top-2.5 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={loanPaymentNotes}
+                    onChange={(e) => setLoanPaymentNotes(e.target.value)}
+                    placeholder="Reason for late fee, remarks…"
+                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
-                Notes (optional)
-              </label>
-              <input
-                type="text"
-                value={loanPaymentNotes}
-                onChange={(e) => setLoanPaymentNotes(e.target.value)}
-                placeholder="Reason for late fee, remarks…"
-                className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-1">
+            {/* Footer */}
+            <div className="flex justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20">
               <button
                 onClick={() => {
                   clearLoanEmiLink();
@@ -5080,7 +5306,24 @@ const Payment: React.FC = () => {
                 Cancel Loan Payment
               </button>
               <button
-                onClick={() => setLoanPaymentDetailsOpen(false)}
+                onClick={() => {
+                  if (base <= 0) {
+                    toast.error(loanPayMode === "lumpsum" ? "Enter a lump sum amount" : "Select at least one EMI");
+                    return;
+                  }
+                  setForm((prev) => ({
+                    ...prev,
+                    paymentName:
+                      loanPayMode === "lumpsum"
+                        ? `Loan Lump Sum — ${selectedLoanEmi.LoanNo} (${selectedLoanEmi.BorrowerName})`
+                        : `Loan EMI${selectedLoanEmiIds.length > 1 ? "s" : ""} ${loanSiblingEmis.filter((e) => selectedLoanEmiIds.includes(e.EMIId)).map((e) => e.InstallmentNo).join(", ")} — ${selectedLoanEmi.LoanNo} (${selectedLoanEmi.BorrowerName})`,
+                    // The actual bank/cheque transaction is the full amount
+                    // that changes hands — principal+interest (or lump sum)
+                    // plus the late fee, not just the EMI/lump-sum portion.
+                    amount: base + fee,
+                  }));
+                  setLoanPaymentDetailsOpen(false);
+                }}
                 className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
               >
                 Continue
@@ -5088,7 +5331,8 @@ const Payment: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </>
   );
 };

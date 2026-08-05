@@ -212,7 +212,8 @@ const paymentBodySchema = z
     const body = value;
     return {
       ...body,
-      PPaymentName: body.PPaymentName ?? body.remarks ?? body.paymentName,
+      PPaymentName: body.PPaymentName ?? body.paymentName ?? body.remarks,
+      PRemarks: body.PRemarks ?? body.notes,
       PMode: body.PMode ?? body.mode,
       PAmount: body.PAmount ?? body.amount,
       PDocType: body.PDocType ?? body.docTypeId,
@@ -241,6 +242,7 @@ const paymentBodySchema = z
   z
     .object({
       PPaymentName: optStr(200),
+      PRemarks: optStr(1000),
       PMode: reqStr(50, "Payment mode is required"),
       PAmount: reqNonNegativeNumber("Amount must be non-negative"),
       PDocType: optStr(50),

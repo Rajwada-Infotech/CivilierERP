@@ -9,6 +9,7 @@ export function maskCardNumber(num: string | null): string {
 export function blankForm(): Omit<PaymentRecord, "id"> {
   return {
     paymentName: "",
+    notes: "",
     mode: "",
     amount: null,
     baseAmount: null,
@@ -55,6 +56,7 @@ export function dbToRecord(item: DbPayment): PaymentRecord {
   return {
     id: String(item.PPaymentID),
     paymentName: item.PPaymentName || "",
+    notes: item.PRemarks || "",
     paidTo: item.PSupplierName || "",
     supplierContact: item.PSupplierContact || "",
     mode: item.PMode || "",

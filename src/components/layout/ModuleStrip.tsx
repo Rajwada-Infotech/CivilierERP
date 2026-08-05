@@ -311,80 +311,84 @@ export const ModuleStrip: React.FC = () => {
           {/* Divider below logo */}
           <div className="mx-3 mb-1 h-px bg-gradient-to-r from-transparent via-foreground/30 to-transparent relative z-10" />
 
-          {/* ── Regular module icons (finance → ticket) ───────────────────── */}
-          <div className="relative z-10 flex flex-col items-center gap-1 pt-2">
-            {regularItems.map((item) => (
-              <IconButton
-                key={item.id as string}
-                item={item}
-                isActive={activeModule === item.id}
-                onClick={() => handleSwitch(item.id as NonNullable<Module>)}
-                onMouseEnter={(e) => handleMouseEnter(item, e)}
-                onMouseLeave={() => setTooltip(null)}
-              />
-            ))}
-          </div>
-
-          {/* ── Separator between ticket and admin ────────────────────────────── */}
-          {adminItems.length > 0 && (
-            <div className="relative z-10 flex flex-col items-center my-1.5">
-              {/* Top line */}
-              <div
-                className="w-px h-5"
-                style={{
-                  background: `linear-gradient(to bottom, transparent, rgba(${activeRingRgb},0.6))`,
-                }}
-              />
-              {/* Pulsing dot — subtle, no scale change, just opacity + soft glow */}
-              <motion.div
-                className="rounded-full"
-                style={{
-                  width: 5,
-                  height: 5,
-                  background: activeModuleItem.color,
-                }}
-                animate={{
-                  opacity: [0.45, 1, 0.45],
-                  boxShadow: [
-                    `0 0 0px rgba(${activeRingRgb},0)`,
-                    `0 0 5px 1px rgba(${activeRingRgb},0.70)`,
-                    `0 0 0px rgba(${activeRingRgb},0)`,
-                  ],
-                }}
-                transition={{
-                  duration: 2,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                }}
-              />
-              {/* Bottom line */}
-              <div
-                className="w-px h-5"
-                style={{
-                  background: `linear-gradient(to top, transparent, rgba(${activeRingRgb},0.6))`,
-                }}
-              />
+          {/* ── Scrollable icon region — regular + admin modules. Scrolls
+              internally (instead of overflowing the pill) once there are
+              too many modules for the viewport, so the footer's expand
+              button below always stays fully visible, never clipped. ── */}
+          <div className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {/* ── Regular module icons (finance → ticket) ───────────────────── */}
+            <div className="flex flex-col items-center gap-2 pt-2 pb-1">
+              {regularItems.map((item) => (
+                <IconButton
+                  key={item.id as string}
+                  item={item}
+                  isActive={activeModule === item.id}
+                  onClick={() => handleSwitch(item.id as NonNullable<Module>)}
+                  onMouseEnter={(e) => handleMouseEnter(item, e)}
+                  onMouseLeave={() => setTooltip(null)}
+                />
+              ))}
             </div>
-          )}
 
-          {/* ── Admin icon (only for admin-tier) ──────────────────────────── */}
-          <div className="relative z-10 flex flex-col items-center gap-1">
-            {adminItems.map((item) => (
-              <IconButton
-                key={item.id as string}
-                item={item}
-                isActive={activeModule === item.id}
-                onClick={() => handleSwitch(item.id as NonNullable<Module>)}
-                onMouseEnter={(e) => handleMouseEnter(item, e)}
-                onMouseLeave={() => setTooltip(null)}
-              />
-            ))}
+            {/* ── Separator between ticket and admin ────────────────────────────── */}
+            {adminItems.length > 0 && (
+              <div className="flex flex-col items-center my-1.5">
+                {/* Top line */}
+                <div
+                  className="w-px h-5"
+                  style={{
+                    background: `linear-gradient(to bottom, transparent, rgba(${activeRingRgb},0.6))`,
+                  }}
+                />
+                {/* Pulsing dot — subtle, no scale change, just opacity + soft glow */}
+                <motion.div
+                  className="rounded-full"
+                  style={{
+                    width: 5,
+                    height: 5,
+                    background: activeModuleItem.color,
+                  }}
+                  animate={{
+                    opacity: [0.45, 1, 0.45],
+                    boxShadow: [
+                      `0 0 0px rgba(${activeRingRgb},0)`,
+                      `0 0 5px 1px rgba(${activeRingRgb},0.70)`,
+                      `0 0 0px rgba(${activeRingRgb},0)`,
+                    ],
+                  }}
+                  transition={{
+                    duration: 2,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                  }}
+                />
+                {/* Bottom line */}
+                <div
+                  className="w-px h-5"
+                  style={{
+                    background: `linear-gradient(to top, transparent, rgba(${activeRingRgb},0.6))`,
+                  }}
+                />
+              </div>
+            )}
+
+            {/* ── Admin icon (only for admin-tier) ──────────────────────────── */}
+            <div className="flex flex-col items-center gap-2 pb-2">
+              {adminItems.map((item) => (
+                <IconButton
+                  key={item.id as string}
+                  item={item}
+                  isActive={activeModule === item.id}
+                  onClick={() => handleSwitch(item.id as NonNullable<Module>)}
+                  onMouseEnter={(e) => handleMouseEnter(item, e)}
+                  onMouseLeave={() => setTooltip(null)}
+                />
+              ))}
+            </div>
           </div>
-
-          <div className="flex-1 relative z-10" />
 
           {/* ── Footer — h-16, expand button when collapsed (no border) ────── */}
-          <div className="relative z-10 h-16 flex items-center justify-center">
+          <div className="relative z-10 h-16 shrink-0 flex items-center justify-center">
             <AnimatePresence>
               {collapsed && (
                 <motion.button

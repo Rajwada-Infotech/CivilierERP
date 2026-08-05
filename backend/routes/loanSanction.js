@@ -13,10 +13,9 @@ router.use(authMiddleware);
 
 const LOAN_TYPES = ["Inter-Company", "Bank Loan", "Customer Loan"];
 const INTEREST_TYPES = ["SI", "CI"];
-// Flexible repayment (multi-EMI select, lump sum, early payoff) is only
-// meaningful for a real external loan — an Inter-Company transfer is
-// settled internally, not "repaid" through this flow.
-const REPAYABLE_TYPES = ["Bank Loan", "Customer Loan"];
+// Every loan type is repaid through the same flexible flow (multi-EMI
+// select, lump sum, early payoff), driven exclusively from the Payment
+// page's "Loan EMIs" tab — the Loan Sanction page itself is read-only.
 
 // Get-or-create the system-generated ledger head that represents a company
 // or customer as a Loan counterparty — mirrors ensureProjectLedgerHeads in
@@ -69,7 +68,11 @@ async function ensureLoanLedgerHead(pool, keyPrefix, counterpartyId, counterpart
 //     interest shrinks each period as principal is paid down.
 // Always generates at least 1 installment (a tenure-less loan is treated as
 // a single bullet payment).
-function buildEmiSchedule(amount, annualRatePct, tenureMonths, startDate, interestType = "CI") {
+// explicitDueDate: only applied to the single installment of a no-tenure
+// (n=1) loan — e.g. an Inter-Company simple transfer with no EMI
+// breakdown — letting the user set the whole-loan repayment due date
+// directly instead of it defaulting to loanDate + 1 month.
+function buildEmiSchedule(amount, annualRatePct, tenureMonths, startDate, interestType = "CI", explicitDueDate = null) {
   const n = Math.max(1, parseInt(tenureMonths, 10) || 1);
   const start = new Date(startDate);
   const rows = [];
@@ -80,8 +83,13 @@ function buildEmiSchedule(amount, annualRatePct, tenureMonths, startDate, intere
     for (let i = 1; i <= n; i++) {
       const principal = i === n ? Math.round((amount - allocated) * 100) / 100 : flat;
       allocated += principal;
-      const due = new Date(start);
-      due.setMonth(due.getMonth() + i);
+      let due;
+      if (n === 1 && explicitDueDate) {
+        due = new Date(explicitDueDate);
+      } else {
+        due = new Date(start);
+        due.setMonth(due.getMonth() + i);
+      }
       rows.push({ installmentNo: i, dueDate: due, emiAmount: principal, principal, interest: 0 });
     }
     return rows;
@@ -255,11 +263,8 @@ router.get("/emi-reminders", async (req, res) => {
   }
 });
 
-// ── GET /emi-payable — all unpaid EMIs for Bank Loan / Customer Loan ──────
-// Feeds the "pay these EMIs" picker (multi-select or lump sum). Only the
-// two loan types that use the flexible repayment flow show up here — an
-// Inter-Company transfer is settled via the simple per-EMI checkbox on
-// the EMI Schedule tab instead.
+// ── GET /emi-payable — all unpaid EMIs across every loan type ─────────────
+// Feeds the Payment page's "Loan EMIs" picker (multi-select or lump sum).
 // Registered before "/:id" so it isn't swallowed by the param route.
 router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req, res) => {
   try {
@@ -276,7 +281,7 @@ router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req
       LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
       LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
-      WHERE e.IsPaid = 0 AND ls.LoanType IN ('Bank Loan', 'Customer Loan') AND ls.Status <> 'Closed'
+      WHERE e.IsPaid = 0 AND ls.Status <> 'Closed'
       ORDER BY e.DueDate ASC
     `);
     res.json(result.recordset);
@@ -472,6 +477,7 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
     interestType,
     interestRate,
     tenureMonths,
+    dueDate,
     purpose,
     remarks,
   } = req.body;
@@ -621,7 +627,7 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
           WHERE LHeadId = @PartyId;
       `);
 
-    const schedule = buildEmiSchedule(amt, effectiveRate || 0, tenureMonths, loanDate, iType);
+    const schedule = buildEmiSchedule(amt, effectiveRate || 0, tenureMonths, loanDate, iType, dueDate || null);
     await insertEmiSchedule(tx, loanId, schedule);
 
     await tx.commit();
@@ -724,7 +730,7 @@ router.put("/:id/emi/:emiId/pay", requirePageRight("loan-sanction", "edit"), asy
 });
 
 // ── POST /:id/pay — flexible repayment: single EMI, multiple EMIs, or a
-//    lump sum. Bank Loan / Customer Loan only (see REPAYABLE_TYPES).
+//    lump sum. Applies to every loan type.
 //
 // Body: { emiIds?: number[], lumpSumAmount?: number, lateFee?: number,
 //         paymentDate, notes? }
@@ -765,12 +771,6 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
       .query("SELECT LoanId, LoanNo, LoanType, Status, BorrowerLHeadId, LenderLHeadId FROM dbo.LoanSanction WHERE LoanId = @LoanId");
     const loan = loanRes.recordset[0];
     if (!loan) throw Object.assign(new Error("Loan not found"), { status: 404 });
-    if (!REPAYABLE_TYPES.includes(loan.LoanType)) {
-      throw Object.assign(
-        new Error("Flexible repayment (EMI select / lump sum) is only available for Bank Loan and Customer Loan. Use the EMI Schedule checkbox for other loan types."),
-        { status: 400 },
-      );
-    }
     if (loan.Status === "Closed") {
       throw Object.assign(new Error("This loan is already closed."), { status: 409 });
     }

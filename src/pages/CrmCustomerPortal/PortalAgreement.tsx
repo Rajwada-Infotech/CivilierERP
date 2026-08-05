@@ -17,6 +17,29 @@ import {
 
 type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
 
+// Consolidated Agreement Date status — one "Agreement Date" field plus a
+// badge cluster, replacing the old separate "Proposed Date (From the
+// company)" / "Proposed Date (You)" / "Agreement Date" fields. "Accepted"
+// lights up for both sides the instant AgreementDate is confirmed — matching
+// proposals finalizes as a single mutual event, there's no separate per-side
+// accept step, so both badges reflect that same moment.
+const DATE_BADGE_TONES: Record<string, { bg: string; fg: string }> = {
+  purple: { bg: "rgba(124,58,237,0.10)", fg: "#7C3AED" },
+  blue:   { bg: "rgba(37,99,235,0.10)",  fg: "#2563EB" },
+  green:  { bg: "rgba(16,150,80,0.10)",  fg: "#0F7A44" },
+};
+// Only ever rendered once actually true — a grey placeholder for a status
+// that hasn't happened yet is misleading, not informative.
+function DateStatusBadge({ label, date, color, active }: { label: string; date?: string | null; color: "purple" | "blue" | "green"; active: boolean }) {
+  if (!active) return null;
+  const tone = DATE_BADGE_TONES[color];
+  return (
+    <span className="text-[11px] px-2 py-0.5 rounded-full font-medium" style={{ background: tone.bg, color: tone.fg }}>
+      {label}{date ? `: ${fmtDate(date)}` : ""}
+    </span>
+  );
+}
+
 function mimeIcon(mime: string | null | undefined, size = 16) {
   if (!mime) return <FileIcon size={size} className="text-slate-400 shrink-0" />;
   if (mime.startsWith("image/")) return <FileImage size={size} className="text-blue-500 shrink-0" />;
@@ -349,12 +372,19 @@ const PortalAgreement: React.FC = () => {
             <InfoField label="Total Value" value={fmtMoney(agreement.TotalValue)} />
             <InfoField label="PAN" value={agreement.PanNo} mono />
             <InfoField label="Aadhaar" value={maskAadhaar(agreement.AadhaarNo)} mono />
-            <InfoField label="Proposed Date (From the company)" value={fmtDate(agreement.ProposedDateByCompany)} />
-            <InfoField label="Proposed Date (You)" value={fmtDate(agreement.ProposedDateByCustomer)} />
-            <InfoField label="Agreement Date" value={fmtDate(agreement.AgreementDate)} />
+            <InfoField label="Agreement Date" value={fmtDate(agreement.AgreementDate) || "Not yet finalized"} />
             {agreement.LegalAddress && <InfoField label="Registered Address" value={agreement.LegalAddress} />}
             <InfoField label="Documents" value={needsAction.length > 0 ? `${onFile.length} on file, ${needsAction.length} needed` : onFile.length} />
           </div>
+
+          {(agreement.ProposedDateByCompany || agreement.ProposedDateByCustomer || agreement.AgreementDate) && (
+            <div className="px-5 sm:px-6 pb-5 flex flex-wrap gap-1.5">
+              <DateStatusBadge label="Proposed by Company" date={agreement.ProposedDateByCompany} color="purple" active={!!agreement.ProposedDateByCompany} />
+              <DateStatusBadge label="Proposed by You" date={agreement.ProposedDateByCustomer} color="blue" active={!!agreement.ProposedDateByCustomer} />
+              <DateStatusBadge label="Accepted by Company" color="green" active={!!agreement.AgreementDate} />
+              <DateStatusBadge label="Accepted by You" color="green" active={!!agreement.AgreementDate} />
+            </div>
+          )}
 
           {dateMismatch && !agreement.AgreementDate && agreement.DateApprovalStatus !== "Pending" && (
             <div className="mx-5 sm:mx-6 mb-5 text-xs rounded-lg p-3 flex items-start gap-2" style={{ background: GOLD_SOFT, color: "#8A6D14" }}>
