@@ -86,6 +86,20 @@ function micrSeq(micr: string): number {
   return parseInt(micr.slice(0, 6), 10) || 0;
 }
 
+// ChequeStartNumber/ChequeEndNumber are numeric columns, so leading zeros
+// (e.g. "000223") are always stripped by the time they reach the DB. The
+// full padded cheque number is preserved separately in ChequeStartMICR/
+// ChequeEndMICR (stored as text). Display from the MICR string whenever it's
+// present; only fall back to the numeric value for legacy rows saved before
+// those columns existed, which have no way to recover their original padding.
+function displayChequeNo(
+  micr: string | null | undefined,
+  num: number | null | undefined,
+): string {
+  if (micr && micr.length >= 6) return micr.slice(0, 6);
+  return num != null ? String(num) : "—";
+}
+
 function calcTotal(start: string, end: string): number {
   if (start.length < 6 || end.length < 6) return 0;
   const s = micrSeq(start);
@@ -200,8 +214,8 @@ function buildChequeColumns(
       header: "Range",
       cell: ({ row }) => (
         <span className="font-mono text-xs text-muted-foreground">
-          {row.original.ChequeStartNumber ?? "—"} –{" "}
-          {row.original.ChequeEndNumber ?? "—"}
+          {displayChequeNo(row.original.ChequeStartMICR, row.original.ChequeStartNumber)} –{" "}
+          {displayChequeNo(row.original.ChequeEndMICR, row.original.ChequeEndNumber)}
         </span>
       ),
     },
@@ -357,7 +371,7 @@ const ChequeMaster: React.FC = () => {
         <tr><td>IFSC Code</td><td>${cheque.IFSCCode || "—"}</td></tr>
         <tr><td>Account Type</td><td>${cheque.BankAccountType || "—"}</td></tr>
         <tr><td>Cheque Book Number</td><td>${cheque.ChequeLotNumber || "—"}</td></tr>
-        <tr><td>Cheque Range</td><td>${cheque.ChequeStartNumber ?? "—"} → ${cheque.ChequeEndNumber ?? "—"}</td></tr>
+        <tr><td>Cheque Range</td><td>${displayChequeNo(cheque.ChequeStartMICR, cheque.ChequeStartNumber)} → ${displayChequeNo(cheque.ChequeEndMICR, cheque.ChequeEndNumber)}</td></tr>
         <tr><td>Total Cheques</td><td>${cheque.TotalCheques ?? "—"}</td></tr>
         <tr><td>Remarks</td><td>${cheque.Remarks || "—"}</td></tr>
         <tr><td>Status</td><td>${cheque.Status ? "Active" : "Inactive"}</td></tr>
@@ -457,8 +471,8 @@ const ChequeMaster: React.FC = () => {
       accountNumber: item.AccountNumber || "",
       ifscCode: item.IFSCCode || "",
       lotNumber: item.ChequeLotNumber || "",
-      chqStart: (item as any).ChequeStartMICR ?? String(item.ChequeStartNumber ?? ""),
-      chqEnd:   (item as any).ChequeEndMICR   ?? String(item.ChequeEndNumber   ?? ""),
+      chqStart: item.ChequeStartMICR ?? String(item.ChequeStartNumber ?? ""),
+      chqEnd:   item.ChequeEndMICR   ?? String(item.ChequeEndNumber   ?? ""),
       totalCheques: item.TotalCheques ?? 0,
       remarks: item.Remarks || "",
       status: item.Status,
@@ -1319,7 +1333,7 @@ const ChequeMaster: React.FC = () => {
                 },
                 {
                   label: "Cheque Range",
-                  value: `${viewRow.ChequeStartNumber ?? "—"} → ${viewRow.ChequeEndNumber ?? "—"}`,
+                  value: `${displayChequeNo(viewRow.ChequeStartMICR, viewRow.ChequeStartNumber)} → ${displayChequeNo(viewRow.ChequeEndMICR, viewRow.ChequeEndNumber)}`,
                   mono: true,
                 },
                 {
