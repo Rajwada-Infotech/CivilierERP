@@ -148,6 +148,8 @@ const CSV_HEADERS = {
   uomCode: "UOM",
   hsnCode: "HSN Code",
   defaultSupplier: "Default Supplier",
+  glLedger: "GL Ledger",
+  costCentre: "Cost Centre",
   description: "Description",
 } as const;
 
@@ -159,6 +161,8 @@ const ITEM_CSV_TEMPLATE_COLUMNS: ExportColumn[] = [
   { header: CSV_HEADERS.uomCode, accessor: "uomCode" },
   { header: CSV_HEADERS.hsnCode, accessor: "hsnCode" },
   { header: CSV_HEADERS.defaultSupplier, accessor: "defaultSupplier" },
+  { header: CSV_HEADERS.glLedger, accessor: "glLedger" },
+  { header: CSV_HEADERS.costCentre, accessor: "costCentre" },
   { header: CSV_HEADERS.description, accessor: "description" },
 ];
 
@@ -433,6 +437,21 @@ const ItemMaster: React.FC = () => {
     }),
   );
 
+  // GL Ledger master options — mirrors what GLAccountSelect fetches
+  // internally, but this page also needs the raw list itself to resolve a
+  // "GL Ledger" name/code typed in a CSV import row (GLAccountSelect only
+  // exposes a picker UI, not a lookup API).
+  const { data: dbGlAccounts = [] } = useQuery({
+    queryKey: ["gl-accounts-for-item-master"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/general-ledger/options");
+      if (!res.ok) return [];
+      const data = await res.json().catch(() => ({}));
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   const data: Item[] = (Array.isArray(dbItems) ? dbItems : []).map(dbToItem);
 
   // ── Local state ───────────────────────────────────────────────────────────
@@ -688,6 +707,8 @@ const ItemMaster: React.FC = () => {
           const uomRaw = (raw[CSV_HEADERS.uomCode] || "").trim();
           const hsnRaw = (raw[CSV_HEADERS.hsnCode] || "").trim();
           const supplierRaw = (raw[CSV_HEADERS.defaultSupplier] || "").trim();
+          const glLedgerRaw = (raw[CSV_HEADERS.glLedger] || "").trim();
+          const costCentreRaw = (raw[CSV_HEADERS.costCentre] || "").trim();
           const description = (raw[CSV_HEADERS.description] || "").trim();
 
           if (!itemName) throw new Error("Item Name is required");
@@ -736,6 +757,30 @@ const ItemMaster: React.FC = () => {
             defaultSupplierId = matchedSupplier.value;
           }
 
+          // GL Ledger tag is optional — match by label or code.
+          let glHeadId = "";
+          if (glLedgerRaw) {
+            const matchedGl = (Array.isArray(dbGlAccounts) ? dbGlAccounts : []).find(
+              (g: any) =>
+                (g.label ?? "").toLowerCase() === glLedgerRaw.toLowerCase() ||
+                (g.code ?? "").toLowerCase() === glLedgerRaw.toLowerCase(),
+            );
+            if (!matchedGl)
+              throw new Error(`GL Ledger "${glLedgerRaw}" was not found`);
+            glHeadId = String(matchedGl.id);
+          }
+
+          // Cost Centre tag is optional — same resolve-if-present pattern.
+          let costCenterId = "";
+          if (costCentreRaw) {
+            const matchedCc = costCenterOptions.find(
+              (c) => c.label.toLowerCase() === costCentreRaw.toLowerCase(),
+            );
+            if (!matchedCc)
+              throw new Error(`Cost Centre "${costCentreRaw}" was not found`);
+            costCenterId = matchedCc.value;
+          }
+
           // HSN — required, and is now the sole source of GST rates.
           // No CGST/SGST/IGST columns in the CSV; rates are always looked
           // up from the HSN code, same as picking an HSN in the form.
@@ -766,6 +811,8 @@ const ItemMaster: React.FC = () => {
               belongsTo: group.id,
               uomCode,
               defaultSupplierId,
+              glHeadId,
+              costCenterId,
             },
             group.description,
           );
