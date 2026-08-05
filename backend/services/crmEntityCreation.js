@@ -646,6 +646,13 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // CrmCoApplicant by BookingId) actually find it.
   await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
     .query("UPDATE dbo.CrmCoApplicant SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
+  // Extra Work captured on the Application wizard's own tab (ApplicationId
+  // set, BookingId NULL, no hold/conversion needed — unlike Parking, there's
+  // no scarce slot to reserve) — same backfill as Parking above, so
+  // rollupBookingTotals below picks it up into ExtraChargesTotal/GrandTotal
+  // and the Booking tab's Parking & Extra Work list actually shows it.
+  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+    .query("UPDATE dbo.CrmExtraCharge SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
 
   // The real % payment schedule must exist BEFORE any parking allotment is
   // converted below. applyAddParking numbers its own milestone via

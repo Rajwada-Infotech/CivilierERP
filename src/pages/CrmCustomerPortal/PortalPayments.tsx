@@ -31,19 +31,23 @@ function InvoicePdfDialog({ invoice, applicationId, onClose }: { invoice: any; a
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{invoice.InvoiceNo}</DialogTitle>
-          <DialogDescription>{invoice.InvoiceType} · {fmtMoney(invoice.Amount)}</DialogDescription>
+          <div className="flex items-center justify-between gap-3 pr-6">
+            <div>
+              <DialogTitle>{invoice.InvoiceNo}</DialogTitle>
+              <DialogDescription>{invoice.InvoiceType} · {fmtMoney(invoice.Amount)}</DialogDescription>
+            </div>
+            {blobUrl && (
+              <a href={blobUrl} download={`${invoice.InvoiceNo}.pdf`}
+                style={{ background: GOLD }}
+                className="shrink-0 px-3 py-1.5 text-sm text-white rounded-lg font-medium flex items-center gap-1.5 hover:opacity-90">
+                <Download size={14} /> Download PDF
+              </a>
+            )}
+          </div>
         </DialogHeader>
         <div className="flex items-center justify-center min-h-[300px] bg-slate-50 rounded-lg overflow-hidden">
           {!blobUrl ? <span className="text-sm text-slate-400">Loading preview…</span>
             : <iframe src={blobUrl} title={invoice.InvoiceNo} className="w-full h-[60vh] border-0" />}
-        </div>
-        <div className="flex justify-end items-center pt-1">
-          {blobUrl && (
-            <a href={blobUrl} download={`${invoice.InvoiceNo}.pdf`} style={{ color: GOLD }} className="hover:underline flex items-center gap-1 text-sm">
-              <Download size={13} /> Download PDF
-            </a>
-          )}
         </div>
       </DialogContent>
     </Dialog>

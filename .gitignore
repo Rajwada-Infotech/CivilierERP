@@ -64,3 +64,5 @@ CivilierERP Documentation.pdf
 # so this avoids the fallback silently serving index.html renamed to .apk.
 # Never committed; production is served from /apk-releases/ by nginx instead.
 public/downloads/
+
+backend/uploads/crm-invoices/

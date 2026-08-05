@@ -67,6 +67,55 @@ router.post("/record", requirePageRight("on-account-adjustment", "create"), asyn
   if (!partyId || !txnType || !amount || amount <= 0) return res.status(400).json({ error: "Missing required fields" });
   try {
     const pool = getPool();
+
+    // This is an "internal" route in name only — it's reachable directly by
+    // anyone holding on-account-adjustment/create, and previously trusted
+    // refId with zero verification. That let a caller mint an arbitrary
+    // CREDIT (inflating a party's OnAccountBalance) by passing a refId that
+    // was never approved, didn't belong to that party, or had already been
+    // used to fund an earlier ledger entry (replaying one approved payment
+    // into multiple credits). CREDIT entries now must point at a real,
+    // approved source row, and that source can only be used once.
+    // NOTE: NewPayment's PPartyId/Status columns are confirmed from
+    // invoices-for-party above; ReceivedPayment has no confirmed PartyId
+    // column in what I've read, so that branch checks status/amount only —
+    // flag if RPPartyId (or equivalent) exists and should be added here.
+    if (String(txnType).toUpperCase() === "CREDIT") {
+      if (!refId || !refType) {
+        return res.status(400).json({ error: "refId and refType are required for a CREDIT entry" });
+      }
+      const rid = parseInt(refId, 10);
+      const amt = parseFloat(amount);
+      let sourceOk = false;
+
+      if (refType === "Payment") {
+        const src = await pool.request().input("id", sql.Int, rid).query(
+          `SELECT PPartyId, Status, PAmount FROM dbo.NewPayment WHERE PPaymentID = @id`
+        );
+        const row = src.recordset[0];
+        sourceOk = !!row && row.Status === "Approved" && row.PPartyId === partyId && parseFloat(row.PAmount) >= amt;
+      } else if (refType === "ReceivedPayment") {
+        const src = await pool.request().input("id", sql.Int, rid).query(
+          `SELECT RPStatus, RPAmount FROM dbo.ReceivedPayment WHERE RPPaymentID = @id`
+        );
+        const row = src.recordset[0];
+        sourceOk = !!row && row.RPStatus === "Approved" && parseFloat(row.RPAmount) >= amt;
+      } else {
+        return res.status(400).json({ error: `Unrecognized refType '${refType}' for a CREDIT entry` });
+      }
+
+      if (!sourceOk) {
+        return res.status(400).json({ error: "refId does not reference an approved payment for this party/amount" });
+      }
+
+      const dup = await pool.request().input("rt", sql.NVarChar(30), refType).input("rid", sql.Int, rid).query(
+        `SELECT TOP 1 OAId FROM dbo.OnAccountLedger WHERE RefType = @rt AND RefId = @rid AND TxnType = 'CREDIT'`
+      );
+      if (dup.recordset.length) {
+        return res.status(409).json({ error: "This payment has already been recorded on-account" });
+      }
+    }
+
     const r = await pool.request()
       .input("PartyId",     sql.Int,           partyId)
       .input("PartyType",   sql.NVarChar(20),  partyType ?? "")

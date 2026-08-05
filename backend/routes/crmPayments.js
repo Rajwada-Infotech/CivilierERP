@@ -897,9 +897,11 @@ router.get("/booking/:bookingId/on-account", requirePageRight("crm-payments", "v
     const pool = getPool();
     const bid = parseInt(req.params.bookingId);
     const result = await pool.request().input("bid", sql.Int, bid).query(`
-      SELECT o.*, cu.name AS CreatedByName
+      SELECT o.*, cu.name AS CreatedByName,
+             inv.Id AS InvoiceId, inv.InvoiceNo, inv.InvoiceDate, inv.Status AS InvoiceStatus
       FROM dbo.CrmOnAccountPayment o
       LEFT JOIN dbo.Users cu ON cu.id = o.CreatedBy
+      LEFT JOIN dbo.CrmInvoice inv ON inv.OnAccountPaymentId = o.Id
       WHERE o.BookingId = @bid
       ORDER BY o.CreatedAt DESC
     `);

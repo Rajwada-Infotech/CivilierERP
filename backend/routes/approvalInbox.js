@@ -4,6 +4,19 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const logger = require("../logger");
 const { getPool } = require("../db");
+const { requirePageRight } = require("../middleware/requirePageRight");
+
+// This router previously had no page-level check at all — every other route
+// file in this codebase gates with requirePageRight, but this one relied
+// only on the blanket /api authMiddleware in server.js (so a valid login was
+// required, but ANY role could read pending PO/Payment/ReceivedPayment/GRN/
+// Contract/CRM-brokerage amounts across the whole company). Gated the same
+// way the rest of the app does, using an "approval-inbox" page key.
+// NOTE: if dbo.Pages / the menu table has no "approval-inbox" entry yet,
+// requirePageRight will deny everyone (including admins) until it's seeded —
+// add it the same way the widget-rights table was seeded, then grant it to
+// whichever roles should see the cross-module inbox.
+router.use(requirePageRight("approval-inbox", "view"));
 
 // NULL placeholders so every UNION ALL branch has the same column count.
 // Only the expense-booking branch populates GrnTotalAmount, GrnBasicAmount,

@@ -1,6 +1,4 @@
 const express = require("express");
-const path = require("path");
-const fs = require("fs");
 const multer = require("multer");
 const router = express.Router();
 const { getPool, sql } = require("../db");
@@ -15,7 +13,7 @@ const { releaseAllParkingForBooking } = require("./crmParking");
 const { syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones, maybeAutoGenerateBookingInvoice } = require("../services/crmWorkflowGuards");
-const { generateInvoicePdf, invoicePdfPath } = require("../services/invoicePdf");
+const { generateInvoicePdf, getInvoicePdfBuffer } = require("../services/invoicePdf");
 const { recalculateBookingGst } = require("../services/crmGst");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
@@ -26,18 +24,8 @@ const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, 
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
-const UPLOAD_DIR = path.join(__dirname, "../uploads/crm-booking-attachments");
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-    cb(null, `${Date.now()}_${Math.round(Math.random() * 1e9)}_${safe}`);
-  },
-});
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024, files: 10 },
   fileFilter: (_req, file, cb) => {
     const ALLOWED = [
@@ -62,7 +50,7 @@ const BOOKING_SELECT = `
     b.PaymentPlanId, b.BookingDate, b.HsnCode,
     b.PaymentMode, b.AssignedTo, b.Status, b.Notes, b.IsActive,
     b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
-    b.UnitParkingGstRate, b.UnitParkingGstAmount, b.ExtraWorkGstAmount, b.TotalGstAmount,
+    b.UnitParkingGstRate, b.UnitGstAmount, b.ParkingGstAmount, b.UnitParkingGstAmount, b.ExtraWorkGstAmount, b.TotalGstAmount,
     b.UnitReviewConfirmed, b.UnitReviewConfirmedBy, b.UnitReviewConfirmedAt,
     b.PlanReviewConfirmed, b.PlanReviewConfirmedBy, b.PlanReviewConfirmedAt,
     b.ReadyForApprovalAt,
@@ -651,8 +639,19 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
 
     const booking = await pool.request().input("id", sql.Int, id).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @id");
     const bookingNo = booking.recordset[0]?.BookingNo;
+    // dbo.Users has no plain-text "role" column — role is a RoleId FK into
+    // dbo.Role (RId / RName / RCode). RName is the machine-readable value
+    // ('admin', 'super_admin', 'marketing_head', ...) that matches every
+    // other role check in this codebase (e.g. CRM_APPROVER_ROLES in
+    // approvalService.js, req.user.role); RCode is a short display code
+    // (SA/ADM/MAR/...) and isn't what's compared elsewhere. The previous
+    // `WHERE LOWER(role) IN (...)` referenced a column that doesn't exist
+    // at all and 500'd this entire endpoint (surfaced in the CRM UI as
+    // "Invalid column name 'role'." on Confirm & Book).
     const admins = await pool.request().query(`
-      SELECT id FROM dbo.Users WHERE LOWER(role) IN ('admin', 'super_admin', 'marketing_head') AND discontinue = 0
+      SELECT u.id FROM dbo.Users u
+      JOIN dbo.Role r ON r.RId = u.RoleId
+      WHERE LOWER(r.RName) IN ('admin', 'super_admin', 'marketing_head') AND u.discontinue = 0
     `);
     for (const a of admins.recordset) {
       await emitNotification(pool, a.id, "crm_booking_ready_for_approval",
@@ -874,6 +873,36 @@ router.get("/:id/invoices", requirePageRight("crm-bookings", "view"), async (req
   }
 });
 
+// POST /:id/invoices/force-booking — recovery path only. The Booking
+// invoice is meant to be 100% auto-generated the instant the booking
+// payment clears and staff hit Confirm & Book (maybeAutoGenerateBookingInvoice,
+// called from ready-for-approval below). This route exists purely for the
+// case where that auto-generation somehow didn't fire (e.g. the PDF render
+// failed, or an older booking predates the auto-flow) — it calls the exact
+// same function, which is itself idempotent (no-ops if an invoice already
+// exists, or if the booking amount isn't actually fully paid yet), so this
+// can never create a duplicate or jump ahead of the real payment gate.
+router.post("/:id/invoices/force-booking", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const activeErr = await requireActiveBooking(pool, id);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const existing = await pool.request().input("bid", sql.Int, id)
+      .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Booking'");
+    if (existing.recordset.length) return res.status(400).json({ error: "A Booking invoice already exists for this booking" });
+
+    const result = await maybeAutoGenerateBookingInvoice(pool, id, actorId(req));
+    if (!result) return res.status(400).json({ error: "Cannot generate the Booking invoice yet — the Booking Amount isn't fully paid" });
+
+    res.status(201).json({ success: true, id: result.id, InvoiceNo: result.InvoiceNo });
+  } catch (e) {
+    console.error("[crm-bookings] POST /:id/invoices/force-booking error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /:id/invoices — generate a real, permanently-numbered invoice.
 // Visible to the customer in their portal immediately (no separate "send"
 // step — an invoice is a record of a real transaction, not a draft that
@@ -887,6 +916,11 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
 
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const allowedManualTypes = new Set(["Milestone", "Maintenance", "Other", "OnAccount"]);
+    if (!allowedManualTypes.has(type)) {
+      return res.status(400).json({ error: "Invoice type is not supported for manual generation" });
+    }
 
     // Booking-type invoices are 100% system-owned — maybeAutoGenerateBookingInvoice
     // creates the one-and-only Booking invoice automatically the moment the
@@ -907,8 +941,30 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     // of just another disconnected ad-hoc entry. MilestoneId's unique index
     // (migration 268) guarantees a milestone can never be invoiced twice.
     let milestoneId = null;
+    let onAccountPaymentId = null;
     let amount, invoiceDate, description;
-    if (type === "Milestone") {
+    if (type === "OnAccount") {
+      // On-account deposits (dbo.CrmOnAccountPayment — money received in
+      // excess of what's currently due, auto-parked and later auto-applied
+      // to future milestones) are real cash received and must not go
+      // un-invoiced. Amount is the deposit's own full Amount (what was
+      // actually received), not AppliedAmount — an invoice documents money
+      // received, independent of how it's later allocated across
+      // milestones. OnAccountPaymentId's unique index (migration 288)
+      // guarantees a deposit can never be invoiced twice.
+      onAccountPaymentId = parseInt(b.OnAccountPaymentId);
+      if (!onAccountPaymentId) return res.status(400).json({ error: "OnAccountPaymentId is required for an OnAccount invoice" });
+      const oa = await pool.request().input("oid", sql.Int, onAccountPaymentId).input("bid", sql.Int, id).query(`
+        SELECT Id, ReceiptNo, Amount, ReceivedDate, PaymentMode FROM dbo.CrmOnAccountPayment WHERE Id = @oid AND BookingId = @bid
+      `);
+      const oaRow = oa.recordset[0];
+      if (!oaRow) return res.status(404).json({ error: "On-account payment not found on this booking" });
+      const already = await pool.request().input("oid", sql.Int, onAccountPaymentId).query("SELECT Id FROM dbo.CrmInvoice WHERE OnAccountPaymentId = @oid");
+      if (already.recordset.length) return res.status(400).json({ error: `On-account payment "${oaRow.ReceiptNo}" already has an invoice` });
+      amount = Number(oaRow.Amount);
+      invoiceDate = oaRow.ReceivedDate;
+      description = b.Description || `On-account payment received — ${oaRow.ReceiptNo}`;
+    } else if (type === "Milestone") {
       milestoneId = parseInt(b.MilestoneId);
       if (!milestoneId) return res.status(400).json({ error: "MilestoneId is required for a Milestone invoice" });
       const m = await pool.request().input("mid", sql.Int, milestoneId).input("bid", sql.Int, id).query(`
@@ -932,6 +988,36 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
       invoiceDate = b.InvoiceDate || null;
       description = b.Description || null;
+
+      // Maintenance/Other invoices aren't tied to a milestone, so there's no
+      // MilestoneId to anchor a uniqueness check on the way "Milestone" does
+      // above. The billing period (calendar month of InvoiceDate) is the
+      // next best anchor — one Maintenance/Other invoice per booking per
+      // month, blocking accidental double-generation while still allowing
+      // legitimate repeat billing (e.g. next quarter's maintenance) once the
+      // period rolls over. Checked here for a fast, clear error message, and
+      // enforced again at the DB level (migration 270's unique index on
+      // BookingId/InvoiceType/BillingPeriod) so it can never be raced by two
+      // near-simultaneous requests.
+      const effectiveDate = invoiceDate ? new Date(invoiceDate) : new Date();
+      const periodYear = effectiveDate.getFullYear();
+      const periodMonth = effectiveDate.getMonth() + 1;
+      const dup = await pool.request()
+        .input("bid", sql.Int, id)
+        .input("type", sql.NVarChar(30), type)
+        .input("yr", sql.Int, periodYear)
+        .input("mo", sql.Int, periodMonth)
+        .query(`
+          SELECT TOP 1 Id, InvoiceNo FROM dbo.CrmInvoice
+          WHERE BookingId = @bid AND InvoiceType = @type
+            AND YEAR(InvoiceDate) = @yr AND MONTH(InvoiceDate) = @mo
+        `);
+      if (dup.recordset.length) {
+        const monthLabel = effectiveDate.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+        return res.status(400).json({
+          error: `A ${type} invoice (${dup.recordset[0].InvoiceNo}) already exists for ${monthLabel} on this booking — only one ${type} invoice is allowed per billing period`,
+        });
+      }
     }
 
     const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
@@ -944,16 +1030,18 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       .input("desc", sql.NVarChar(500), description)
       .input("cb",   sql.Int,           actorId(req))
       .input("mid",  sql.Int,           milestoneId)
+      .input("oaid", sql.Int,           onAccountPaymentId)
       .query(`
-        INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt, MilestoneId)
+        INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt, MilestoneId, OnAccountPaymentId)
         OUTPUT INSERTED.Id
-        VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME(), @mid)
+        VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME(), @mid, @oaid)
       `);
     const invoiceId = result.recordset[0].Id;
     // Best-effort, same request — the invoice record itself is the source of
     // truth and must not fail to create just because PDF rendering hit a
-    // problem; the download route regenerates on demand if the file is ever
-    // missing, so a rendering failure here is recoverable, not data loss.
+    // problem; generateInvoicePdf writes the base64 straight onto the row,
+    // and the download route regenerates + re-persists on demand if it's
+    // ever missing, so a rendering failure here is recoverable, not data loss.
     try {
       await generateInvoicePdf(pool, invoiceId);
     } catch (pdfErr) {
@@ -961,14 +1049,24 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     }
     res.status(201).json({ success: true, id: invoiceId, InvoiceNo: invoiceNo });
   } catch (e) {
+    // Two near-simultaneous requests can both pass the app-level duplicate
+    // check above and then race into the INSERT — the unique indexes
+    // (migration 268 for MilestoneId, 270 for BookingId/InvoiceType/
+    // BillingPeriod, 288 for OnAccountPaymentId) are the real backstop and
+    // will reject the second one. Surface that as the same clear 400
+    // instead of a raw SQL 500.
+    if (e.number === 2601 || e.number === 2627) {
+      return res.status(400).json({ error: "An invoice already exists for this milestone, on-account payment, or billing period — it can't be generated twice" });
+    }
     console.error("[crm-bookings] POST /:id/invoices error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// GET /:id/invoices/:invoiceId/pdf — stream the invoice PDF. Regenerates it
-// on the fly if the file is missing from disk (e.g. a fresh deploy that
-// didn't carry over /uploads) instead of 404ing on a real, existing invoice.
+// GET /:id/invoices/:invoiceId/pdf — stream the invoice PDF straight from
+// the CrmInvoice row's stored base64. Regenerates + re-persists it on the
+// fly if the row predates the PdfBase64 column (getInvoicePdfBuffer handles
+// that) instead of 404ing on a real, existing invoice.
 router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -978,13 +1076,10 @@ router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "vie
       .query("SELECT InvoiceNo FROM dbo.CrmInvoice WHERE Id = @iid AND BookingId = @bid");
     if (!row.recordset.length) return res.status(404).json({ error: "Invoice not found" });
     const invoiceNo = row.recordset[0].InvoiceNo;
-    let filePath = invoicePdfPath(invoiceNo);
-    if (!fs.existsSync(filePath)) {
-      filePath = await generateInvoicePdf(pool, invoiceId);
-    }
+    const buffer = await getInvoicePdfBuffer(pool, invoiceId);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${invoiceNo}.pdf"`);
-    fs.createReadStream(filePath).pipe(res);
+    res.send(buffer);
   } catch (e) {
     console.error("[crm-bookings] GET /:id/invoices/:invoiceId/pdf error:", e.message);
     res.status(500).json({ error: e.message });
@@ -1099,14 +1194,14 @@ router.post("/:id/attachments", requirePageRight("crm-bookings", "edit"), upload
         .input("bid",   sql.Int,           id)
         .input("label", sql.NVarChar(200), req.body.Label || null)
         .input("fname", sql.NVarChar(300), file.originalname)
-        .input("sname", sql.NVarChar(300), file.filename)
+        .input("fb64",  sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
         .input("fsize", sql.Int,           file.size)
         .input("mime",  sql.NVarChar(150), file.mimetype)
         .input("cb",    sql.Int,           actorId(req))
         .query(`
-          INSERT INTO dbo.CrmBookingAttachment (BookingId, Label, FileName, StoredName, FileSize, MimeType, UploadedBy, UploadedAt)
+          INSERT INTO dbo.CrmBookingAttachment (BookingId, Label, FileName, FileBase64, FileSize, MimeType, UploadedBy, UploadedAt)
           OUTPUT INSERTED.Id
-          VALUES (@bid, @label, @fname, @sname, @fsize, @mime, @cb, SYSDATETIME())
+          VALUES (@bid, @label, @fname, @fb64, @fsize, @mime, @cb, SYSDATETIME())
         `);
       inserted.push(result.recordset[0].Id);
     }
@@ -1124,15 +1219,12 @@ router.get("/:id/attachments/file/:attId", requirePageRight("crm-bookings", "vie
     const bookingId = parseInt(req.params.id);
     const attId = parseInt(req.params.attId);
     const result = await pool.request().input("id", sql.Int, attId).input("bid", sql.Int, bookingId)
-      .query("SELECT StoredName, FileName, MimeType FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
-    if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });
+      .query("SELECT FileBase64, FileName, MimeType FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
+    if (!result.recordset.length || !result.recordset[0].FileBase64) return res.status(404).json({ error: "Attachment not found" });
     const row = result.recordset[0];
-    const resolvedPath = path.resolve(UPLOAD_DIR, row.StoredName);
-    if (!resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) return res.status(403).json({ error: "Access denied" });
-    if (!fs.existsSync(resolvedPath)) return res.status(404).json({ error: "File not found on disk" });
     res.setHeader("Content-Type", row.MimeType || "application/octet-stream");
     res.setHeader("Content-Disposition", `inline; filename="${row.FileName.replace(/"/g, "")}"`);
-    fs.createReadStream(resolvedPath).pipe(res);
+    res.send(Buffer.from(row.FileBase64, "base64"));
   } catch (e) {
     console.error("[crm-bookings] GET /:id/attachments/file/:attId error:", e.message);
     res.status(500).json({ error: e.message });
@@ -1149,11 +1241,9 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
     if (statusCheck.recordset[0]?.Status === "Approved") return res.status(400).json({ error: "This Booking is Approved — attachments can no longer be removed." });
 
     const result = await pool.request().input("id", sql.Int, attId).input("bid", sql.Int, bookingId)
-      .query("SELECT StoredName FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
+      .query("SELECT Id FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
     if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });
     await pool.request().input("id", sql.Int, attId).query("DELETE FROM dbo.CrmBookingAttachment WHERE Id = @id");
-    const resolvedPath = path.resolve(UPLOAD_DIR, result.recordset[0].StoredName);
-    if (resolvedPath.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) fs.unlink(resolvedPath, () => {});
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-bookings] DELETE /:id/attachments/:attId error:", e.message);
