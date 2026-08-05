@@ -28,11 +28,14 @@ const DATE_BADGE_TONES: Record<string, { bg: string; fg: string }> = {
   blue:   { bg: "rgba(37,99,235,0.10)",  fg: "#2563EB" },
   green:  { bg: "rgba(16,150,80,0.10)",  fg: "#0F7A44" },
 };
+// Only ever rendered once actually true — a grey placeholder for a status
+// that hasn't happened yet is misleading, not informative.
 function DateStatusBadge({ label, date, color, active }: { label: string; date?: string | null; color: "purple" | "blue" | "green"; active: boolean }) {
-  const tone = active ? DATE_BADGE_TONES[color] : { bg: "rgba(148,163,184,0.12)", fg: "#94A3B8" };
+  if (!active) return null;
+  const tone = DATE_BADGE_TONES[color];
   return (
     <span className="text-[11px] px-2 py-0.5 rounded-full font-medium" style={{ background: tone.bg, color: tone.fg }}>
-      {label}{active && date ? `: ${fmtDate(date)}` : ""}
+      {label}{date ? `: ${fmtDate(date)}` : ""}
     </span>
   );
 }
@@ -374,12 +377,14 @@ const PortalAgreement: React.FC = () => {
             <InfoField label="Documents" value={needsAction.length > 0 ? `${onFile.length} on file, ${needsAction.length} needed` : onFile.length} />
           </div>
 
-          <div className="px-5 sm:px-6 pb-5 flex flex-wrap gap-1.5">
-            <DateStatusBadge label="Proposed by Company" date={agreement.ProposedDateByCompany} color="purple" active={!!agreement.ProposedDateByCompany} />
-            <DateStatusBadge label="Proposed by You" date={agreement.ProposedDateByCustomer} color="blue" active={!!agreement.ProposedDateByCustomer} />
-            <DateStatusBadge label="Accepted by Company" color="green" active={!!agreement.AgreementDate} />
-            <DateStatusBadge label="Accepted by You" color="green" active={!!agreement.AgreementDate} />
-          </div>
+          {(agreement.ProposedDateByCompany || agreement.ProposedDateByCustomer || agreement.AgreementDate) && (
+            <div className="px-5 sm:px-6 pb-5 flex flex-wrap gap-1.5">
+              <DateStatusBadge label="Proposed by Company" date={agreement.ProposedDateByCompany} color="purple" active={!!agreement.ProposedDateByCompany} />
+              <DateStatusBadge label="Proposed by You" date={agreement.ProposedDateByCustomer} color="blue" active={!!agreement.ProposedDateByCustomer} />
+              <DateStatusBadge label="Accepted by Company" color="green" active={!!agreement.AgreementDate} />
+              <DateStatusBadge label="Accepted by You" color="green" active={!!agreement.AgreementDate} />
+            </div>
+          )}
 
           {dateMismatch && !agreement.AgreementDate && agreement.DateApprovalStatus !== "Pending" && (
             <div className="mx-5 sm:mx-6 mb-5 text-xs rounded-lg p-3 flex items-start gap-2" style={{ background: GOLD_SOFT, color: "#8A6D14" }}>
