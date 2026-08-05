@@ -999,10 +999,10 @@ const Payment: React.FC = () => {
           }
         : newMode === "Cheque"
           ? {
-              // Plain (non-PDC) cheque: always today's date, locked in the
-              // UI — a cheque dated anything else isn't a plain cheque,
-              // it's a post-dated one, which is its own mode.
-              chequeDate: today,
+              // Plain (non-PDC) cheque: defaults to today but is editable —
+              // backdate it to whenever the cheque was actually issued.
+              // Never clobber a date the user already picked.
+              chequeDate: prev.chequeDate || today,
             }
           : {
               // Post-Dated Cheque: auto-fill today as a starting point only
@@ -1610,6 +1610,16 @@ const Payment: React.FC = () => {
         today.setHours(0, 0, 0, 0);
         if (validUntil < today) {
           toast.error("This post-dated cheque has expired. Please select a valid cheque date.");
+          return false;
+        }
+      }
+      // Plain Cheque (not PDC) can be backdated to when it was actually
+      // issued, but never dated in the future — a future-dated cheque is by
+      // definition a Post-Dated Cheque, its own mode.
+      if (form.mode === "Cheque" && form.chequeDate) {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        if (form.chequeDate > todayStr) {
+          toast.error("Cheque date cannot be in the future — use Post-Dated Cheque for a future date.");
           return false;
         }
       }

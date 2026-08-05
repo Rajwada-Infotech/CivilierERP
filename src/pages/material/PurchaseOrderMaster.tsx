@@ -778,6 +778,9 @@ const PurchaseOrderMaster: React.FC = () => {
         // HSN-resolved rate — takes precedence over the raw item-master
         // columns above, which are frequently stale/unset.
         resolvedGstRate: itemsGstById.get(String(i.M_Id))?.gstRate ?? null,
+        // Cost Centre tagged on the item (Item Master) — used to auto-fill
+        // this PO's own Cost Centre the first time a tagged item is added.
+        costCenterId: i.M_CostCenterId ? String(i.M_CostCenterId) : "",
       })),
     [itemsRaw, itemsGstById],
   );
@@ -1613,6 +1616,16 @@ const PurchaseOrderMaster: React.FC = () => {
       igstRate,
       gstRate,
     });
+
+    // Auto-fill the PO's Cost Centre from the item's own Item Master tag —
+    // only when the PO doesn't already have one set (first-tagged-item-wins;
+    // never silently overrides a Cost Centre the user already picked). A
+    // later item tagged with a *different* centre just gets left alone
+    // rather than fought over — the user can always change it manually.
+    if (item.costCenterId && !form.costCenterId) {
+      setField("costCenterId", item.costCenterId);
+      toast.info("Cost Centre auto-filled from this item's Item Master tag.");
+    }
   };
 
   // ── Form helpers ──────────────────────────────────────────────────────────

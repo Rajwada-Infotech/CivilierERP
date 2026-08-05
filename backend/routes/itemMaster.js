@@ -7,22 +7,30 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
+// Item_Master_Group has grown several optional columns via migration over
+// time (M_UOM, default_supplier_id, and now M_GLHeadId/M_CostCenterId) — this
+// probes all of them in one round trip so every handler below can safely
+// interpolate them into its SQL only when the migration has actually run.
+async function getItemOptionalCols(pool) {
+  const result = await pool.request().query(`
+    SELECT name FROM sys.columns
+    WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group')
+      AND name IN (N'M_UOM', N'default_supplier_id', N'M_GLHeadId', N'M_CostCenterId')
+  `);
+  const names = new Set(result.recordset.map((r) => r.name));
+  return {
+    hasUOM: names.has("M_UOM"),
+    hasDS: names.has("default_supplier_id"),
+    hasGL: names.has("M_GLHeadId"),
+    hasCC: names.has("M_CostCenterId"),
+  };
+}
+
 // ─── GET all items ────────────────────────────────────────────────────────────
 router.get("/", cache("item-master", 300), async (req, res) => {
   try {
     const pool = getPool();
-
-    const colCheck = await pool.request().query(`
-      SELECT COUNT(1) AS cnt FROM sys.columns
-      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_UOM'
-    `);
-    const hasUOM = colCheck.recordset[0].cnt > 0;
-
-    const dsCheck = await pool.request().query(`
-      SELECT COUNT(1) AS cnt FROM sys.columns
-      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'default_supplier_id'
-    `);
-    const hasDS = dsCheck.recordset[0].cnt > 0;
+    const { hasUOM, hasDS, hasGL, hasCC } = await getItemOptionalCols(pool);
 
     const result = await pool.request().query(`
       SELECT
@@ -48,10 +56,16 @@ router.get("/", cache("item-master", 300), async (req, res) => {
         item.Parent_Id,
         grp.M_Name AS ParentGroupName,
         ${hasDS ? "item.default_supplier_id," : "NULL AS default_supplier_id,"}
-        ${hasDS ? "gl.LHeadName AS DefaultSupplierName" : "NULL AS DefaultSupplierName"}
+        ${hasDS ? "supp.LHeadName AS DefaultSupplierName," : "NULL AS DefaultSupplierName,"}
+        ${hasGL ? "item.M_GLHeadId," : "NULL AS M_GLHeadId,"}
+        ${hasGL ? "gl.LHeadName AS GLHeadName," : "NULL AS GLHeadName,"}
+        ${hasCC ? "item.M_CostCenterId," : "NULL AS M_CostCenterId,"}
+        ${hasCC ? "cc.Name AS CostCenterName" : "NULL AS CostCenterName"}
       FROM dbo.Item_Master_Group item
       LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = item.Parent_Id
-      ${hasDS ? "LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = item.default_supplier_id" : ""}
+      ${hasDS ? "LEFT JOIN dbo.AccountHeadMaster supp ON supp.LHeadId = item.default_supplier_id" : ""}
+      ${hasGL ? "LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = item.M_GLHeadId" : ""}
+      ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = item.M_CostCenterId" : ""}
       WHERE item.Parent_Id IS NOT NULL
          OR item.M_IdentityCode = 1
       ORDER BY grp.M_Name, item.M_Name
@@ -68,6 +82,7 @@ router.get("/by-group/:groupId", async (req, res) => {
   const { groupId } = req.params;
   try {
     const pool = getPool();
+    const { hasGL, hasCC } = await getItemOptionalCols(pool);
     const result = await pool
       .request()
       .input("Parent_Id", sql.UniqueIdentifier, groupId).query(`
@@ -78,6 +93,8 @@ router.get("/by-group/:groupId", async (req, res) => {
           M_HSN, M_CGST, M_IGST, M_SGST,
           M_UOM, M_CreatedBy, M_CreatedDate,
           M_UpdatedBy, UpdatedAt, M_ApprovedBy, ApprovedAt, Parent_Id
+          ${hasGL ? ", M_GLHeadId" : ""}
+          ${hasCC ? ", M_CostCenterId" : ""}
         FROM dbo.Item_Master_Group
         WHERE Parent_Id = @Parent_Id
         ORDER BY M_Name
@@ -94,11 +111,7 @@ router.get("/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const pool = getPool();
-    const colCheck = await pool.request().query(`
-      SELECT COUNT(1) AS cnt FROM sys.columns
-      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_UOM'
-    `);
-    const hasUOM = colCheck.recordset[0].cnt > 0;
+    const { hasUOM, hasGL, hasCC } = await getItemOptionalCols(pool);
 
     const result = await pool.request().input("M_Id", sql.UniqueIdentifier, id)
       .query(`
@@ -125,10 +138,16 @@ router.get("/:id", async (req, res) => {
           item.Parent_Id,
           grp.M_Name AS ParentGroupName,
           item.default_supplier_id,
-          gl.LHeadName AS DefaultSupplierName
+          supp.LHeadName AS DefaultSupplierName,
+          ${hasGL ? "item.M_GLHeadId," : "NULL AS M_GLHeadId,"}
+          ${hasGL ? "gl.LHeadName AS GLHeadName," : "NULL AS GLHeadName,"}
+          ${hasCC ? "item.M_CostCenterId," : "NULL AS M_CostCenterId,"}
+          ${hasCC ? "cc.Name AS CostCenterName" : "NULL AS CostCenterName"}
         FROM dbo.Item_Master_Group item
         LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = item.Parent_Id
-        LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = item.default_supplier_id
+        LEFT JOIN dbo.AccountHeadMaster supp ON supp.LHeadId = item.default_supplier_id
+        ${hasGL ? "LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = item.M_GLHeadId" : ""}
+        ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = item.M_CostCenterId" : ""}
         WHERE item.M_Id = @M_Id
       `);
     if (!result.recordset.length)
@@ -157,6 +176,8 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
     M_UOM,
     Parent_Id, // ← group M_Id (UUID)
     default_supplier_id,
+    M_GLHeadId,
+    M_CostCenterId,
   } = req.body;
 
   if (!M_Name) return res.status(400).json({ error: "M_Name is required" });
@@ -167,12 +188,7 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
 
   try {
     const pool = getPool();
-
-    const colCheck = await pool.request().query(`
-      SELECT COUNT(1) AS cnt FROM sys.columns
-      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_UOM'
-    `);
-    const hasUOM = colCheck.recordset[0].cnt > 0;
+    const { hasUOM, hasDS, hasGL, hasCC } = await getItemOptionalCols(pool);
 
     const req2 = pool
       .request()
@@ -192,18 +208,16 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
       .input("Parent_Id", sql.UniqueIdentifier, Parent_Id); // ← UUID
 
     if (hasUOM) req2.input("M_UOM", sql.NVarChar(20), M_UOM || null);
-
-    const dsCheck2 = await pool.request().query(`
-      SELECT COUNT(1) AS cnt FROM sys.columns
-      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'default_supplier_id'
-    `);
-    const hasDS2 = dsCheck2.recordset[0].cnt > 0;
-    if (hasDS2)
+    if (hasDS)
       req2.input(
         "default_supplier_id",
         sql.Int,
         default_supplier_id ? parseInt(default_supplier_id) : null,
       );
+    if (hasGL)
+      req2.input("M_GLHeadId", sql.Int, M_GLHeadId ? parseInt(M_GLHeadId, 10) : null);
+    if (hasCC)
+      req2.input("M_CostCenterId", sql.Int, M_CostCenterId ? parseInt(M_CostCenterId, 10) : null);
 
     const result = await req2.query(`
       INSERT INTO dbo.Item_Master_Group (
@@ -213,7 +227,9 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
         M_IdentityCode,
         M_HSN, M_CGST, M_IGST, M_SGST,
         ${hasUOM ? "M_UOM," : ""}
-        ${hasDS2 ? "default_supplier_id," : ""}
+        ${hasDS ? "default_supplier_id," : ""}
+        ${hasGL ? "M_GLHeadId," : ""}
+        ${hasCC ? "M_CostCenterId," : ""}
         M_CreatedBy, M_CreatedDate, Parent_Id
       )
       OUTPUT INSERTED.M_Id
@@ -224,7 +240,9 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
         @M_IdentityCode,
         @M_HSN, @M_CGST, @M_IGST, @M_SGST,
         ${hasUOM ? "@M_UOM," : ""}
-        ${hasDS2 ? "@default_supplier_id," : ""}
+        ${hasDS ? "@default_supplier_id," : ""}
+        ${hasGL ? "@M_GLHeadId," : ""}
+        ${hasCC ? "@M_CostCenterId," : ""}
         @M_CreatedBy, @M_CreatedDate, @Parent_Id
       )
     `);
@@ -261,18 +279,15 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
     M_ApprovedBy,
     Parent_Id, // ← group M_Id (UUID)
     default_supplier_id,
+    M_GLHeadId,
+    M_CostCenterId,
   } = req.body;
 
   if (!M_Name) return res.status(400).json({ error: "M_Name is required" });
 
   try {
     const pool = getPool();
-
-    const colCheck = await pool.request().query(`
-      SELECT COUNT(1) AS cnt FROM sys.columns
-      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_UOM'
-    `);
-    const hasUOM = colCheck.recordset[0].cnt > 0;
+    const { hasUOM, hasDS, hasGL, hasCC } = await getItemOptionalCols(pool);
 
     const req2 = pool
       .request()
@@ -294,18 +309,16 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
       .input("Parent_Id", sql.UniqueIdentifier, Parent_Id || null); // ← UUID
 
     if (hasUOM) req2.input("M_UOM", sql.NVarChar(20), M_UOM || null);
-
-    const dsPutCheck = await pool.request().query(`
-      SELECT COUNT(1) AS cnt FROM sys.columns
-      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'default_supplier_id'
-    `);
-    const hasDSPut = dsPutCheck.recordset[0].cnt > 0;
-    if (hasDSPut)
+    if (hasDS)
       req2.input(
         "default_supplier_id",
         sql.Int,
         default_supplier_id ? parseInt(default_supplier_id) : null,
       );
+    if (hasGL)
+      req2.input("M_GLHeadId", sql.Int, M_GLHeadId ? parseInt(M_GLHeadId, 10) : null);
+    if (hasCC)
+      req2.input("M_CostCenterId", sql.Int, M_CostCenterId ? parseInt(M_CostCenterId, 10) : null);
 
     const result = await req2.query(`
       UPDATE dbo.Item_Master_Group SET
@@ -321,7 +334,9 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
         M_IGST         = @M_IGST,
         M_SGST         = @M_SGST,
         ${hasUOM ? "M_UOM = @M_UOM," : ""}
-        ${hasDSPut ? "default_supplier_id = @default_supplier_id," : ""}
+        ${hasDS ? "default_supplier_id = @default_supplier_id," : ""}
+        ${hasGL ? "M_GLHeadId = @M_GLHeadId," : ""}
+        ${hasCC ? "M_CostCenterId = @M_CostCenterId," : ""}
         M_UpdatedBy    = @M_UpdatedBy,
         UpdatedAt      = @UpdatedAt,
         M_ApprovedBy   = @M_ApprovedBy,
@@ -365,7 +380,3 @@ router.delete("/:id", requirePageRight("item-master", "delete"), async (req, res
 });
 
 module.exports = router;
-
-
-
-
