@@ -15,6 +15,13 @@ const chequeMasterCreateSchema = z
     ChequeLotNumber: z.string().trim().min(1, "Lot number is required").max(100),
     ChequeStartNumber: z.coerce.number().int().positive("Start number is required"),
     ChequeEndNumber: z.coerce.number().int().positive("End number is required"),
+    // Full padded cheque-number string (leading zeros preserved), optionally with
+    // the 9-char city/bank/branch MICR suffix. Without declaring these here, zod's
+    // .object() strips them before the route handler ever sees req.body — they
+    // were reaching the API from the frontend but being silently dropped, so
+    // ChequeStartNumber/ChequeEndNumber saved fine while these stayed NULL.
+    ChequeStartMICR: z.string().trim().max(15).nullable().optional(),
+    ChequeEndMICR: z.string().trim().max(15).nullable().optional(),
     TotalCheques: z.coerce.number().int().positive().nullable().optional(),
     Remarks: z.string().trim().max(500).nullable().optional(),
     Status: z.coerce.boolean().default(true),
