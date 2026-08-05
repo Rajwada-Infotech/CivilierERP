@@ -59,6 +59,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Payment Name", accessor: "PPaymentName" },
   { header: "Amount", accessor: (r) => (r.PAmount != null ? `Rs. ${Number(r.PAmount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "—") },
   { header: "Company", accessor: "PCompanyName" },
+  { header: "Project", accessor: "PProject" },
   { header: "Reason", accessor: "Reason" },
   { header: "Cancelled By", accessor: "CancelledBy" },
   { header: "Cancelled At", accessor: (r) => fmt(r.CancelledAt as string) },
@@ -524,7 +525,7 @@ export default function ChequeCancellation() {
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-border bg-muted/10">
-                        {["Cheque No", "Lot", "Bank", "A/C Number", "Payment Doc", "Amount", "Reason", "Cancelled By", "Cancelled At"].map((h) => (
+                        {["Cheque No", "Lot", "Bank", "A/C Number", "Payment Doc", "Company", "Project", "Amount", "Reason", "Cancelled By", "Cancelled At"].map((h) => (
                           <th key={h} className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                             {h}
                           </th>
@@ -539,6 +540,8 @@ export default function ChequeCancellation() {
                           <td className="px-3 py-3 align-middle">{r.BankName ?? "—"}</td>
                           <td className="px-3 py-3 font-mono align-middle">{r.AccountNumber ?? "—"}</td>
                           <td className="px-3 py-3 align-middle">{r.DocNo ?? "—"}</td>
+                          <td className="px-3 py-3 align-middle">{r.PCompanyName ?? r.PCompany ?? "—"}</td>
+                          <td className="px-3 py-3 align-middle">{r.PProject ?? "—"}</td>
                           <td className="px-3 py-3 align-middle">{r.PAmount != null ? formatINR(r.PAmount) : "—"}</td>
                           <td className="px-3 py-3 text-muted-foreground align-middle">{r.Reason ?? "—"}</td>
                           <td className="px-3 py-3 align-middle">{r.CancelledBy ?? "—"}</td>

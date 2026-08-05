@@ -14,11 +14,15 @@ export interface LoanSanction {
   LenderCompanyName?: string | null;
   LenderBankId?: number | null;
   LenderBankName?: string | null;
+  LenderBankAccountId?: number | null;
+  LenderBankAccountName?: string | null;
   BorrowerCompanyId?: number | null;
   BorrowerCompanyName?: string | null;
   BorrowerCustomerId?: number | null;
   BorrowerCustomerSource?: "AH" | "CRM" | null;
   BorrowerCustomerName?: string | null;
+  BorrowerBankAccountId?: number | null;
+  BorrowerBankAccountName?: string | null;
   LoanDate: string;
   Amount: number;
   HasInterest?: boolean;
@@ -65,9 +69,11 @@ export interface LoanSanctionPayload {
   loanDocNo?: string | null;
   lenderCompanyId?: number | string | null;
   lenderBankId?: number | string | null;
+  lenderBankAccountId?: number | string | null;
   borrowerCompanyId?: number | string | null;
   borrowerCustomerId?: number | string | null;
   borrowerCustomerSource?: "AH" | "CRM" | null;
+  borrowerBankAccountId?: number | string | null;
   loanDate: string;
   amount: number | string;
   hasInterest?: boolean;

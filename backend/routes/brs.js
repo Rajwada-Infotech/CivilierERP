@@ -172,6 +172,7 @@ router.get("/", cache("brs", 60), async (req, res) => {
             np.PChequeNo
           )                        AS TxnId,
           np.Status                AS PayStatus,
+          np.PIsChequeCancelled    AS IsChequeCancelled,
           np.PCreatedAt            AS CreatedAt,
           np.PChequeNo             AS ChequeNo,
           np.PChequeLotNumber      AS ChequeLotNumber,
@@ -240,6 +241,7 @@ router.get("/", cache("brs", 60), async (req, res) => {
             rp.RPCheckNumber
           )                        AS TxnId,
           rp.RPStatus              AS PayStatus,
+          CAST(0 AS BIT)           AS IsChequeCancelled,
           rp.RPCreatedAt           AS CreatedAt,
           rp.RPCheckNumber         AS ChequeNo,
           CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
@@ -288,6 +290,7 @@ router.get("/", cache("brs", 60), async (req, res) => {
           cr.ReceiptNo             AS DocNo,
           cr.TransactionRef        AS TxnId,
           'Approved'               AS PayStatus,
+          CAST(0 AS BIT)           AS IsChequeCancelled,
           cr.CreatedAt             AS CreatedAt,
           CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
           CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
@@ -369,6 +372,7 @@ router.get("/", cache("brs", 60), async (req, res) => {
         u.TxnId,
         u.ChequeNo,
         u.PayStatus,
+        u.IsChequeCancelled,
         u.IsMatched,
         u.IsBounced,
         u.BounceDate,

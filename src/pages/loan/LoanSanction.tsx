@@ -38,7 +38,7 @@ import {
   Receipt,
 } from "lucide-react";
 import { MoneyRecive } from "iconsax-react";
-import { getCompanyOptions, type CompanyOption } from "@/api/bankMasterApi";
+import { getCompanyOptions, getBanks, type CompanyOption, type BankRecord } from "@/api/bankMasterApi";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
 import {
   getLoanSanctions,
@@ -92,9 +92,14 @@ const EMPTY_FORM = {
   loanDocNo: "",
   lenderCompanyId: "",
   lenderBankId: "",
+  // Inter-Company only — which specific bank account of the lender/borrower
+  // company the funds moved between (distinct from lenderBankId, which is
+  // only for the Bank Loan type where the lender IS the bank).
+  lenderBankAccountId: "",
   borrowerCompanyId: "",
   borrowerCustomerId: "",
   borrowerCustomerSource: "AH" as "AH" | "CRM",
+  borrowerBankAccountId: "",
   loanDate: new Date().toISOString().slice(0, 10),
   amount: "",
   hasInterest: false,
@@ -161,6 +166,18 @@ export default function LoanSanctionPage() {
     queryKey: ["bank-options-loan"],
     queryFn: getBankOptions,
   });
+
+  // Full bank records (with each bank's own company tag) — used to scope
+  // the Inter-Company Lender/Borrower Bank A/C pickers to only that party's
+  // own banks, instead of every bank in the system.
+  const { data: bankRecords = [] } = useQuery({
+    queryKey: ["bank-records-loan"],
+    queryFn: getBanks,
+  });
+  const banksForCompany = (companyLabel: string) =>
+    bankRecords.filter(
+      (b: BankRecord) => b.BStatus && (b.BCompanyName || "").trim().toLowerCase() === companyLabel.trim().toLowerCase(),
+    );
 
   const { data: schedule = [], isLoading: scheduleLoading } = useQuery({
     queryKey: ["loan-schedule", viewingLoan?.LoanId],
@@ -262,9 +279,11 @@ export default function LoanSanctionPage() {
         loanDocNo: form.loanDocNo || null,
         lenderCompanyId: isBankLoan ? null : form.lenderCompanyId,
         lenderBankId: isBankLoan ? form.lenderBankId : null,
+        lenderBankAccountId: isInterCompanyType ? form.lenderBankAccountId || null : null,
         borrowerCompanyId: isCustomerLoan ? null : form.borrowerCompanyId,
         borrowerCustomerId: isCustomerLoan ? form.borrowerCustomerId : null,
         borrowerCustomerSource: isCustomerLoan ? form.borrowerCustomerSource : null,
+        borrowerBankAccountId: isInterCompanyType ? form.borrowerBankAccountId || null : null,
         loanDate: form.loanDate,
         amount: form.amount,
         hasInterest: form.hasInterest,
@@ -702,6 +721,12 @@ export default function LoanSanctionPage() {
                         label={isCustomerLoan ? "Borrower (Customer)" : "Borrower (Company)"}
                         value={displayBorrower || "—"}
                       />
+                      {isInterCompanyType && (
+                        <>
+                          <InfoCard label="Lender Bank A/C" value={viewingLoan?.LenderBankAccountName || "—"} />
+                          <InfoCard label="Borrower Bank A/C" value={viewingLoan?.BorrowerBankAccountName || "—"} />
+                        </>
+                      )}
                     </div>
 
                     {/* Terms */}
@@ -809,7 +834,12 @@ export default function LoanSanctionPage() {
                           <select
                             className={inputCls}
                             value={form.lenderCompanyId}
-                            onChange={(e) => set("lenderCompanyId", e.target.value)}
+                            onChange={(e) => {
+                              set("lenderCompanyId", e.target.value);
+                              // A bank A/C picked for the previous company no
+                              // longer applies once the company changes.
+                              set("lenderBankAccountId", "");
+                            }}
                           >
                             <option value="">— Select —</option>
                             {companies.map((c: CompanyOption) => (
@@ -836,7 +866,10 @@ export default function LoanSanctionPage() {
                           <select
                             className={inputCls}
                             value={form.borrowerCompanyId}
-                            onChange={(e) => set("borrowerCompanyId", e.target.value)}
+                            onChange={(e) => {
+                              set("borrowerCompanyId", e.target.value);
+                              set("borrowerBankAccountId", "");
+                            }}
                           >
                             <option value="">— Select —</option>
                             {companies.map((c: CompanyOption) => (
@@ -848,6 +881,57 @@ export default function LoanSanctionPage() {
                         )}
                       </div>
                     </div>
+
+                    {isInterCompanyType && (
+                      <div className="grid grid-cols-2 gap-5">
+                        <div className="space-y-2">
+                          <label className={labelCls}>Lender Bank A/C</label>
+                          <select
+                            className={inputCls}
+                            value={form.lenderBankAccountId}
+                            onChange={(e) => set("lenderBankAccountId", e.target.value)}
+                            disabled={!form.lenderCompanyId}
+                          >
+                            <option value="">
+                              {form.lenderCompanyId ? "— No bank A/C tag —" : "— Select lender company first —"}
+                            </option>
+                            {banksForCompany(companyName(form.lenderCompanyId)).map((b: BankRecord) => (
+                              <option key={b.BId} value={b.BId}>
+                                {b.BName}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[11px] text-muted-foreground">
+                            Which of the lender's bank accounts the funds actually left from.
+                            {form.lenderCompanyId && banksForCompany(companyName(form.lenderCompanyId)).length === 0 &&
+                              " No banks tagged to this company in Bank Master."}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <label className={labelCls}>Borrower Bank A/C</label>
+                          <select
+                            className={inputCls}
+                            value={form.borrowerBankAccountId}
+                            onChange={(e) => set("borrowerBankAccountId", e.target.value)}
+                            disabled={!form.borrowerCompanyId}
+                          >
+                            <option value="">
+                              {form.borrowerCompanyId ? "— No bank A/C tag —" : "— Select borrower company first —"}
+                            </option>
+                            {banksForCompany(companyName(form.borrowerCompanyId)).map((b: BankRecord) => (
+                              <option key={b.BId} value={b.BId}>
+                                {b.BName}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[11px] text-muted-foreground">
+                            Which of the borrower's bank accounts the funds landed in.
+                            {form.borrowerCompanyId && banksForCompany(companyName(form.borrowerCompanyId)).length === 0 &&
+                              " No banks tagged to this company in Bank Master."}
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-5">
                       <div className="space-y-2">

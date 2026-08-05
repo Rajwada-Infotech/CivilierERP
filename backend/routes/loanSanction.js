@@ -213,9 +213,11 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
         ls.InterestType, ls.HasInterest,
         ls.LenderCompanyId, lc.name AS LenderCompanyName,
         ls.LenderBankId, lb.LHeadName AS LenderBankName,
+        ls.LenderBankAccountId, lba.LHeadName AS LenderBankAccountName,
         ls.BorrowerCompanyId, bc.name AS BorrowerCompanyName,
         ls.BorrowerCustomerId, ls.BorrowerCustomerSource,
         COALESCE(cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerCustomerName,
+        ls.BorrowerBankAccountId, bba.LHeadName AS BorrowerBankAccountName,
         ls.LoanDate, ls.Amount, ls.InterestRate, ls.TenureMonths,
         ls.Purpose, ls.Status, ls.Remarks,
         ls.LenderLHeadId, ls.BorrowerLHeadId,
@@ -226,9 +228,11 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
       FROM dbo.LoanSanction ls
       LEFT JOIN dbo.enterprise lc ON lc.id = ls.LenderCompanyId AND lc.business_type = 'C'
       LEFT JOIN dbo.AccountHeadMaster lb ON lb.LHeadId = ls.LenderBankId
+      LEFT JOIN dbo.AccountHeadMaster lba ON lba.LHeadId = ls.LenderBankAccountId
       LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
       LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
+      LEFT JOIN dbo.AccountHeadMaster bba ON bba.LHeadId = ls.BorrowerBankAccountId
       LEFT JOIN dbo.LoanNOCAttachments noc ON noc.AttachmentId = ls.NOCAttachmentId
       ${nocSearch ? "WHERE noc.FileName LIKE @NocSearch" : ""}
       ORDER BY ls.CreatedAt DESC
@@ -377,8 +381,10 @@ router.get("/:id", requirePageRight("loan-sanction", "view"), async (req, res) =
         ls.*,
         lc.name AS LenderCompanyName,
         lb.LHeadName AS LenderBankName,
+        lba.LHeadName AS LenderBankAccountName,
         bc.name AS BorrowerCompanyName,
         COALESCE(cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerCustomerName,
+        bba.LHeadName AS BorrowerBankAccountName,
         lender_gl.LHeadCode AS LenderLHeadCode,
         lender_grp.Name AS LenderGroupName,
         lender_parent.Name AS LenderParentGroupName,
@@ -388,9 +394,11 @@ router.get("/:id", requirePageRight("loan-sanction", "view"), async (req, res) =
       FROM dbo.LoanSanction ls
       LEFT JOIN dbo.enterprise lc ON lc.id = ls.LenderCompanyId AND lc.business_type = 'C'
       LEFT JOIN dbo.AccountHeadMaster lb ON lb.LHeadId = ls.LenderBankId
+      LEFT JOIN dbo.AccountHeadMaster lba ON lba.LHeadId = ls.LenderBankAccountId
       LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
       LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
+      LEFT JOIN dbo.AccountHeadMaster bba ON bba.LHeadId = ls.BorrowerBankAccountId
       LEFT JOIN dbo.AccountHeadMaster lender_gl ON lender_gl.LHeadId = ls.LenderLHeadId
       LEFT JOIN dbo.AccountGroup lender_grp ON lender_grp.AGId = lender_gl.LBelongsTo
       LEFT JOIN dbo.AccountGroup lender_parent ON lender_parent.AGId = lender_grp.ParentGroupId
@@ -468,9 +476,11 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
     loanDocNo,
     lenderCompanyId,
     lenderBankId,
+    lenderBankAccountId,
     borrowerCompanyId,
     borrowerCustomerId,
     borrowerCustomerSource,
+    borrowerBankAccountId,
     loanDate,
     amount,
     hasInterest,
@@ -556,9 +566,11 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
       .input("LoanDocNo", sql.NVarChar(100), loanDocNo || null)
       .input("LenderCompanyId", sql.Int, lenderCompany ? lenderCompany.id : null)
       .input("LenderBankId", sql.Int, lenderBank ? lenderBank.id : null)
+      .input("LenderBankAccountId", sql.Int, lenderBankAccountId ? parseInt(lenderBankAccountId, 10) : null)
       .input("BorrowerCompanyId", sql.Int, borrowerCompany ? borrowerCompany.id : null)
       .input("BorrowerCustomerId", sql.Int, borrowerCustomer ? borrowerCustomer.custId : null)
       .input("BorrowerCustomerSource", sql.NVarChar(10), isCustomerLoan ? custSource : null)
+      .input("BorrowerBankAccountId", sql.Int, borrowerBankAccountId ? parseInt(borrowerBankAccountId, 10) : null)
       .input("LoanDate", sql.Date, loanDate)
       .input("Amount", sql.Decimal(18, 2), amt)
       .input("HasInterest", sql.Bit, useInterest ? 1 : 0)
@@ -569,13 +581,13 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
       .input("Remarks", sql.NVarChar(500), remarks || null)
       .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
         INSERT INTO dbo.LoanSanction
-          (LoanNo, LoanType, LoanDocNo, LenderCompanyId, LenderBankId, BorrowerCompanyId, BorrowerCustomerId,
-           BorrowerCustomerSource, LoanDate, Amount, HasInterest, InterestType, InterestRate, TenureMonths,
+          (LoanNo, LoanType, LoanDocNo, LenderCompanyId, LenderBankId, LenderBankAccountId, BorrowerCompanyId, BorrowerCustomerId,
+           BorrowerCustomerSource, BorrowerBankAccountId, LoanDate, Amount, HasInterest, InterestType, InterestRate, TenureMonths,
            Purpose, Status, Remarks, CreatedBy, CreatedAt)
         OUTPUT INSERTED.LoanId
         VALUES
-          (@LoanNo, @LoanType, @LoanDocNo, @LenderCompanyId, @LenderBankId, @BorrowerCompanyId, @BorrowerCustomerId,
-           @BorrowerCustomerSource, @LoanDate, @Amount, @HasInterest, @InterestType, @InterestRate, @TenureMonths,
+          (@LoanNo, @LoanType, @LoanDocNo, @LenderCompanyId, @LenderBankId, @LenderBankAccountId, @BorrowerCompanyId, @BorrowerCustomerId,
+           @BorrowerCustomerSource, @BorrowerBankAccountId, @LoanDate, @Amount, @HasInterest, @InterestType, @InterestRate, @TenureMonths,
            @Purpose, 'Sanctioned', @Remarks, @CreatedBy, SYSDATETIME())
       `);
     const loanId = insertResult.recordset[0].LoanId;
