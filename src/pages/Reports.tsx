@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
-import { exportToCsv } from "@/lib/export";
+import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import {
   Building2,
@@ -36,7 +36,6 @@ import {
   Wrench,
   Receipt,
   Store,
-  Download,
   ChevronLeft,
   AlertCircle,
   Loader2,
@@ -48,6 +47,7 @@ import {
   Settings2,
   Warehouse,
   XCircle,
+  Ban,
   Wallet,
   Megaphone,
   Target,
@@ -471,6 +471,39 @@ const ALL_REPORTS: ReportDef[] = [
       {
         header: "Re-issued Via",
         accessor: (r) => (r.ReplacementDocNo ?? "—") as string,
+      },
+    ],
+  },
+  {
+    id: "cancelled-cheques-report",
+    label: "Cancelled Cheques",
+    description: "Every cheque cancelled via Finance → Cheque Cancellation",
+    icon: Ban,
+    color: "#dc2626",
+    apiPath: "/api/cheque-cancellation",
+    defaultParams: { limit: "500" },
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+      dataKey: "data",
+    },
+    columns: [
+      { header: "Cheque No", accessor: (r) => (r.ChequeNo ?? "—") as string },
+      { header: "Lot Number", accessor: (r) => (r.ChequeLotNumber ?? "—") as string },
+      { header: "Bank", accessor: (r) => (r.BankName ?? "—") as string },
+      { header: "A/C Number", accessor: (r) => (r.AccountNumber ?? "—") as string },
+      { header: "Payment Doc No", accessor: (r) => (r.DocNo ?? "—") as string },
+      { header: "Payment Name", accessor: (r) => (r.PPaymentName ?? "—") as string },
+      { header: "Amount", accessor: (r) => fmt(r.PAmount as number) },
+      { header: "Company", accessor: (r) => (r.PCompanyName ?? "—") as string },
+      { header: "Reason", accessor: (r) => (r.Reason ?? "—") as string },
+      { header: "Cancelled By", accessor: (r) => (r.CancelledBy ?? "—") as string },
+      {
+        header: "Cancelled At",
+        accessor: (r) => (r.CancelledAt ? String(r.CancelledAt).slice(0, 10) : "—"),
       },
     ],
   },
@@ -1584,6 +1617,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "journal-voucher-report",
       "on-account-report",
       "pdc-report",
+      "cancelled-cheques-report",
     ],
   },
   {
@@ -2066,13 +2100,13 @@ const ReportTable: React.FC<{
             </div>
           )}
 
-          <button
-            onClick={() => exportToCsv(rows, report.columns, report.id)}
+          <ExportMenu
+            data={rows as unknown as Record<string, unknown>[]}
+            columns={report.columns}
+            title={report.label}
+            filename={report.id}
             disabled={loading || rows.length === 0}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-all"
-          >
-            <Download size={11} /> Export CSV
-          </button>
+          />
         </div>
       </div>
 

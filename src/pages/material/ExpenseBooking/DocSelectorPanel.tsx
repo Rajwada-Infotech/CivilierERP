@@ -543,9 +543,6 @@ export function DocSelectorPanel({
           >
             <t.icon size={11} />
             {t.label}
-            <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-muted text-[10px] text-muted-foreground font-normal">
-              {t.count}
-            </span>
           </button>
         ))}
       </div>

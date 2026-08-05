@@ -111,6 +111,7 @@ import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
 import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
 import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
 import { DirectItemsTable } from "./ExpenseBooking/DirectItemsTable";
+import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
 import type {
   CompanyOption,
   ProjectOption,
@@ -1738,7 +1739,7 @@ export default function MaterialExpenseBooking() {
 
                   <div className="space-y-2">
                     <Field
-                      label="Booking Name"
+                      label="Purpose of Expense Booking"
                       hint={
                         selectedDoc?.nameLabel
                           ? "Auto-filled from selected document — editable"
@@ -1847,8 +1848,15 @@ export default function MaterialExpenseBooking() {
                         accounts, so a free-text GL field there is unused and
                         confusing. */}
                     {isDirect && selectedDoc?.kind === "TOD" && (
-                      <Field label="GL Account">
-                        <Input value={form.glAccount ?? ""} onChange={(e) => set("glAccount", e.target.value)} placeholder="Optional GL account" />
+                      <Field label="GL Account" hint="Posts this invoice's debit leg against the selected ledger head">
+                        <GLAccountSelect
+                          value={form.glAccountId ?? null}
+                          onChange={(id, label) => {
+                            set("glAccountId", id);
+                            set("glAccount", label ?? "");
+                          }}
+                          placeholder="Select GL account..."
+                        />
                       </Field>
                     )}
                   </div>

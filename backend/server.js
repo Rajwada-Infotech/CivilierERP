@@ -198,6 +198,7 @@ const ALL_ROUTES = [
   { path: "/api/stock-ledger", file: "./routes/stockLedger" },
   { path: "/api/inventory-master", file: "./routes/inventoryMaster" },
   { path: "/api/brs", file: "./routes/brs" },
+  { path: "/api/cheque-cancellation", file: "./routes/chequeCancellation" },
   { path: "/api/reports", file: "./routes/reports" },
   { path: "/api/reports/pdc", file: "./routes/pdcReport" },
   { path: "/api/finance-dashboard", file: "./routes/financeDashboard" },

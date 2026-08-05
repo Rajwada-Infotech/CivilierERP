@@ -156,6 +156,13 @@ const expenseBookingBodySchema = z.object({
   EAdditionalCharges: optJsonPassthrough,
   ECostCenter: optStr(200),
   EGLAccount: optStr(200),
+  // AccountHeadMaster.LHeadId (LHeadType='GL') for the GL account chosen
+  // directly on the form — the actual posting target for direct/manual
+  // (TOD) bookings. EGLAccount (text) is kept as a display fallback only.
+  EGLAccountId: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
+    z.number().int().positive().optional(),
+  ),
   EWorkDoneRef: z.preprocess(
     (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
     z.number().optional(),
