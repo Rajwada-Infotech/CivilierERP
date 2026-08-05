@@ -339,7 +339,11 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
         .json({ error: "Cheque lot not found or inactive" });
     }
 
-    const { ChequeStartNumber, ChequeEndNumber } = lotRes.recordset[0];
+    // mssql returns BIGINT columns as JS strings, not numbers — comparing
+    // ("61" <= "100") lexicographically is false, so without Number()
+    // coercion the loop below never runs and every lot looks empty.
+    const ChequeStartNumber = Number(lotRes.recordset[0].ChequeStartNumber);
+    const ChequeEndNumber = Number(lotRes.recordset[0].ChequeEndNumber);
 
     // Fetch all cheque numbers used from this lot, plus their bounce status
     const usedRes = await pool.request().input("PChequeLotId", sql.Int, lotId)
@@ -394,7 +398,12 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
         .json({ error: "Cheque lot not found or inactive" });
     }
 
-    const lot = lotRes.recordset[0];
+    // Same string-vs-number BIGINT coercion issue as /cheque-numbers/:lotId.
+    const lot = {
+      ...lotRes.recordset[0],
+      ChequeStartNumber: Number(lotRes.recordset[0].ChequeStartNumber),
+      ChequeEndNumber: Number(lotRes.recordset[0].ChequeEndNumber),
+    };
     const num = parseInt(chequeNo);
     if (num < lot.ChequeStartNumber || num > lot.ChequeEndNumber) {
       return res.status(400).json({ error: "Cheque number out of lot range" });
