@@ -407,36 +407,96 @@ async function maybeAutoGenerateAgreementInvoice(pool, bookingId, actorUserId) {
   return { id: invoiceId, InvoiceNo: invoiceNo };
 }
 
-// Both sides landing on the same proposed date no longer finalizes
-// AgreementDate directly — it only puts the date up for a super_admin
-// sign-off (DateApprovalStatus='Pending', a second approval gate on the
-// same record, independent of Senior/Customer content approval). Called
-// after every point that can touch either proposed-date column (company
-// propose-date, customer approve/propose-date) so the match is caught the
-// instant it happens, from either side. Returns true iff this call is the
-// one that just moved it into Pending (so a route can tell the caller
-// "submitted for approval"); false/null otherwise. Never returns a
-// confirmed date — use finalizeAgreementDate() (fired from the actual
-// approve endpoint) for that.
-async function maybeResolveAgreementDate(pool, agreementId) {
+// --- Single-field agreement-date negotiation loop -------------------------
+// Replaces the old two-column (ProposedDateByCompany / ProposedDateByCustomer)
+// design. One live field, ProposedDate, plus ProposedDateStatus tracking
+// whose turn it is:
+//   null                  -> nothing proposed yet, either side may open
+//   PendingCustomerReview -> company just acted, waiting on customer
+//   PendingCompanyReview  -> customer just acted, waiting on company
+//   Matched               -> both sides landed on the same date
+// Matched still does NOT write AgreementDate directly — same as the old
+// design, it only opens the independent super_admin sign-off gate
+// (DateApprovalStatus='Pending'). Only finalizeAgreementDate(), fired from
+// the actual PUT /:id/date/approve endpoint once that sign-off completes,
+// ever writes AgreementDate.
+
+function agreementDateError(message, status) {
+  const e = new Error(message);
+  e.status = status;
+  return e;
+}
+
+// Propose a brand-new date, or revise the currently-pending one, from one
+// side. `proposedBy` is 'Company' or 'Customer' — whichever side is taking
+// this action right now. Enforces turn-taking: a side may act when nothing
+// is pending yet (opening move) or when the status shows it's waiting on
+// THEM to respond — never while waiting on the other side. Writes
+// CrmAgreementDateHistory exactly as before (unchanged shape/consumers).
+async function proposeAgreementDate(pool, agreementId, proposedBy, proposedDate, actorUserId) {
   const row = await pool.request().input("id", sql.Int, agreementId).query(`
-    SELECT AgreementDate, DateApprovalStatus, ProposedDateByCompany, ProposedDateByCustomer
+    SELECT AgreementDate, DateApprovalStatus, ProposedDateStatus
     FROM dbo.CrmAgreement WHERE Id = @id
   `);
   const ag = row.recordset[0];
-  if (!ag || ag.AgreementDate) return false; // already finalized, never overwritten
-  if (ag.DateApprovalStatus === "Pending") return false; // already awaiting sign-off
-  if (!ag.ProposedDateByCompany || !ag.ProposedDateByCustomer) return false;
+  if (!ag) throw agreementDateError("Agreement not found", 404);
+  if (ag.AgreementDate) throw agreementDateError("The agreement date is already confirmed", 400);
+  if (ag.DateApprovalStatus === "Pending") throw agreementDateError("A proposed date is already awaiting approval", 400);
 
-  const company = new Date(ag.ProposedDateByCompany).toDateString();
-  const customer = new Date(ag.ProposedDateByCustomer).toDateString();
-  if (company !== customer) return false; // still negotiating
+  const myTurnStatus = proposedBy === "Company" ? "PendingCompanyReview" : "PendingCustomerReview";
+  if (ag.ProposedDateStatus && ag.ProposedDateStatus !== myTurnStatus) {
+    throw agreementDateError("Waiting on the other side to respond to the current proposal", 400);
+  }
+
+  await pool.request()
+    .input("agid", sql.Int, agreementId)
+    .input("by",   sql.NVarChar(20), proposedBy)
+    .input("pd",   sql.Date, proposedDate)
+    .input("cb",   sql.Int, actorUserId || null)
+    .query(`
+      INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
+      VALUES (@agid, @by, @pd, @cb, SYSDATETIME())
+    `);
+
+  const nextStatus = proposedBy === "Company" ? "PendingCustomerReview" : "PendingCompanyReview";
+  await pool.request()
+    .input("id", sql.Int, agreementId)
+    .input("pd", sql.Date, proposedDate)
+    .input("st", sql.NVarChar(30), nextStatus)
+    .query(`
+      UPDATE dbo.CrmAgreement SET ProposedDate = @pd, ProposedDateStatus = @st
+      WHERE Id = @id
+    `);
+
+  return { status: nextStatus };
+}
+
+// The side it's currently waiting on accepts ProposedDate as-is (no
+// re-typing the same date to force a "match"). Moves straight to 'Matched'
+// and opens the super_admin sign-off gate, same as a same-date match did
+// under the old two-column design. Returns true if this call is the one
+// that just opened that gate.
+async function acceptAgreementDate(pool, agreementId, acceptedBy) {
+  const row = await pool.request().input("id", sql.Int, agreementId).query(`
+    SELECT AgreementDate, DateApprovalStatus, ProposedDate, ProposedDateStatus
+    FROM dbo.CrmAgreement WHERE Id = @id
+  `);
+  const ag = row.recordset[0];
+  if (!ag) throw agreementDateError("Agreement not found", 404);
+  if (ag.AgreementDate) throw agreementDateError("The agreement date is already confirmed", 400);
+  if (ag.DateApprovalStatus === "Pending") throw agreementDateError("A proposed date is already awaiting approval", 400);
+  if (!ag.ProposedDate) throw agreementDateError("No proposed date to accept", 400);
+
+  const myTurnStatus = acceptedBy === "Company" ? "PendingCompanyReview" : "PendingCustomerReview";
+  if (ag.ProposedDateStatus !== myTurnStatus) {
+    throw agreementDateError("It's not your turn to accept — the other side hasn't reviewed the current proposal yet", 400);
+  }
 
   // Directly to 'Pending', not via approvalService.transition() — this is a
-  // system event (a date match), not a user clicking "submit", and the
+  // system event (an accept), not a user clicking "submit", and the
   // engine's own "Pending" transition expects a submitting user/role.
   await pool.request().input("id", sql.Int, agreementId)
-    .query("UPDATE dbo.CrmAgreement SET DateApprovalStatus = 'Pending' WHERE Id = @id");
+    .query("UPDATE dbo.CrmAgreement SET ProposedDateStatus = 'Matched', DateApprovalStatus = 'Pending' WHERE Id = @id");
 
   await pool.request()
     .input("agid", sql.Int, agreementId)
@@ -455,14 +515,14 @@ async function maybeResolveAgreementDate(pool, agreementId) {
 // first time (it had none until an agreement date genuinely existed).
 async function finalizeAgreementDate(pool, agreementId) {
   const row = await pool.request().input("id", sql.Int, agreementId).query(`
-    SELECT BookingId, ProposedDateByCompany FROM dbo.CrmAgreement WHERE Id = @id
+    SELECT BookingId, ProposedDate FROM dbo.CrmAgreement WHERE Id = @id
   `);
   const ag = row.recordset[0];
   if (!ag) return null;
 
   await pool.request()
     .input("id", sql.Int, agreementId)
-    .input("adt", sql.Date, ag.ProposedDateByCompany)
+    .input("adt", sql.Date, ag.ProposedDate)
     .query("UPDATE dbo.CrmAgreement SET AgreementDate = @adt WHERE Id = @id");
 
   await pool.request()
@@ -474,13 +534,23 @@ async function finalizeAgreementDate(pool, agreementId) {
 
   await pool.request()
     .input("bid", sql.Int, ag.BookingId)
-    .input("adt", sql.Date, ag.ProposedDateByCompany)
+    .input("adt", sql.Date, ag.ProposedDate)
     .query(`
       UPDATE dbo.CrmPaymentMilestone SET DueDate = @adt
       WHERE BookingId = @bid AND MilestoneName = 'Agreement' AND DueDate IS NULL AND Status = 'Pending'
     `);
 
-  return ag.ProposedDateByCompany;
+  return ag.ProposedDate;
+}
+
+// PUT /:id/date/reject hard-resets the whole negotiation to NULL/NULL —
+// confirmed behavior, matching what the old two-column design did.
+async function resetAgreementDateNegotiation(pool, agreementId) {
+  await pool.request().input("id", sql.Int, agreementId).query(`
+    UPDATE dbo.CrmAgreement SET
+      DateApprovalStatus = 'NotRequired', ProposedDate = NULL, ProposedDateStatus = NULL
+    WHERE Id = @id
+  `);
 }
 
 // Same 8-step whitelist as crmLegalMilestones.js's PUT /:id/:step — kept in
@@ -906,8 +976,10 @@ module.exports = {
   maybeAutoGenerateAgreementInvoice,
   maybeAutoCreateBrokerage,
   maybeUnlockBrokerageMilestoneTranche,
-  maybeResolveAgreementDate,
+  proposeAgreementDate,
+  acceptAgreementDate,
   finalizeAgreementDate,
+  resetAgreementDateNegotiation,
   syncLegalMilestoneStep,
   requireActiveBooking,
   recalculateRemainingMilestones,

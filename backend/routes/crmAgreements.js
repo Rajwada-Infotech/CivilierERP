@@ -10,7 +10,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { ensurePortalUser } = require("../services/crmPortalProvision");
 const { emitNotification } = require("../services/notify");
-const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoGenerateAgreementInvoice, maybeResolveAgreementDate, finalizeAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
+const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoGenerateAgreementInvoice, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 // Senior approval is gated to admin/super_admin/dba via this shared engine —
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
@@ -52,7 +52,7 @@ const AGR_SELECT = `
     ag.SeniorApprovalStatus, ag.SeniorApprovedAt, ag.SeniorApprovalRemarks,
     ag.CustomerApprovalStatus, ag.CustomerApprovedAt,
     ag.RecheckCount, ag.LastRecheckRemarks,
-    ag.ProposedDateByCompany, ag.ProposedDateByCustomer, ag.SentToCustomerAt, ag.DateApprovalStatus,
+    ag.ProposedDate, ag.ProposedDateStatus, ag.SentToCustomerAt, ag.DateApprovalStatus,
     ag.LegalExecutiveId, le.name AS LegalExecutiveName,
     b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.GrandTotal, b.TotalGstAmount,
     b.UnitGstAmount, b.ParkingTotal, b.ParkingGstAmount, b.ExtraChargesTotal, b.ExtraWorkGstAmount,
@@ -242,11 +242,11 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
     // AgreementDate is likewise never accepted here — per the workflow's
     // "SET IT WITH BOTH END'S AVAILABILITY" requirement, it can only ever be
     // set by finalizeAgreementDate() once a super_admin approves it (via
-    // PUT /:id/date/approve), which itself only becomes possible once the
-    // company's proposed date and the customer's proposed date actually
-    // match (PUT /:id/propose-date, POST /agreement/respond on the portal
-    // side, or POST /agreement/propose-date). A field that let staff
-    // type a date directly here would silently bypass that mandate.
+    // PUT /:id/date/approve), which itself only becomes possible once one
+    // side accepts the other's proposed date (PUT /:id/propose-date +
+    // /:id/date/accept, or POST /agreement/propose-date + /agreement/respond
+    // on the portal side). A field that let staff type a date directly here
+    // would silently bypass that mandate.
     const result = await pool.request()
       .input("agno",  sql.NVarChar(50),  agNo)
       .input("bid",   sql.Int,           parseInt(b.BookingId))
@@ -345,6 +345,20 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
     const pool0 = getPool();
     const lockReason0 = await getAgreementBookingLockReason(pool0, id);
     if (lockReason0) return res.status(409).json({ error: `Cannot approve — ${lockReason0}. Cancel the agreement instead.` });
+    // Same mandate mark-executed already enforces, moved earlier: a Legal
+    // Executive must be on record before senior approval, not just before
+    // execution. The stepper (CrmAgreement.tsx: agreementStepStates) already
+    // displays "Legal Exec. Assigned" as the step before "Senior Approval" —
+    // this makes that order real instead of just a label, closing the gap
+    // where senior-approve -> send -> customer-approve -> date-agree could
+    // all complete with nobody assigned, and the stepper would show a "done"
+    // step sitting after a still-"current" one.
+    const legalCheck0 = await pool0.request().input("id", sql.Int, id)
+      .query("SELECT LegalExecutiveId FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!legalCheck0.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    if (!legalCheck0.recordset[0].LegalExecutiveId) {
+      return res.status(400).json({ error: "A Legal Executive must be assigned before this agreement can receive senior approval — use PUT /:id/assign-legal" });
+    }
     // The Admin Approval Inbox's Approve/Reject buttons render through the
     // shared ApprovalActions component (src/components/ApprovalActions.tsx),
     // which posts { note: ... } — not { Remarks: ... }, which is what every
@@ -503,7 +517,7 @@ router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req
 
 // PUT /:id/date/approve — the second, independent approval gate: confirms
 // the agreement date once both sides have proposed a matching one
-// (DateApprovalStatus='Pending', set by maybeResolveAgreementDate()).
+// (DateApprovalStatus='Pending', set by acceptAgreementDate()).
 // Restricted to super_admin only via approvalService's
 // MODULE_APPROVER_ROLE_OVERRIDES + the seeded LevelsData — same
 // "hardcoded for now, reassignable later with zero code change" pattern
@@ -567,11 +581,7 @@ router.put("/:id/date/reject", requirePageRight("crm-agreements", "edit"), async
     const lockReason = await getAgreementBookingLockReason(pool, id);
     if (lockReason) return res.status(409).json({ error: `Cannot reject a date — ${lockReason}. Cancel the agreement instead.` });
     const result = await approvalTransition("crm-agreement-date", id, "Rejected", userEmail, req.user?.role, remarks);
-    await pool.request().input("id", sql.Int, id).query(`
-      UPDATE dbo.CrmAgreement SET
-        DateApprovalStatus = 'NotRequired', ProposedDateByCompany = NULL, ProposedDateByCustomer = NULL
-      WHERE Id = @id
-    `);
+    await resetAgreementDateNegotiation(pool, id);
     await pool.request()
       .input("agid", sql.Int, id)
       .input("rem", sql.NVarChar(sql.MAX), remarks)
@@ -649,7 +659,10 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
     }
 
     // Preserve the prior proposed date (if any) in history before it's
-    // overwritten — nothing about the negotiation is ever lost.
+    // overwritten — nothing about the negotiation is ever lost. If
+    // proposedDate is omitted, leave whatever's currently on ProposedDate/
+    // ProposedDateStatus alone (e.g. resending after recheck without
+    // changing the date already on the table).
     if (proposedDate) {
       await pool.request()
         .input("agid", sql.Int, id)
@@ -659,17 +672,23 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
           INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
           VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
         `);
+      await pool.request()
+        .input("id", sql.Int, id)
+        .input("pd", sql.Date, proposedDate)
+        .query(`
+          UPDATE dbo.CrmAgreement SET
+            ProposedDate = @pd, ProposedDateStatus = 'PendingCustomerReview'
+          WHERE Id = @id
+        `);
     }
 
     await pool.request()
       .input("id",  sql.Int, id)
-      .input("pdc", sql.Date, proposedDate || null)
       .query(`
         UPDATE dbo.CrmAgreement SET
           SentToCustomerAt = SYSDATETIME(),
           CustomerApprovalStatus = 'Pending',
-          CustomerApprovedAt = NULL,
-          ProposedDateByCompany = ISNULL(@pdc, ProposedDateByCompany)
+          CustomerApprovedAt = NULL
         WHERE Id = @id
       `);
 
@@ -682,14 +701,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
       `);
     await syncLegalMilestoneStep(pool, ag.recordset[0].BookingId, "DocShared", actorId(req));
 
-    // If the customer already proposed a date on a prior round (e.g. after
-    // a recheck), the company's date here might now match it — catch that
-    // immediately instead of waiting on the customer to act again. A match
-    // no longer confirms the date outright — it goes to DateApprovalStatus
-    // ='Pending' for a super_admin sign-off.
-    const submittedForApproval = await maybeResolveAgreementDate(pool, id);
-
-    res.json({ success: true, agreementDateSubmittedForApproval: submittedForApproval });
+    res.json({ success: true });
   } catch (e) {
     console.error("[crm-agreements] PUT /:id/send-to-customer error:", e.message);
     res.status(500).json({ error: e.message });
@@ -711,39 +723,58 @@ router.put("/:id/propose-date", requirePageRight("crm-agreements", "edit"), asyn
     if (lockReason) return res.status(409).json({ error: `Cannot propose a date — ${lockReason}. Cancel the agreement instead.` });
 
     const ag = await pool.request().input("id", sql.Int, id).query(`
-      SELECT ag.SentToCustomerAt, ag.AgreementDate, ag.DateApprovalStatus, ag.AgreementNo, ag.BookingId
+      SELECT ag.SentToCustomerAt, ag.AgreementNo, ag.BookingId
       FROM dbo.CrmAgreement ag WHERE ag.Id = @id
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "Agreement not found" });
     const agRow = ag.recordset[0];
     if (!agRow.SentToCustomerAt) return res.status(400).json({ error: "Agreement hasn't been sent to the customer yet" });
-    if (agRow.AgreementDate) return res.status(400).json({ error: "The agreement date is already confirmed" });
-    if (agRow.DateApprovalStatus === "Pending") return res.status(400).json({ error: "A proposed date is already awaiting approval" });
 
-    await pool.request()
-      .input("agid", sql.Int, id)
-      .input("pd",   sql.Date, proposedDate)
-      .input("cb",   sql.Int, actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
-        VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
-      `);
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("pdc", sql.Date, proposedDate)
-      .query("UPDATE dbo.CrmAgreement SET ProposedDateByCompany = @pdc WHERE Id = @id");
+    await proposeAgreementDate(pool, id, "Company", proposedDate, actorId(req));
 
-    const submittedForApproval = await maybeResolveAgreementDate(pool, id);
     await logCommunication(pool, {
       bookingId: agRow.BookingId, direction: "Outbound",
-      subject: submittedForApproval ? `Agreement date matched — sent for approval` : `Proposed agreement date — ${proposedDate}`,
-      summary: `${agRow.AgreementNo}: ${submittedForApproval ? "our proposed date now matches the customer's, sent for super admin sign-off" : `we proposed ${proposedDate}`}.`,
+      subject: `Proposed agreement date — ${proposedDate}`,
+      summary: `${agRow.AgreementNo}: we proposed ${proposedDate}.`,
       createdBy: actorId(req),
     });
-    res.json({ success: true, agreementDateSubmittedForApproval: submittedForApproval });
+    res.json({ success: true });
   } catch (e) {
     console.error("[crm-agreements] PUT /:id/propose-date error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/date/accept — company accepts the customer's currently-proposed
+// date as-is (no need to re-propose the identical date). Moves the
+// negotiation to 'Matched' and opens the super_admin sign-off gate, exactly
+// like a same-date match did under the old two-column design.
+router.put("/:id/date/accept", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot accept a date — ${lockReason}. Cancel the agreement instead.` });
+
+    const ag = await pool.request().input("id", sql.Int, id).query(`
+      SELECT ag.AgreementNo, ag.BookingId, ag.ProposedDate FROM dbo.CrmAgreement ag WHERE ag.Id = @id
+    `);
+    if (!ag.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const agRow = ag.recordset[0];
+
+    await acceptAgreementDate(pool, id, "Company");
+
+    await logCommunication(pool, {
+      bookingId: agRow.BookingId, direction: "Outbound",
+      subject: "Agreement date accepted — sent for approval",
+      summary: `${agRow.AgreementNo}: we accepted the customer's proposed date ${String(agRow.ProposedDate).slice(0, 10)}, sent for super admin sign-off.`,
+      createdBy: actorId(req),
+    });
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] PUT /:id/date/accept error:", e.message);
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -912,9 +943,10 @@ router.put("/:id/assign-legal", requirePageRight("crm-agreements", "edit"), asyn
 // PUT /:id/mark-executed — Draft -> Executed. Gated on the real-world facts
 // that make an agreement "executed": both senior and customer approvals
 // already granted, and a genuine AgreementDate already on record. That date
-// can only have gotten there via maybeResolveAgreementDate() — both sides'
-// proposed dates matching — never typed in here, so execution itself is
-// proof the "both ends agreed on a date" mandate was actually satisfied.
+// can only have gotten there via acceptAgreementDate() + finalizeAgreementDate()
+// — one side accepting the other's proposed date, then a super_admin
+// sign-off — never typed in here, so execution itself is proof the "both
+// ends agreed on a date" mandate was actually satisfied.
 router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();

@@ -56,8 +56,14 @@ const PortalActivity: React.FC = () => {
   if (mandatoryDocs.length > 0) {
     needsAction.push({ icon: FolderCheck, label: `${mandatoryDocs.length} required document${mandatoryDocs.length > 1 ? "s" : ""} needed`, sub: mandatoryDocs.map((d) => d.Label || d.DocumentType).join(", "), to: "/crm-client-portal/agreement" });
   }
-  if (agreement?.CustomerApprovalStatus === "Approved" && !agreement?.AgreementDate && agreement?.DateApprovalStatus !== "Pending") {
-    needsAction.push({ icon: FileText, label: "Propose an agreement date", sub: agreement?.ProposedDateByCompany ? `We proposed ${fmtDate(agreement.ProposedDateByCompany)}` : "Suggest a date that works for you", to: "/crm-client-portal/agreement" });
+  if (agreement?.CustomerApprovalStatus === "Approved" && !agreement?.AgreementDate && agreement?.DateApprovalStatus !== "Pending"
+      && agreement?.ProposedDateStatus !== "PendingCompanyReview") {
+    needsAction.push({
+      icon: FileText,
+      label: agreement?.ProposedDateStatus === "PendingCustomerReview" ? "Respond to our proposed agreement date" : "Propose an agreement date",
+      sub: agreement?.ProposedDateStatus === "PendingCustomerReview" ? `We proposed ${fmtDate(agreement.ProposedDate)} — accept or suggest another` : "Suggest a date that works for you",
+      to: "/crm-client-portal/agreement",
+    });
   }
   if (timeline?.salesDeed?.SentToCustomerAt && timeline?.salesDeed?.CustomerApprovalStatus === "Pending") {
     needsAction.push({ icon: FileText, label: "Your sales deed is waiting for your review", sub: "Approve or request a recheck", to: "/crm-client-portal/agreement" });

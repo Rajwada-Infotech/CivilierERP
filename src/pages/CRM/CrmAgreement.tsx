@@ -10,7 +10,10 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { promptNextStep } from "@/lib/workflowNav";
 
 const API = "/api/crm/agreements";
-const SA_LEADS_API = "/api/sa/leads";
+// NOTE: mount path assumed as "/api/users" to match users.js's PRIVILEGED_ROLES
+// comment ("Password Reset, User Management") — unverified against server.js,
+// which wasn't available. If it's mounted elsewhere, this is a one-line fix.
+const USERS_API = "/api/users";
 
 const DOC_TYPES = ["SaleAgreement", "AllotmentLetter", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
 
@@ -128,12 +131,20 @@ const EMPTY_AGR_FORM = {
   PanNo: "", AadhaarNo: "", Notes: "", LegalExecutiveId: "",
 };
 
+// Legal Executive picker — deliberately NOT the Sales Automation leads
+// module's /users endpoint (that's what this called before; unrelated
+// module, likely scoped to salespeople, and also required the
+// Users-page-admin permission that most CRM/legal staff don't have — which
+// is why the dropdown was rendering empty). This hits a dedicated endpoint
+// scoped server-side to legal_head/legal_person roles only, open to any
+// authenticated user (the page itself is already gated by
+// crm-agreements:view, so no extra restriction needed here).
 async function fetchUsers(): Promise<{ value: string; label: string }[]> {
   try {
-    const r = await fetchWithAuth(`${SA_LEADS_API}/users`);
+    const r = await fetchWithAuth(`${USERS_API}/legal-executives`);
     if (!r.ok) return [];
     const d: any[] = await r.json();
-    return d.map((u) => ({ value: String(u.Id), label: u.Name }));
+    return d.map((u) => ({ value: String(u.id), label: u.name }));
   } catch { return []; }
 }
 const EMPTY_DOC_FORM = {
@@ -564,9 +575,7 @@ const CrmAgreement: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(data.agreementDateSubmittedForApproval
-        ? "Agreement sent — both sides now agree on a date, awaiting super admin approval"
-        : "Agreement sent to customer portal");
+      toast.success("Agreement sent to customer portal");
       setSendDialog(false);
       setSendDate("");
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
@@ -590,13 +599,31 @@ const CrmAgreement: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(data.agreementDateSubmittedForApproval
-        ? "Both sides now agree — sent for super admin approval"
-        : "Proposed date sent to customer");
+      toast.success("Proposed date sent to customer");
       setProposeDateDialog(false);
       setSendDate("");
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Accept the customer's currently-proposed date as-is — no re-typing it.
+  // Only enabled when ProposedDateStatus shows it's the company's turn.
+  const handleAcceptDate = async () => {
+    if (!selectedId) return;
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${selectedId}/date/accept`, { method: "PUT" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Date accepted — sent for super admin approval");
+      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -787,18 +814,23 @@ const CrmAgreement: React.FC = () => {
                       text = "Awaiting senior approval — visit the Admin Approval Inbox to approve or reject it.";
                     } else if (!a?.SentToCustomerAt) {
                       text = "Senior-approved — ready to send to the customer for their review.";
-                      cta = { label: "Send to Customer Portal", onClick: () => { setSendDate(a?.ProposedDateByCompany ? String(a.ProposedDateByCompany).slice(0, 10) : ""); setSendDialog(true); } };
+                      cta = { label: "Send to Customer Portal", onClick: () => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : ""); setSendDialog(true); } };
                     } else if (a?.CustomerApprovalStatus === "RecheckRequested") {
                       text = `Customer requested a recheck${a?.LastRecheckRemarks ? `: "${a.LastRecheckRemarks}"` : ""} — address it and resend.`;
-                      cta = { label: "Resend After Recheck", onClick: () => { setSendDate(a?.ProposedDateByCompany ? String(a.ProposedDateByCompany).slice(0, 10) : ""); setSendDialog(true); } };
+                      cta = { label: "Resend After Recheck", onClick: () => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : ""); setSendDialog(true); } };
                     } else if (a?.CustomerApprovalStatus !== "Approved") {
                       text = "Sent to the customer — awaiting their review and approval.";
                     } else if (!a?.AgreementDate) {
                       if (a?.DateApprovalStatus === "Pending") {
                         text = "Both sides agreed on a date — awaiting super admin sign-off.";
+                      } else if (a?.ProposedDateStatus === "PendingCustomerReview") {
+                        text = `We proposed ${a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "a date"} — awaiting the customer's response.`;
+                      } else if (a?.ProposedDateStatus === "PendingCompanyReview") {
+                        text = `Customer ${a?.ProposedDate ? `proposed ${String(a.ProposedDate).slice(0, 10)}` : "revised the date"} — accept it or propose a different one.`;
+                        cta = { label: "Accept Date", onClick: handleAcceptDate };
                       } else {
                         text = "Customer approved — propose an agreement date.";
-                        cta = { label: a?.ProposedDateByCompany ? "Update Proposed Date" : "Propose Agreement Date", onClick: () => { setSendDate(a?.ProposedDateByCompany ? String(a.ProposedDateByCompany).slice(0, 10) : ""); setProposeDateDialog(true); } };
+                        cta = { label: "Propose Agreement Date", onClick: () => { setSendDate(""); setProposeDateDialog(true); } };
                       }
                     } else if (pendingDocs.length) {
                       text = `${pendingDocs.length} mandatory document(s) still need verification before this can be executed: ${pendingDocs.map((d: any) => d.Label || d.DocumentType).join(", ")}.`;
@@ -1098,24 +1130,26 @@ const CrmAgreement: React.FC = () => {
                     </span>
                   </div>
                 </div>
-                {(detail.agreement?.ProposedDateByCompany || detail.agreement?.ProposedDateByCustomer || detail.agreement?.AgreementDate) && (
+                {(detail.agreement?.ProposedDate || detail.agreement?.AgreementDate) && (
                   <div className="flex flex-wrap gap-1.5">
-                    <DateStatusBadge label="Proposed by Company" date={detail.agreement?.ProposedDateByCompany} color="purple" active={!!detail.agreement?.ProposedDateByCompany} />
-                    <DateStatusBadge label="Proposed by Customer" date={detail.agreement?.ProposedDateByCustomer} color="blue" active={!!detail.agreement?.ProposedDateByCustomer} />
-                    <DateStatusBadge label="Accepted by Company" color="green" active={!!detail.agreement?.AgreementDate} />
-                    <DateStatusBadge label="Accepted by Customer" color="green" active={!!detail.agreement?.AgreementDate} />
+                    <DateStatusBadge
+                      label={
+                        detail.agreement?.AgreementDate ? "Agreed by Both"
+                        : detail.agreement?.ProposedDateStatus === "Matched" ? "Matched"
+                        : detail.agreement?.ProposedDateStatus === "PendingCustomerReview" ? "Proposed by Company — awaiting Customer"
+                        : detail.agreement?.ProposedDateStatus === "PendingCompanyReview" ? "Proposed by Customer — awaiting Company"
+                        : "Proposed"
+                      }
+                      date={detail.agreement?.AgreementDate || detail.agreement?.ProposedDate}
+                      color={detail.agreement?.AgreementDate ? "green" : detail.agreement?.ProposedDateStatus === "PendingCompanyReview" ? "blue" : "purple"}
+                      active
+                    />
                   </div>
                 )}
-                {!detail.agreement?.AgreementDate && detail.agreement?.ProposedDateByCompany && detail.agreement?.ProposedDateByCustomer && (
-                  new Date(detail.agreement.ProposedDateByCompany).toDateString() === new Date(detail.agreement.ProposedDateByCustomer).toDateString() ? (
-                    <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded p-2">
-                      Both sides agree on this date — Agreement Date will be confirmed automatically.
-                    </div>
-                  ) : (
-                    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-                      Company and customer proposed different dates — renegotiate via "Resend After Recheck" once the customer requests a recheck, or agree offline and re-send with a matching date.
-                    </div>
-                  )
+                {!detail.agreement?.AgreementDate && detail.agreement?.ProposedDateStatus === "Matched" && (
+                  <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded p-2">
+                    Both sides agree on this date — awaiting super admin sign-off before it's confirmed.
+                  </div>
                 )}
                 {dateHistory.length > 0 && (
                   <div className="text-xs">
@@ -1160,7 +1194,7 @@ const CrmAgreement: React.FC = () => {
                         Send to Customer Portal
                       </span>
                     ) : (
-                      <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setSendDialog(true); }}
+                      <button onClick={() => { setSendDate(detail.agreement?.ProposedDate ? String(detail.agreement.ProposedDate).slice(0, 10) : ""); setSendDialog(true); }}
                         className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
                         Send to Customer Portal
                       </button>
@@ -1172,7 +1206,7 @@ const CrmAgreement: React.FC = () => {
                         Resend After Recheck
                       </span>
                     ) : (
-                      <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setSendDialog(true); }}
+                      <button onClick={() => { setSendDate(detail.agreement?.ProposedDate ? String(detail.agreement.ProposedDate).slice(0, 10) : ""); setSendDialog(true); }}
                         className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
                         Resend After Recheck
                       </button>
@@ -1182,20 +1216,39 @@ const CrmAgreement: React.FC = () => {
                       agreement's content (spec: "...CUSTOMER APPROVAL ->
                       APPROVAL FROM BOTH END -> DATE OF AGREEMENT..."), so
                       this shows once CustomerApprovalStatus is Approved —
-                      not "Pending", which is the state *before* that. */}
+                      not "Pending", which is the state *before* that.
+                      Turn-based: company can act (Accept or Revise) only
+                      when ProposedDateStatus shows it's waiting on them
+                      ('PendingCompanyReview') or nothing's been proposed
+                      yet; while waiting on the customer, no button shows. */}
                   {detail.agreement?.SentToCustomerAt && detail.agreement?.CustomerApprovalStatus === "Approved" && !detail.agreement?.AgreementDate && (
                     detail.agreement?.DateApprovalStatus === "Pending" ? (
                       <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-amber-600 bg-amber-50 border-amber-200">
                         Awaiting Super Admin Approval
                       </span>
-                    ) : isBookingCancelled(detail.agreement) ? (
-                      <span title="Booking is cancelled — cannot propose a date" className="text-xs px-3 py-1.5 border border-dashed border-border rounded-lg text-muted-foreground/40 cursor-not-allowed">
-                        {detail.agreement?.ProposedDateByCompany ? "Update Proposed Date" : "Propose Agreement Date"}
+                    ) : detail.agreement?.ProposedDateStatus === "PendingCustomerReview" ? (
+                      <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">
+                        Awaiting customer's response
                       </span>
+                    ) : isBookingCancelled(detail.agreement) ? (
+                      <span title="Booking is cancelled — cannot act on a date" className="text-xs px-3 py-1.5 border border-dashed border-border rounded-lg text-muted-foreground/40 cursor-not-allowed">
+                        {detail.agreement?.ProposedDateStatus === "PendingCompanyReview" ? "Accept Date" : "Propose Agreement Date"}
+                      </span>
+                    ) : detail.agreement?.ProposedDateStatus === "PendingCompanyReview" ? (
+                      <>
+                        <button onClick={handleAcceptDate} disabled={saving}
+                          className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                          Accept Date
+                        </button>
+                        <button onClick={() => { setSendDate(detail.agreement?.ProposedDate ? String(detail.agreement.ProposedDate).slice(0, 10) : ""); setProposeDateDialog(true); }}
+                          className="text-xs px-3 py-1.5 border border-border rounded-lg font-medium hover:bg-muted">
+                          Propose a Different Date
+                        </button>
+                      </>
                     ) : (
-                      <button onClick={() => { setSendDate(detail.agreement?.ProposedDateByCompany ? String(detail.agreement.ProposedDateByCompany).slice(0, 10) : ""); setProposeDateDialog(true); }}
+                      <button onClick={() => { setSendDate(""); setProposeDateDialog(true); }}
                         className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
-                        {detail.agreement?.ProposedDateByCompany ? "Update Proposed Date" : "Propose Agreement Date"}
+                        Propose Agreement Date
                       </button>
                     )
                   )}
@@ -1377,15 +1430,15 @@ const CrmAgreement: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Propose/Update Agreement Date — the agreement itself now sends to
-          the customer automatically on senior approval, so this is the
-          standalone way to propose or renegotiate a date afterward. */}
+      {/* Propose/Revise Agreement Date — one live proposed date, turn-based
+          between company and customer. Submitting here always moves the
+          negotiation to the customer's turn next (PendingCustomerReview). */}
       <Dialog open={proposeDateDialog} onOpenChange={(o) => { if (!o) { setProposeDateDialog(false); setSendDate(""); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Propose Agreement Date</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              If the customer proposes (or has already proposed) the same date, it's confirmed automatically as the Agreement Date.
+              This date goes to the customer for their review. They can accept it as-is, or propose a different one back to you.
             </p>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Proposed Agreement Date</label>
