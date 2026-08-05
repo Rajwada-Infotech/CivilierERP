@@ -785,6 +785,22 @@ const PurchaseOrderMaster: React.FC = () => {
     [itemsRaw, itemsGstById],
   );
 
+  // A PO must be all-Goods or all-Service — never a mix (see the
+  // validate()-time block below for the full rationale). Computed here too
+  // so the cart can show a warning as soon as a mix appears, not just at
+  // save time.
+  const itemTypesInCart = useMemo(() => {
+    const types = new Set<string>();
+    for (const li of lineItems) {
+      if (!li.itemName && !li.quantity) continue;
+      const t = items.find((i) => i.id === li.itemId)?.itemType;
+      if (t) types.add(t);
+    }
+    return types;
+  }, [lineItems, items]);
+  const hasMixedItemTypes =
+    itemTypesInCart.has("Goods") && itemTypesInCart.has("Service");
+
   const tcRecords = useMemo(
     () =>
       ensureArray<any>(tcRaw)
@@ -1666,6 +1682,26 @@ const PurchaseOrderMaster: React.FC = () => {
       );
       return false;
     }
+
+    // A PO must be all-Goods or all-Service — never a mix. Goods items
+    // always have to be received via a GRN before they can be invoiced;
+    // Service items can be invoiced directly with no GRN (see the
+    // "service-eligible" PO endpoint used for direct/TOD invoicing).
+    // Mixing the two on one PO would make that invoice-eligibility
+    // ambiguous per line, so a Material Request containing both — e.g.
+    // Cement + Sand (Goods) and Plastering (Service) — must be split into
+    // separate POs by item type: one PO for the Goods items and another
+    // for the Service items (or further split however's convenient), but
+    // never one PO combining Cement/Sand with Plastering. The MR → PO →
+    // GRN/WO → Invoice → Payment chain still tracks each split PO on its
+    // own, same as any other PO.
+    if (hasMixedItemTypes) {
+      toast.error(
+        "This PO mixes Goods and Service items. Create separate POs — one for the Goods items (they'll need a GRN) and another for the Service items (can be invoiced directly).",
+      );
+      return false;
+    }
+
     return true;
   };
 
@@ -4364,6 +4400,16 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
               <p className="px-5 pb-2 text-xs text-destructive">
                 Add at least one line item
               </p>
+            )}
+
+            {hasMixedItemTypes && (
+              <div className="flex items-start gap-2 mx-5 mb-3 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-xs text-amber-700 dark:text-amber-400">
+                <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                <span>
+                  This cart mixes <strong>Goods</strong> and <strong>Service</strong> items — a PO can only be one or the other.
+                  Remove one type and raise a separate PO for it (Goods items need a GRN; Service items can be invoiced directly).
+                </span>
+              </div>
             )}
 
             {/* Table header */}
