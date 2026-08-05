@@ -840,7 +840,9 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.EBillingTermId, eb.EBillingTermName,
           eb.ETCId, eb.ETCName, eb.ETCText,
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
-          eb.EAdditionalCharges, eb.ECostCenter, eb.EGLAccount, eb.EWorkDoneRef,
+          eb.EAdditionalCharges, eb.ECostCenter, eb.EGLAccount, eb.EGLAccountId, eb.EWorkDoneRef,
+          gl.LHeadName AS EGLAccountName, gl.LHeadCode AS EGLAccountCode,
+          glGroup.Name AS EGLAccountGroupName, glParentGroup.Name AS EGLAccountParentGroupName,
           ${hasPaymentTermId ? "eb.PaymentTermId," : "CAST(NULL AS INT) AS PaymentTermId,"}
           ${hasDirectItemsCol ? "eb.EDirectItemsData," : "CAST(NULL AS NVARCHAR(MAX)) AS EDirectItemsData,"}
           eb.EBillStatus, eb.ETotalPaid, eb.ERemainingAmount,
@@ -897,6 +899,12 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         -- Direct Work Done source link
         LEFT JOIN dbo.WorkDone wd_direct
           ON eb.ESourceType = 'WORK_DONE' AND wd_direct.ID = TRY_CAST(eb.ESourceId AS INT)
+        -- GL Account chosen on the booking (General Ledger master) — pulled
+        -- in with its immediate group + parent group so the list/preview can
+        -- show the nested chart-of-accounts path without a second call.
+        LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = eb.EGLAccountId
+        LEFT JOIN dbo.AccountGroup glGroup ON glGroup.AGId = gl.LBelongsTo
+        LEFT JOIN dbo.AccountGroup glParentGroup ON glParentGroup.AGId = glGroup.ParentGroupId
         ${ebSupplierList.joins}
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
           AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
@@ -1205,7 +1213,13 @@ router.get("/:id", async (req, res) => {
                END AS EGrnTotalAmount,
                -- Pass through source info needed for fallback computation
                eb.ESourceType AS _ESourceType,
-               eb.ESourceId   AS _ESourceId
+               eb.ESourceId   AS _ESourceId,
+               -- GL Account chosen on the booking (General Ledger master) —
+               -- immediate group id is included so the frontend can walk the
+               -- full parent chain (arbitrary depth) via /api/account-group.
+               gl.LHeadName AS EGLAccountName,
+               gl.LHeadCode AS EGLAccountCode,
+               gl.LBelongsTo AS EGLAccountGroupId
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
@@ -1218,6 +1232,7 @@ router.get("/:id", async (req, res) => {
         LEFT JOIN dbo.PurchaseOrders po_direct
           ON eb.ESourceType IN ('PO','WO_PO') AND po_direct.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
         LEFT JOIN dbo.enterprise epo_direct ON epo_direct.id = po_direct.ProjectId
+        LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = eb.EGLAccountId
         ${ebSupplierDet.joins}
         WHERE eb.Eid = @Eid
       `);
@@ -1400,6 +1415,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
     EAdditionalCharges,
     ECostCenter,
     EGLAccount,
+    EGLAccountId,
     PaymentTermId,
   } = payload;
   const ESourceType = "GRN";
@@ -1724,6 +1740,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
       )
       .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
       .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
+      .input("EGLAccountId", sql.Int, EGLAccountId ? parseInt(EGLAccountId, 10) : null)
       .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null);
 
     if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
@@ -1741,7 +1758,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
           EBillingTermId, EBillingTermName, EBillingTermsData,
           ETCId, ETCName, ETCText,
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
-          ECostCenter, EGLAccount, EWorkDoneRef
+          ECostCenter, EGLAccount, EGLAccountId, EWorkDoneRef
           ${hasPayTermCol ? ", PaymentTermId" : ""}
           ${hasDirectItemsCol ? ", EDirectItemsData" : ""}
         ) VALUES (
@@ -1755,7 +1772,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
           @EBillingTermId, @EBillingTermName, @EBillingTermsData,
           @ETCId, @ETCName, @ETCText,
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
-          @ECostCenter, @EGLAccount, @EWorkDoneRef
+          @ECostCenter, @EGLAccount, @EGLAccountId, @EWorkDoneRef
           ${hasPayTermCol ? ", @PaymentTermId" : ""}
           ${hasDirectItemsCol ? ", @EDirectItemsData" : ""}
         );
@@ -1832,6 +1849,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     EAdditionalCharges,
     ECostCenter,
     EGLAccount,
+    EGLAccountId,
     EWorkDoneRef,
     PaymentTermId,
     EDirectItemsData,
@@ -2301,6 +2319,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       )
       .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
       .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
+      .input("EGLAccountId", sql.Int, EGLAccountId ? parseInt(EGLAccountId, 10) : null)
       .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null)
       .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
       .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null);
@@ -2321,7 +2340,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           EBillingTermId, EBillingTermName, EBillingTermsData,
           ETCId, ETCName, ETCText,
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
-          ECostCenter, EGLAccount, EWorkDoneRef, ContractId, LHeadId
+          ECostCenter, EGLAccount, EGLAccountId, EWorkDoneRef, ContractId, LHeadId
           ${hasPayTermCol ? ", PaymentTermId" : ""}
           ${hasDirectItemsCol ? ", EDirectItemsData" : ""}
         ) VALUES (
@@ -2335,7 +2354,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           @EBillingTermId, @EBillingTermName, @EBillingTermsData,
           @ETCId, @ETCName, @ETCText,
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
-          @ECostCenter, @EGLAccount, @EWorkDoneRef, @ContractId, @LHeadId
+          @ECostCenter, @EGLAccount, @EGLAccountId, @EWorkDoneRef, @ContractId, @LHeadId
           ${hasPayTermCol ? ", @PaymentTermId" : ""}
           ${hasDirectItemsCol ? ", @EDirectItemsData" : ""}
         );
@@ -2900,6 +2919,7 @@ router.put(
       EAdditionalCharges,
       ECostCenter,
       EGLAccount,
+      EGLAccountId,
       EWorkDoneRef,
       PaymentTermId: PaymentTermIdPut,
       EDirectItemsData: EDirectItemsDataPut,
@@ -3064,6 +3084,7 @@ router.put(
         )
         .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
         .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
+        .input("EGLAccountId", sql.Int, EGLAccountId ? parseInt(EGLAccountId, 10) : null)
         .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null)
         .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null);
 
@@ -3087,7 +3108,7 @@ router.put(
           ETCId=@ETCId, ETCName=@ETCName, ETCText=@ETCText,
           EVendorInvoiceNo=@EVendorInvoiceNo, EVendorInvoiceDate=@EVendorInvoiceDate,
           EAdditionalCharges=@EAdditionalCharges,
-          ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EWorkDoneRef=@EWorkDoneRef,
+          ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EGLAccountId=@EGLAccountId, EWorkDoneRef=@EWorkDoneRef,
           LHeadId=@LHeadId
           ${hasPayTermColPut ? ", PaymentTermId=@PaymentTermIdPut" : ""}
           ${hasDirectItemsColPut ? ", EDirectItemsData=@EDirectItemsDataPut" : ""}
@@ -3535,12 +3556,14 @@ router.get("/:id/posting", async (req, res) => {
     const ebSupplierPost = expenseBookingSupplierSql("eb", "postprev");
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
       SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
-             eb.ELinkedGrnIds,
+             eb.ELinkedGrnIds, eb.EGLAccountId,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
              eb.EName AS SupplierName,
              ${ebSupplierPost.idExpr} AS ResolvedSupplierId,
-             ${ebSupplierPost.nameExpr} AS ResolvedSupplierName
+             ${ebSupplierPost.nameExpr} AS ResolvedSupplierName,
+             gl.LHeadName AS EGLAccountName
       FROM dbo.ExpenseBooking eb
+      LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = eb.EGLAccountId
       ${ebSupplierPost.joins}
       WHERE eb.Eid = @Eid
     `);
@@ -3569,7 +3592,12 @@ router.get("/:id/posting", async (req, res) => {
     const leds = ledRes.recordset;
     const find = (fn) => { const r = leds.find(fn); return r ? { id: r.LHeadId, label: r.LHeadName } : null; };
     const accounts = {
-      purchase:  find((l)=>l.LHeadName.toLowerCase().includes("purchase")),
+      // For direct (non-GRN) bookings, the invoice's own chosen GL Account
+      // (General Ledger master) takes the debit leg instead of the generic
+      // system "Purchase A/c" ledger, when one has been selected on the form.
+      purchase:  eb.EGLAccountId
+        ? { id: eb.EGLAccountId, label: eb.EGLAccountName || "GL Account" }
+        : find((l)=>l.LHeadName.toLowerCase().includes("purchase")),
       pgrn:      find((l)=>l.LHeadName.toLowerCase().includes("pending")),
       supplier:  eb.ResolvedSupplierId ? { id: eb.ResolvedSupplierId, label: "Supplier / Creditor A/c" } : null,
       // Confirmed input tax credit, recognized once the invoice matches the
@@ -3615,7 +3643,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const ebSupplierPost2 = expenseBookingSupplierSql("eb", "postgl");
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
       SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
-             eb.ELinkedGrnIds,
+             eb.ELinkedGrnIds, eb.EGLAccountId,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
              ${ebSupplierPost2.idExpr} AS ResolvedSupplierId
       FROM dbo.ExpenseBooking eb
@@ -3673,10 +3701,14 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // ledger), which is why searching IsSystemGenerated=1 rows for it
     // always failed with "Supplier/Creditor system ledger not configured."
     const supplierId = eb.ResolvedSupplierId;
+    // Direct (non-GRN) bookings post their debit leg to the invoice's own
+    // chosen GL Account (General Ledger master) when one was selected on
+    // the form, instead of the generic system "Purchase A/c" ledger.
+    const debitLedgerId = !isGrnLinked && eb.EGLAccountId ? eb.EGLAccountId : purchaseId;
     if (!supplierId) return res.status(422).json({ error: "Could not resolve this invoice's supplier account." });
     if (isGrnLinked && !pgrnId) return res.status(422).json({ error: "Provision for Pending GRN system ledger not configured." });
     if (isGrnLinked && taxAmount > 0 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
-    if (!isGrnLinked && !purchaseId) return res.status(422).json({ error: "Purchase system ledger not configured." });
+    if (!isGrnLinked && !debitLedgerId) return res.status(422).json({ error: "Purchase system ledger not configured." });
 
     // GRN-linked: base clears the GRN provision; tax is recognized as
     // confirmed ITC (GST Credit Available) now that an actual invoice
@@ -3696,8 +3728,8 @@ router.post("/:id/post-to-gl", async (req, res) => {
             { LHeadId: supplierId, DebitAmount: 0, CreditAmount: g.totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
           ])
       : [
-          { LHeadId: purchaseId, DebitAmount: totalAmount, CreditAmount: 0,           Narration: `Invoice Posting: ${eb.EDocNo} — Purchase` },
-          { LHeadId: supplierId, DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
+          { LHeadId: debitLedgerId, DebitAmount: totalAmount, CreditAmount: 0,           Narration: `Invoice Posting: ${eb.EDocNo} — ${eb.EGLAccountId ? "GL Account" : "Purchase"}` },
+          { LHeadId: supplierId,    DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
         ];
 
     const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
