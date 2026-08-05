@@ -370,19 +370,19 @@ export default function ChequeCancellation() {
           <TabsContent value="bulk" className="mt-3">
             <div className="glass rounded-xl px-5 py-4 space-y-4 ring-1 ring-border/60">
               <p className="text-xs text-muted-foreground">
-                Paste multiple cheque numbers, then check them before cancelling.
+                Paste multiple cheque numbers (comma, space, or newline separated), then check them before cancelling.
               </p>
 
               <div className="flex flex-col sm:flex-row gap-3 items-stretch">
-                <textarea
+                <input
+                  type="text"
                   value={bulkInput}
                   onChange={(e) => setBulkInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) runBulkSearch();
+                    if (e.key === "Enter") runBulkSearch();
                   }}
-                  placeholder={"One cheque number per line — e.g.\n100234\n100235\n100236"}
-                  rows={3}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-border bg-input/70 text-xs leading-relaxed resize-y font-mono focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  placeholder="Cheque numbers — e.g. 100234, 100235, 100236"
+                  className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-border bg-input/70 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-colors"
                 />
                 <div className="flex sm:flex-col gap-2 sm:w-36 shrink-0">
                   <button

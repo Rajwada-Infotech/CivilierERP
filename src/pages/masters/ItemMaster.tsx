@@ -50,6 +50,7 @@ import {
   AlternateUomTagger,
   type AlternateUomRow,
 } from "./ItemUomAlternatesEditor";
+import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface HsnCode {
@@ -72,6 +73,8 @@ interface Item {
   belongsTo: string;
   uomCode: string;
   defaultSupplierId: string;
+  glHeadId: string;
+  costCenterId: string;
 }
 
 function dbToItem(row: DbItem): Item {
@@ -90,6 +93,8 @@ function dbToItem(row: DbItem): Item {
     defaultSupplierId: row.default_supplier_id
       ? String(row.default_supplier_id)
       : "",
+    glHeadId: row.M_GLHeadId ? String(row.M_GLHeadId) : "",
+    costCenterId: row.M_CostCenterId ? String(row.M_CostCenterId) : "",
   };
 }
 
@@ -111,6 +116,8 @@ function itemToPayload(form: Omit<Item, "_id">, groupName: string) {
     default_supplier_id: form.defaultSupplierId
       ? parseInt(form.defaultSupplierId)
       : null,
+    M_GLHeadId: form.glHeadId ? parseInt(form.glHeadId) : null,
+    M_CostCenterId: form.costCenterId ? parseInt(form.costCenterId) : null,
   };
 }
 
@@ -126,6 +133,8 @@ const EMPTY_FORM: Omit<Item, "_id"> = {
   belongsTo: "",
   uomCode: "",
   defaultSupplierId: "",
+  glHeadId: "",
+  costCenterId: "",
 };
 
 // ── CSV template / import column mapping ─────────────────────────────────────
@@ -400,6 +409,27 @@ const ItemMaster: React.FC = () => {
     (s: any) => ({
       value: String(s.id ?? ""),
       label: s.label ?? "",
+    }),
+  );
+
+  // Cost Centre master options — for the item-level Cost Centre tag, which
+  // Purchase Order auto-fills its own Cost Centre from (see
+  // PurchaseOrderMaster.tsx handleItemSelect).
+  const { data: dbCostCenters = [] } = useQuery({
+    queryKey: ["cost-centers-for-item-master"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/cost-center/options");
+      if (!res.ok) return [];
+      const data = await res.json().catch(() => ({}));
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const costCenterOptions = (Array.isArray(dbCostCenters) ? dbCostCenters : []).map(
+    (c: any) => ({
+      value: String(c.id ?? ""),
+      label: c.label ?? "",
     }),
   );
 
@@ -880,6 +910,27 @@ const ItemMaster: React.FC = () => {
       },
     },
     {
+      accessorKey: "glHeadId",
+      header: "GL Ledger",
+      cell: ({ row }) => (
+        <span className="text-sm text-muted-foreground">
+          {dbItems?.find((i) => i.M_Id === row.original._id)?.GLHeadName || "-"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "costCenterId",
+      header: "Cost Centre",
+      cell: ({ row }) => {
+        const cc = costCenterOptions.find(
+          (c) => c.value === row.original.costCenterId,
+        );
+        return (
+          <span className="text-sm text-muted-foreground">{cc?.label || "-"}</span>
+        );
+      },
+    },
+    {
       accessorKey: "hsnCode",
       header: "HSN",
       cell: ({ row }) => (
@@ -1193,6 +1244,30 @@ const ItemMaster: React.FC = () => {
                 {supplierOptions.map((s) => (
                   <option key={s.value} value={s.value}>
                     {s.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {/* GL Ledger tag — the account this item's spend is booked under */}
+            <Field label="GL Ledger">
+              <GLAccountSelect
+                value={form.glHeadId ? parseInt(form.glHeadId, 10) : null}
+                onChange={(id) => set("glHeadId", id ? String(id) : "")}
+                placeholder="— No GL ledger tag —"
+              />
+            </Field>
+            {/* Cost Centre tag — auto-fills the Cost Centre when this item is
+                added to a Purchase Order (see PurchaseOrderMaster.tsx). */}
+            <Field label="Cost Centre">
+              <select
+                value={form.costCenterId}
+                onChange={(e) => set("costCenterId", e.target.value)}
+                className={inputCls()}
+              >
+                <option value="">— No cost centre tag —</option>
+                {costCenterOptions.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
                   </option>
                 ))}
               </select>
