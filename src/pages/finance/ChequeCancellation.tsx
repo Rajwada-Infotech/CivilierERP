@@ -321,61 +321,104 @@ export default function ChequeCancellation() {
 
         {/* ── Bulk Cancellation ─────────────────────────────────────────────── */}
         <div className="glass rounded-xl p-4 ring-1 ring-border/60 space-y-4">
-          <p className="text-xs font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
-            <Layers size={12} /> Bulk Cheque Cancellation
-          </p>
-          <textarea
-            value={bulkInput}
-            onChange={(e) => setBulkInput(e.target.value)}
-            placeholder="Enter multiple cheque numbers — one per line, or separated by commas/spaces"
-            rows={2}
-            className="w-full max-w-md px-2.5 py-1.5 rounded-lg border border-border bg-background text-xs resize-y focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono"
-          />
-          <button
-            onClick={runBulkSearch}
-            disabled={bulkSearching}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-all"
-          >
-            {bulkSearching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} Check Cheque Numbers
-          </button>
+          <div>
+            <p className="text-xs font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+              <Layers size={12} /> Bulk Cheque Cancellation
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Paste multiple cheque numbers, then check them before cancelling.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 items-stretch">
+            <textarea
+              value={bulkInput}
+              onChange={(e) => setBulkInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) runBulkSearch();
+              }}
+              placeholder={"One cheque number per line — e.g.\n100234\n100235\n100236"}
+              rows={3}
+              className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-border bg-background text-xs leading-relaxed resize-y font-mono focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <div className="flex sm:flex-col gap-2 sm:w-40 shrink-0">
+              <button
+                onClick={runBulkSearch}
+                disabled={bulkSearching || !bulkInput.trim()}
+                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-all"
+              >
+                {bulkSearching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} Check
+              </button>
+              {(bulkInput || bulkResults.length > 0) && (
+                <button
+                  onClick={() => {
+                    setBulkInput("");
+                    setBulkResults([]);
+                    setBulkReason("");
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground transition-all"
+                >
+                  <XCircle size={13} /> Clear
+                </button>
+              )}
+            </div>
+          </div>
 
           {bulkResults.length > 0 && (
             <div className="rounded-xl border border-border overflow-hidden">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-muted/30">
-                    <th className="px-3 py-2 text-left font-heading uppercase tracking-widest text-[10px] text-muted-foreground">Cheque No</th>
-                    <th className="px-3 py-2 text-left font-heading uppercase tracking-widest text-[10px] text-muted-foreground">Payment Doc</th>
-                    <th className="px-3 py-2 text-left font-heading uppercase tracking-widest text-[10px] text-muted-foreground">Amount</th>
-                    <th className="px-3 py-2 text-left font-heading uppercase tracking-widest text-[10px] text-muted-foreground">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bulkResults.map((r) => (
-                    <tr key={r.chequeNo} className="border-t border-border/50">
-                      <td className="px-3 py-2 font-mono">{r.chequeNo}</td>
-                      <td className="px-3 py-2">{r.payment?.DocNo ?? "—"}</td>
-                      <td className="px-3 py-2">{r.payment ? formatINR(r.payment.PAmount) : "—"}</td>
-                      <td className="px-3 py-2">
-                        {!r.found ? (
-                          <span className="inline-flex items-center gap-1 text-muted-foreground">
-                            <XCircle size={11} /> No matching payment entry
-                          </span>
-                        ) : r.alreadyCancelled ? (
-                          <span className="inline-flex items-center gap-1 text-rose-500">
-                            <Ban size={11} /> Already cancelled
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                            <CheckCircle2 size={11} /> Ready to cancel
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="flex flex-col sm:flex-row items-center gap-2 p-3 border-t border-border bg-muted/10">
+              {/* Summary strip */}
+              <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 bg-muted/20 border-b border-border">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
+                  <CheckCircle2 size={11} /> {validBulkEntries.length} ready
+                </span>
+                {bulkResults.some((r) => r.found && r.alreadyCancelled) && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-500 text-[11px] font-semibold">
+                    <Ban size={11} /> {bulkResults.filter((r) => r.found && r.alreadyCancelled).length} already cancelled
+                  </span>
+                )}
+                {bulkResults.some((r) => !r.found) && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted text-muted-foreground text-[11px] font-semibold">
+                    <XCircle size={11} /> {bulkResults.filter((r) => !r.found).length} not found
+                  </span>
+                )}
+                <span className="ml-auto text-[10px] text-muted-foreground">{bulkResults.length} checked</span>
+              </div>
+
+              {/* Result rows */}
+              <div className="max-h-64 overflow-y-auto divide-y divide-border/50">
+                {bulkResults.map((r) => {
+                  const state = !r.found ? "missing" : r.alreadyCancelled ? "cancelled" : "ready";
+                  return (
+                    <div
+                      key={r.chequeNo}
+                      className={`flex items-center gap-3 px-3 py-2 text-xs ${state === "missing" ? "opacity-60" : ""}`}
+                    >
+                      <span className="font-mono font-semibold text-foreground w-24 shrink-0">{r.chequeNo}</span>
+                      <span className="flex-1 min-w-0 truncate text-muted-foreground">
+                        {r.payment ? `${r.payment.DocNo ?? "—"} · ${formatINR(r.payment.PAmount)}` : "—"}
+                      </span>
+                      {state === "missing" && (
+                        <span className="inline-flex items-center gap-1 text-muted-foreground shrink-0">
+                          <XCircle size={11} /> No matching payment
+                        </span>
+                      )}
+                      {state === "cancelled" && (
+                        <span className="inline-flex items-center gap-1 text-rose-500 shrink-0">
+                          <Ban size={11} /> Already cancelled
+                        </span>
+                      )}
+                      {state === "ready" && (
+                        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 shrink-0">
+                          <CheckCircle2 size={11} /> Ready
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Action bar */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-3 border-t border-border bg-muted/10">
                 <input
                   value={bulkReason}
                   onChange={(e) => setBulkReason(e.target.value)}
@@ -386,7 +429,7 @@ export default function ChequeCancellation() {
                   <button
                     onClick={runBulkCancel}
                     disabled={bulkCancelling || !validBulkEntries.length}
-                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-medium hover:bg-rose-700 disabled:opacity-50 transition-all whitespace-nowrap"
+                    className="flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-medium hover:bg-rose-700 disabled:opacity-50 transition-all whitespace-nowrap"
                   >
                     {bulkCancelling ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />}
                     Cancel {validBulkEntries.length} Valid Entr{validBulkEntries.length === 1 ? "y" : "ies"}
