@@ -97,10 +97,10 @@ export function ExpenseBookingPicker({
   return (
     <div className="space-y-1.5">
       <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
-        Select Invoice or Contract
+        Select Invoice / Contract / Loan EMI
       </label>
       <p className="text-[11px] text-muted-foreground -mt-1">
-        Choose an invoice or contract — auto-fills project, company &amp; amount.
+        Choose an invoice, contract, or loan EMI — auto-fills project, company &amp; amount.
       </p>
       <div className="relative" ref={ref}>
         {/* Trigger */}
@@ -137,7 +137,7 @@ export function ExpenseBookingPicker({
               <span className="font-mono text-xs text-primary font-semibold truncate">{selected.label}</span>
             </span>
           ) : (
-            <span className="text-muted-foreground">— Choose invoice or contract —</span>
+            <span className="text-muted-foreground">— Choose invoice, contract, or loan EMI —</span>
           )}
           <ChevronDown size={14} className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
         </button>

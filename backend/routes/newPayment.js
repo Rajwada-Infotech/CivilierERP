@@ -132,18 +132,26 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         -- Project name (resolved from EB → enterprise, or PO → enterprise)
         COALESCE(ep.name, po_proj.name, np.PProject)       AS PProjectName,
-        -- Supplier name from ExpenseBooking resolved chain
-        CASE
-          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
-          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
-          ELSE grn2_sup.LHeadName
-        END                                                AS PSupplierName,
+        -- Supplier/contractor name — from the ExpenseBooking resolved chain
+        -- when this payment is linked to an invoice, otherwise fall back to
+        -- the party (PPartyId) picked directly on a direct/TOD payment.
+        COALESCE(
+          CASE
+            WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
+            WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
+            ELSE grn2_sup.LHeadName
+          END,
+          party_head.LHeadName
+        )                                                  AS PSupplierName,
         -- Supplier contact person
-        CASE
-          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadContactPerson
-          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadContactPerson
-          ELSE grn2_sup.LHeadContactPerson
-        END                                                AS PSupplierContact,
+        COALESCE(
+          CASE
+            WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadContactPerson
+            WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadContactPerson
+            ELSE grn2_sup.LHeadContactPerson
+          END,
+          party_head.LHeadContactPerson
+        )                                                  AS PSupplierContact,
         -- Net Payable (the payment amount already on np.PAmount, but also expose EB net for reference)
         ISNULL(eb.ENetAmount, eb.EAmount)                  AS EBNetPayable,
         -- Tax amount: computed as (ENetAmount - EAmount) when both are set, else 0
@@ -235,6 +243,9 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
       LEFT JOIN dbo.AccountHeadMaster grn2_sup
         ON grn2_sup.LHeadId = grn2.SupplierID
+      -- Resolve party directly picked on a direct/TOD payment (no linked EB)
+      LEFT JOIN dbo.AccountHeadMaster party_head
+        ON party_head.LHeadId = np.PPartyId
       -- BRS state for DisplayStatus
       LEFT JOIN dbo.BankReconciliation brc_list
         ON  brc_list.SourceType = 'PAYMENT'
@@ -430,6 +441,7 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
 router.post("/", requirePageRight("new-payment", "create"), validateBody(paymentBodySchema), async (req, res) => {
   const {
     PPaymentName,
+    PRemarks,
     PMode,
     PAmount,
     PDocType,
@@ -570,6 +582,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     const insertResult = await pool
       .request()
       .input("PPaymentName", sql.VarChar, PPaymentName || "")
+      .input("PRemarks", sql.NVarChar(1000), PRemarks || null)
       .input("PMode", sql.VarChar, PMode || "")
       .input("PAmount", sql.Decimal(18, 2), PAmount != null ? Number(PAmount) : null)
       .input("PDocType", sql.VarChar, PDocType || "N/A")
@@ -616,7 +629,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("PApprovedBy", sql.NVarChar(100), null)
       .input("Status", sql.NVarChar(20), initialStatus).query(`
         INSERT INTO dbo.NewPayment (
-          PPaymentName, PMode, PAmount, PDocType, PDate,
+          PPaymentName, PRemarks, PMode, PAmount, PDocType, PDate,
           PBankID, PBankName, PProject, PCompany, PExpenseRef,
           PChequeNo, PChequeLotId, PChequeLotNumber, PChequeDate,
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
@@ -627,7 +640,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
         )
         OUTPUT INSERTED.PPaymentID
         VALUES (
-          @PPaymentName, @PMode, @PAmount, @PDocType, @PDate,
+          @PPaymentName, @PRemarks, @PMode, @PAmount, @PDocType, @PDate,
           @PBankID, @PBankName, @PProject, @PCompany, @PExpenseRef,
           @PChequeNo, @PChequeLotId, @PChequeLotNumber, @PChequeDate,
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
@@ -693,6 +706,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
   const { id } = req.params;
   const {
     PPaymentName,
+    PRemarks,
     PMode,
     PAmount,
     PDocType,
@@ -765,6 +779,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .request()
       .input("PPaymentID", sql.Int, id)
       .input("PPaymentName", sql.VarChar, PPaymentName || "")
+      .input("PRemarks", sql.NVarChar(1000), PRemarks || null)
       .input("PMode", sql.VarChar, PMode || "")
       .input("PAmount", sql.Decimal(18, 2), PAmount != null ? Number(PAmount) : null)
       .input("PDocType", sql.VarChar, PDocType || "N/A")
@@ -799,6 +814,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PUpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.NewPayment SET
           PPaymentName         = @PPaymentName,
+          PRemarks             = @PRemarks,
           PMode                = @PMode,
           PAmount              = @PAmount,
           PDocType             = @PDocType,
@@ -1210,16 +1226,22 @@ router.get("/:id", async (req, res) => {
         np.*,
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         COALESCE(ep.name, po_proj.name, np.PProject)       AS PProjectName,
-        CASE
-          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
-          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
-          ELSE grn2_sup.LHeadName
-        END                                                AS PSupplierName,
-        CASE
-          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadContactPerson
-          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadContactPerson
-          ELSE grn2_sup.LHeadContactPerson
-        END                                                AS PSupplierContact,
+        COALESCE(
+          CASE
+            WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
+            WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
+            ELSE grn2_sup.LHeadName
+          END,
+          party_head.LHeadName
+        )                                                  AS PSupplierName,
+        COALESCE(
+          CASE
+            WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadContactPerson
+            WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadContactPerson
+            ELSE grn2_sup.LHeadContactPerson
+          END,
+          party_head.LHeadContactPerson
+        )                                                  AS PSupplierContact,
         ISNULL(eb.ENetAmount, eb.EAmount)                  AS EBNetPayable,
         CASE
           WHEN eb.ENetAmount IS NOT NULL AND eb.EAmount IS NOT NULL
@@ -1253,6 +1275,7 @@ router.get("/:id", async (req, res) => {
       LEFT JOIN dbo.GoodsReceiptNotes grn2
         ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
       LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
+      LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadName = np.PBankName AND ahm.LHeadType = 'B'
       WHERE np.PPaymentID = @id
     `);

@@ -44,7 +44,6 @@ import {
   getLoanSanctions,
   getLoanSchedule,
   createLoanSanction,
-  toggleEmiPaid,
   deleteLoanSanction,
   getCustomerOptions,
   getBankOptions,
@@ -54,7 +53,6 @@ import {
   getLoanDocuments,
   uploadLoanDocument,
   type LoanSanction,
-  type LoanEMI,
   type LoanType,
   type InterestCalcType,
   type CustomerOption,
@@ -64,9 +62,6 @@ import {
 
 const ACCENT = "#22c55e";
 const LOAN_TYPES: LoanType[] = ["Inter-Company", "Bank Loan", "Customer Loan"];
-// Flexible repayment (multi-select EMIs, lump sum, early payoff) only
-// applies to a real external loan — mirrors backend REPAYABLE_TYPES.
-const REPAYABLE_TYPES: LoanType[] = ["Bank Loan", "Customer Loan"];
 
 // Common lending benchmarks — shown as quick picks in the dropdown-cum-text
 // field, but the field always accepts a typed custom value too.
@@ -106,6 +101,9 @@ const EMPTY_FORM = {
   interestType: "CI" as InterestCalcType,
   interestRate: "",
   tenureMonths: "",
+  // Only used for a no-breakdown loan (Inter-Company simple transfer, no
+  // interest/tenure) — the single overall repayment due date.
+  dueDate: "",
   purpose: "",
   remarks: "",
 };
@@ -170,12 +168,10 @@ export default function LoanSanctionPage() {
     enabled: !!viewingLoan,
   });
 
-  const isRepayable = !!viewingLoan && REPAYABLE_TYPES.includes(viewingLoan.LoanType);
-
   const { data: payments = [] } = useQuery({
     queryKey: ["loan-payments", viewingLoan?.LoanId],
     queryFn: () => getLoanPayments(viewingLoan!.LoanId),
-    enabled: !!viewingLoan && isRepayable,
+    enabled: !!viewingLoan,
   });
 
   const { data: loanDocuments = [] } = useQuery({
@@ -275,6 +271,7 @@ export default function LoanSanctionPage() {
         interestType: form.interestType,
         interestRate: form.hasInterest ? form.interestRate || null : null,
         tenureMonths: form.tenureMonths || null,
+        dueDate: isInterCompanyType && !form.hasInterest ? form.dueDate || null : null,
         purpose: form.purpose || null,
         remarks: form.remarks || null,
       });
@@ -293,18 +290,6 @@ export default function LoanSanctionPage() {
       toast.error(e.message ?? "Could not sanction this loan");
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleTogglePaid = async (emi: LoanEMI) => {
-    if (!viewingLoan) return;
-    try {
-      await toggleEmiPaid(viewingLoan.LoanId, emi.EMIId, !emi.IsPaid);
-      await qc.invalidateQueries({ queryKey: ["loan-schedule", viewingLoan.LoanId] });
-      await qc.invalidateQueries({ queryKey: ["loan-sanctions"] });
-      toast.success(emi.IsPaid ? "EMI marked unpaid" : "EMI marked paid");
-    } catch (e: any) {
-      toast.error(e.message ?? "Could not update this EMI");
     }
   };
 
@@ -911,6 +896,22 @@ export default function LoanSanctionPage() {
                       </button>
                     </div>
 
+                    {isInterCompanyType && !form.hasInterest && (
+                      <div className="space-y-2 max-w-[220px]">
+                        <label className={labelCls}>Repayment Due Date</label>
+                        <input
+                          type="date"
+                          className={inputCls}
+                          value={form.dueDate}
+                          min={form.loanDate || undefined}
+                          onChange={(e) => set("dueDate", e.target.value)}
+                        />
+                        <p className="text-[11px] text-muted-foreground">
+                          This loan isn't broken into EMIs — set when the whole amount is due back.
+                        </p>
+                      </div>
+                    )}
+
                     {(!isInterCompanyType || form.hasInterest) && (
                       <div className="grid grid-cols-2 gap-5">
                         {form.hasInterest && (
@@ -1067,7 +1068,7 @@ export default function LoanSanctionPage() {
                   />
                 </div>
 
-                {isRepayable && viewingLoan.Status !== "Closed" && (
+                {viewingLoan.Status !== "Closed" && (
                   <div className="rounded-xl border border-border bg-muted/10 p-3.5 flex items-center gap-2 text-[11px] text-muted-foreground">
                     <Wallet size={13} className="shrink-0" />
                     EMIs are paid from the <span className="font-semibold text-foreground">Finance → Payment</span> page (Loan EMIs tab) — this view is read-only.
@@ -1132,19 +1133,10 @@ export default function LoanSanctionPage() {
                               </td>
                               <td className="px-3 py-2.5 text-right font-mono font-medium">{fmt(emi.EMIAmount)}</td>
                               <td className="px-3 py-2.5 text-center">
-                                {isRepayable ? (
-                                  emi.IsPaid ? (
-                                    <CheckCircle2 size={15} className="text-emerald-500 inline-block" />
-                                  ) : (
-                                    <Circle size={15} className="text-muted-foreground/40 inline-block" />
-                                  )
+                                {emi.IsPaid ? (
+                                  <CheckCircle2 size={15} className="text-emerald-500 inline-block" />
                                 ) : (
-                                  <input
-                                    type="checkbox"
-                                    checked={emi.IsPaid}
-                                    onChange={() => handleTogglePaid(emi)}
-                                    className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
-                                  />
+                                  <Circle size={15} className="text-muted-foreground/40 inline-block" />
                                 )}
                               </td>
                             </tr>
@@ -1234,40 +1226,27 @@ export default function LoanSanctionPage() {
                   ) : null}
                 </div>
 
-                {/* Event timeline — sanction + actual payment transactions (or, for
-                    non-repayable loan types, the simple per-EMI paid history) */}
+                {/* Event timeline — sanction + actual payment transactions, all
+                    settled exclusively via Finance → Payment (Loan EMIs tab) */}
                 <div>
                   <ChainNode
                     icon={<MoneyRecive size={13} className="text-emerald-500" />}
                     title={`Loan Sanctioned — ${viewingLoan.LoanNo}`}
                     subtitle={`${fmt(viewingLoan.Amount)} disbursed to ${displayBorrower} on ${fmtDate(viewingLoan.LoanDate)}`}
                     done
-                    isLast={isRepayable ? payments.length === 0 : paidEmis === 0}
+                    isLast={payments.length === 0}
                   />
-                  {isRepayable
-                    ? payments.map((p, i, arr) => (
-                        <ChainNode
-                          key={p.PaymentId}
-                          icon={<Receipt size={13} className="text-emerald-500" />}
-                          title={`${p.PaymentType === "LumpSum" ? "Lump Sum Payment" : `${p.EmisCovered} EMI${p.EmisCovered === 1 ? "" : "s"} Paid`} — ${p.PaymentRef}`}
-                          subtitle={`${fmt(p.TotalAmount)}${p.LateFee > 0 ? ` (incl. ${fmt(p.LateFee)} late fee)` : ""} · Paid ${fmtDate(p.PaymentDate)}${p.CreatedBy ? ` by ${p.CreatedBy}` : ""}${p.ExcessCredited > 0 ? ` · ${fmt(p.ExcessCredited)} excess credited to lender's on-account` : ""}${p.ClosedLoan ? " · Loan closed" : ""}`}
-                          done
-                          isLast={i === arr.length - 1 && viewingLoan.Status === "Closed"}
-                        />
-                      ))
-                    : schedule
-                        .filter((e) => e.IsPaid)
-                        .map((emi, i, arr) => (
-                          <ChainNode
-                            key={emi.EMIId}
-                            icon={<CheckCircle2 size={13} className="text-emerald-500" />}
-                            title={`EMI ${emi.InstallmentNo} Paid`}
-                            subtitle={`${fmt(emi.EMIAmount)} · Paid ${fmtDate(emi.PaidDate)}${emi.PaidBy ? ` by ${emi.PaidBy}` : ""}`}
-                            done
-                            isLast={i === arr.length - 1 && !!nextDue === false}
-                          />
-                        ))}
-                  {isRepayable && viewingLoan.Status === "Closed" && (
+                  {payments.map((p, i, arr) => (
+                    <ChainNode
+                      key={p.PaymentId}
+                      icon={<Receipt size={13} className="text-emerald-500" />}
+                      title={`${p.PaymentType === "LumpSum" ? "Lump Sum Payment" : `${p.EmisCovered} EMI${p.EmisCovered === 1 ? "" : "s"} Paid`} — ${p.PaymentRef}`}
+                      subtitle={`${fmt(p.TotalAmount)}${p.LateFee > 0 ? ` (incl. ${fmt(p.LateFee)} late fee)` : ""} · Paid ${fmtDate(p.PaymentDate)}${p.CreatedBy ? ` by ${p.CreatedBy}` : ""}${p.ExcessCredited > 0 ? ` · ${fmt(p.ExcessCredited)} excess credited to lender's on-account` : ""}${p.ClosedLoan ? " · Loan closed" : ""}`}
+                      done
+                      isLast={i === arr.length - 1 && viewingLoan.Status === "Closed"}
+                    />
+                  ))}
+                  {viewingLoan.Status === "Closed" && (
                     <ChainNode
                       icon={<FileCheck2 size={13} className="text-emerald-500" />}
                       title="Loan Fully Repaid — Closed"
@@ -1282,24 +1261,7 @@ export default function LoanSanctionPage() {
                       isLast
                     />
                   )}
-                  {!isRepayable && nextDue && (
-                    <ChainNode
-                      icon={<Circle size={13} className="text-amber-500" />}
-                      title={`EMI ${nextDue.InstallmentNo} Pending`}
-                      subtitle={`${fmt(nextDue.EMIAmount)} due ${fmtDate(nextDue.DueDate)}`}
-                      done={false}
-                      isLast
-                      action={
-                        <button
-                          onClick={() => handleTogglePaid(nextDue)}
-                          className="text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
-                        >
-                          Mark Paid
-                        </button>
-                      }
-                    />
-                  )}
-                  {isRepayable && !nextDue && viewingLoan.Status !== "Closed" && payments.length === 0 && (
+                  {viewingLoan.Status !== "Closed" && payments.length === 0 && (
                     <ChainNode
                       icon={<Circle size={13} className="text-amber-500" />}
                       title="No payments yet"
