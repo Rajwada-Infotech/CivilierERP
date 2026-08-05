@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
-import { exportToCsv } from "@/lib/export";
+import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import {
   Building2,
@@ -36,7 +36,6 @@ import {
   Wrench,
   Receipt,
   Store,
-  Download,
   ChevronLeft,
   AlertCircle,
   Loader2,
@@ -2066,13 +2065,13 @@ const ReportTable: React.FC<{
             </div>
           )}
 
-          <button
-            onClick={() => exportToCsv(rows, report.columns, report.id)}
+          <ExportMenu
+            data={rows as unknown as Record<string, unknown>[]}
+            columns={report.columns}
+            title={report.label}
+            filename={report.id}
             disabled={loading || rows.length === 0}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-all"
-          >
-            <Download size={11} /> Export CSV
-          </button>
+          />
         </div>
       </div>
 

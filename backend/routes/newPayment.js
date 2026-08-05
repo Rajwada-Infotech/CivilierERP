@@ -33,6 +33,24 @@ function normalizeBankId(value) {
   return Number.isFinite(bankId) && bankId > 0 ? bankId : null;
 }
 
+// Resolves the dbo.FinYear row a payment date falls into — the year in the
+// payment's own PDate IS the financial year it belongs to, independent of
+// DocYear (which only reflects the calendar year the doc number was issued
+// in). Used so direct/manual payments (no linked ExpenseBooking) are still
+// correctly filterable/displayable by Financial Year in Reports.
+async function resolveFinYearId(pool, pDate) {
+  if (!pDate) return null;
+  const result = await pool
+    .request()
+    .input("PDate", sql.Date, pDate)
+    .query(`
+      SELECT TOP 1 FId FROM dbo.FinYear
+      WHERE @PDate >= FStartDate AND @PDate <= FEndDate
+      ORDER BY FStartDate DESC
+    `);
+  return result.recordset[0]?.FId ?? null;
+}
+
 // syncBillStatus is imported from ../utils/syncBillStatus
 // Wrap to match existing call sites that pass (pool, expenseRef) without sql
 const _syncBillStatus = (pool, expenseRef) => syncBillStatus(pool, sql, expenseRef);
@@ -75,7 +93,12 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     }
     if (companyId) conditions.push(`np.PCompany = @companyId`);
     if (project) conditions.push(`np.PProject LIKE @project`);
-    if (finYear) conditions.push(`np.DocYear  = @finYear`);
+    // Filters by the FinYear the payment's own PDate falls into (PFinYearId
+    // — resolved at save time, see resolveFinYearId), matching the same
+    // dbo.FinYear.FId the Reports page's FY dropdown sends. NOT DocYear,
+    // which is just the calendar year the doc number happened to be issued
+    // in and never matches a FinYear.FId.
+    if (finYear) conditions.push(`np.PFinYearId = @finYear`);
     if (docNumber) conditions.push(`np.DocNo LIKE @docNumber`);
     if (docDate) conditions.push(`CAST(np.PCreatedAt AS DATE) = @docDate`);
     if (dateParam) conditions.push(`np.PDate = @dateParam`);
@@ -94,7 +117,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (search) request.input("search", sql.NVarChar(200), `%${search}%`);
     if (companyId) request.input("companyId", sql.NVarChar(50), companyId);
     if (project) request.input("project", sql.NVarChar(200), `%${project}%`);
-    if (finYear) request.input("finYear", sql.SmallInt, parseInt(finYear));
+    if (finYear) request.input("finYear", sql.Int, parseInt(finYear));
     if (docNumber)
       request.input("docNumber", sql.NVarChar(100), `%${docNumber}%`);
     if (docDate) request.input("docDate", sql.Date, docDate);
@@ -116,7 +139,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (companyId) dataRequest.input("companyId", sql.NVarChar(50), companyId);
     if (project)
       dataRequest.input("project", sql.NVarChar(200), `%${project}%`);
-    if (finYear) dataRequest.input("finYear", sql.SmallInt, parseInt(finYear));
+    if (finYear) dataRequest.input("finYear", sql.Int, parseInt(finYear));
     if (docNumber)
       dataRequest.input("docNumber", sql.NVarChar(100), `%${docNumber}%`);
     if (docDate) dataRequest.input("docDate", sql.Date, docDate);
@@ -175,7 +198,10 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
             AND eb.ESourceType = 'GRN'
         )                                                  AS HSNCodes,
         -- Financial year from ExpenseBooking
-        ISNULL(eb.EFinYear, '')                            AS EBFinYear,
+        -- Financial year: prefer the linked ExpenseBooking's own EFinYear;
+        -- for direct/manual payments (no linked EB) fall back to the FinYear
+        -- resolved from the payment's own PDate (see resolveFinYearId).
+        ISNULL(eb.EFinYear, ISNULL(pfy.FName, ''))         AS EBFinYear,
         -- Ref Doc = the ExpenseBooking DocNo
         eb.EDocNo                                          AS RefDoc,
         -- Expense Booking primary key — used by "Pay Remaining" to pre-fill the form
@@ -218,6 +244,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         END                                                AS DisplayStatus
       FROM dbo.NewPayment np
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
       LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
       -- Resolve company
       LEFT JOIN dbo.enterprise ec
@@ -585,6 +612,13 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     const docYear = parseInt(parts[parts.length - 2], 10) || null;
     const docSerial = parseInt(parts[parts.length - 1], 10) || null;
 
+    // The financial year a payment belongs to is the one its own PDate falls
+    // into — not DocYear (the calendar year the doc number happened to be
+    // locked in, always "today"). Resolved once here so it's filterable and
+    // displayable via Reports even for direct/manual payments with no
+    // linked ExpenseBooking to inherit a fin year from.
+    const pFinYearId = await resolveFinYearId(pool, PDate);
+
     // All new payments auto-submit to Pending for approval — no manual submit step.
     const initialStatus = "Pending";
 
@@ -625,6 +659,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("DocTypeId", sql.Int, docTypeId)
       .input("DocYear", sql.SmallInt, docYear)
       .input("DocSerial", sql.Int, docSerial)
+      .input("PFinYearId", sql.Int, pFinYearId)
       .input("ParentDocNo", sql.NVarChar(100), parentDocNo || null)
       .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo || null)
       // Audit
@@ -643,7 +678,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           PChequeNo, PChequeLotId, PChequeLotNumber, PChequeDate,
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
-          DocNo, DocTypeId, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
+          DocNo, DocTypeId, DocYear, DocSerial, PFinYearId, ParentDocNo, RootExBDocNo,
           ReplacesPaymentId, BounceCharge, ContractId, PPartyId, OASkipAutoApply,
           PCreatedAt, PCreatedBy, PApprovedBy, Status
         )
@@ -654,7 +689,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           @PChequeNo, @PChequeLotId, @PChequeLotNumber, @PChequeDate,
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
-          @DocNo, @DocTypeId, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
+          @DocNo, @DocTypeId, @DocYear, @DocSerial, @PFinYearId, @ParentDocNo, @RootExBDocNo,
           @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId, @OASkipAutoApply,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
         )
@@ -784,6 +819,10 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       }
     }
 
+    // Re-resolve the Financial Year whenever the payment date is edited — it
+    // always tracks the payment's own PDate, same as on create.
+    const pFinYearIdUpdate = await resolveFinYearId(pool, PDate);
+
     await pool
       .request()
       .input("PPaymentID", sql.Int, id)
@@ -793,6 +832,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PAmount", sql.Decimal(18, 2), PAmount != null ? Number(PAmount) : null)
       .input("PDocType", sql.VarChar, PDocType || "N/A")
       .input("PDate", sql.Date, PDate || null)
+      .input("PFinYearId", sql.Int, pFinYearIdUpdate)
       .input("PBankID", sql.Int, normalizeBankId(PBankID))
       .input("PBankName", sql.VarChar, PBankName || null)
       .input("PProject", sql.VarChar, PProject || "")
@@ -1258,7 +1298,7 @@ router.get("/:id", async (req, res) => {
           ELSE 0
         END                                                AS TaxAmount,
         ISNULL(eb.EAmount, 0)                              AS TaxableAmount,
-        ISNULL(eb.EFinYear, '')                            AS EBFinYear,
+        ISNULL(eb.EFinYear, ISNULL(pfy.FName, ''))         AS EBFinYear,
         eb.EDocNo                                          AS RefDoc,
         eb.EDocDate                                        AS EBDocDate,
         eb.ERemarks                                        AS EBDescription,
@@ -1268,6 +1308,7 @@ router.get("/:id", async (req, res) => {
         ahm.LHeadName                                      AS BankAccountName
       FROM dbo.NewPayment np
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
       LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
       LEFT JOIN dbo.enterprise ec
         ON ec.id = TRY_CAST(np.PCompany AS INT) AND ec.business_type = 'C'
