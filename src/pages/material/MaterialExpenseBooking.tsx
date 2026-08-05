@@ -358,10 +358,12 @@ export default function MaterialExpenseBooking() {
         );
       },
     );
+    // Other Expenses only ever books against the "Direct Expense Booking"
+    // (DINV) document type now — the legacy REQ/ExB-ISS/ExB-PAY/FA rows that
+    // used to show here were leftover general-purpose doc types, not
+    // actually meant for this picker.
     load<TodItem>("tod", "/api/document-type", setTodList, setLoadingTOD, (r) =>
-      (Array.isArray(r) ? r : []).filter(
-        (t) => !["PO", "WO"].includes((t as any).ModuleTag ?? ""),
-      ),
+      (Array.isArray(r) ? r : []).filter((t) => (t as any).Prefix === "DINV"),
     );
 
     _mastersCache.grn = null;
@@ -497,20 +499,26 @@ export default function MaterialExpenseBooking() {
     value: Omit<ExpenseRecord, "id">[K],
   ) => setForm((prev) => ({ ...prev, [field]: value }));
 
-  // Due Date tracks Vendor Invoice Date + the selected Payment Term's Days,
-  // recomputed live any time either changes — not just at the moment a
-  // supplier/term is first picked. Single source of truth for dueDate so
-  // editing the invoice date after the fact keeps it correct in real time.
+  // Due Date tracks Payment Term's Days from a base date, recomputed live
+  // any time either changes — not just at the moment a supplier/term is
+  // first picked. Single source of truth for dueDate so editing the invoice
+  // date after the fact keeps it correct in real time.
+  //
+  // Base date prefers Vendor Invoice Date (the supplier's own invoice date)
+  // but falls back to Booking Date when no vendor invoice date has been
+  // entered yet — otherwise picking a Payment Term before filling in the
+  // (optional) vendor invoice date silently did nothing.
   useEffect(() => {
-    if (!form.paymentTermId || !form.vendorInvoiceDate) return;
+    const baseDateStr = form.vendorInvoiceDate || form.bookingDate;
+    if (!form.paymentTermId || !baseDateStr) return;
     const term = paymentTermOptions.find((t) => t.Id === form.paymentTermId);
     if (!term || term.CreditDays == null) return;
-    const base = new Date(form.vendorInvoiceDate);
+    const base = new Date(baseDateStr);
     if (isNaN(base.getTime())) return;
     base.setDate(base.getDate() + term.CreditDays);
     const next = base.toISOString().split("T")[0];
     setForm((prev) => (prev.dueDate === next ? prev : { ...prev, dueDate: next }));
-  }, [form.paymentTermId, form.vendorInvoiceDate, paymentTermOptions]);
+  }, [form.paymentTermId, form.vendorInvoiceDate, form.bookingDate, paymentTermOptions]);
 
   const resolveCostCenterForProject = useCallback(
     (projectId?: number | null) => {
