@@ -279,7 +279,11 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
             <Field
               label={isPostDated ? "Post-Dated Cheque Date" : "Cheque Date"}
               required={isPostDated}
-              hint={isPostDated ? "Must be a future date" : undefined}
+              hint={
+                isPostDated
+                  ? "Must be a future date"
+                  : "Locked to today — switch to Post-Dated Cheque for a future date"
+              }
             >
               <div className="relative">
                 <CalendarDays
@@ -294,8 +298,9 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                       ? new Date().toISOString().slice(0, 10)
                       : undefined
                   }
+                  disabled={!isPostDated}
                   onChange={(e) => set("chequeDate", e.target.value)}
-                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition disabled:opacity-70 disabled:cursor-not-allowed [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                 />
               </div>
             </Field>

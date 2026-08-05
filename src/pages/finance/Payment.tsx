@@ -997,10 +997,19 @@ const Payment: React.FC = () => {
             chequeAccountNumber: "",
             chequeIfsc: "",
           }
-        : {
-            // Auto-fill cheque date to today if not already set
-            chequeDate: prev.chequeDate || today,
-          }),
+        : newMode === "Cheque"
+          ? {
+              // Plain (non-PDC) cheque: always today's date, locked in the
+              // UI — a cheque dated anything else isn't a plain cheque,
+              // it's a post-dated one, which is its own mode.
+              chequeDate: today,
+            }
+          : {
+              // Post-Dated Cheque: auto-fill today as a starting point only
+              // if not already set — the user is expected to pick a future
+              // date, so don't clobber one they've already chosen.
+              chequeDate: prev.chequeDate || today,
+            }),
       // Clear digital fields when switching away from digital modes
       ...(!["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(newMode)
         ? {
