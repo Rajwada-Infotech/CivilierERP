@@ -327,11 +327,20 @@ router.get("/cheque-lots", async (req, res) => {
         bm.BBranch      AS BankBranch,
         bm.BAccountType AS BankAccountType,
         cm.Remarks,
-        -- Remaining: explicit arithmetic avoids computed-column resolution issues
-        (cm.ChequeEndNumber - cm.ChequeStartNumber + 1) - ISNULL((
-          SELECT COUNT(*) FROM dbo.NewPayment np
-          WHERE np.PChequeLotId = cm.CId AND np.PChequeNo IS NOT NULL
-        ), 0) AS RemainingCheques
+        -- Remaining: explicit arithmetic avoids computed-column resolution issues.
+        -- Subtracts both cheques currently attached to an active payment AND
+        -- cancelled cheques (dbo.CancelledCheque — permanently blocked from
+        -- reissue even though cancellation detaches PChequeLotId from the
+        -- originating NewPayment row).
+        (cm.ChequeEndNumber - cm.ChequeStartNumber + 1)
+          - ISNULL((
+              SELECT COUNT(*) FROM dbo.NewPayment np
+              WHERE np.PChequeLotId = cm.CId AND np.PChequeNo IS NOT NULL
+            ), 0)
+          - ISNULL((
+              SELECT COUNT(*) FROM dbo.CancelledCheque cc
+              WHERE cc.ChequeLotId = cm.CId
+            ), 0) AS RemainingCheques
       FROM dbo.ChequeMaster cm
       LEFT JOIN dbo.BankMaster bm ON cm.BankId = bm.BId
       ${whereClause}
@@ -387,11 +396,23 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
       usedRes.recordset.filter((r) => r.IsBounced).map((r) => String(r.PChequeNo))
     );
 
+    // Cancelled cheques are permanently blocked from reissue even though
+    // cancellation detaches the originating payment's PChequeLotId (so they
+    // no longer show up in usedSet above) — see chequeCancellation.js.
+    const cancelledRes = await pool.request().input("ChequeLotId", sql.Int, lotId)
+      .query(`SELECT ChequeNo FROM dbo.CancelledCheque WHERE ChequeLotId = @ChequeLotId`);
+    const cancelledSet = new Set(cancelledRes.recordset.map((r) => String(r.ChequeNo)));
+
     // Build list of all cheque numbers in range
     const cheques = [];
     for (let n = ChequeStartNumber; n <= ChequeEndNumber; n++) {
       const num = String(n);
-      cheques.push({ number: num, used: usedSet.has(num), bounced: bouncedSet.has(num) });
+      cheques.push({
+        number: num,
+        used: usedSet.has(num),
+        bounced: bouncedSet.has(num),
+        cancelled: cancelledSet.has(num),
+      });
     }
 
     res.json(cheques);
@@ -450,6 +471,20 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
       return res
         .status(409)
         .json({ error: "Cheque number already used in another payment" });
+    }
+
+    // Cancelled cheques are permanently blocked — cancellation detaches
+    // PChequeLotId from the payment row, so the check above alone wouldn't
+    // catch a previously-cancelled number being picked again.
+    const cancelledDupRes = await pool
+      .request()
+      .input("ChequeLotId", sql.Int, lotId)
+      .input("ChequeNo", sql.NVarChar(50), String(chequeNo))
+      .query(`SELECT COUNT(*) AS cnt FROM dbo.CancelledCheque WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo`);
+    if (cancelledDupRes.recordset[0].cnt > 0) {
+      return res
+        .status(409)
+        .json({ error: "This cheque number has been cancelled and cannot be reissued." });
     }
 
     // Count remaining available cheques (exclude Rejected/Deleted)
@@ -1424,6 +1459,7 @@ router.get("/chain/:expenseRef", async (req, res) => {
           np.PChequeDate,
           np.PChequeIfsc,
           np.PBankName,
+          np.PIsChequeCancelled,
           np.ReplacesPaymentId,
           np.BounceCharge,
           np.PCreatedBy,

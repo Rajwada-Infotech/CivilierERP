@@ -3286,6 +3286,11 @@ const Payment: React.FC = () => {
                                   return bank ? <><span>·</span><span className="font-medium text-foreground/70">{bank}</span></> : null;
                                 })()}
                                 {p.PChequeNo && <><span>·</span><span>Chq {p.PChequeNo}</span></>}
+                                {!!p.PIsChequeCancelled && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold">
+                                    Cancelled Cheque
+                                  </span>
+                                )}
                                 {(p.BounceCharge ?? 0) > 0 && (
                                   <span className="text-amber-600 dark:text-amber-400 font-medium">
                                     +{formatINR(p.BounceCharge!)} bank charge
@@ -4466,6 +4471,11 @@ const Payment: React.FC = () => {
                                   <span className="font-mono font-semibold text-foreground text-xs">{formatINR(Number(p.PAmount ?? 0))}</span>
                                   {p.PMode && <span>· {p.PMode}</span>}
                                   {p.PChequeNo && <span>· Chq #{p.PChequeNo}</span>}
+                                  {!!p.PIsChequeCancelled && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold">
+                                      Cancelled Cheque
+                                    </span>
+                                  )}
                                 </div>
                                 {p.BounceDate && (
                                   <div className="text-[10px] text-red-600 dark:text-red-400 flex items-center gap-1">
