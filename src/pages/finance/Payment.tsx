@@ -3250,7 +3250,7 @@ const Payment: React.FC = () => {
                         const borderCls =
                           ds === "Success" || ds === "Cheque Cleared"
                             ? "border-emerald-500"
-                            : ds === "Cheque Bounced"
+                            : ds === "Cheque Bounced" || ds === "Cheque Cancelled"
                             ? "border-red-500"
                             : ds === "Reissued"
                             ? "border-violet-500"
@@ -3262,7 +3262,7 @@ const Payment: React.FC = () => {
                         const badgeCls =
                           ds === "Success" || ds === "Cheque Cleared"
                             ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
-                            : ds === "Cheque Bounced"
+                            : ds === "Cheque Bounced" || ds === "Cheque Cancelled"
                             ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20"
                             : ds === "Reissued"
                             ? "bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20"
@@ -4189,7 +4189,7 @@ const Payment: React.FC = () => {
                                     ? "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800"
                                   : rec.displayStatus === "Cheque Issued"
                                     ? "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800"
-                                  : rec.displayStatus === "Cheque Bounced"
+                                  : rec.displayStatus === "Cheque Bounced" || rec.displayStatus === "Cheque Cancelled"
                                     ? "bg-red-100 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800"
                                   : rec.displayStatus === "Reissued"
                                     ? "bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-400 dark:border-violet-800"
@@ -4446,21 +4446,21 @@ const Payment: React.FC = () => {
                             ds === "Success" || ds === "Cheque Cleared" ? "border-l-emerald-500" :
                             ds === "Pending" ? "border-l-amber-500" :
                             ds === "Cheque Issued" ? "border-l-blue-500" :
-                            ds === "Cheque Bounced" ? "border-l-red-500" :
+                            ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "border-l-red-500" :
                             ds === "Reissued" ? "border-l-violet-500" :
                             "border-l-gray-400";
                           const dotColor =
                             ds === "Success" || ds === "Cheque Cleared" ? "bg-emerald-500" :
                             ds === "Pending" ? "bg-amber-500" :
                             ds === "Cheque Issued" ? "bg-blue-500" :
-                            ds === "Cheque Bounced" ? "bg-red-500" :
+                            ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "bg-red-500" :
                             ds === "Reissued" ? "bg-violet-500" :
                             "bg-gray-400";
                           const badgeClass =
                             ds === "Success" || ds === "Cheque Cleared" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400" :
                             ds === "Pending" ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400" :
                             ds === "Cheque Issued" ? "bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400" :
-                            ds === "Cheque Bounced" ? "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400" :
+                            ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400" :
                             ds === "Reissued" ? "bg-violet-500/10 border-violet-500/20 text-violet-700 dark:text-violet-400" :
                             "bg-gray-500/10 border-gray-500/20 text-gray-700 dark:text-gray-400";
                           return (

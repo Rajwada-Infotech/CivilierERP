@@ -224,6 +224,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
             WHERE r2.ReplacesPaymentId = np.PPaymentID
               AND r2.Status NOT IN ('Rejected', 'Deleted')
           ) THEN 'Reissued'
+          WHEN np.PIsChequeCancelled = 1
+            THEN 'Cheque Cancelled'
           WHEN COALESCE(brc_list.IsBounced, 0) = 1
             THEN 'Cheque Bounced'
           WHEN COALESCE(brc_list.IsMatched, 0) = 1
@@ -1414,6 +1416,7 @@ router.get("/detail/:id", async (req, res) => {
           COALESCE(brc_list.IsBounced, 0) AS IsBounced,
           CASE
             WHEN EXISTS (SELECT 1 FROM dbo.NewPayment r2 WHERE r2.ReplacesPaymentId = np.PPaymentID AND r2.Status NOT IN ('Rejected','Deleted')) THEN 'Reissued'
+            WHEN np.PIsChequeCancelled = 1 THEN 'Cheque Cancelled'
             WHEN COALESCE(brc_list.IsBounced, 0) = 1 THEN 'Cheque Bounced'
             WHEN COALESCE(brc_list.IsMatched, 0) = 1 AND np.PMode IN ('Cheque','Post-Dated Cheque') THEN 'Cheque Cleared'
             WHEN np.Status = 'Approved' AND np.PMode IN ('Cheque','Post-Dated Cheque') THEN 'Cheque Issued'
@@ -1482,6 +1485,8 @@ router.get("/chain/:expenseRef", async (req, res) => {
               WHERE r2.ReplacesPaymentId = np.PPaymentID
                 AND r2.Status NOT IN ('Rejected', 'Deleted')
             ) THEN 'Reissued'
+            WHEN np.PIsChequeCancelled = 1
+              THEN 'Cheque Cancelled'
             WHEN COALESCE(brc.IsBounced, 0) = 1
               THEN 'Cheque Bounced'
             WHEN COALESCE(brc.IsMatched, 0) = 1

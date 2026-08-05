@@ -80,6 +80,10 @@ function isBounced(e: BrsEntry): boolean {
   return e.IsBounced === true || e.IsBounced === 1;
 }
 
+function isCancelled(e: BrsEntry): boolean {
+  return e.IsChequeCancelled === true || e.IsChequeCancelled === 1;
+}
+
 
 // ─── Export column definitions ────────────────────────────────────────────────
 
@@ -95,8 +99,10 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Txn ID",     accessor: (r) => r.TxnId ?? "—" },
   { header: "Pay Status", accessor: "PayStatus" },
   { header: "BRS Status", accessor: (r) => {
-    if ((r as unknown as BrsEntry).IsBounced === 1 || (r as unknown as BrsEntry).IsBounced === true) return "Bounced";
-    return (r as unknown as BrsEntry).IsMatched === 1 || (r as unknown as BrsEntry).IsMatched === true ? "Clear" : "Unclear";
+    const e = r as unknown as BrsEntry;
+    if (isCancelled(e)) return "Cheque Cancelled";
+    if (e.IsBounced === 1 || e.IsBounced === true) return "Bounced";
+    return e.IsMatched === 1 || e.IsMatched === true ? "Clear" : "Unclear";
   }},
   { header: "Clearing Date", accessor: (r) => fmt((r as unknown as BrsEntry).ClearingDate) },
   { header: "Bounce Date",   accessor: (r) => fmt((r as unknown as BrsEntry).BounceDate) },
@@ -123,7 +129,15 @@ function TypePill({ type }: { type: "PAYMENT" | "RECEIVED" }) {
   );
 }
 
-function ClearBadge({ cleared, bounced }: { cleared: boolean; bounced: boolean }) {
+function ClearBadge({ cleared, bounced, cancelled }: { cleared: boolean; bounced: boolean; cancelled?: boolean }) {
+  if (cancelled) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-800">
+        <Ban size={10} className="shrink-0" />
+        Cheque Cancelled
+      </span>
+    );
+  }
   if (bounced) {
     return (
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-800">
@@ -472,7 +486,7 @@ export default function Brs() {
 
   // ── Toggle clear / unclear ────────────────────────────────────────────────
   const toggle = useCallback(async (entry: BrsEntry) => {
-    if (isBounced(entry)) return; // can't toggle a bounced entry
+    if (isBounced(entry) || isCancelled(entry)) return; // can't toggle a bounced or cancelled-cheque entry
     const key = `${entry.SourceType}-${entry.SourceID}`;
     setTogglingId(key);
     try {
@@ -829,12 +843,13 @@ export default function Brs() {
                 const key = `${entry.SourceType}-${entry.SourceID}`;
                 const cleared = isCleared(entry);
                 const bounced = isBounced(entry);
+                const cancelled = isCancelled(entry);
                 const toggling = togglingId === key;
                 return (
                   <div
                     key={key}
                     className={`px-4 py-3.5 transition-colors ${
-                      bounced
+                      cancelled || bounced
                         ? "bg-red-500/[0.05] border-l-2 border-l-red-500/50"
                         : cleared
                           ? "bg-emerald-500/[0.03]"
@@ -845,9 +860,9 @@ export default function Brs() {
                     <div className="flex items-start gap-3">
                       <div className="pt-0.5 shrink-0">
                         <PassbookCheck
-                          checked={cleared && !bounced}
+                          checked={cleared && !bounced && !cancelled}
                           loading={toggling}
-                          onChange={() => !bounced && toggle(entry)}
+                          onChange={() => !bounced && !cancelled && toggle(entry)}
                         />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -881,10 +896,10 @@ export default function Brs() {
                       </div>
                       {/* Amount + BRS on the right */}
                       <div className="shrink-0 text-right flex flex-col items-end gap-1.5">
-                        <span className={`text-sm font-mono font-bold ${bounced ? "text-red-600 dark:text-red-400 line-through decoration-red-500/60" : "text-foreground"}`}>
+                        <span className={`text-sm font-mono font-bold ${bounced || cancelled ? "text-red-600 dark:text-red-400 line-through decoration-red-500/60" : "text-foreground"}`}>
                           {formatINR(entry.Amount)}
                         </span>
-                        <ClearBadge cleared={cleared} bounced={bounced} />
+                        <ClearBadge cleared={cleared} bounced={bounced} cancelled={cancelled} />
                         {bounced && <BounceDetailPanel entry={entry} />}
                         {cleared && entry.ClearingDate && (() => {
                           const { date, time } = fmtDT(entry.ClearingDate);
@@ -977,13 +992,14 @@ export default function Brs() {
                   const key = `${entry.SourceType}-${entry.SourceID}`;
                   const cleared = isCleared(entry);
                   const bounced = isBounced(entry);
+                  const cancelled = isCancelled(entry);
                   const toggling = togglingId === key;
 
                   return (
                     <tr
                       key={key}
                       className={`transition-colors ${
-                        bounced
+                        cancelled || bounced
                           ? "bg-red-500/[0.05] hover:bg-red-500/[0.09] border-l-2 border-l-red-500/50"
                           : cleared
                             ? "bg-emerald-500/[0.03] hover:bg-emerald-500/[0.07]"
@@ -992,9 +1008,9 @@ export default function Brs() {
                     >
                       <td className="px-3 py-4 text-center align-middle">
                         <PassbookCheck
-                          checked={cleared && !bounced}
+                          checked={cleared && !bounced && !cancelled}
                           loading={toggling}
-                          onChange={() => !bounced && toggle(entry)}
+                          onChange={() => !bounced && !cancelled && toggle(entry)}
                         />
                       </td>
                       <td className="px-3 py-4 align-middle">
@@ -1031,7 +1047,7 @@ export default function Brs() {
                         </span>
                       </td>
                       <td className="px-3 py-4 text-right align-middle">
-                        <span className={`text-xs font-mono font-semibold ${bounced ? "text-red-600 dark:text-red-400 line-through decoration-red-500/60" : "text-foreground"}`}>
+                        <span className={`text-xs font-mono font-semibold ${bounced || cancelled ? "text-red-600 dark:text-red-400 line-through decoration-red-500/60" : "text-foreground"}`}>
                           {formatINR(entry.Amount)}
                         </span>
                       </td>
@@ -1048,7 +1064,7 @@ export default function Brs() {
                       </td>
                       <td className="px-3 py-4 align-middle">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <ClearBadge cleared={cleared} bounced={bounced} />
+                          <ClearBadge cleared={cleared} bounced={bounced} cancelled={cancelled} />
                           {bounced && <BounceDetailPanel entry={entry} />}
                         </div>
                       </td>

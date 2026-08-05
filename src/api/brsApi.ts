@@ -20,6 +20,7 @@ export interface BrsEntry {
   TxnId: string | null;
   ChequeNo: string | null;
   PayStatus: string;
+  IsChequeCancelled: boolean | number; // SQL BIT comes back as 0/1 or true/false
   IsMatched: boolean | number; // SQL BIT comes back as 0/1 or true/false
   IsBounced: boolean | number;
   BounceDate: string | null;
