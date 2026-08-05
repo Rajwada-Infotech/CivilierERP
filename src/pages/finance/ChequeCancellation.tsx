@@ -6,7 +6,7 @@
  * for the cancellation semantics (permanent block on reissue, badge flag, etc).
  */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -119,19 +119,6 @@ export default function ChequeCancellation() {
 
   // ── Bulk cancellation ────────────────────────────────────────────────────────
   const [bulkInput, setBulkInput] = useState("");
-  const bulkTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  // Auto-grow the textarea to fit its content (min ~3 lines, capped so a huge
-  // paste doesn't blow out the page — it scrolls internally past that).
-  const autoGrowBulkTextarea = () => {
-    const el = bulkTextareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
-  };
-  useEffect(() => {
-    autoGrowBulkTextarea();
-  }, [bulkInput]);
   const [bulkResults, setBulkResults] = useState<BulkSearchResult[]>([]);
   const [bulkSearching, setBulkSearching] = useState(false);
   const [bulkCancelling, setBulkCancelling] = useState(false);
@@ -383,21 +370,19 @@ export default function ChequeCancellation() {
           <TabsContent value="bulk" className="mt-3">
             <div className="glass rounded-xl px-5 py-4 space-y-4 ring-1 ring-border/60">
               <p className="text-xs text-muted-foreground">
-                Paste multiple cheque numbers, then check them before cancelling.
+                Paste multiple cheque numbers (comma, space, or newline separated), then check them before cancelling.
               </p>
 
               <div className="flex flex-col sm:flex-row gap-3 items-stretch">
-                <textarea
-                  ref={bulkTextareaRef}
+                <input
+                  type="text"
                   value={bulkInput}
                   onChange={(e) => setBulkInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) runBulkSearch();
+                    if (e.key === "Enter") runBulkSearch();
                   }}
-                  placeholder={"One cheque number per line — e.g.\n100234\n100235\n100236"}
-                  rows={3}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-border bg-input/70 text-xs leading-relaxed resize-none overflow-y-auto font-mono focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-[height] duration-100"
-                  style={{ height: "auto" }}
+                  placeholder="Cheque numbers — e.g. 100234, 100235, 100236"
+                  className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-border bg-input/70 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-colors"
                 />
                 <div className="flex sm:flex-col gap-2 sm:w-36 shrink-0">
                   <button
