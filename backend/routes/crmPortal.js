@@ -10,6 +10,7 @@ const { emitNotification } = require("../services/notify");
 const { maybeResolveAgreementDate, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { getInvoicePdfBuffer } = require("../services/invoicePdf");
+const { getAgreementBookingLockReason, agreementExecutedLockReason } = require("./crmAgreements");
 
 // Categories a customer is allowed to raise themselves — same vocabulary as
 // the staff-side Service Ticket module (crmServiceTickets.js), so every
@@ -433,7 +434,7 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
       const docId = parseInt(req.params.docId, 10);
 
       const check = await pool.request().input("aid", sql.Int, appId).input("did", sql.Int, docId).query(`
-        SELECT d.Id, d.Status, d.DocumentType, ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
+        SELECT d.Id, d.AgreementId, d.Status, d.DocumentType, ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
         FROM dbo.CrmAgreementDocument d
         JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
         JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
@@ -447,6 +448,15 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
       if (!["Requested", "Rejected"].includes(doc.Status)) {
         return res.status(400).json({ error: "This document isn't open for upload" });
       }
+      // Same two gates every staff-side document route already enforces
+      // (crmAgreements.js) — this customer-facing upload was the one path
+      // missing them. A booking cancelled out from under a still-open
+      // document request, or an agreement that's since been Executed/
+      // Registered, must not accept a new upload either.
+      const lockReason = await getAgreementBookingLockReason(pool, doc.AgreementId);
+      if (lockReason) return res.status(409).json({ error: `Cannot upload — ${lockReason}.` });
+      const execLockReason = await agreementExecutedLockReason(pool, doc.AgreementId);
+      if (execLockReason) return res.status(409).json({ error: `Cannot upload — ${execLockReason}.` });
 
       await pool.request()
         .input("id", sql.Int, docId)

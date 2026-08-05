@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock } from "lucide-react";
+import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, History, FolderClock, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -13,7 +13,6 @@ const API = "/api/crm/agreements";
 const SA_LEADS_API = "/api/sa/leads";
 
 const DOC_TYPES = ["SaleAgreement", "AllotmentLetter", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
-const DOC_STATUSES = ["Pending", "Requested", "Uploaded", "Submitted", "Verified", "Rejected"];
 
 const agrStatusColor: Record<string, string> = {
   Draft:      "text-muted-foreground bg-muted/50 border-border",
@@ -58,6 +57,63 @@ function DateStatusBadge({ label, date, color, active }: { label: string; date?:
 function unverifiedMandatoryDocs(documents: any[] | undefined): any[] {
   return (documents || []).filter((d) => d.IsMandatory && d.Status !== "Verified");
 }
+
+// A single, honest read of where this agreement actually is in its real
+// lifecycle — mirrors the exact same gates the buttons below already
+// enforce (senior approval -> sent -> customer approval -> date agreed ->
+// executed -> registered), just rendered as a progress trail instead of
+// scattered status pills, so the workflow is legible at a glance instead of
+// something staff have to piece together from separate fields.
+type StepState = "done" | "current" | "upcoming";
+function agreementStepStates(a: any): { label: string; state: StepState }[] {
+  // Legal Executive assignment gets its own dedicated step, not just a
+  // buried precondition inside "Executed" — it's a real, server-enforced
+  // mandate (mark-executed 400s without one) and deserves the same
+  // visibility as every other real gate in this lifecycle. Placed right
+  // after Prepared since assignment can and should happen as soon as the
+  // agreement exists, well before execution is anywhere close — waiting
+  // until the last step to surface it would defeat the point of showing it
+  // as a distinct stage at all.
+  const legalAssigned = !!a?.LegalExecutiveId;
+  const senior = a?.SeniorApprovalStatus === "Approved";
+  const sent = !!a?.SentToCustomerAt;
+  const custApproved = a?.CustomerApprovalStatus === "Approved";
+  const dated = !!a?.AgreementDate;
+  const executed = a?.Status === "Executed" || a?.Status === "Registered";
+  const registered = a?.Status === "Registered";
+  return [
+    { label: "Prepared",             state: "done" },
+    { label: "Legal Exec. Assigned", state: legalAssigned ? "done" : "current" },
+    { label: "Senior Approval",      state: senior ? "done" : legalAssigned ? "current" : "upcoming" },
+    { label: "Sent to Customer",     state: sent ? "done" : senior ? "current" : "upcoming" },
+    { label: "Customer Approval",    state: custApproved ? "done" : sent ? "current" : "upcoming" },
+    { label: "Date Agreed",          state: dated ? "done" : custApproved ? "current" : "upcoming" },
+    { label: "Executed",             state: executed ? "done" : dated ? "current" : "upcoming" },
+    { label: "Registered",           state: registered ? "done" : executed ? "current" : "upcoming" },
+  ];
+}
+function AgreementStepper({ steps }: { steps: { label: string; state: StepState }[] }) {
+  return (
+    <div className="flex items-center overflow-x-auto thin-scroll">
+      {steps.map((s, i) => (
+        <React.Fragment key={s.label}>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+              s.state === "done" ? "bg-green-500 text-white"
+              : s.state === "current" ? "bg-primary text-primary-foreground"
+              : "bg-muted text-muted-foreground"}`}>
+              {s.state === "done" ? <Check size={11} /> : i + 1}
+            </span>
+            <span className={`text-xs font-medium whitespace-nowrap ${s.state === "upcoming" ? "text-muted-foreground" : ""}`}>{s.label}</span>
+          </div>
+          {i < steps.length - 1 && (
+            <div className={`w-5 sm:w-8 h-px mx-1.5 shrink-0 ${steps[i + 1].state !== "upcoming" ? "bg-green-400" : "bg-border"}`} />
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
 const docStatusColor: Record<string, string> = {
   Pending:   "text-orange-600 bg-orange-50 border-orange-200",
   Requested: "text-amber-600 bg-amber-50 border-amber-200",
@@ -101,44 +157,157 @@ function fmtBytes(n: number | null | undefined) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// Preview dialog for a single uploaded agreement document.
-const DocPreviewDialog: React.FC<{ doc: any; onClose: () => void }> = ({ doc, onClose }) => {
+async function fetchDocAudit(docId: number): Promise<any[]> {
+  try {
+    const r = await fetchWithAuth(`${API}/documents/${docId}/audit`);
+    return r.ok ? r.json() : [];
+  } catch { return []; }
+}
+
+// Review dialog for a single agreement document — preview, verify/reject
+// (rejecting a legal document with no reason on record is never allowed,
+// server-enforced too, see PUT /:id/documents/:docId), and a History tab
+// showing every prior status change from CrmAuditLog. Replaces the old
+// preview-only dialog + bare status <select>, which let a document be
+// silently flipped to Rejected with zero explanation and no easy way to see
+// what happened to it before — not acceptable for real contractual paperwork.
+const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: () => void; onReviewed: () => void }> =
+  ({ agreementId, doc, onClose, onReviewed }) => {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [tab, setTab] = useState<"preview" | "history">("preview");
+  const [audit, setAudit] = useState<any[] | null>(null);
+  const [remarks, setRemarks] = useState(doc.Remarks || "");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (!doc.FilePath) return;
     let objectUrl: string | null = null;
     fetchWithAuth(`${API}/documents/file/${doc.Id}`)
       .then((r) => r.blob())
       .then((blob) => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); })
       .catch(() => setBlobUrl(null));
     return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [doc.Id]);
+  }, [doc.Id, doc.FilePath]);
+
+  useEffect(() => {
+    if (tab === "history" && audit === null) fetchDocAudit(doc.Id).then(setAudit);
+  }, [tab, audit, doc.Id]);
+
+  const setStatus = async (status: string) => {
+    if (status === "Rejected" && !remarks.trim()) { toast.error("Remarks are required to reject"); return; }
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${agreementId}/documents/${doc.Id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Status: status, Remarks: remarks || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update");
+      toast.success(`Marked ${status}`);
+      onReviewed();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
-            {mimeIcon(doc.MimeType)} {doc.FileName || doc.DocumentType}
+            {mimeIcon(doc.MimeType)} {doc.Label || doc.DocumentType.replace(/([A-Z])/g, " $1").trim()}
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${docStatusColor[doc.Status] || ""}`}>{doc.Status}</span>
           </DialogTitle>
         </DialogHeader>
-        <div className="flex items-center justify-center min-h-[300px] bg-muted/30 rounded-lg overflow-hidden">
-          {!blobUrl ? (
-            <span className="text-sm text-muted-foreground">Loading preview…</span>
-          ) : doc.MimeType?.startsWith("image/") ? (
-            <img src={blobUrl} alt={doc.FileName} className="max-w-full max-h-[60vh] object-contain" />
-          ) : doc.MimeType === "application/pdf" ? (
-            <iframe src={blobUrl} title={doc.FileName} className="w-full h-[60vh] border-0" />
-          ) : (
-            <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">
-              {mimeIcon(doc.MimeType)}
-              Preview not available for this file type.
-            </div>
-          )}
+
+        <div className="flex items-center gap-1 border-b border-border -mt-1">
+          <button onClick={() => setTab("preview")}
+            className={`text-xs font-medium px-3 py-1.5 border-b-2 -mb-px ${tab === "preview" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+            Preview
+          </button>
+          <button onClick={() => setTab("history")}
+            className={`text-xs font-medium px-3 py-1.5 border-b-2 -mb-px flex items-center gap-1 ${tab === "history" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+            <History size={12} /> History
+          </button>
         </div>
-        <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
-          <span>{fmtBytes(doc.FileSize)}</span>
-          {blobUrl && <a href={blobUrl} download={doc.FileName} className="text-primary hover:underline">Download</a>}
+
+        {tab === "preview" ? (
+          <>
+            <div className="flex items-center justify-center min-h-[240px] bg-muted/30 rounded-lg overflow-hidden">
+              {!doc.FilePath && !doc.DocumentUrl ? (
+                <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">
+                  <Clock size={22} /> Awaiting upload from customer — nothing to preview yet.
+                </div>
+              ) : doc.DocumentUrl && !doc.FilePath ? (
+                <a href={doc.DocumentUrl} target="_blank" rel="noreferrer" className="flex flex-col items-center gap-2 py-8 text-primary text-sm hover:underline">
+                  <FileIcon size={22} /> Open external document link
+                </a>
+              ) : !blobUrl ? (
+                <span className="text-sm text-muted-foreground">Loading preview…</span>
+              ) : doc.MimeType?.startsWith("image/") ? (
+                <img src={blobUrl} alt={doc.FileName} className="max-w-full max-h-[50vh] object-contain" />
+              ) : doc.MimeType === "application/pdf" ? (
+                <iframe src={blobUrl} title={doc.FileName} className="w-full h-[50vh] border-0" />
+              ) : (
+                <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">{mimeIcon(doc.MimeType)} Preview not available.</div>
+              )}
+            </div>
+            {doc.FilePath && (
+              <div className="flex justify-between items-center text-xs text-muted-foreground">
+                <span>{doc.FileName} {doc.FileSize ? `· ${fmtBytes(doc.FileSize)}` : ""}{doc.IssuedBy ? ` · by ${doc.IssuedBy}` : ""}</span>
+                {blobUrl && <a href={blobUrl} download={doc.FileName} className="text-primary hover:underline flex items-center gap-1"><Download size={12} /> Download</a>}
+              </div>
+            )}
+            {doc.FilePath && (
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Remarks {doc.Status !== "Verified" ? "(required to reject)" : ""}</label>
+                <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2}
+                  placeholder="Reason for rejection, or any note for the record..."
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="min-h-[240px] max-h-[50vh] overflow-y-auto">
+            {audit === null ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">Loading history…</div>
+            ) : audit.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
+                <FolderClock size={20} /> No review history yet for this document.
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {audit.map((h: any) => (
+                  <li key={h.Id} className="text-xs border border-border rounded-lg px-3 py-2 flex items-start justify-between gap-3">
+                    <div>
+                      <span className="font-medium">{h.Field}</span>{": "}
+                      <span className="text-muted-foreground">{h.OldValue || "—"}</span>{" → "}
+                      <span className="font-medium">{h.NewValue || "—"}</span>
+                    </div>
+                    <div className="text-right text-muted-foreground shrink-0">
+                      <div>{h.ChangedByName || "System"}</div>
+                      <div>{String(h.ChangedAt).replace("T", " ").slice(0, 16)}</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-border">
+          {doc.FilePath && doc.Status !== "Verified" && (
+            <button onClick={() => setStatus("Verified")} disabled={saving}
+              className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-40">Verify</button>
+          )}
+          {doc.FilePath && doc.Status !== "Rejected" && (
+            <button onClick={() => setStatus("Rejected")} disabled={saving}
+              className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">Reject</button>
+          )}
+          <button onClick={onClose} className="px-3 py-1.5 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
         </div>
       </DialogContent>
     </Dialog>
@@ -197,6 +366,16 @@ const CrmAgreement: React.FC = () => {
   const [editLocked, setEditLocked] = useState(true);
   const editInputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${editLocked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
   const [saving, setSaving] = useState(false);
+  // Same tabbed pattern as CrmBookingDetail.tsx — the detail panel used to
+  // be one long stack of cards (Overview, Approval Workflow, Documents all
+  // scrolling together), which read as a messy wall of text rather than a
+  // step-by-step flow. Header actions + the lifecycle Stepper/Next-Action
+  // banner stay always visible above the tabs since they're global, not
+  // section-specific.
+  const AGR_TABS = ["Overview", "Legal & Approval", "Documents"] as const;
+  type AgrTab = typeof AGR_TABS[number];
+  const [agrTab, setAgrTab] = useState<AgrTab>("Overview");
+  useEffect(() => { setAgrTab("Overview"); }, [selectedId]);
 
   const { data: agreements = [], isLoading } = useQuery({ queryKey: ["crm-agreements"], queryFn: fetchAgreements, staleTime: 60_000 });
   const { data: detail } = useQuery({
@@ -352,14 +531,22 @@ const CrmAgreement: React.FC = () => {
     }
   };
 
+  // Quick-verify only (Rejected always requires remarks, server-enforced —
+  // that path goes through DocumentReviewDialog instead). Previously this
+  // never checked res.ok, so a failed verify (e.g. the "not uploaded yet"
+  // guard firing) silently did nothing with no error shown — fixed to
+  // actually surface the real outcome.
   const handleDocStatusChange = async (docId: number, status: string) => {
     if (!selectedId) return;
     try {
-      await fetchWithAuth(`${API}/${selectedId}/documents/${docId}`, {
+      const res = await fetchWithAuth(`${API}/${selectedId}/documents/${docId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ Status: status }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update document");
+      toast.success(`Marked ${status}`);
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
     } catch (e: any) {
       toast.error(e.message);
@@ -465,6 +652,32 @@ const CrmAgreement: React.FC = () => {
     setEditDialog(true);
   };
 
+  const [assigningLegal, setAssigningLegal] = useState(false);
+  // Deliberately its own action, not folded into Edit Details — assigning
+  // "who is handling this" isn't a legal-content correction, so it
+  // shouldn't require unlocking Edit, filling a revision reason, or
+  // bumping VersionNo the way a PAN/address fix does.
+  const handleAssignLegal = async (legalExecutiveId: string) => {
+    if (!selectedId) return;
+    setAssigningLegal(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${selectedId}/assign-legal`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ LegalExecutiveId: legalExecutiveId || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(legalExecutiveId ? "Legal executive assigned" : "Legal executive unassigned");
+      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setAssigningLegal(false);
+    }
+  };
+
   const handleSaveEdit = async () => {
     if (!selectedId) return;
     setSaving(true);
@@ -545,11 +758,79 @@ const CrmAgreement: React.FC = () => {
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
           ) : (
             <>
-              {/* Agreement Info */}
-              <div className="rounded-xl border border-border p-4 space-y-3">
+              {/* Lifecycle progress + the one thing to actually do right now —
+                  replaces staff having to piece the current state together
+                  from separate status pills scattered further down. */}
+              {detail.agreement?.Status !== "Cancelled" && (
+                <div className="rounded-xl border border-border p-4 space-y-3">
+                  <AgreementStepper steps={agreementStepStates(detail.agreement)} />
+                  {(() => {
+                    const a = detail.agreement;
+                    const pendingDocs = unverifiedMandatoryDocs(detail.documents);
+                    const cancelled = isBookingCancelled(a);
+                    let text = "";
+                    let cta: { label: string; onClick: () => void } | null = null;
+                    if (cancelled) {
+                      text = `The underlying booking is ${a?.BookingStatus || "inactive"} — this agreement is locked. Cancel it to close it out.`;
+                    } else if (a?.Status === "Registered") {
+                      text = "Registered — this agreement is fully complete.";
+                    } else if (a?.Status === "Executed") {
+                      text = "Executed — mark it Registered once the Sales Deed carries a Registration No.";
+                    } else if (!a?.LegalExecutiveId) {
+                      // Advisory, not a hard block on this step specifically —
+                      // Senior Approval doesn't actually require it — but
+                      // surfaced first to match its position in the stepper
+                      // above and get it assigned early rather than only
+                      // being discovered as a blocker at the very last step.
+                      text = "Assign a Legal Executive to take ownership of preparing this agreement's paperwork — required before it can be marked executed.";
+                    } else if (a?.SeniorApprovalStatus !== "Approved") {
+                      text = "Awaiting senior approval — visit the Admin Approval Inbox to approve or reject it.";
+                    } else if (!a?.SentToCustomerAt) {
+                      text = "Senior-approved — ready to send to the customer for their review.";
+                      cta = { label: "Send to Customer Portal", onClick: () => { setSendDate(a?.ProposedDateByCompany ? String(a.ProposedDateByCompany).slice(0, 10) : ""); setSendDialog(true); } };
+                    } else if (a?.CustomerApprovalStatus === "RecheckRequested") {
+                      text = `Customer requested a recheck${a?.LastRecheckRemarks ? `: "${a.LastRecheckRemarks}"` : ""} — address it and resend.`;
+                      cta = { label: "Resend After Recheck", onClick: () => { setSendDate(a?.ProposedDateByCompany ? String(a.ProposedDateByCompany).slice(0, 10) : ""); setSendDialog(true); } };
+                    } else if (a?.CustomerApprovalStatus !== "Approved") {
+                      text = "Sent to the customer — awaiting their review and approval.";
+                    } else if (!a?.AgreementDate) {
+                      if (a?.DateApprovalStatus === "Pending") {
+                        text = "Both sides agreed on a date — awaiting super admin sign-off.";
+                      } else {
+                        text = "Customer approved — propose an agreement date.";
+                        cta = { label: a?.ProposedDateByCompany ? "Update Proposed Date" : "Propose Agreement Date", onClick: () => { setSendDate(a?.ProposedDateByCompany ? String(a.ProposedDateByCompany).slice(0, 10) : ""); setProposeDateDialog(true); } };
+                      }
+                    } else if (pendingDocs.length) {
+                      text = `${pendingDocs.length} mandatory document(s) still need verification before this can be executed: ${pendingDocs.map((d: any) => d.Label || d.DocumentType).join(", ")}.`;
+                    } else {
+                      text = "Everything is ready — mark this agreement executed.";
+                      cta = { label: "Mark Executed", onClick: () => handleAgreementAction("mark-executed") };
+                    }
+                    return (
+                      <div className="flex items-center justify-between gap-3 flex-wrap rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
+                        <div className="flex items-start gap-2 text-sm">
+                          <ArrowRight size={15} className="text-primary shrink-0 mt-0.5" />
+                          <span>{text}</span>
+                        </div>
+                        {cta && (
+                          <button onClick={cta.onClick}
+                            className="shrink-0 px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                            {cta.label}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Header — name, status, and every global action. Stays
+                  visible across all tabs since these apply to the whole
+                  agreement, not one section of it. */}
+              <div className="rounded-xl border border-border p-4 space-y-1">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="font-bold text-foreground">{detail.agreement?.ApplicantName}</h2>
+                    <h2 className="font-bold text-lg text-foreground flex items-center gap-1.5"><Building2 size={16} className="text-primary" /> {detail.agreement?.ApplicantName}</h2>
                     <p className="text-xs font-mono text-muted-foreground">
                       {detail.agreement?.AgreementNo}
                       {detail.agreement?.VersionNo > 1 && <span className="ml-1.5 text-violet-600">· v{detail.agreement.VersionNo}</span>}
@@ -597,6 +878,16 @@ const CrmAgreement: React.FC = () => {
                           </span>
                         );
                       }
+                      if (!detail.agreement?.LegalExecutiveId) {
+                        // Same order as the backend (LegalExecutiveId before
+                        // mandatory docs) and the Next Action banner above.
+                        return (
+                          <span title="A Legal Executive must be assigned first — pick one from the Legal Executive field above"
+                            className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
+                            Mark Executed (legal exec. unassigned)
+                          </span>
+                        );
+                      }
                       if (pendingDocs.length) {
                         return (
                           <span title={`Mandatory document(s) not yet verified: ${pendingDocs.map((d) => d.Label || d.DocumentType).join(", ")}`}
@@ -632,12 +923,32 @@ const CrmAgreement: React.FC = () => {
                     )}
                   </div>
                 </div>
+              </div>
+
+              {/* Tab bar — same visual pattern as CrmBookingDetail.tsx's own
+                  tabs (underline style), so the two most-used CRM detail
+                  pages feel like one consistent system instead of each
+                  inventing their own step UI. */}
+              <div className="flex items-center gap-x-1 border-b border-border px-1 -mt-1">
+                {AGR_TABS.map((t, i) => (
+                  <button key={t} onClick={() => setAgrTab(t)}
+                    className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                      agrTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}>
+                    <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                      agrTab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{i + 1}</span>
+                    {t}
+                  </button>
+                ))}
+              </div>
+
+              {agrTab === "Overview" && (
+              <div className="rounded-xl border border-border p-4 space-y-3">
                 <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
                   {[
                     ["Booking No",    detail.agreement?.BookingNo],
                     ["Unit",          detail.agreement?.UnitNo],
                     ["Project",       detail.agreement?.ProjectName || "—"],
-                    ["Total Value",   detail.agreement?.TotalValue ? `₹${Number(detail.agreement.TotalValue).toLocaleString("en-IN")}` : "—"],
                     ["Agreement Date",detail.agreement?.AgreementDate ? String(detail.agreement.AgreementDate).slice(0, 10) : "—"],
                     ["Legal Name",    detail.agreement?.LegalName || "—"],
                     ["PAN",           detail.agreement?.PanNo || "—"],
@@ -645,6 +956,32 @@ const CrmAgreement: React.FC = () => {
                   ].map(([k, v]) => (
                     <div key={k}><span className="text-xs text-muted-foreground">{k}: </span><span className="font-medium">{v}</span></div>
                   ))}
+                  {/* GrandTotal (GST-inclusive), not the raw pre-GST TotalValue
+                      — every other financial surface in the CRM (Booking
+                      list, Booking Detail, Invoices) shows the GST-inclusive
+                      figure as the real total, so this page showing the bare
+                      base value was a genuine inconsistency, not just a
+                      display choice. The breakdown line lists every real
+                      component GrandTotal is actually built from (Unit + its
+                      GST, Parking as a tax-inclusive lump since Parking's own
+                      GST is baked into ParkingTotal rather than split out as
+                      its own column, Extra Work if any) — a plain "Base +
+                      GST" summary silently dropped Parking/Extra Work, which
+                      made the numbers not add up to GrandTotal at all. */}
+                  <div>
+                    <span className="text-xs text-muted-foreground">Total Value (incl. GST): </span>
+                    <span className="font-medium">
+                      {detail.agreement?.GrandTotal ? `₹${Number(detail.agreement.GrandTotal).toLocaleString("en-IN")}` : "—"}
+                    </span>
+                    {detail.agreement?.GrandTotal > 0 && (
+                      <span className="text-[11px] text-muted-foreground block">
+                        Unit ₹{Number(detail.agreement.TotalValue).toLocaleString("en-IN")}
+                        {detail.agreement?.UnitGstAmount > 0 && ` + Unit GST ₹${Number(detail.agreement.UnitGstAmount).toLocaleString("en-IN")}`}
+                        {detail.agreement?.ParkingTotal > 0 && ` + Parking ₹${Number(detail.agreement.ParkingTotal).toLocaleString("en-IN")}${detail.agreement?.ParkingGstAmount > 0 ? ` (incl. GST ₹${Number(detail.agreement.ParkingGstAmount).toLocaleString("en-IN")})` : ""}`}
+                        {detail.agreement?.ExtraChargesTotal > 0 && ` + Extra Work ₹${Number(detail.agreement.ExtraChargesTotal).toLocaleString("en-IN")}${detail.agreement?.ExtraWorkGstAmount > 0 ? ` (incl. GST ₹${Number(detail.agreement.ExtraWorkGstAmount).toLocaleString("en-IN")})` : ""}`}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 space-y-1.5 text-xs">
                   <div className="flex items-center justify-between gap-3">
@@ -707,10 +1044,40 @@ const CrmAgreement: React.FC = () => {
                   <div className="text-xs text-muted-foreground bg-muted/30 rounded p-2">{detail.agreement.LegalAddress}</div>
                 )}
               </div>
+              )}
+
+              {agrTab === "Legal & Approval" && (
+              <div className="space-y-4">
+              <div className="rounded-xl border border-border p-4 space-y-2">
+                <h3 className="text-sm font-semibold flex items-center gap-1.5"><UserCircle2 size={15} className="text-primary" /> Legal Executive</h3>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">Responsible for preparing this agreement's paperwork: </span>
+                  {["Registered", "Cancelled"].includes(detail.agreement?.Status) || isBookingCancelled(detail.agreement) ? (
+                    <span className="font-medium">
+                      {detail.agreement?.LegalExecutiveName || <span className="text-amber-600">Unassigned</span>}
+                    </span>
+                  ) : (
+                    <select
+                      value={detail.agreement?.LegalExecutiveId ? String(detail.agreement.LegalExecutiveId) : ""}
+                      disabled={assigningLegal}
+                      onChange={(e) => handleAssignLegal(e.target.value)}
+                      className={`text-sm border rounded px-1.5 py-0.5 bg-background disabled:opacity-40 ${
+                        detail.agreement?.LegalExecutiveId ? "border-border" : "border-amber-300 text-amber-600"}`}>
+                      <option value="">— Unassigned —</option>
+                      {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                    </select>
+                  )}
+                </div>
+                {!detail.agreement?.LegalExecutiveId && !["Registered", "Cancelled"].includes(detail.agreement?.Status) && (
+                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                    No Legal Executive assigned yet — this is required before the agreement can be marked executed (server-enforced, not just a reminder). Assign someone above once it's clear who's preparing the paperwork.
+                  </div>
+                )}
+              </div>
 
               {/* Approval Workflow */}
               <div className="rounded-xl border border-border p-4 space-y-3">
-                <h3 className="text-sm font-semibold">Approval Workflow</h3>
+                <h3 className="text-sm font-semibold flex items-center gap-1.5"><ShieldAlert size={15} className="text-primary" /> Approval Workflow</h3>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <span className="text-xs text-muted-foreground block mb-1">Senior Approval</span>
@@ -839,11 +1206,13 @@ const CrmAgreement: React.FC = () => {
                   )}
                 </div>
               </div>
+              </div>
+              )}
 
-              {/* Documents */}
+              {agrTab === "Documents" && (
               <div className="rounded-xl border border-border overflow-hidden">
                 <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
-                  <h3 className="text-sm font-semibold">Agreement Documents ({detail.documents?.length || 0})</h3>
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><ScrollText size={15} className="text-primary" /> Agreement Documents ({detail.documents?.length || 0})</h3>
                   <div className="flex items-center gap-3">
                     <button onClick={() => setDocRequestDialog(true)}
                       className="flex items-center gap-1 text-xs text-primary hover:underline">
@@ -862,9 +1231,8 @@ const CrmAgreement: React.FC = () => {
                   return (
                     <div key={d.Id} className="px-4 py-3 border-b border-border last:border-0 flex items-center justify-between gap-3">
                       <button
-                        onClick={() => (d.FilePath ? setPreviewDoc(d) : d.DocumentUrl && window.open(d.DocumentUrl, "_blank"))}
-                        disabled={!d.FilePath && !d.DocumentUrl}
-                        className="flex items-center gap-3 text-left disabled:cursor-default min-w-0"
+                        onClick={() => setPreviewDoc(d)}
+                        className="flex items-center gap-3 text-left min-w-0"
                       >
                         {awaitingCustomer ? <Clock size={16} className="text-amber-500 shrink-0" /> : mimeIcon(d.MimeType)}
                         <div className="min-w-0">
@@ -889,14 +1257,22 @@ const CrmAgreement: React.FC = () => {
                           )}
                         </div>
                       </button>
-                      <select value={d.Status} onChange={(e) => handleDocStatusChange(d.Id, e.target.value)}
-                        className={`text-xs px-2 py-0.5 rounded-full border font-medium shrink-0 ${docStatusColor[d.Status] || ""} bg-transparent cursor-pointer`}>
-                        {DOC_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${docStatusColor[d.Status] || ""}`}>{d.Status}</span>
+                        {d.FilePath && d.Status !== "Verified" && (
+                          <button title="Quick verify" onClick={() => handleDocStatusChange(d.Id, "Verified")}
+                            className="p-1 rounded hover:bg-green-100 text-green-600"><Check size={14} /></button>
+                        )}
+                        {d.FilePath && d.Status !== "Rejected" && (
+                          <button title="Reject (opens review — a reason is required)" onClick={() => setPreviewDoc(d)}
+                            className="p-1 rounded hover:bg-red-100 text-red-600"><X size={14} /></button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
               </div>
+              )}
             </>
           )}
         </div>
@@ -1125,7 +1501,14 @@ const CrmAgreement: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {previewDoc && <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
+      {previewDoc && (
+        <DocumentReviewDialog
+          agreementId={previewDoc.AgreementId || selectedId!}
+          doc={previewDoc}
+          onClose={() => setPreviewDoc(null)}
+          onReviewed={() => { setPreviewDoc(null); qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] }); }}
+        />
+      )}
 
       {/* Edit Details — every save snapshots the prior values into Version
           History (see backend PUT /:id) rather than silently overwriting them. */}

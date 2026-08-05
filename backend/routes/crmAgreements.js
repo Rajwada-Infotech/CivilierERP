@@ -54,7 +54,8 @@ const AGR_SELECT = `
     ag.RecheckCount, ag.LastRecheckRemarks,
     ag.ProposedDateByCompany, ag.ProposedDateByCustomer, ag.SentToCustomerAt, ag.DateApprovalStatus,
     ag.LegalExecutiveId, le.name AS LegalExecutiveName,
-    b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue,
+    b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.GrandTotal, b.TotalGstAmount,
+    b.UnitGstAmount, b.ParkingTotal, b.ParkingGstAmount, b.ExtraChargesTotal, b.ExtraWorkGstAmount,
     b.Status AS BookingStatus, b.IsActive AS BookingIsActive,
     a.ApplicantName, a.Mobile, a.Email,
     cu.name AS CreatedByName,
@@ -87,6 +88,24 @@ async function getAgreementBookingLockReason(pool, agreementId) {
   const row = result.recordset[0];
   if (row.BookingIsActive === false || ["Cancelled", "Rejected"].includes(row.BookingStatus)) {
     return `the underlying booking is ${row.BookingStatus || "inactive"}`;
+  }
+  return null;
+}
+
+// A separate check from the booking lock above — this one guards the
+// agreement's own lifecycle rather than its booking. Once Executed or
+// Registered, the document set is part of what was actually signed off;
+// attaching/requesting/uploading new documents against it afterward would
+// let the "as executed" record keep changing after the fact with nobody
+// told. Used by the three document routes below and by crmPortal.js's own
+// customer-facing upload route.
+async function agreementExecutedLockReason(pool, agreementId) {
+  const result = await pool.request().input("id", sql.Int, agreementId)
+    .query("SELECT Status FROM dbo.CrmAgreement WHERE Id = @id");
+  if (!result.recordset.length) return null;
+  const status = result.recordset[0].Status;
+  if (["Executed", "Registered"].includes(status)) {
+    return `this agreement is already ${status}`;
   }
   return null;
 }
@@ -766,6 +785,15 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
 
     const lockReason = await getAgreementBookingLockReason(pool, id);
     if (lockReason) return res.status(409).json({ error: `Cannot edit — ${lockReason}. Cancel the agreement instead.` });
+    // Once an agreement is Executed or Registered, its legal content is the
+    // record of what the customer actually approved and signed — it must
+    // never silently drift after the fact. Previously this had no gate
+    // beyond the booking-lock check above, so LegalName/PAN/Aadhaar could
+    // still be edited (with a real VersionNo bump + revision row) on an
+    // already-executed contract with nobody notified.
+    if (["Executed", "Registered"].includes(oldRow.Status)) {
+      return res.status(409).json({ error: `Cannot edit — this agreement is already ${oldRow.Status}. Its legal content is locked.` });
+    }
 
     // AgreementDate is deliberately NOT accepted here — see the note on
     // POST / above. Edit Details can correct legal identity fields, but the
@@ -834,6 +862,53 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
   }
 });
 
+// PUT /:id/assign-legal — assign or reassign the Legal Executive responsible
+// for preparing this agreement's paperwork. Split out from the generic
+// PUT /:id on purpose: that route bundles the change into "Edit Details"
+// (locked-by-default, meant for correcting legal identity fields, bumps
+// VersionNo and asks for a revision reason) — none of which applies to
+// "who is handling this," so assignment was previously reachable only by
+// going through an edit flow meant for something else entirely. This never
+// touches VersionNo or CrmAgreementRevision.
+router.put("/:id/assign-legal", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const actor = actorId(req);
+    const newId = req.body?.LegalExecutiveId ? parseInt(req.body.LegalExecutiveId) : null;
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot reassign — ${lockReason}. Cancel the agreement instead.` });
+
+    const old = await pool.request().input("id", sql.Int, id)
+      .query("SELECT LegalExecutiveId, AgreementNo, Status FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!old.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const oldRow = old.recordset[0];
+    if (["Registered", "Cancelled"].includes(oldRow.Status)) {
+      return res.status(400).json({ error: `Cannot reassign a legal executive on an agreement that is already ${oldRow.Status}` });
+    }
+
+    await pool.request().input("id", sql.Int, id).input("leg", sql.Int, newId).input("ub", sql.Int, actor)
+      .query("UPDATE dbo.CrmAgreement SET LegalExecutiveId = @leg, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+
+    await logCrmAudit(pool, "Agreement", id, actor, [
+      { field: "LegalExecutiveId", oldVal: oldRow.LegalExecutiveId ? String(oldRow.LegalExecutiveId) : null, newVal: newId ? String(newId) : null },
+    ]);
+
+    if (newId && newId !== oldRow.LegalExecutiveId) {
+      await emitNotification(pool, newId, "crm_agreement_legal_assigned",
+        "Agreement Assigned For Preparation",
+        `${oldRow.AgreementNo} assigned to you for legal preparation.`,
+        id, "crm_agreement");
+    }
+
+    res.json({ success: true, LegalExecutiveId: newId });
+  } catch (e) {
+    console.error("[crm-agreements] PUT /:id/assign-legal error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // PUT /:id/mark-executed — Draft -> Executed. Gated on the real-world facts
 // that make an agreement "executed": both senior and customer approvals
 // already granted, and a genuine AgreementDate already on record. That date
@@ -847,7 +922,7 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     const actor = actorId(req);
 
     const cur = await pool.request().input("id", sql.Int, id).query(`
-      SELECT BookingId, Status, AgreementDate, SeniorApprovalStatus, CustomerApprovalStatus
+      SELECT BookingId, Status, AgreementDate, SeniorApprovalStatus, CustomerApprovalStatus, LegalExecutiveId
       FROM dbo.CrmAgreement WHERE Id = @id
     `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
@@ -861,6 +936,13 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     }
     if (!row.AgreementDate) {
       return res.status(400).json({ error: "Both sides must agree on an agreement date first — propose a date and wait for the customer's matching response before marking executed" });
+    }
+    // A legally executed contract must have a named responsible party on
+    // record — the Legal Executive field previously had no consequence at
+    // all for staying Unassigned all the way through execution, which is a
+    // real accountability gap for real paperwork, not a cosmetic one.
+    if (!row.LegalExecutiveId) {
+      return res.status(400).json({ error: "A Legal Executive must be assigned before this agreement can be marked executed — use PUT /:id/assign-legal" });
     }
     const unverified = await pool.request().input("id", sql.Int, id).query(`
       SELECT DocumentType, Label, Status FROM dbo.CrmAgreementDocument
@@ -994,6 +1076,8 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
 
     const lockReason = await getAgreementBookingLockReason(pool, agreementId);
     if (lockReason) return res.status(409).json({ error: `Cannot attach a document — ${lockReason}.` });
+    const execLockReason = await agreementExecutedLockReason(pool, agreementId);
+    if (execLockReason) return res.status(409).json({ error: `Cannot attach a document — ${execLockReason}.` });
 
     const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), b.DocumentType)
       .query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
@@ -1037,6 +1121,8 @@ router.post("/:id/documents/request", requirePageRight("crm-documents", "create"
 
     const lockReason = await getAgreementBookingLockReason(pool, agreementId);
     if (lockReason) return res.status(409).json({ error: `Cannot request a document — ${lockReason}.` });
+    const execLockReason = await agreementExecutedLockReason(pool, agreementId);
+    if (execLockReason) return res.status(409).json({ error: `Cannot request a document — ${execLockReason}.` });
 
     const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), b.DocumentType)
       .query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
@@ -1079,6 +1165,10 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
       const lockReason = await getAgreementBookingLockReason(pool, agreementId);
       if (lockReason) {
         return res.status(409).json({ error: `Cannot upload a document — ${lockReason}.` });
+      }
+      const execLockReason = await agreementExecutedLockReason(pool, agreementId);
+      if (execLockReason) {
+        return res.status(409).json({ error: `Cannot upload a document — ${execLockReason}.` });
       }
 
       const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), docType)
@@ -1131,6 +1221,11 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("d.Status = @st"); }
     if (documentType) { req0.input("dt", sql.NVarChar(100), documentType); conds.push("d.DocumentType = @dt"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    // Includes the agreement-level lifecycle fields (senior/customer approval,
+    // send/date state) and the Legal Executive assignment — not just the
+    // document's own status — so the cross-agreement register can show real
+    // step-by-step progress and flag an unassigned legal preparer per
+    // agreement, instead of only ever showing document rows in isolation.
     const result = await req0.query(`
       SELECT
         d.Id, d.AgreementId, d.DocumentType, d.Label, d.IsMandatory, d.UploadedByType,
@@ -1138,11 +1233,14 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
         d.FileSize, d.MimeType, d.Status, d.Remarks, d.VersionNo,
         d.RequestedAt, d.UploadedAt, d.CreatedAt,
         ag.AgreementNo, ag.Status AS AgreementStatus,
+        ag.SeniorApprovalStatus, ag.SentToCustomerAt, ag.CustomerApprovalStatus, ag.AgreementDate,
+        ag.LegalExecutiveId, le.name AS LegalExecutiveName,
         b.BookingNo, b.UnitNo, a.ApplicantName
       FROM dbo.CrmAgreementDocument d
       JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.Users le ON le.id = ag.LegalExecutiveId
       ${where}
       ORDER BY d.CreatedAt DESC
     `);
@@ -1199,6 +1297,25 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
     if (b.Status === "Verified" && !oldRow.FileBase64) {
       return res.status(400).json({ error: "Cannot verify a document that hasn't been uploaded yet" });
     }
+    // Same rule PUT /documents/bulk-review already enforces — a legal
+    // document can't be silently rejected with no reason on record. This
+    // single-document route was the one path that didn't have this check,
+    // which meant a plain status-dropdown flip could reject a real
+    // contractual document with zero explanation and nothing useful in the
+    // audit trail beyond "Status: Uploaded -> Rejected".
+    if (b.Status === "Rejected" && !String(b.Remarks || "").trim()) {
+      return res.status(400).json({ error: "Remarks are required to reject a document" });
+    }
+    // Split, not a blanket freeze: Verified is still allowed post-execution
+    // (doesn't change legal content, needs no customer action). Rejected is
+    // blocked — it puts the document back in the customer's court to
+    // re-upload, but the customer-facing upload route is itself frozen at
+    // Executed/Registered (crmPortal.js), so a post-execution reject would
+    // leave the document permanently stuck Rejected with no way back.
+    if (b.Status === "Rejected") {
+      const execLockReason = await agreementExecutedLockReason(pool, agreementId);
+      if (execLockReason) return res.status(409).json({ error: `Cannot reject — ${execLockReason}. The document can no longer be re-uploaded, so rejecting it now would leave it permanently stuck.` });
+    }
 
     await pool.request()
       .input("id",  sql.Int,          docId)
@@ -1250,6 +1367,86 @@ async function setPortalActive(pool, agreementId, isActive) {
   return { ok: true };
 }
 
+// GET /documents/:docId/audit — review history for a single document, read
+// from dbo.CrmAuditLog (EntityType='AgreementDocument'). Lets a reviewer see
+// who touched a document and when (prior status flips, remarks changes)
+// instead of only ever seeing its current state — matters most on documents
+// that bounced through Rejected -> re-uploaded -> Submitted more than once.
+router.get("/documents/:docId/audit", requirePageRight("crm-documents", "view"), async (req, res) => {
+  try {
+    const docId = parseInt(req.params.docId);
+    const result = await getPool().request().input("id", sql.Int, docId).query(`
+      SELECT al.Id, al.Field, al.OldValue, al.NewValue, al.ChangedAt, al.ChangedBy, u.name AS ChangedByName
+      FROM dbo.CrmAuditLog al
+      LEFT JOIN dbo.Users u ON u.id = al.ChangedBy
+      WHERE al.EntityType = 'AgreementDocument' AND al.EntityId = @id
+      ORDER BY al.ChangedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-agreements] GET documents/:docId/audit error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /documents/bulk-review — review several documents from across
+// different agreements in one call, for the cross-agreement Agreement
+// Papers register. Each document is validated independently (its own
+// booking-lock check, its own "can't verify without a file" check) so one
+// bad row in a batch doesn't block the rest; the response reports exactly
+// which ids succeeded and which were skipped and why, instead of an
+// all-or-nothing failure that would leave staff guessing which of 20
+// selected rows actually went through.
+router.put("/documents/bulk-review", requirePageRight("crm-documents", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const actor = actorId(req);
+    const { docIds, status, remarks } = req.body || {};
+    if (!Array.isArray(docIds) || !docIds.length) return res.status(400).json({ error: "docIds is required" });
+    if (!["Verified", "Rejected"].includes(status)) return res.status(400).json({ error: "status must be Verified or Rejected" });
+    if (status === "Rejected" && !String(remarks || "").trim()) return res.status(400).json({ error: "Remarks are required to reject" });
+
+    const results = { succeeded: [], skipped: [] };
+    for (const rawId of docIds) {
+      const docId = parseInt(rawId);
+      try {
+        const cur = await pool.request().input("id", sql.Int, docId).query(`
+          SELECT d.Status, d.AgreementId, CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
+          FROM dbo.CrmAgreementDocument d WHERE d.Id = @id
+        `);
+        if (!cur.recordset.length) { results.skipped.push({ docId, reason: "Document not found" }); continue; }
+        const row = cur.recordset[0];
+
+        const lockReason = await getAgreementBookingLockReason(pool, row.AgreementId);
+        if (lockReason) { results.skipped.push({ docId, reason: `Booking ${lockReason}` }); continue; }
+        if (status === "Verified" && !row.HasFile) { results.skipped.push({ docId, reason: "Not uploaded yet" }); continue; }
+        // Same split as the single-document route: Rejected is blocked
+        // post-execution (the customer's upload route is frozen too, so a
+        // reject here would leave the document permanently stuck), Verified
+        // stays allowed since it doesn't touch legal content.
+        if (status === "Rejected") {
+          const execLockReason = await agreementExecutedLockReason(pool, row.AgreementId);
+          if (execLockReason) { results.skipped.push({ docId, reason: execLockReason }); continue; }
+        }
+
+        await pool.request().input("id", sql.Int, docId).input("st", sql.NVarChar(30), status).input("rem", sql.NVarChar(sql.MAX), remarks || null)
+          .query("UPDATE dbo.CrmAgreementDocument SET Status = @st, Remarks = @rem WHERE Id = @id");
+
+        if (status !== row.Status) {
+          await logCrmAudit(pool, "AgreementDocument", docId, actor, [{ field: "Status", oldVal: row.Status, newVal: status }]);
+        }
+        results.succeeded.push(docId);
+      } catch (innerErr) {
+        results.skipped.push({ docId, reason: innerErr.message });
+      }
+    }
+    res.json(results);
+  } catch (e) {
+    console.error("[crm-agreements] PUT documents/bulk-review error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.put("/:id/portal/deactivate", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -1283,3 +1480,8 @@ router.put("/:id/portal/reactivate", requirePageRight("crm-agreements", "edit"),
 });
 
 module.exports = router;
+// Reused by crmPortal.js's own document-upload route (POST
+// /agreement/documents/:docId/upload) — the customer-facing upload path was
+// missing this exact check, unlike every staff-side document route here.
+module.exports.getAgreementBookingLockReason = getAgreementBookingLockReason;
+module.exports.agreementExecutedLockReason = agreementExecutedLockReason;
