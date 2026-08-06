@@ -654,6 +654,284 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
   }
 });
 
+// ── PUT /:id — edit an already-sanctioned loan ─────────────────────────────
+// Everything is editable EXCEPT the parties' identity (LoanType,
+// LenderCompanyId/LenderBankId, BorrowerCompanyId/BorrowerCustomerId) —
+// those define WHO the loan is between and can't change after the fact.
+// Financial-core fields (amount, interest, tenure, loan date, due date) DO
+// re-run the amortization schedule and adjust the borrower's On A/C
+// balance, which is only safe while nothing has actually been repaid yet —
+// blocked with a 409 once any EMI/LoanPayment exists. Administrative
+// fields (doc no, purpose, remarks, bank A/C tags) can always be edited.
+router.put("/:id", requirePageRight("loan-sanction", "edit"), async (req, res) => {
+  const loanId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(loanId)) return res.status(400).json({ error: "Invalid id" });
+  const {
+    loanDocNo, purpose, remarks, lenderBankAccountId, borrowerBankAccountId,
+    loanDate, amount, hasInterest, interestType, interestRate, tenureMonths, dueDate,
+  } = req.body;
+  const updatedBy = req.user?.email || req.user?.name || "system";
+
+  // Financial-core edit only kicks in if the caller actually sent one of
+  // these — the administrative-only edit path (Loan Doc No/Purpose/
+  // Remarks/bank tags) must keep working even after repayment has started.
+  const touchesFinancials =
+    loanDate !== undefined || amount !== undefined || hasInterest !== undefined ||
+    interestType !== undefined || interestRate !== undefined || tenureMonths !== undefined ||
+    dueDate !== undefined;
+
+  const pool = getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    await tx.begin();
+
+    const loanRes = await new sql.Request(tx)
+      .input("LoanId", sql.Int, loanId)
+      .query("SELECT LoanId, LoanNo, Amount, BorrowerLHeadId, Status FROM dbo.LoanSanction WHERE LoanId = @LoanId");
+    const loan = loanRes.recordset[0];
+    if (!loan) throw Object.assign(new Error("Loan not found"), { status: 404 });
+
+    if (touchesFinancials) {
+      if (loan.Status === "Closed") {
+        throw Object.assign(new Error("This loan is closed and its terms can no longer be edited."), { status: 409 });
+      }
+      const paidRes = await new sql.Request(tx)
+        .input("LoanId", sql.Int, loanId)
+        .query("SELECT COUNT(*) AS cnt FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId AND IsPaid = 1");
+      if (paidRes.recordset[0].cnt > 0) {
+        throw Object.assign(
+          new Error("This loan already has repayments recorded — amount/interest/tenure/dates can no longer be edited. Only Loan Doc No, Purpose, Remarks, and bank A/C tags can still be changed."),
+          { status: 409 },
+        );
+      }
+
+      const useInterest = hasInterest !== false && hasInterest !== "false";
+      const iType = INTEREST_TYPES.includes(interestType) ? interestType : "CI";
+      const newAmt = parseFloat(amount);
+      if (!newAmt || newAmt <= 0) throw Object.assign(new Error("Amount must be greater than 0"), { status: 400 });
+      const newLoanDate = loanDate || loan.LoanDate;
+      const effectiveRate = useInterest && interestRate != null && interestRate !== "" ? parseFloat(interestRate) : null;
+      const newTenure = tenureMonths != null && tenureMonths !== "" ? parseInt(tenureMonths, 10) : null;
+
+      // Regenerate the schedule from scratch — safe because we already
+      // confirmed nothing is paid yet.
+      await new sql.Request(tx)
+        .input("LoanId", sql.Int, loanId)
+        .query("DELETE FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId");
+      const schedule = buildEmiSchedule(newAmt, effectiveRate || 0, newTenure, newLoanDate, iType, dueDate || null);
+      await insertEmiSchedule(tx, loanId, schedule);
+
+      // Adjust the original sanction CREDIT and the borrower's On A/C
+      // balance by the delta rather than re-deriving it, so any unrelated
+      // activity on that balance since sanction isn't clobbered.
+      const amountDelta = newAmt - Number(loan.Amount);
+      if (amountDelta !== 0) {
+        await new sql.Request(tx)
+          .input("RefId", sql.Int, loanId)
+          .input("NewAmount", sql.Decimal(18, 2), newAmt)
+          .query(`
+            UPDATE TOP (1) dbo.OnAccountLedger
+            SET Amount = @NewAmount
+            WHERE RefType = 'Loan' AND RefId = @RefId AND TxnType = 'CREDIT'
+          `);
+        if (loan.BorrowerLHeadId) {
+          await new sql.Request(tx)
+            .input("PartyId", sql.Int, loan.BorrowerLHeadId)
+            .input("Delta", sql.Decimal(18, 2), amountDelta)
+            .query(`
+              UPDATE dbo.AccountHeadMaster
+              SET OnAccountBalance = ISNULL(OnAccountBalance, 0) + @Delta
+              WHERE LHeadId = @PartyId
+            `);
+        }
+      }
+
+      // If this loan was already posted to GL with the old amount, reverse
+      // that entry — the Posting tab auto-reposts with the new amount the
+      // next time it's opened (same auto-post-on-view flow as sanction).
+      await new sql.Request(tx)
+        .input("SrcId", sql.Int, loanId)
+        .query(`
+          UPDATE dbo.GeneralLedgerEntry SET IsReversed = 1
+          WHERE SourceType = 'LoanPosting' AND SourceId = @SrcId AND IsReversed = 0
+        `);
+
+      await new sql.Request(tx)
+        .input("LoanId", sql.Int, loanId)
+        .input("LoanDate", sql.Date, newLoanDate)
+        .input("Amount", sql.Decimal(18, 2), newAmt)
+        .input("HasInterest", sql.Bit, useInterest ? 1 : 0)
+        .input("InterestType", sql.NVarChar(10), iType)
+        .input("InterestRate", sql.Decimal(5, 2), effectiveRate)
+        .input("TenureMonths", sql.Int, newTenure)
+        .query(`
+          UPDATE dbo.LoanSanction
+          SET LoanDate = @LoanDate, Amount = @Amount, HasInterest = @HasInterest,
+              InterestType = @InterestType, InterestRate = @InterestRate, TenureMonths = @TenureMonths
+          WHERE LoanId = @LoanId
+        `);
+    }
+
+    await new sql.Request(tx)
+      .input("LoanId", sql.Int, loanId)
+      .input("LoanDocNo", sql.NVarChar(100), loanDocNo || null)
+      .input("Purpose", sql.NVarChar(500), purpose || null)
+      .input("Remarks", sql.NVarChar(500), remarks || null)
+      .input("LenderBankAccountId", sql.Int, lenderBankAccountId ? parseInt(lenderBankAccountId, 10) : null)
+      .input("BorrowerBankAccountId", sql.Int, borrowerBankAccountId ? parseInt(borrowerBankAccountId, 10) : null)
+      .input("UpdatedBy", sql.NVarChar(150), updatedBy).query(`
+        UPDATE dbo.LoanSanction
+        SET LoanDocNo = @LoanDocNo, Purpose = @Purpose, Remarks = @Remarks,
+            LenderBankAccountId = @LenderBankAccountId, BorrowerBankAccountId = @BorrowerBankAccountId,
+            UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+        WHERE LoanId = @LoanId
+      `);
+
+    await tx.commit();
+    await Promise.all([bumpCacheVersion("loan-sanction"), bumpCacheVersion("on-account"), bumpCacheVersion("journal-voucher")]);
+    res.json({ success: true });
+  } catch (err) {
+    await tx.rollback().catch(() => {});
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/posting — live posting preview, mirrors GRN's /:id/posting ───
+// (same "isPosted / jvNo" shape the frontend already knows how to render).
+router.get("/:id/posting", requirePageRight("loan-sanction", "view"), async (req, res) => {
+  const loanId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(loanId)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const loanRes = await pool.request().input("LoanId", sql.Int, loanId).query(`
+      SELECT
+        ls.LoanId, ls.LoanNo, ls.Amount, ls.LenderCompanyId, ls.LenderLHeadId, ls.BorrowerLHeadId,
+        lender_gl.LHeadName AS LenderLHeadName,
+        lender_grp.Name AS LenderGroupName,
+        borrower_gl.LHeadName AS BorrowerLHeadName,
+        borrower_grp.Name AS BorrowerGroupName
+      FROM dbo.LoanSanction ls
+      LEFT JOIN dbo.AccountHeadMaster lender_gl ON lender_gl.LHeadId = ls.LenderLHeadId
+      LEFT JOIN dbo.AccountGroup lender_grp ON lender_grp.AGId = lender_gl.LBelongsTo
+      LEFT JOIN dbo.AccountHeadMaster borrower_gl ON borrower_gl.LHeadId = ls.BorrowerLHeadId
+      LEFT JOIN dbo.AccountGroup borrower_grp ON borrower_grp.AGId = borrower_gl.LBelongsTo
+      WHERE ls.LoanId = @LoanId
+    `);
+    if (!loanRes.recordset.length) return res.status(404).json({ error: "Loan not found" });
+    const loan = loanRes.recordset[0];
+
+    const postedRes = await pool.request().input("SrcId", sql.Int, loanId).query(`
+      SELECT TOP 1 EntryId, VoucherNo FROM dbo.GeneralLedgerEntry
+      WHERE SourceType = 'LoanPosting' AND SourceId = @SrcId AND IsReversed = 0
+    `);
+    const existingPost = postedRes.recordset[0];
+
+    res.json({
+      loanNo: loan.LoanNo,
+      amount: loan.Amount,
+      accounts: {
+        borrower: loan.BorrowerLHeadId
+          ? { id: loan.BorrowerLHeadId, name: loan.BorrowerLHeadName, group: loan.BorrowerGroupName }
+          : null,
+        lender: loan.LenderLHeadId
+          ? { id: loan.LenderLHeadId, name: loan.LenderLHeadName, group: loan.LenderGroupName }
+          : null,
+      },
+      isPosted: !!existingPost,
+      jvNo: existingPost?.VoucherNo ?? null,
+      jvId: existingPost?.EntryId ?? null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /:id/post-to-gl — post the loan sanction as a real JV, same
+//    mechanism GRN/Payment use, so it shows up in Trial Balance ──────────
+router.post("/:id/post-to-gl", requirePageRight("loan-sanction", "edit"), async (req, res) => {
+  const loanId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(loanId)) return res.status(400).json({ error: "Invalid id" });
+  const userEmail = req.user?.email || req.user?.name || "system";
+  try {
+    const pool = getPool();
+    const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
+    const { postVoucher } = require("../services/generalLedger");
+
+    const loanRes = await pool.request().input("LoanId", sql.Int, loanId).query(`
+      SELECT LoanId, LoanNo, Amount, LenderCompanyId, BorrowerCompanyId, LenderLHeadId, BorrowerLHeadId
+      FROM dbo.LoanSanction WHERE LoanId = @LoanId
+    `);
+    if (!loanRes.recordset.length) return res.status(404).json({ error: "Loan not found" });
+    const loan = loanRes.recordset[0];
+    if (!loan.LenderLHeadId || !loan.BorrowerLHeadId) {
+      return res.status(422).json({ error: "This loan is missing its lender/borrower GL accounts — cannot post." });
+    }
+
+    const alreadyPosted = await pool.request().input("SrcId", sql.Int, loanId).query(`
+      SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType = 'LoanPosting' AND SourceId = @SrcId AND IsReversed = 0
+    `);
+    if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This loan has already been posted to GL." });
+
+    const amt = Number(loan.Amount);
+    if (!amt || amt <= 0) return res.status(400).json({ error: "Loan has no amount to post." });
+
+    // Dr the borrower's Loan ledger (they now owe this — a receivable from
+    // the sanctioning side), Cr the lender's Loan ledger (funds went out).
+    const lines = [
+      { LHeadId: loan.BorrowerLHeadId, DebitAmount: amt, CreditAmount: 0, Narration: `Loan Posting: ${loan.LoanNo} — Borrower` },
+      { LHeadId: loan.LenderLHeadId, DebitAmount: 0, CreditAmount: amt, Narration: `Loan Posting: ${loan.LoanNo} — Lender` },
+    ];
+
+    const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
+    const finalDocNo = dtId
+      ? await lockNextDocNumber(pool, sql, {
+          docTypeId: dtId,
+          tableName: "JournalVoucher",
+          docNoColumn: "JVNo",
+          issuedBy: userEmail,
+        }).catch(() => null)
+      : null;
+
+    const insertHdr = await pool.request()
+      .input("JVNo", sql.NVarChar(100), finalDocNo || null)
+      .input("JVDate", sql.Date, new Date())
+      .input("Narration", sql.NVarChar(500), `Loan Posting: ${loan.LoanNo}`)
+      .input("CompanyId", sql.Int, loan.LenderCompanyId || loan.BorrowerCompanyId || null)
+      .input("DocTypeId", sql.Int, dtId || null)
+      .input("CreatedBy", sql.NVarChar(150), userEmail)
+      .query(`INSERT INTO dbo.JournalVoucher (JVNo,JVDate,Narration,CompanyId,Status,DocTypeId,CreatedBy) OUTPUT INSERTED.JVID VALUES (@JVNo,@JVDate,@Narration,@CompanyId,'Approved',@DocTypeId,@CreatedBy)`);
+    const jvId = insertHdr.recordset[0].JVID;
+
+    let sortOrder = 0;
+    for (const line of lines) {
+      await pool.request()
+        .input("JVID", sql.Int, jvId)
+        .input("LHeadId", sql.Int, line.LHeadId)
+        .input("DebitAmount", sql.Decimal(18, 2), line.DebitAmount)
+        .input("CreditAmount", sql.Decimal(18, 2), line.CreditAmount)
+        .input("Narration", sql.NVarChar(255), line.Narration)
+        .input("SortOrder", sql.Int, sortOrder++)
+        .query(`INSERT INTO dbo.JournalVoucherLines (JVID,LHeadId,DebitAmount,CreditAmount,Narration,SortOrder) VALUES (@JVID,@LHeadId,@DebitAmount,@CreditAmount,@Narration,@SortOrder)`);
+    }
+    if (finalDocNo) await backPatchRecordId(pool, sql, finalDocNo, "JournalVoucher", jvId);
+
+    await postVoucher(pool, {
+      voucherNo: finalDocNo || `JV-${jvId}`,
+      voucherDate: new Date(),
+      sourceType: "LoanPosting",
+      sourceId: loanId,
+      companyId: loan.LenderCompanyId || loan.BorrowerCompanyId || null,
+      createdBy: userEmail,
+      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
+    });
+
+    await Promise.all([bumpCacheVersion("journal-voucher"), bumpCacheVersion("loan-sanction")]);
+    res.json({ jvId, jvNo: finalDocNo, message: "Loan posted to GL successfully." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── PUT /:id/emi/:emiId/pay — check/uncheck an EMI as paid ────────────────
 // Checking it DEBITs the borrower's Loan ledger balance (repayment reduces
 // what's still outstanding/adjustable); unchecking reverses that DEBIT.

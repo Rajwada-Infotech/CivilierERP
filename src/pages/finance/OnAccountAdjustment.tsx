@@ -11,6 +11,8 @@ import { getInvoicesForParty, applyOAAdjustment } from "@/api/onAccountApi";
 import type { OAInvoice } from "@/api/onAccountApi";
 import { previewOAAdjustment, excludeOriginatingInvoice } from "@/api/onAccountAdjustment";
 import { toast } from "sonner";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 
 interface PartySummary {
   PartyId: number;
@@ -57,6 +59,20 @@ function fmtDate(d: string | null | undefined) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
+
+// Mirrors the visible desktop table's own column order (Party → Payment
+// Voucher → Date → Invoice/Booking → Net Payable → Total Paid → On A/C
+// Amt → Party Balance) so the export reads like the page it came from.
+const ON_ACCOUNT_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Party", accessor: (r: any) => r.PartyName || "—" },
+  { header: "Payment Voucher", accessor: (r: any) => r.PaymentDocNo || "—" },
+  { header: "Date", accessor: (r: any) => fmtDate(r.PaymentDate) },
+  { header: "Invoice / Booking", accessor: (r: any) => (r.Source === "CRM" ? `${r.CrmBookingNo || "—"}${r.CrmUnitNo ? ` · ${r.CrmUnitNo}` : ""}` : r.InvoiceDocNo || r.InvoiceRef || "—") },
+  { header: "Net Payable", accessor: (r: any) => (r.InvoiceAmount != null ? formatINR(r.InvoiceAmount) : "—") },
+  { header: "Total Paid", accessor: (r: any) => ((r.InvoiceTotalPaid ?? r.PaymentAmount) != null ? formatINR(r.InvoiceTotalPaid ?? r.PaymentAmount ?? 0) : "—") },
+  { header: "On A/C Amt", accessor: (r: any) => formatINR(r.ExcessAmount) },
+  { header: "Party Balance", accessor: (r: any) => formatINR(r.AvailableBalance) },
+];
 
 function PartyTypePill({ code }: { code: string }) {
   const label = code === "S" ? "Supplier" : code === "C" ? "Contractor" : code === "A" ? "Customer" : code;
@@ -514,6 +530,13 @@ export default function OnAccountAdjustment() {
                 {filteredCredits.length > 0 && ` · ${filteredCredits.length} entr${filteredCredits.length === 1 ? "y" : "ies"}`}
               </p>
             </div>
+            <ExportMenu
+              data={filteredCredits as unknown as Record<string, unknown>[]}
+              columns={ON_ACCOUNT_EXPORT_COLUMNS}
+              title="On A/C Adjustment"
+              filename="on-account-adjustment"
+              disabled={filteredCredits.length === 0}
+            />
           </div>
           {isLoading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">

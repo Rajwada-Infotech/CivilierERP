@@ -15,6 +15,14 @@ const STEPS = [
   "DocShared", "MutualAgreement", "DirectorMeeting", "FinalExecution",
 ];
 
+// Every step but DirectorMeeting now auto-ticks from its real-world
+// equivalent on the Agreement page (see syncLegalMilestoneStep /
+// syncLegalMilestoneFromDocument in crmWorkflowGuards.js) — Status is no
+// longer accepted here for those, so this endpoint can't be used to fake a
+// step that hasn't actually happened. Due/Notes remain editable for every
+// step (scheduling/annotating is still manual for all of them).
+const MANUAL_STEPS = new Set(["DirectorMeeting"]);
+
 const LM_SELECT = `
   SELECT m.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile
   FROM dbo.CrmLegalMilestone m
@@ -102,6 +110,10 @@ router.put("/:id/:step", requirePageRight("crm-legal-milestones", "edit"), async
     if (!cur.recordset.length) return res.status(404).json({ error: "Legal milestone tracker not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+
+    if (b.Status && !MANUAL_STEPS.has(step)) {
+      return res.status(400).json({ error: `${step} is auto-synced from the Agreement workflow and can't be marked manually.` });
+    }
 
     const result = await pool.request()
       .input("id",   sql.Int,  id)

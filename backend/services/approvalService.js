@@ -9,7 +9,9 @@ const {
   postExpenseBookingApproval,
   postPaymentApproval,
   postJournalVoucherApproval,
+  postFundTransferApproval,
 } = require("./generalLedger");
+const { userHasEffectivePageRight } = require("../middleware/permissions");
 
 // Module slug → general ledger poster, called once a record reaches full
 // approval (last workflow level). Modules not listed here don't post to the
@@ -20,6 +22,7 @@ const GL_POSTERS = {
   "expense-booking": postExpenseBookingApproval,
   payments: postPaymentApproval,
   "journal-voucher": postJournalVoucherApproval,
+  "fund-transfer": postFundTransferApproval,
 };
 
 // Map module slug → { table, pkCol, statusCol }
@@ -74,6 +77,11 @@ const MODULE_MAP = {
     pk: "ICTId",
     status: "Status",
   },
+  "fund-transfer": {
+    table: "dbo.FundTransfer",
+    pk: "FTId",
+    status: "Status",
+  },
   "crm-applications": { table: "dbo.CrmApplication", pk: "Id", status: "Status" },
   "crm-bookings": { table: "dbo.CrmBooking", pk: "Id", status: "Status" },
   // The "approval" on a CrmAgreement is specifically the senior sign-off gate
@@ -115,6 +123,7 @@ const MODULE_DOC_LINKS = {
   payments: "Payment",
   "journal-voucher": "Journal Voucher",
   "inter-company-transfer": "Inter-Company Transfer",
+  "fund-transfer": "Fund Transfer",
 };
 
 const APPROVER_ROLES = ["admin", "super_admin", "dba"];
@@ -133,6 +142,10 @@ const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 const MODULE_APPROVER_ROLE_OVERRIDES = {
   "journal-voucher": ["super_admin"],
   "inter-company-transfer": ["super_admin"],
+  // Fund Transfer moves real cash and, for inter-company transfers, books a
+  // loan between two legal entities — same scrutiny level as Journal
+  // Voucher / Inter-Company (Stock) Transfer, per explicit instruction.
+  "fund-transfer": ["super_admin"],
   "crm-applications": CRM_APPROVER_ROLES,
   "crm-bookings": CRM_APPROVER_ROLES,
   // legal_head added specifically here (not to CRM_APPROVER_ROLES generally) —
@@ -212,6 +225,7 @@ const WORKFLOW_ID_MAP = {
   "vehicle-in-out": "VehicleInOut",
   "journal-voucher": "JournalVoucher",
   "inter-company-transfer": "InterCompanyTransfer",
+  "fund-transfer": "FundTransfer",
   contracts: "Contract",
 };
 
@@ -439,6 +453,29 @@ async function recordGLPosting(module, recordId, outcome, approverEmail) {
   }
 }
 
+/**
+ * Fallback authorization check for approve/reject: does this user hold
+ * "edit" on the "approval-inbox" page via Menu Rights (role-level or
+ * per-user override)? Only consulted when the module's hardcoded role
+ * whitelist already rejected the user — see the gate in transition().
+ */
+async function hasApprovalInboxEditRight(userId) {
+  if (!userId) return false;
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("UserId", sql.Int, userId)
+      .query("SELECT RoleId FROM dbo.users WHERE id = @UserId");
+    const roleId = result.recordset[0]?.RoleId;
+    if (!roleId) return false;
+    return await userHasEffectivePageRight(userId, roleId, "approval-inbox", "edit");
+  } catch (err) {
+    console.error("[approvalService] hasApprovalInboxEditRight check failed:", err.message);
+    return false;
+  }
+}
+
 async function transition(
   module,
   id,
@@ -454,16 +491,35 @@ async function transition(
   const tableName = map.table.replace("dbo.", "");
 
   // ── Authorisation gate (cheap check before opening a transaction) ─────────
+  // Two independent ways in: the hardcoded per-module role whitelist (the
+  // original design), OR holding "edit" on the "approval-inbox" page via
+  // Menu Rights — added because granting someone that page's rights (the
+  // obvious, discoverable way to give approve/reject access) silently did
+  // nothing; only the fixed role list was ever actually checked.
+  //
+  // The page-right fallback only applies to modules on the *default*
+  // APPROVER_ROLES list. Modules with an explicit, deliberately narrow
+  // MODULE_APPROVER_ROLE_OVERRIDES entry (Journal Voucher, Fund Transfer,
+  // Inter-Company Transfer, the CRM director/date sub-gates — all
+  // hardcoded to super_admin "per explicit instruction") stay locked to
+  // that role list regardless of page rights, since those overrides exist
+  // specifically to be stricter than a page permission can express.
   const isApproveOrReject =
     targetStatus === "Approved" || targetStatus === "Rejected";
-  const allowedApproverRoles = MODULE_APPROVER_ROLE_OVERRIDES[module] || APPROVER_ROLES;
-  if (
-    isApproveOrReject &&
-    !allowedApproverRoles.includes((userRole || "").toLowerCase())
-  ) {
-    const authErr = new Error("You are not authorized to approve or reject records.");
-    authErr.status = 403;
-    throw authErr;
+  if (isApproveOrReject) {
+    const hasOverride = Object.prototype.hasOwnProperty.call(MODULE_APPROVER_ROLE_OVERRIDES, module);
+    const allowedApproverRoles = hasOverride ? MODULE_APPROVER_ROLE_OVERRIDES[module] : APPROVER_ROLES;
+    const roleAllowed = allowedApproverRoles.includes((userRole || "").toLowerCase());
+    // Only hit the DB for the page-right fallback when the role check
+    // already failed and this module isn't one of the deliberately
+    // narrower ones — the common case (an actual admin/dba) never pays
+    // for it.
+    const pageRightAllowed = !roleAllowed && !hasOverride && (await hasApprovalInboxEditRight(userId));
+    if (!roleAllowed && !pageRightAllowed) {
+      const authErr = new Error("You are not authorized to approve or reject records.");
+      authErr.status = 403;
+      throw authErr;
+    }
   }
 
   // ── Status change + audit write happen atomically under a row lock ────────

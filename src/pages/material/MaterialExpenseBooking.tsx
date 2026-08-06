@@ -61,7 +61,8 @@ import {
   ShoppingCart,
 } from "lucide-react";
 import { toast } from "sonner";
-import { exportToCsv, parseCsv } from "@/lib/export";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
+import { ExportMenu } from "@/components/ExportMenu";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { Field } from "./ExpenseBooking/FormPrimitives";
 import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
@@ -128,6 +129,46 @@ import type {
   CostCenterOption,
   DocSelectorProps,
 } from "./ExpenseBooking/types";
+
+// Same effective-net logic the visible table uses (GRN-linked rows recompute
+// from grnTotalAmount + billing terms; everything else falls back to
+// computeBreakdown on the stored basicAmount) — kept in sync so the export
+// never shows a different number than what's on screen.
+function computeEffectiveNet(rec: any): number {
+  if (rec.eSourceType === "GRN" && rec.grnTotalAmount != null) {
+    const terms =
+      rec.billingTerms && rec.billingTerms.length > 0
+        ? rec.billingTerms
+        : rec.discount
+          ? [rec.discount]
+          : [];
+    return computeGrnNetWithTerms(rec.grnTotalAmount, terms, rec.basicAmount);
+  }
+  const rbd = computeBreakdown(
+    rec.basicAmount,
+    rec.cgstRate,
+    rec.sgstRate,
+    rec.billingTerms && rec.billingTerms.length > 0 ? rec.billingTerms : rec.discount,
+    rec.igstRate ?? 0,
+  );
+  return rec.netAmount ?? rbd.netAmount;
+}
+
+// Mirrors the visible table's column order exactly (Booking Ref → Vendor →
+// Company/Project → Basic Amt → GST → Net Amt → Doc → Status) so the
+// exported file reads the same as the page it came from.
+const INVOICE_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Booking Ref", accessor: (r: any) => r.bookingReference || "—" },
+  { header: "Booking Date", accessor: (r: any) => r.bookingDate || "—" },
+  { header: "Vendor", accessor: (r: any) => r.supplier || "—" },
+  { header: "Company", accessor: (r: any) => r.companyName || "—" },
+  { header: "Project", accessor: (r: any) => r.projectName || "—" },
+  { header: "Basic Amt", accessor: (r: any) => (r.status === "Draft" ? "—" : `Rs. ${fmt(r.basicAmount)}`) },
+  { header: "GST %", accessor: (r: any) => (r.status === "Draft" ? "—" : (r.igstRate ?? 0) > 0 ? `${r.igstRate}%` : `${(r.cgstRate ?? 0) + (r.sgstRate ?? 0)}%`) },
+  { header: "Net Amt", accessor: (r: any) => `Rs. ${fmt(computeEffectiveNet(r))}` },
+  { header: "Doc No", accessor: (r: any) => r.sourceDocNo || r.linkedPODocNo || r.bookingReference || "—" },
+  { header: "Status", accessor: (r: any) => r.status || "—" },
+];
 
 export default function MaterialExpenseBooking() {
   const importFileInputRef = useRef<HTMLInputElement>(null);
@@ -1295,6 +1336,13 @@ export default function MaterialExpenseBooking() {
           view === "list" ? (
             <div className="flex flex-wrap items-center gap-2">
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
+              <ExportMenu
+                data={filteredRecords as unknown as Record<string, unknown>[]}
+                columns={INVOICE_EXPORT_COLUMNS}
+                title="Invoice"
+                filename="invoice"
+                disabled={filteredRecords.length === 0 || !rights.canExport}
+              />
               <button
                 onClick={handleDownloadTemplate}
                 title="Download a blank CSV template"

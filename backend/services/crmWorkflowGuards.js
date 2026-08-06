@@ -208,20 +208,54 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
   }
   const agreementId = result.recordset[0].Id;
 
-  // Standing document request: an executable agreement needs the customer's
-  // own identity proof on file, not just the PAN/Aadhaar numbers typed in
+  // Standing document request: a customer's own identity proof is useful KYC
+  // paperwork to have on file, not just the PAN/Aadhaar numbers typed in
   // during the welcome call. Requested here (Status='Requested', no file
-  // yet) so it's waiting the moment the agreement is later shared with the
-  // customer — same "->" chain the workflow spec describes between bank
-  // details and agreement preparation.
+  // yet), open for upload immediately (see GET /agreement/documents' own
+  // early-access carve-out in crmPortal.js) — no need to wait for the
+  // agreement to be shared. Deliberately NOT mandatory: the real gate on
+  // Agreement Followup / Senior Approval is the actual legal Sale Agreement
+  // paper the Legal Executive prepares and uploads, not this KYC document.
   await pool.request()
     .input("agid", sql.Int, agreementId)
     .input("cb", sql.Int, actorUserId || null)
     .query(`
       INSERT INTO dbo.CrmAgreementDocument
         (AgreementId, DocumentType, Label, IsMandatory, Status, UploadedByType, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
-      VALUES (@agid, 'IdentityProof', 'Identity Proof (PAN / Aadhaar copy)', 1, 'Requested', 'Customer', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
+      VALUES (@agid, 'IdentityProof', 'Identity Proof (PAN / Aadhaar copy)', 0, 'Requested', 'Customer', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
     `);
+
+  // The actual legal paperwork — the real Sale Agreement document the
+  // Legal Executive drafts outside this software (law/legal paperwork) and
+  // then uploads here — was never being requested at all, only the
+  // customer's KYC identity proof above. That made "Agreement Followup"
+  // track the wrong thing entirely: a booking's KYC status, not whether the
+  // actual legal contract exists. UploadedByType is left NULL (not
+  // 'Customer') since this one is staff/Legal-Executive-uploaded, not
+  // requested from the customer.
+  await pool.request()
+    .input("agid", sql.Int, agreementId)
+    .input("cb", sql.Int, actorUserId || null)
+    .query(`
+      INSERT INTO dbo.CrmAgreementDocument
+        (AgreementId, DocumentType, Label, IsMandatory, Status, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
+      VALUES (@agid, 'SaleAgreement', 'Sale Agreement (Legal Paperwork)', 1, 'Requested', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
+    `);
+
+  // Legal Milestone tracking used to require a staff member to remember to
+  // click "Start Workflow" for every booking after its agreement appeared —
+  // easy to forget, and the 8-step legal process (drafting, internal
+  // approval, etc.) is really just internal follow-up on the agreement that
+  // was just auto-created above, not a separate decision anyone needs to
+  // make. Auto-started here, right alongside the agreement itself, the same
+  // way the SaleAgreement document request is. Guarded separately (like
+  // portal provisioning below) so a failure here can't turn into a 500 on
+  // whatever action actually triggered agreement creation.
+  try {
+    await maybeAutoCreateLegalMilestone(pool, bookingId, actorUserId);
+  } catch (e) {
+    console.error("[maybeAutoCreateAgreement] legal milestone auto-start failed:", e.message);
+  }
 
   // The agreement (and its identity-proof document request) are already
   // committed above by this point — portal provisioning is a "nice to have
@@ -246,6 +280,41 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
   }
 
   return { id: agreementId, AgreementNo: agNo, portal: portalInfo };
+}
+
+/**
+ * Auto-start the Legal Milestone tracker for a booking the instant it has
+ * an agreement — mirrors POST /api/crm/legal-milestones' own rule (an
+ * agreement must exist first) and its MilestoneNo scheme. No-op if a
+ * tracker already exists for this booking (UNIQUE BookingId) or the
+ * booking has no agreement yet. Idempotent/race-safe like the sibling
+ * maybeAutoCreate* helpers — safe to call from multiple trigger points.
+ */
+async function maybeAutoCreateLegalMilestone(pool, bookingId, actorUserId) {
+  const existing = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Id FROM dbo.CrmLegalMilestone WHERE BookingId = @bid");
+  if (existing.recordset.length) return null;
+
+  const agr = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+  if (!agr.recordset.length) return null;
+
+  const milestoneNo = "LGL-" + Date.now().toString(36).toUpperCase().slice(-7);
+  try {
+    const result = await pool.request()
+      .input("no",  sql.NVarChar(30), milestoneNo)
+      .input("bid", sql.Int, bookingId)
+      .input("cb",  sql.Int, actorUserId || null)
+      .query(`
+        INSERT INTO dbo.CrmLegalMilestone (MilestoneNo, BookingId, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @cb, SYSDATETIME())
+      `);
+    return { id: result.recordset[0].Id, MilestoneNo: milestoneNo };
+  } catch (e) {
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) return null;
+    throw e;
+  }
 }
 
 /**
@@ -407,36 +476,96 @@ async function maybeAutoGenerateAgreementInvoice(pool, bookingId, actorUserId) {
   return { id: invoiceId, InvoiceNo: invoiceNo };
 }
 
-// Both sides landing on the same proposed date no longer finalizes
-// AgreementDate directly — it only puts the date up for a super_admin
-// sign-off (DateApprovalStatus='Pending', a second approval gate on the
-// same record, independent of Senior/Customer content approval). Called
-// after every point that can touch either proposed-date column (company
-// propose-date, customer approve/propose-date) so the match is caught the
-// instant it happens, from either side. Returns true iff this call is the
-// one that just moved it into Pending (so a route can tell the caller
-// "submitted for approval"); false/null otherwise. Never returns a
-// confirmed date — use finalizeAgreementDate() (fired from the actual
-// approve endpoint) for that.
-async function maybeResolveAgreementDate(pool, agreementId) {
+// --- Single-field agreement-date negotiation loop -------------------------
+// Replaces the old two-column (ProposedDateByCompany / ProposedDateByCustomer)
+// design. One live field, ProposedDate, plus ProposedDateStatus tracking
+// whose turn it is:
+//   null                  -> nothing proposed yet, either side may open
+//   PendingCustomerReview -> company just acted, waiting on customer
+//   PendingCompanyReview  -> customer just acted, waiting on company
+//   Matched               -> both sides landed on the same date
+// Matched still does NOT write AgreementDate directly — same as the old
+// design, it only opens the independent super_admin sign-off gate
+// (DateApprovalStatus='Pending'). Only finalizeAgreementDate(), fired from
+// the actual PUT /:id/date/approve endpoint once that sign-off completes,
+// ever writes AgreementDate.
+
+function agreementDateError(message, status) {
+  const e = new Error(message);
+  e.status = status;
+  return e;
+}
+
+// Propose a brand-new date, or revise the currently-pending one, from one
+// side. `proposedBy` is 'Company' or 'Customer' — whichever side is taking
+// this action right now. Enforces turn-taking: a side may act when nothing
+// is pending yet (opening move) or when the status shows it's waiting on
+// THEM to respond — never while waiting on the other side. Writes
+// CrmAgreementDateHistory exactly as before (unchanged shape/consumers).
+async function proposeAgreementDate(pool, agreementId, proposedBy, proposedDate, actorUserId) {
   const row = await pool.request().input("id", sql.Int, agreementId).query(`
-    SELECT AgreementDate, DateApprovalStatus, ProposedDateByCompany, ProposedDateByCustomer
+    SELECT AgreementDate, DateApprovalStatus, ProposedDateStatus
     FROM dbo.CrmAgreement WHERE Id = @id
   `);
   const ag = row.recordset[0];
-  if (!ag || ag.AgreementDate) return false; // already finalized, never overwritten
-  if (ag.DateApprovalStatus === "Pending") return false; // already awaiting sign-off
-  if (!ag.ProposedDateByCompany || !ag.ProposedDateByCustomer) return false;
+  if (!ag) throw agreementDateError("Agreement not found", 404);
+  if (ag.AgreementDate) throw agreementDateError("The agreement date is already confirmed", 400);
+  if (ag.DateApprovalStatus === "Pending") throw agreementDateError("A proposed date is already awaiting approval", 400);
 
-  const company = new Date(ag.ProposedDateByCompany).toDateString();
-  const customer = new Date(ag.ProposedDateByCustomer).toDateString();
-  if (company !== customer) return false; // still negotiating
+  const myTurnStatus = proposedBy === "Company" ? "PendingCompanyReview" : "PendingCustomerReview";
+  if (ag.ProposedDateStatus && ag.ProposedDateStatus !== myTurnStatus) {
+    throw agreementDateError("Waiting on the other side to respond to the current proposal", 400);
+  }
+
+  await pool.request()
+    .input("agid", sql.Int, agreementId)
+    .input("by",   sql.NVarChar(20), proposedBy)
+    .input("pd",   sql.Date, proposedDate)
+    .input("cb",   sql.Int, actorUserId || null)
+    .query(`
+      INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
+      VALUES (@agid, @by, @pd, @cb, SYSDATETIME())
+    `);
+
+  const nextStatus = proposedBy === "Company" ? "PendingCustomerReview" : "PendingCompanyReview";
+  await pool.request()
+    .input("id", sql.Int, agreementId)
+    .input("pd", sql.Date, proposedDate)
+    .input("st", sql.NVarChar(30), nextStatus)
+    .query(`
+      UPDATE dbo.CrmAgreement SET ProposedDate = @pd, ProposedDateStatus = @st
+      WHERE Id = @id
+    `);
+
+  return { status: nextStatus };
+}
+
+// The side it's currently waiting on accepts ProposedDate as-is (no
+// re-typing the same date to force a "match"). Moves straight to 'Matched'
+// and opens the super_admin sign-off gate, same as a same-date match did
+// under the old two-column design. Returns true if this call is the one
+// that just opened that gate.
+async function acceptAgreementDate(pool, agreementId, acceptedBy) {
+  const row = await pool.request().input("id", sql.Int, agreementId).query(`
+    SELECT AgreementDate, DateApprovalStatus, ProposedDate, ProposedDateStatus
+    FROM dbo.CrmAgreement WHERE Id = @id
+  `);
+  const ag = row.recordset[0];
+  if (!ag) throw agreementDateError("Agreement not found", 404);
+  if (ag.AgreementDate) throw agreementDateError("The agreement date is already confirmed", 400);
+  if (ag.DateApprovalStatus === "Pending") throw agreementDateError("A proposed date is already awaiting approval", 400);
+  if (!ag.ProposedDate) throw agreementDateError("No proposed date to accept", 400);
+
+  const myTurnStatus = acceptedBy === "Company" ? "PendingCompanyReview" : "PendingCustomerReview";
+  if (ag.ProposedDateStatus !== myTurnStatus) {
+    throw agreementDateError("It's not your turn to accept — the other side hasn't reviewed the current proposal yet", 400);
+  }
 
   // Directly to 'Pending', not via approvalService.transition() — this is a
-  // system event (a date match), not a user clicking "submit", and the
+  // system event (an accept), not a user clicking "submit", and the
   // engine's own "Pending" transition expects a submitting user/role.
   await pool.request().input("id", sql.Int, agreementId)
-    .query("UPDATE dbo.CrmAgreement SET DateApprovalStatus = 'Pending' WHERE Id = @id");
+    .query("UPDATE dbo.CrmAgreement SET ProposedDateStatus = 'Matched', DateApprovalStatus = 'Pending' WHERE Id = @id");
 
   await pool.request()
     .input("agid", sql.Int, agreementId)
@@ -455,14 +584,14 @@ async function maybeResolveAgreementDate(pool, agreementId) {
 // first time (it had none until an agreement date genuinely existed).
 async function finalizeAgreementDate(pool, agreementId) {
   const row = await pool.request().input("id", sql.Int, agreementId).query(`
-    SELECT BookingId, ProposedDateByCompany FROM dbo.CrmAgreement WHERE Id = @id
+    SELECT BookingId, ProposedDate FROM dbo.CrmAgreement WHERE Id = @id
   `);
   const ag = row.recordset[0];
   if (!ag) return null;
 
   await pool.request()
     .input("id", sql.Int, agreementId)
-    .input("adt", sql.Date, ag.ProposedDateByCompany)
+    .input("adt", sql.Date, ag.ProposedDate)
     .query("UPDATE dbo.CrmAgreement SET AgreementDate = @adt WHERE Id = @id");
 
   await pool.request()
@@ -474,13 +603,23 @@ async function finalizeAgreementDate(pool, agreementId) {
 
   await pool.request()
     .input("bid", sql.Int, ag.BookingId)
-    .input("adt", sql.Date, ag.ProposedDateByCompany)
+    .input("adt", sql.Date, ag.ProposedDate)
     .query(`
       UPDATE dbo.CrmPaymentMilestone SET DueDate = @adt
       WHERE BookingId = @bid AND MilestoneName = 'Agreement' AND DueDate IS NULL AND Status = 'Pending'
     `);
 
-  return ag.ProposedDateByCompany;
+  return ag.ProposedDate;
+}
+
+// PUT /:id/date/reject hard-resets the whole negotiation to NULL/NULL —
+// confirmed behavior, matching what the old two-column design did.
+async function resetAgreementDateNegotiation(pool, agreementId) {
+  await pool.request().input("id", sql.Int, agreementId).query(`
+    UPDATE dbo.CrmAgreement SET
+      DateApprovalStatus = 'NotRequired', ProposedDate = NULL, ProposedDateStatus = NULL
+    WHERE Id = @id
+  `);
 }
 
 // Same 8-step whitelist as crmLegalMilestones.js's PUT /:id/:step — kept in
@@ -495,15 +634,23 @@ const LEGAL_MILESTONE_STEPS = [
  * Auto-tick a Legal Milestone step the instant its real-world equivalent
  * happens elsewhere in the Agreement lifecycle, instead of requiring staff
  * to separately click "Mark Complete" on the Legal Milestones page for
- * something that already just happened on the Agreement page. Only wired
- * for steps with an unambiguous single source of truth:
- *   InternalApproval -> Agreement senior-approved
- *   DocShared        -> Agreement sent to customer
+ * something that already just happened on the Agreement page. Every step
+ * but one is wired to an unambiguous single source of truth:
+ *   DocCollection     -> customer's Identity Proof document Verified
+ *   LegalReview       -> Legal Executive assigned to the agreement (this
+ *                        step is labeled "Legal Executive Assigned" in the
+ *                        UI now — "Legal Review" never had a real trigger
+ *                        of its own; assignment is the closest real event
+ *                        and is the thing that actually gates the rest of
+ *                        the workflow)
+ *   Drafting          -> the Sale Agreement document itself uploaded
+ *   InternalApproval  -> Agreement senior-approved
+ *   DocShared         -> Agreement sent to customer
  *   MutualAgreement   -> Customer approved the agreement
  *   FinalExecution    -> Agreement marked Executed
- * DocCollection/LegalReview/Drafting/DirectorMeeting have no equivalent
- * external event yet and stay manual-only (via the existing PUT /:id/:step
- * endpoint, still available for every step including these four).
+ * DirectorMeeting has no digital equivalent — an in-person meeting leaves
+ * no trace in this system — and stays manual-only (via the existing PUT
+ * /:id/:step endpoint, still available for every step including this one).
  * No-op if the legal workflow hasn't been started for this booking yet, or
  * if the step is already Completed (idempotent — safe to call from
  * multiple trigger points, e.g. both /:id/approve's auto-send and
@@ -532,6 +679,31 @@ async function syncLegalMilestoneStep(pool, bookingId, step, actorUserId) {
         UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
       WHERE Id = @id
     `);
+}
+
+/**
+ * DocCollection and Drafting are both triggered by a CrmAgreementDocument
+ * change (Verified / Uploaded respectively), and every document-touching
+ * route already has the docId in hand but not always the BookingId — this
+ * looks both up in one join and fires the right step, so call sites don't
+ * each have to duplicate the DocumentType/Status matching logic. Safe to
+ * call after ANY document status change; it's a no-op for document types
+ * or statuses that don't map to a milestone step.
+ */
+async function syncLegalMilestoneFromDocument(pool, docId, actorUserId) {
+  const row = await pool.request().input("id", sql.Int, docId).query(`
+    SELECT d.DocumentType, d.Status, ag.BookingId
+    FROM dbo.CrmAgreementDocument d
+    JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+    WHERE d.Id = @id
+  `);
+  if (!row.recordset.length) return;
+  const { DocumentType, Status, BookingId } = row.recordset[0];
+  if (DocumentType === "IdentityProof" && Status === "Verified") {
+    await syncLegalMilestoneStep(pool, BookingId, "DocCollection", actorUserId);
+  } else if (DocumentType === "SaleAgreement" && ["Uploaded", "Submitted", "Verified"].includes(Status)) {
+    await syncLegalMilestoneStep(pool, BookingId, "Drafting", actorUserId);
+  }
 }
 
 // Redistributes the ₹ (and %) of every NOT-yet-settled milestone on a
@@ -900,15 +1072,19 @@ async function maybeAutoGenerateBookingInvoice(pool, bookingId, actorUserId) {
 module.exports = {
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
+  maybeAutoCreateLegalMilestone,
   maybeAutoCreateSalesDeed,
   maybeAutoGenerateInvoice,
   maybeAutoGenerateBookingInvoice,
   maybeAutoGenerateAgreementInvoice,
   maybeAutoCreateBrokerage,
   maybeUnlockBrokerageMilestoneTranche,
-  maybeResolveAgreementDate,
+  proposeAgreementDate,
+  acceptAgreementDate,
   finalizeAgreementDate,
+  resetAgreementDateNegotiation,
   syncLegalMilestoneStep,
+  syncLegalMilestoneFromDocument,
   requireActiveBooking,
   recalculateRemainingMilestones,
   isLegalWorkStarted,

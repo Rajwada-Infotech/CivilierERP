@@ -16,6 +16,18 @@ const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
 // Privileged roles that can always list users (Password Reset, User Management)
 const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"];
 
+// Roles allowed to be assigned as an Agreement's Legal Executive. Filtered by
+// RName (the stable, human-assigned role code), not RId — role IDs are
+// auto-increment and not guaranteed to match across environments, RName is
+// what migrations actually seed by. legal_head can also prepare paperwork in
+// smaller teams even though their primary function is senior approval, so
+// both legal roles are included rather than just legal_person.
+// TEMP (continuous dev/testing only): super_admin included so testing isn't
+// blocked on real legal-role users existing in every environment. Remove
+// once real legal_head/legal_person accounts are seeded everywhere this
+// matters — this is a scope hole if it ships to production as-is.
+const LEGAL_EXECUTIVE_ROLES = ["legal_head", "legal_person", "super_admin"];
+
 const SALT_ROUNDS = 12;
 const MAX_LOGIN_ATTEMPTS = process.env.NODE_ENV === "development" ? 50 : 10;
 const LOCKOUT_SECONDS = 15 * 60;
@@ -216,6 +228,30 @@ router.post("/logout", authMiddleware, async (req, res) => {
 // Password Reset and User Management pages always load, regardless of
 // whether a RoleRights row exists for "Users / List" in the DB.
 router.get(
+  "/legal-executives",
+  authMiddleware,
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const req0 = pool.request();
+      LEGAL_EXECUTIVE_ROLES.forEach((role, i) => req0.input(`role${i}`, sql.NVarChar(50), role));
+      const inClause = LEGAL_EXECUTIVE_ROLES.map((_, i) => `@role${i}`).join(",");
+      const result = await req0.query(`
+        SELECT u.id, u.name, u.email, r.RName AS roleName
+        FROM dbo.users u
+        JOIN dbo.Role r ON u.RoleId = r.RId
+        WHERE r.RName IN (${inClause})
+          AND ISNULL(u.discontinue, 0) = 0
+        ORDER BY u.name
+      `);
+      res.json(result.recordset);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+router.get(
   "/",
   authMiddleware,
   allowRoles(...PRIVILEGED_ROLES),
@@ -271,10 +307,9 @@ router.post(
         .input("RoleId", sql.Int, assignedRoleId)
         .input("can_accept_tickets", sql.Bit, can_accept_tickets ? 1 : 0)
         .input("password", sql.NVarChar, hashed).query(`
-          INSERT INTO dbo.users (name, email, password, RoleId, role, created_datetime, discontinue, can_accept_tickets)
+          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets)
           VALUES (
             @name, @email, @password, @RoleId,
-            (SELECT RName FROM dbo.Role WHERE RId = @RoleId),
             GETDATE(), 0, @can_accept_tickets
           )
         `);

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -78,6 +79,13 @@ interface ApprovalActionsProps {
    *  Senior Approval vs. its separate Date Approval) and each needs its own
    *  route. Omit for the default `${endpoint}/${recordId}/${action}`. */
   actionPathSuffix?: string;
+  /** Mark modules the backend keeps deliberately role-locked (Journal
+   *  Voucher, Fund Transfer, Inter-Company Transfer, CRM Agreement Date /
+   *  Sales Deed Director — see MODULE_APPROVER_ROLE_OVERRIDES in
+   *  approvalService.js). When true, the "approval-inbox" page-right
+   *  fallback below is skipped and only approverRoles can unlock the
+   *  buttons, mirroring the backend gate exactly. */
+  restricted?: boolean;
 }
 
 export function ApprovalActions({
@@ -89,12 +97,19 @@ export function ApprovalActions({
   submitOnly = false,
   approverRoles = APPROVER_ROLES,
   actionPathSuffix,
+  restricted = false,
 }: ApprovalActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
 
-  const approver = isApprover(approverRoles);
+  // Fallback: holding "edit" on the "approval-inbox" page via Menu Rights
+  // also unlocks the buttons — mirrors the backend's transition() gate in
+  // approvalService.js. Not consulted for `restricted` modules, which stay
+  // locked to approverRoles on both sides.
+  const { canEdit: hasApprovalInboxEdit } = usePageRights("approval-inbox");
+  const approver =
+    isApprover(approverRoles) || (!restricted && hasApprovalInboxEdit);
 
   // ── Action handler ──────────────────────────────────────────────────────────
   async function handleAction(action: "submit" | "approve" | "reject") {

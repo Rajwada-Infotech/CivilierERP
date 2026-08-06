@@ -77,17 +77,25 @@ export const IFSC_BANK_MAP: Record<string, string> = {
 
 // ─── Export columns ──────────────────────────────────────────────────────────
 
+// Mirrors the visible desktop table's own column order (Payment Purpose →
+// Doc No → Expense Ref → Amount → Status), then appends the supplementary
+// detail fields the compact table doesn't have room for — so the export
+// reads like the page it came from instead of a differently-ordered dump.
 export const EXPORT_COLUMNS: ExportColumn[] = [
-  { header: "Doc No", accessor: "docNo" },
   { header: "Payment Purpose", accessor: "paymentName" },
-  { header: "Paid To", accessor: "paidTo" },
+  { header: "Doc No", accessor: "docNo" },
   { header: "Expense Ref", accessor: "expenseRef" },
-  { header: "Project", accessor: "project" },
+  { header: "Amount", accessor: (r: any) => formatINR(Number(r.amount || 0)) },
+  // displayStatus (Cheque Cancelled / Bounced / Cleared / Issued / …) is
+  // the real, currently-shown status — the raw `status` field is only the
+  // underlying approval state (Approved/Pending/Rejected), which is why a
+  // cancelled or bounced cheque still exported as "Approved" before.
+  { header: "Status", accessor: (r: any) => r.displayStatus || r.status || "—" },
+  { header: "Paid To", accessor: "paidTo" },
   { header: "Company", accessor: "company" },
+  { header: "Project", accessor: "project" },
   { header: "Mode", accessor: "mode" },
   { header: "Date", accessor: "date" },
-  { header: "Amount", accessor: (r: any) => formatINR(Number(r.amount || 0)) },
   { header: "Bank", accessor: "bankName" },
   { header: "Cheque No", accessor: "chequeNo" },
-  { header: "Status", accessor: "status" },
 ];

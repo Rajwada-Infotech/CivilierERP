@@ -36,14 +36,19 @@ import {
   Upload,
   FileCheck2,
   Receipt,
+  Pencil,
+  Save,
+  X as XIcon,
 } from "lucide-react";
 import { MoneyRecive } from "iconsax-react";
 import { getCompanyOptions, getBanks, type CompanyOption, type BankRecord } from "@/api/bankMasterApi";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   getLoanSanctions,
   getLoanSchedule,
   createLoanSanction,
+  updateLoanSanction,
   deleteLoanSanction,
   getCustomerOptions,
   getBankOptions,
@@ -139,7 +144,37 @@ export default function LoanSanctionPage() {
   const [deleteTarget, setDeleteTarget] = useState<LoanSanction | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Editing the safe administrative fields on an already-sanctioned loan —
+  // deliberately separate from the create form's state — everything here
+  // is editable except the parties' identity (loan type, lender/borrower
+  // company/bank/customer), which the backend also refuses to touch.
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [editForm, setEditForm] = useState({
+    loanDocNo: "",
+    purpose: "",
+    remarks: "",
+    lenderBankAccountId: "",
+    borrowerBankAccountId: "",
+    loanDate: "",
+    amount: "",
+    hasInterest: false,
+    interestType: "CI" as InterestCalcType,
+    interestRate: "",
+    tenureMonths: "",
+    dueDate: "",
+  });
+  const [savingDetails, setSavingDetails] = useState(false);
+
   const [uploadingNoc, setUploadingNoc] = useState(false);
+
+  // GL posting — mirrors GRN's Posting tab: fetch the live preview when the
+  // tab opens, then auto-post it to the real ledger (dbo.GeneralLedgerEntry)
+  // the moment it's not already posted, so the loan actually shows up in
+  // Trial Balance instead of only ever being a client-side preview.
+  const [loanPostingData, setLoanPostingData] = useState<any | null>(null);
+  const [loanPostingLoading, setLoanPostingLoading] = useState(false);
+  const [loanPosting, setLoanPosting] = useState(false);
+  const [loanPostingError, setLoanPostingError] = useState<string | null>(null);
   const nocInputRef = useRef<HTMLInputElement>(null);
 
   // Loan document attachment (agreement / sanction letter etc.)
@@ -233,6 +268,43 @@ export default function LoanSanctionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loans]);
 
+  // Fetch live posting data when the Posting tab opens (mirrors GRN.tsx).
+  useEffect(() => {
+    if (tab !== "posting" || !viewingLoan?.LoanId) return;
+    setLoanPostingLoading(true);
+    setLoanPostingData(null);
+    fetchWithAuth(`/api/loan-sanction/${viewingLoan.LoanId}/posting`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setLoanPostingData(d ?? null))
+      .catch(() => setLoanPostingData(null))
+      .finally(() => setLoanPostingLoading(false));
+  }, [tab, viewingLoan?.LoanId]);
+
+  // Auto-post the moment the preview has loaded and isn't already posted —
+  // no manual "Post to GL" click, same as GRN's Posting tab.
+  useEffect(() => {
+    if (
+      tab !== "posting" ||
+      loanPostingLoading ||
+      !loanPostingData ||
+      loanPostingData.isPosted ||
+      loanPosting ||
+      !viewingLoan?.LoanId
+    )
+      return;
+    setLoanPosting(true);
+    setLoanPostingError(null);
+    fetchWithAuth(`/api/loan-sanction/${viewingLoan.LoanId}/post-to-gl`, { method: "POST" })
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body?.error ?? "Posting failed");
+        setLoanPostingData((prev: any) => ({ ...prev, isPosted: true, jvNo: body.jvNo, jvId: body.jvId }));
+      })
+      .catch((err: any) => setLoanPostingError(err.message ?? "Posting failed"))
+      .finally(() => setLoanPosting(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, loanPostingLoading, loanPostingData, viewingLoan?.LoanId]);
+
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -255,11 +327,92 @@ export default function LoanSanctionPage() {
     setViewingLoan(loan);
     setTab("overview");
     setShowForm(true);
+    setEditingDetails(false);
+  };
+
+  const openEditDetails = async (loan: LoanSanction) => {
+    setViewingLoan(loan);
+    setTab("overview");
+    setShowForm(true);
+    setEditForm({
+      loanDocNo: loan.LoanDocNo || "",
+      purpose: loan.Purpose || "",
+      remarks: loan.Remarks || "",
+      lenderBankAccountId: loan.LenderBankAccountId ? String(loan.LenderBankAccountId) : "",
+      borrowerBankAccountId: loan.BorrowerBankAccountId ? String(loan.BorrowerBankAccountId) : "",
+      loanDate: loan.LoanDate ? loan.LoanDate.slice(0, 10) : "",
+      amount: loan.Amount != null ? String(loan.Amount) : "",
+      hasInterest: loan.HasInterest !== false,
+      interestType: (loan.InterestType as InterestCalcType) || "CI",
+      interestRate: loan.InterestRate != null ? String(loan.InterestRate) : "",
+      tenureMonths: loan.TenureMonths != null ? String(loan.TenureMonths) : "",
+      dueDate: "",
+    });
+    setEditingDetails(true);
+    // No-breakdown loans (Inter-Company simple transfer) keep their due
+    // date on the single EMI row rather than the loan itself — pull it in
+    // for the edit form so it isn't blank.
+    if (loan.LoanType === "Inter-Company" && loan.HasInterest === false) {
+      try {
+        const sched = await getLoanSchedule(loan.LoanId);
+        if (sched.length === 1) {
+          setEditForm((f) => ({ ...f, dueDate: sched[0].DueDate.slice(0, 10) }));
+        }
+      } catch {
+        // non-fatal — the field just stays blank
+      }
+    }
+  };
+
+  const handleSaveDetails = async () => {
+    if (!viewingLoan) return;
+    setSavingDetails(true);
+    try {
+      const isInterCompany = viewingLoan.LoanType === "Inter-Company";
+      await updateLoanSanction(viewingLoan.LoanId, {
+        loanDocNo: editForm.loanDocNo || null,
+        purpose: editForm.purpose || null,
+        remarks: editForm.remarks || null,
+        lenderBankAccountId: editForm.lenderBankAccountId || null,
+        borrowerBankAccountId: editForm.borrowerBankAccountId || null,
+        // Financial-core fields are only sent when repayment hasn't started
+        // yet — the backend treats their mere presence in the body as "the
+        // caller wants to touch the financial core" and 409s once any EMI
+        // is paid, so admin-only edits after that point must omit them
+        // entirely rather than resend the unchanged (disabled) values.
+        ...(paidEmis === 0
+          ? {
+              loanDate: editForm.loanDate,
+              amount: editForm.amount,
+              hasInterest: editForm.hasInterest,
+              interestType: editForm.interestType,
+              interestRate: editForm.hasInterest ? editForm.interestRate || null : null,
+              tenureMonths: editForm.tenureMonths || null,
+              dueDate: isInterCompany && !editForm.hasInterest ? editForm.dueDate || null : null,
+            }
+          : {}),
+      });
+      toast.success("Loan details updated");
+      setEditingDetails(false);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["loan-sanctions"] }),
+        qc.invalidateQueries({ queryKey: ["loan-schedule", viewingLoan.LoanId] }),
+        qc.invalidateQueries({ queryKey: ["loan-payments", viewingLoan.LoanId] }),
+      ]);
+      const fresh = await getLoanSanctions();
+      const updated = fresh.find((l) => l.LoanId === viewingLoan.LoanId);
+      if (updated) setViewingLoan(updated);
+    } catch (e: any) {
+      toast.error(friendlyErrorMessage(e, "Could not update loan details"));
+    } finally {
+      setSavingDetails(false);
+    }
   };
 
   const closeForm = () => {
     setShowForm(false);
     setViewingLoan(null);
+    setEditingDetails(false);
   };
 
   const handleSave = async () => {
@@ -456,6 +609,13 @@ export default function LoanSanctionPage() {
             <Eye size={13} />
           </button>
           <button
+            onClick={() => openEditDetails(row.original)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            title="Edit details"
+          >
+            <Pencil size={13} />
+          </button>
+          <button
             onClick={() => setDeleteTarget(row.original)}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
             title="Delete"
@@ -593,13 +753,24 @@ export default function LoanSanctionPage() {
               </div>
             </div>
             {viewingLoan && (
-              <button
-                type="button"
-                onClick={() => setDeleteTarget(viewingLoan)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-destructive border border-destructive/30 hover:bg-destructive/10 transition-colors shrink-0"
-              >
-                <Trash2 size={12} /> Delete
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {!editingDetails && (
+                  <button
+                    type="button"
+                    onClick={() => openEditDetails(viewingLoan)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary border border-primary/30 hover:bg-primary/10 transition-colors"
+                  >
+                    <Pencil size={12} /> Edit
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(viewingLoan)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-destructive border border-destructive/30 hover:bg-destructive/10 transition-colors"
+                >
+                  <Trash2 size={12} /> Delete
+                </button>
+              </div>
             )}
           </div>
 
@@ -713,6 +884,162 @@ export default function LoanSanctionPage() {
 
                 {readOnly ? (
                   <>
+                    {editingDetails && (
+                      <div className="rounded-xl border border-primary/30 bg-primary/[0.03] p-4 space-y-4">
+                        <SectionLabel icon={Pencil} label="Edit Loan Details" />
+                        {paidEmis > 0 && (
+                          <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1.5 -mt-2">
+                            <AlertTriangle size={11} /> This loan already has repayments recorded — amount, interest, tenure and dates are locked. Only Loan Doc No, Purpose, Remarks, and bank A/C tags can be edited.
+                          </p>
+                        )}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <label className={labelCls}>Loan Doc No.</label>
+                            <input
+                              className={inputCls}
+                              value={editForm.loanDocNo}
+                              onChange={(e) => setEditForm((f) => ({ ...f, loanDocNo: e.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className={labelCls}>Loan Date</label>
+                            <input
+                              type="date"
+                              className={inputCls}
+                              disabled={paidEmis > 0}
+                              value={editForm.loanDate}
+                              onChange={(e) => setEditForm((f) => ({ ...f, loanDate: e.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className={labelCls}>Amount</label>
+                            <input
+                              type="number"
+                              className={inputCls}
+                              disabled={paidEmis > 0}
+                              value={editForm.amount}
+                              onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className={labelCls}>Tenure (months)</label>
+                            <input
+                              type="number"
+                              className={inputCls}
+                              disabled={paidEmis > 0}
+                              value={editForm.tenureMonths}
+                              onChange={(e) => setEditForm((f) => ({ ...f, tenureMonths: e.target.value.replace(/[^0-9]/g, "") }))}
+                            />
+                          </div>
+                          <div className="space-y-1.5 col-span-2 flex items-center justify-between rounded-lg border border-border px-3.5 py-2.5">
+                            <span className="text-sm font-medium text-foreground">Interest-bearing loan</span>
+                            <button
+                              type="button"
+                              disabled={paidEmis > 0}
+                              onClick={() => setEditForm((f) => ({ ...f, hasInterest: !f.hasInterest }))}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
+                                editForm.hasInterest ? "bg-emerald-500" : "bg-muted"
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
+                                  editForm.hasInterest ? "translate-x-6" : "translate-x-1"
+                                }`}
+                              />
+                            </button>
+                          </div>
+                          {editForm.hasInterest && (
+                            <div className="space-y-1.5">
+                              <label className={labelCls}>Interest Rate (% p.a.)</label>
+                              <input
+                                type="number"
+                                className={inputCls}
+                                disabled={paidEmis > 0}
+                                value={editForm.interestRate}
+                                onChange={(e) => setEditForm((f) => ({ ...f, interestRate: e.target.value.replace(/[^0-9.]/g, "") }))}
+                              />
+                            </div>
+                          )}
+                          {isInterCompanyType && !editForm.hasInterest && (
+                            <div className="space-y-1.5">
+                              <label className={labelCls}>Repayment Due Date</label>
+                              <input
+                                type="date"
+                                className={inputCls}
+                                disabled={paidEmis > 0}
+                                value={editForm.dueDate}
+                                min={editForm.loanDate || undefined}
+                                onChange={(e) => setEditForm((f) => ({ ...f, dueDate: e.target.value }))}
+                              />
+                            </div>
+                          )}
+                          {isInterCompanyType && (
+                            <>
+                              <div className="space-y-1.5">
+                                <label className={labelCls}>Lender Bank A/C</label>
+                                <select
+                                  className={inputCls}
+                                  value={editForm.lenderBankAccountId}
+                                  onChange={(e) => setEditForm((f) => ({ ...f, lenderBankAccountId: e.target.value }))}
+                                >
+                                  <option value="">— No bank A/C tag —</option>
+                                  {banksForCompany(viewingLoan?.LenderCompanyName || "").map((b: BankRecord) => (
+                                    <option key={b.BId} value={b.BId}>{b.BName}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <label className={labelCls}>Borrower Bank A/C</label>
+                                <select
+                                  className={inputCls}
+                                  value={editForm.borrowerBankAccountId}
+                                  onChange={(e) => setEditForm((f) => ({ ...f, borrowerBankAccountId: e.target.value }))}
+                                >
+                                  <option value="">— No bank A/C tag —</option>
+                                  {banksForCompany(viewingLoan?.BorrowerCompanyName || "").map((b: BankRecord) => (
+                                    <option key={b.BId} value={b.BId}>{b.BName}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </>
+                          )}
+                          <div className="space-y-1.5 col-span-2">
+                            <label className={labelCls}>Purpose</label>
+                            <input
+                              className={inputCls}
+                              value={editForm.purpose}
+                              onChange={(e) => setEditForm((f) => ({ ...f, purpose: e.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-1.5 col-span-2">
+                            <label className={labelCls}>Remarks</label>
+                            <input
+                              className={inputCls}
+                              value={editForm.remarks}
+                              onChange={(e) => setEditForm((f) => ({ ...f, remarks: e.target.value }))}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingDetails(false)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-muted transition-colors"
+                          >
+                            <XIcon size={12} /> Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSaveDetails}
+                            disabled={savingDetails}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
+                          >
+                            <Save size={12} /> {savingDetails ? "Saving…" : "Save"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Parties */}
                     <SectionLabel icon={Building2} label="Parties" />
                     <div className="grid grid-cols-2 gap-3">
@@ -1361,11 +1688,31 @@ export default function LoanSanctionPage() {
             {/* Posting tab */}
             {tab === "posting" && (
               <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Wallet size={14} className="text-emerald-600" />
-                  <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
-                    Journal Entry — Loan Posting
-                  </span>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Wallet size={14} className="text-emerald-600" />
+                    <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                      Journal Entry — Loan Posting
+                    </span>
+                  </div>
+                  {readOnly && (
+                    loanPostingLoading ? (
+                      <span className="text-[10px] text-muted-foreground">Loading…</span>
+                    ) : loanPostingData?.isPosted ? (
+                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                        <CheckCircle2 size={10} /> Posted · {loanPostingData.jvNo || `JV-${loanPostingData.jvId}`}
+                      </span>
+                    ) : loanPosting ? (
+                      <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                        <span className="w-2.5 h-2.5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                        Posting…
+                      </span>
+                    ) : loanPostingError ? (
+                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/10 text-red-600 border border-red-500/20">
+                        <AlertCircle size={10} /> {loanPostingError}
+                      </span>
+                    ) : null
+                  )}
                 </div>
                 <div className="rounded-xl border border-border overflow-hidden">
                   <table className="w-full text-sm">
@@ -1438,7 +1785,9 @@ export default function LoanSanctionPage() {
                 <p className="text-xs text-muted-foreground">
                   All postings use system-generated GL accounts, auto-created per counterparty on
                   first use{isBankLoan ? " — for a Bank Loan, the lender's own existing GL account (and its real account group) is reused directly, not a shadow account" : ""}.
-                  Additional posting fields will be added here later.
+                  {readOnly
+                    ? " This entry is posted to the General Ledger automatically and appears in Trial Balance."
+                    : " Save the loan to generate this posting."}
                 </p>
               </div>
             )}

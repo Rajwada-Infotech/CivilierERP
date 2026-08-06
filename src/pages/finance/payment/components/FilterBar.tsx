@@ -3,10 +3,11 @@ import { createPortal } from "react-dom";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Building2, FolderKanban, CalendarDays, Users, Search, X, ChevronDown } from "lucide-react";
 import type { BookingFilters } from "../types";
+import { PARTY_TYPE_LABELS } from "../api";
 
-// Typeable, scrollable combobox for the Vendor filter (suppliers +
-// contractors combined) — a plain native <select> gets unwieldy once the
-// combined list runs past a couple dozen names.
+// Typeable, scrollable combobox for the Vendor filter (suppliers,
+// contractors, brokers — grouped by category) — a plain native <select>
+// gets unwieldy once the combined list runs past a couple dozen names.
 //
 // The dropdown panel is portalled to document.body (fixed-positioned off
 // the trigger's own bounding rect) rather than absolutely positioned
@@ -18,12 +19,12 @@ import type { BookingFilters } from "../types";
 function VendorCombo({
   value,
   onChange,
-  options,
+  groups,
   placeholder,
 }: {
   value: string;
   onChange: (val: string) => void;
-  options: string[];
+  groups: { groupLabel: string; items: { id: number; label: string }[] }[];
   placeholder: string;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -61,9 +62,12 @@ function VendorCombo({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const filtered = search
-    ? options.filter((o) => o.toLowerCase().includes(search.toLowerCase()))
-    : options;
+  const q = search.trim().toLowerCase();
+  const filteredGroups = q
+    ? groups
+        .map((g) => ({ ...g, items: g.items.filter((i) => i.label.toLowerCase().includes(q)) }))
+        .filter((g) => g.items.length > 0)
+    : groups;
 
   const GAP = 4;
   const PANEL_MAX = 260;
@@ -108,19 +112,26 @@ function VendorCombo({
         >
           {placeholder}
         </button>
-        {filtered.length === 0 ? (
+        {filteredGroups.length === 0 ? (
           <p className="px-2.5 py-2 text-xs text-muted-foreground">No matches</p>
         ) : (
-          filtered.map((item) => (
-            <button
-              key={item}
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { onChange(item); setOpen(false); setSearch(""); }}
-              className={`w-full text-left px-2.5 py-1.5 text-xs hover:bg-muted/50 transition-colors truncate ${item === value ? "bg-primary/10 text-primary font-medium" : "text-foreground"}`}
-            >
-              {item}
-            </button>
+          filteredGroups.map((g) => (
+            <div key={g.groupLabel}>
+              <p className="px-2.5 pt-2 pb-1 text-[10px] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70">
+                {g.groupLabel}
+              </p>
+              {g.items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { onChange(item.label); setOpen(false); setSearch(""); }}
+                  className={`w-full text-left px-2.5 py-1.5 text-xs hover:bg-muted/50 transition-colors truncate ${item.label === value ? "bg-primary/10 text-primary font-medium" : "text-foreground"}`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           ))
         )}
       </div>
@@ -162,7 +173,7 @@ export function FilterBar({
     belongs_to?: number | null;
     company_id?: number | null;
   }[];
-  supplierOptions: { id: number; label: string }[];
+  supplierOptions: { id: number; label: string; type?: string }[];
   finYearOptions: { id: number; label: string }[];
   filters: BookingFilters;
   onChange: (key: keyof BookingFilters, value: string) => void;
@@ -180,7 +191,21 @@ export function FilterBar({
     : projectOptions;
   const projects = filteredProjectOptions.map((o) => o.label);
   const finYears = finYearOptions.map((o) => o.label);
-  const suppliers = supplierOptions.map((o) => o.label);
+
+  // Suppliers get grouped by category (Suppliers / Contractors / Brokers)
+  // instead of one flat list — see PARTY_TYPE_LABELS.
+  const supplierGroups = (() => {
+    const groups = new Map<string, { id: number; label: string }[]>();
+    supplierOptions.forEach((o) => {
+      const key = PARTY_TYPE_LABELS[(o.type ?? "").trim()] ?? "Other";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(o);
+    });
+    const order = ["Suppliers", "Contractors", "Brokers", "Other"];
+    return [...groups.keys()]
+      .sort((a, b) => order.indexOf(a) - order.indexOf(b))
+      .map((groupLabel) => ({ groupLabel, items: groups.get(groupLabel)! }));
+  })();
 
   const activeCount = Object.values(filters).filter(Boolean).length;
 
@@ -211,13 +236,6 @@ export function FilterBar({
       icon: CalendarDays,
       items: finYears,
       placeholder: "All years",
-    },
-    {
-      key: "supplier",
-      label: "Vendor",
-      icon: Users,
-      items: suppliers,
-      placeholder: "All vendors",
     },
   ];
 
@@ -277,35 +295,41 @@ export function FilterBar({
             <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
               <Icon size={9} /> {label}
             </label>
-            {key === "supplier" ? (
-              <VendorCombo
+            <div className="relative">
+              <select
                 value={filters[key] || ""}
-                onChange={(val) => onChange(key, val)}
-                options={items}
-                placeholder={placeholder}
+                onChange={(e) => onChange(key, e.target.value)}
+                className="w-full appearance-none pl-2 pr-7 py-1.5 rounded-lg text-xs bg-background border border-border/70 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                <option value="">{placeholder}</option>
+                {items.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={11}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
               />
-            ) : (
-              <div className="relative">
-                <select
-                  value={filters[key] || ""}
-                  onChange={(e) => onChange(key, e.target.value)}
-                  className="w-full appearance-none pl-2 pr-7 py-1.5 rounded-lg text-xs bg-background border border-border/70 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-                >
-                  <option value="">{placeholder}</option>
-                  {items.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
-                  size={11}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                />
-              </div>
-            )}
+            </div>
           </div>
         ))}
+
+        {/* Vendor — Supplier/Contractor/Broker combined, grouped by category
+            and searchable (see VendorCombo above), unlike the flat native
+            <select>s used for the other filters. */}
+        <div className="space-y-1">
+          <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+            <Users size={9} /> Vendor
+          </label>
+          <VendorCombo
+            value={filters.supplier || ""}
+            onChange={(val) => onChange("supplier", val)}
+            groups={supplierGroups}
+            placeholder="All vendors"
+          />
+        </div>
       </div>
 
       {activeCount > 0 && (
