@@ -299,6 +299,8 @@ const ALL_ROUTES = [
   { path: "/api/crm/legal-milestones",     file: "./routes/crmLegalMilestones"     },
   { path: "/api/crm/noc",                  file: "./routes/crmNoc"                 },
   { path: "/api/crm/sales-deed",           file: "./routes/crmSalesDeed"           },
+  { path: "/api/crm/query-payment",        file: "./routes/crmQueryPayment"        },
+  { path: "/api/crm/registry",             file: "./routes/crmRegistry"            },
   { path: "/api/crm/pre-possession",       file: "./routes/crmPrePossession"       },
   { path: "/api/crm/possession-notice",    file: "./routes/crmPossessionNotice"    },
   { path: "/api/crm/construction-updates", file: "./routes/crmConstructionUpdates" },

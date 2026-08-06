@@ -6,7 +6,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, AlertTriangle, CheckCircle2, Landmark, Pencil, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -40,6 +40,8 @@ async function fetchBookingContext(bookingId: string): Promise<any> {
 const CrmNoc: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [sp] = useSearchParams();
+  const deepLinkBookingId = sp.get("bookingId");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
@@ -59,6 +61,19 @@ const CrmNoc: React.FC = () => {
   });
   const hasAgreement = !!context?.agreement;
   const canRequest = !!form.BookingId && hasAgreement && !contextLoading;
+
+  // Deep-link from Legal Milestones: pre-fill Request NOC with this booking
+  // if it doesn't have a Bank NOC yet.
+  useEffect(() => {
+    if (!deepLinkBookingId || dialogOpen) return;
+    const hasBankNoc = (nocs as any[]).some((n: any) => String(n.BookingId) === deepLinkBookingId && n.NocType === "Bank");
+    if (hasBankNoc) return;
+    if ((bookings as any[]).some((b: any) => String(b.Id) === deepLinkBookingId)) {
+      setForm((f) => ({ ...f, BookingId: deepLinkBookingId, NocType: "Bank" }));
+      setDialogOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkBookingId, nocs.length, bookings.length]);
 
   // Auto-fill Bank NOC fields from the actual lender record (Home Loan
   // Tracking / CrmLoanDetail) — a Bank NOC exists for the bank that issued

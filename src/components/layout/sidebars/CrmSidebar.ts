@@ -44,8 +44,13 @@ export const crmNavItems: NavItem[] = [
     icon: Scale,
     children: [
       { label: "Legal Milestones", path: "/crm/legal-milestones", pageKey: "crm-legal-milestones" },
-      { label: "NOC (Org & Bank)", path: "/crm/noc",              pageKey: "crm-noc"              },
+      // Order follows the real post-agreement sequence: the Sale Deed must
+      // exist before Query Payment (which reads its stamp duty/reg fee) or
+      // Bank NOC (which releases the bank's charge against the unit).
       { label: "Sale Deed",        path: "/crm/sales-deed",       pageKey: "crm-sales-deed"       },
+      { label: "Query Payment",    path: "/crm/query-payment",    pageKey: "crm-query-payment"    },
+      { label: "Registry",         path: "/crm/registry",         pageKey: "crm-registry"         },
+      { label: "NOC (Org & Bank)", path: "/crm/noc",              pageKey: "crm-noc"              },
     ],
   },
 

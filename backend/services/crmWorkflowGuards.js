@@ -665,7 +665,6 @@ async function syncLegalMilestoneStep(pool, bookingId, step, actorUserId) {
   const row = lm.recordset[0];
   if (row[`${step}Status`] === "Completed") return;
 
-  const idx = LEGAL_MILESTONE_STEPS.indexOf(step);
   await pool.request()
     .input("id", sql.Int, row.Id)
     .input("ub", sql.Int, actorUserId || null)
@@ -674,11 +673,43 @@ async function syncLegalMilestoneStep(pool, bookingId, step, actorUserId) {
         ${step}Done   = ISNULL(${step}Done, CAST(SYSDATETIME() AS DATE)),
         ${step}Status = 'Completed',
         ${step}Notes  = ISNULL(${step}Notes, 'Auto-synced from Agreement workflow'),
-        CurrentStep = CASE WHEN CurrentStep = ${idx + 1} THEN ${Math.min(idx + 2, LEGAL_MILESTONE_STEPS.length)} ELSE CurrentStep END,
-        OverallStatus = CASE WHEN '${step}' = 'FinalExecution' THEN 'Completed' ELSE OverallStatus END,
         UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
       WHERE Id = @id
     `);
+  await recomputeLegalMilestoneCurrentStep(pool, row.Id);
+}
+
+/**
+ * CurrentStep used to be advanced incrementally — "if CurrentStep equals
+ * this step's own position, bump it by one" — which silently assumed every
+ * step completes strictly in LEGAL_MILESTONE_STEPS order. In reality each
+ * step is triggered by its own independent real-world event (Legal
+ * Executive assignment, document upload, senior approval, customer
+ * approval, execution...), and DocCollection specifically depends on the
+ * customer's Identity Proof being verified — a non-mandatory document that
+ * often never happens. The result: steps 2-8 could all show Completed while
+ * CurrentStep stayed stuck at 1 forever, because the increment logic only
+ * ever fires relative to whatever CurrentStep already was, and out-of-order
+ * completion breaks that chain permanently.
+ *
+ * Recomputing CurrentStep from scratch — the position of the first
+ * still-incomplete step — is correct regardless of completion order, and
+ * is idempotent/safe to call after every single step update (manual or
+ * auto-synced).
+ */
+async function recomputeLegalMilestoneCurrentStep(pool, legalMilestoneId) {
+  const caseWhens = LEGAL_MILESTONE_STEPS
+    .map((step, i) => `WHEN ${step}Status <> 'Completed' THEN ${i + 1}`)
+    .join("\n        ");
+  await pool.request().input("id", sql.Int, legalMilestoneId).query(`
+    UPDATE dbo.CrmLegalMilestone SET
+      CurrentStep = CASE
+        ${caseWhens}
+        ELSE ${LEGAL_MILESTONE_STEPS.length + 1}
+      END,
+      OverallStatus = CASE WHEN FinalExecutionStatus = 'Completed' THEN 'Completed' ELSE OverallStatus END
+    WHERE Id = @id
+  `);
 }
 
 /**
@@ -1069,6 +1100,33 @@ async function maybeAutoGenerateBookingInvoice(pool, bookingId, actorUserId) {
   return { id: invoiceId, InvoiceNo: invoiceNo };
 }
 
+/**
+ * Loan Processing gate — this stage only exists at all for a booking that
+ * has actually been marked Loan-Financed. Self-funded bookings, and
+ * bookings where financing type hasn't been declared yet, never had a loan
+ * to process in the first place, so they clear immediately — declaring
+ * financing type is not itself a prerequisite for the Deed. Only once a
+ * booking is explicitly Loan-Financed does it need the loan to actually be
+ * Sanctioned or Disbursed before the Deed (and everything after it: Query
+ * Payment, Registry) can proceed. Returns null when cleared, or a
+ * human-readable reason string when not.
+ */
+async function checkLoanProcessingCleared(pool, bookingId) {
+  const result = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT b.FinancingType, l.SanctionStatus
+    FROM dbo.CrmBooking b
+    LEFT JOIN dbo.CrmLoanDetail l ON l.BookingId = b.Id
+    WHERE b.Id = @bid
+  `);
+  const row = result.recordset[0];
+  if (!row) return "Booking not found";
+  if (row.FinancingType !== "LoanFinanced") return null;
+  if (!["Sanctioned", "Disbursed"].includes(row.SanctionStatus)) {
+    return `Loan must be Sanctioned or Disbursed before this stage can proceed (currently '${row.SanctionStatus || "Not Applied"}') — update it on the Loan Tracking page.`;
+  }
+  return null;
+}
+
 module.exports = {
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
@@ -1085,6 +1143,8 @@ module.exports = {
   resetAgreementDateNegotiation,
   syncLegalMilestoneStep,
   syncLegalMilestoneFromDocument,
+  recomputeLegalMilestoneCurrentStep,
+  checkLoanProcessingCleared,
   requireActiveBooking,
   recalculateRemainingMilestones,
   isLegalWorkStarted,

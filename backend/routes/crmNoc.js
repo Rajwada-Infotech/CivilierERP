@@ -118,6 +118,17 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
     }
 
     const nocType = NOC_TYPES.includes(b.NocType) ? b.NocType : "Organisation";
+
+    // Sales Deed must come before Bank NOC — a Bank NOC releases the
+    // lending bank's charge against the unit, which only makes sense once
+    // the deed itself exists. Org NOC has no such dependency.
+    if (nocType === "Bank") {
+      const deed = await pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
+      if (!deed.recordset.length) {
+        return res.status(400).json({ error: "A Bank NOC requires the Sales Deed to exist for this booking first" });
+      }
+    }
     const nocNo = await getNextDocNumber(pool, "NOC", "NOC");
 
     const result = await pool.request()

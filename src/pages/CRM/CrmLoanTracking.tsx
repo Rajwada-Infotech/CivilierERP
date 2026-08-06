@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -35,6 +36,8 @@ const fmt = (n: number | null | undefined) => n != null ? `₹${Number(n).toLoca
 
 const CrmLoanTracking: React.FC = () => {
   const qc = useQueryClient();
+  const [sp] = useSearchParams();
+  const deepLinkBookingId = sp.get("bookingId");
   const [search, setSearch] = useState("");
   const [editingBookingId, setEditingBookingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -64,6 +67,8 @@ const CrmLoanTracking: React.FC = () => {
       !search || b.ApplicantName?.toLowerCase().includes(search.toLowerCase()) || b.BookingNo?.includes(search)
     ), [bookings, search]);
 
+  const editingBooking = editingBookingId != null ? (bookings as any[]).find((b: any) => b.Id === editingBookingId) : null;
+
   const openEdit = (bookingId: number) => {
     const existing = loanMap[bookingId];
     setForm(existing ? {
@@ -77,6 +82,16 @@ const CrmLoanTracking: React.FC = () => {
     setLocked(!!existing);
     setEditingBookingId(bookingId);
   };
+
+  // Deep-link from Sales Deed (Loan Processing gate): jump straight into
+  // this booking's edit dialog instead of dropping the user on the
+  // unfiltered list they'd then have to search through themselves.
+  useEffect(() => {
+    if (!deepLinkBookingId || editingBookingId != null || bookings.length === 0) return;
+    const id = parseInt(deepLinkBookingId, 10);
+    if ((bookings as any[]).some((b: any) => b.Id === id)) openEdit(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkBookingId, bookings.length, loanMap]);
 
   const handleSave = async () => {
     if (!editingBookingId) return;
@@ -164,6 +179,13 @@ const CrmLoanTracking: React.FC = () => {
               )}
             </DialogTitle>
           </DialogHeader>
+          {editingBooking && (
+            <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs space-y-0.5 -mt-1">
+              <div className="font-medium text-sm">{editingBooking.ApplicantName} — {editingBooking.BookingNo} · {editingBooking.UnitNo}</div>
+              <div className="text-muted-foreground">{editingBooking.Mobile}{editingBooking.Email ? ` · ${editingBooking.Email}` : ""}</div>
+              <div className="text-muted-foreground">Booking Value ₹{Number(editingBooking.GrandTotal ?? editingBooking.TotalValue ?? 0).toLocaleString("en-IN")}</div>
+            </div>
+          )}
           {locked && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
               <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
