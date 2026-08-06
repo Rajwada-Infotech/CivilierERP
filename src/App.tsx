@@ -132,6 +132,7 @@ const WorkerAttendance = lazy(
 const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
 const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
 const JournalVoucher = lazy(() => import("./pages/finance/JournalVoucher"));
+const FundTransfer = lazy(() => import("./pages/finance/FundTransfer"));
 const FinanceContract = lazy(() => import("./pages/finance/Contract"));
 const OnAccountReport = lazy(() => import("./pages/finance/OnAccountReport"));
 const OnAccountAdjustment = lazy(() => import("./pages/finance/OnAccountAdjustment"));
@@ -722,6 +723,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="journal-voucher">
             <JournalVoucher />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fund-transfer"
+        element={
+          <ProtectedRoute pageKey="fund-transfer">
+            <FundTransfer />
           </ProtectedRoute>
         }
       />
