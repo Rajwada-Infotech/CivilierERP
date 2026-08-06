@@ -12,6 +12,7 @@ export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
       { label: "Payment",           path: "/payments",               pageKey: "new-payment" },
       { label: "On A/C Adjustment", path: "/on-account-adjustment",  pageKey: "on-account-adjustment" },
       { label: "Received Payment",  path: "/received-payments",      pageKey: "received-payment" },
+      { label: "Fund Transfer",     path: "/fund-transfer",          pageKey: "fund-transfer" },
       { label: "BRS",               path: "/brs",                    pageKey: "brs" },
     ],
   },
