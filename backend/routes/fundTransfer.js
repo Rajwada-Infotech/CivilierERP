@@ -78,14 +78,14 @@ router.get("/", authenticateToken, async (req, res) => {
              ft.DestinationCompanyId, dc.name AS DestinationCompanyName,
              ft.SourceBankId, sb.LHeadName AS SourceBankName,
              ft.DestinationBankId, db.LHeadName AS DestinationBankName,
-             ft.LoanHeadId, lh.LHeadName AS LoanHeadName,
+             ft.LinkedLoanId, ls.LoanNo AS LinkedLoanNo, ls.Status AS LinkedLoanStatus,
              ft.CreatedBy, ft.CreatedAt
       FROM dbo.FundTransfer ft
       LEFT JOIN dbo.enterprise sc ON sc.id = ft.SourceCompanyId
       LEFT JOIN dbo.enterprise dc ON dc.id = ft.DestinationCompanyId
       LEFT JOIN dbo.AccountHeadMaster sb ON sb.LHeadId = ft.SourceBankId
       LEFT JOIN dbo.AccountHeadMaster db ON db.LHeadId = ft.DestinationBankId
-      LEFT JOIN dbo.AccountHeadMaster lh ON lh.LHeadId = ft.LoanHeadId
+      LEFT JOIN dbo.LoanSanction ls ON ls.LoanId = ft.LinkedLoanId
     `;
     if (conditions.length) query += " WHERE " + conditions.join(" AND ");
     query += " ORDER BY ft.TransferDate DESC, ft.FTId DESC";
@@ -108,13 +108,13 @@ router.get("/:id", authenticateToken, async (req, res) => {
       SELECT ft.*,
              sc.name AS SourceCompanyName, dc.name AS DestinationCompanyName,
              sb.LHeadName AS SourceBankName, db.LHeadName AS DestinationBankName,
-             lh.LHeadName AS LoanHeadName
+             ls.LoanNo AS LinkedLoanNo, ls.Status AS LinkedLoanStatus
       FROM dbo.FundTransfer ft
       LEFT JOIN dbo.enterprise sc ON sc.id = ft.SourceCompanyId
       LEFT JOIN dbo.enterprise dc ON dc.id = ft.DestinationCompanyId
       LEFT JOIN dbo.AccountHeadMaster sb ON sb.LHeadId = ft.SourceBankId
       LEFT JOIN dbo.AccountHeadMaster db ON db.LHeadId = ft.DestinationBankId
-      LEFT JOIN dbo.AccountHeadMaster lh ON lh.LHeadId = ft.LoanHeadId
+      LEFT JOIN dbo.LoanSanction ls ON ls.LoanId = ft.LinkedLoanId
       WHERE ft.FTId = @id
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
@@ -299,3 +299,4 @@ router.put("/:id/reject", authenticateToken, requirePageRight("fund-transfer", "
 });
 
 module.exports = router;
+

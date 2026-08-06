@@ -470,7 +470,14 @@ router.get("/:id/payments", requirePageRight("loan-sanction", "view"), async (re
 //   3. An EMI schedule is generated (reducing-balance if InterestRate is
 //      set, else a flat principal split) so the Chain/EMI Schedule tabs
 //      have installments to check off.
-router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) => {
+// Core creation logic, extracted so other modules can sanction a loan
+// programmatically (e.g. Fund Transfer auto-creates an Inter-Company loan
+// the moment it approves a transfer between two different companies —
+// see generalLedger.js's postFundTransferApproval) without going through
+// req/res or duplicating this validation + ledger-head + EMI-schedule
+// logic. Same field names as the route body; throws { status, message }
+// on validation failure, matching the route's own error shape.
+async function createLoanSanctionInternal(payload, createdBy) {
   const {
     loanType,
     loanDocNo,
@@ -490,11 +497,10 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
     dueDate,
     purpose,
     remarks,
-  } = req.body;
-  const createdBy = req.user?.email || req.user?.name || "system";
+  } = payload;
 
   if (!loanType || !LOAN_TYPES.includes(loanType)) {
-    return res.status(400).json({ error: "loanType must be Inter-Company, Bank Loan, or Customer Loan" });
+    throw Object.assign(new Error("loanType must be Inter-Company, Bank Loan, or Customer Loan"), { status: 400 });
   }
   const isCustomerLoan = loanType === "Customer Loan";
   const isBankLoan = loanType === "Bank Loan";
@@ -502,17 +508,17 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
   const useInterest = hasInterest !== false && hasInterest !== "false";
   const iType = INTEREST_TYPES.includes(interestType) ? interestType : "CI";
 
-  if (isBankLoan && !lenderBankId) return res.status(400).json({ error: "Lender bank is required" });
-  if (!isBankLoan && !lenderCompanyId) return res.status(400).json({ error: "Lender company is required" });
+  if (isBankLoan && !lenderBankId) throw Object.assign(new Error("Lender bank is required"), { status: 400 });
+  if (!isBankLoan && !lenderCompanyId) throw Object.assign(new Error("Lender company is required"), { status: 400 });
   if (isCustomerLoan && !borrowerCustomerId) {
-    return res.status(400).json({ error: "Borrower customer is required" });
+    throw Object.assign(new Error("Borrower customer is required"), { status: 400 });
   }
   if (!isCustomerLoan && !borrowerCompanyId) {
-    return res.status(400).json({ error: "Borrower company is required" });
+    throw Object.assign(new Error("Borrower company is required"), { status: 400 });
   }
-  if (!loanDate) return res.status(400).json({ error: "Loan date is required" });
+  if (!loanDate) throw Object.assign(new Error("Loan date is required"), { status: 400 });
   const amt = parseFloat(amount);
-  if (!amt || amt <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+  if (!amt || amt <= 0) throw Object.assign(new Error("Amount must be greater than 0"), { status: 400 });
 
   const pool = getPool();
   const tx = new sql.Transaction(pool);
@@ -647,9 +653,19 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
       bumpCacheVersion("loan-sanction"),
       bumpCacheVersion("on-account"),
     ]);
-    res.status(201).json({ loanId, loanNo });
+    return { loanId, loanNo, lenderLHeadId, borrowerLHeadId };
   } catch (err) {
     await tx.rollback().catch(() => {});
+    throw err;
+  }
+}
+
+router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) => {
+  const createdBy = req.user?.email || req.user?.name || "system";
+  try {
+    const { loanId, loanNo } = await createLoanSanctionInternal(req.body, createdBy);
+    res.status(201).json({ loanId, loanNo });
+  } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
@@ -871,6 +887,17 @@ router.post("/:id/post-to-gl", requirePageRight("loan-sanction", "edit"), async 
       SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType = 'LoanPosting' AND SourceId = @SrcId AND IsReversed = 0
     `);
     if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This loan has already been posted to GL." });
+
+    // A Fund Transfer-originated Inter-Company loan already posted its own
+    // combined bank-movement + lender/borrower legs at approval time (see
+    // postFundTransferApproval in generalLedger.js) — posting again here
+    // would double-count both loan heads' balances.
+    const ftLinked = await pool.request().input("LoanId", sql.Int, loanId).query(`
+      SELECT TOP 1 FTId FROM dbo.FundTransfer WHERE LinkedLoanId = @LoanId
+    `);
+    if (ftLinked.recordset.length) {
+      return res.status(409).json({ error: "This loan was created by a Fund Transfer, which already posted it to GL." });
+    }
 
     const amt = Number(loan.Amount);
     if (!amt || amt <= 0) return res.status(400).json({ error: "Loan has no amount to post." });
@@ -1434,3 +1461,4 @@ router.delete("/:id", requirePageRight("loan-sanction", "delete"), async (req, r
 });
 
 module.exports = router;
+module.exports.createLoanSanctionInternal = createLoanSanctionInternal;

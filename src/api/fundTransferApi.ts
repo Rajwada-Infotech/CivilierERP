@@ -46,8 +46,13 @@ export interface FundTransferSummary {
   SourceBankName: string | null;
   DestinationBankId: number;
   DestinationBankName: string | null;
-  LoanHeadId: number | null;
-  LoanHeadName: string | null;
+  // Inter-company transfers create/link a real dbo.LoanSanction record on
+  // approval (see postFundTransferApproval in generalLedger.js) — this is
+  // the loan-sanction module's own primary key + doc no + status, not
+  // anything Fund Transfer stores itself.
+  LinkedLoanId: number | null;
+  LinkedLoanNo: string | null;
+  LinkedLoanStatus: string | null;
   CreatedBy: string | null;
   CreatedAt: string;
 }

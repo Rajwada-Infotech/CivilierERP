@@ -192,19 +192,23 @@ export function FilterBar({
   const projects = filteredProjectOptions.map((o) => o.label);
   const finYears = finYearOptions.map((o) => o.label);
 
-  // Suppliers get grouped by category (Suppliers / Contractors / Brokers)
-  // instead of one flat list — see PARTY_TYPE_LABELS.
+  // VendorCombo renders one labeled header per group (Suppliers/Contractors/
+  // Brokers/Other), matching PARTY_TYPE_LABELS' categorization — same
+  // grouping the Payment form's own Payee/Party dropdown uses.
+  const CATEGORY_ORDER = ["Suppliers", "Contractors", "Brokers", "Other"];
   const supplierGroups = (() => {
     const groups = new Map<string, { id: number; label: string }[]>();
-    supplierOptions.forEach((o) => {
-      const key = PARTY_TYPE_LABELS[(o.type ?? "").trim()] ?? "Other";
+    supplierOptions.forEach((s) => {
+      const key = PARTY_TYPE_LABELS[(s.type ?? "").trim()] ?? "Other";
       if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(o);
+      groups.get(key)!.push({ id: s.id, label: s.label });
     });
-    const order = ["Suppliers", "Contractors", "Brokers", "Other"];
     return [...groups.keys()]
-      .sort((a, b) => order.indexOf(a) - order.indexOf(b))
-      .map((groupLabel) => ({ groupLabel, items: groups.get(groupLabel)! }));
+      .sort((a, b) => CATEGORY_ORDER.indexOf(a) - CATEGORY_ORDER.indexOf(b))
+      .map((groupLabel) => ({
+        groupLabel,
+        items: groups.get(groupLabel)!.sort((a, b) => a.label.localeCompare(b.label)),
+      }));
   })();
 
   const activeCount = Object.values(filters).filter(Boolean).length;

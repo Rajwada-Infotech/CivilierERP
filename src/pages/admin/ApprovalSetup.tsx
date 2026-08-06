@@ -111,6 +111,12 @@ const MODULE_OPTIONS = [
     desc: "Approving fires the full auto-generated document chain (SO→SI→Payment→PO→GRN→Expense→Payment) — restricted to super_admin regardless of who's assigned here",
   },
   {
+    id: "FundTransfer",
+    label: "Fund Transfer",
+    icon: "🏦",
+    desc: "Bank-to-bank cash movement — inter-company transfers book as a loan on approval. Approval is always restricted to super_admin regardless of who's assigned here",
+  },
+  {
     id: "Contract",
     label: "Contract",
     icon: "📄",
@@ -144,7 +150,7 @@ const MODULE_GROUPS = [
     id: "finance",
     label: "Finance",
     icon: "💰",
-    modules: ["NewPayment", "JournalVoucher", "Contract"],
+    modules: ["NewPayment", "JournalVoucher", "FundTransfer", "Contract"],
   },
   {
     id: "engineering",

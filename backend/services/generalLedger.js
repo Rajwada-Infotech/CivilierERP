@@ -675,86 +675,33 @@ async function postJournalVoucherApproval(pool, jvId, userEmail) {
 
 // ── Fund Transfer (intra-company and inter-company bank-to-bank moves) ──────
 
-let loansAndAdvancesGroupIdCache = null;
-async function getLoansAndAdvancesGroupId(pool) {
-  if (loansAndAdvancesGroupIdCache) return loansAndAdvancesGroupIdCache;
-  const result = await pool.request().query(
-    `SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'LNA'`,
-  );
-  const id = result.recordset[0]?.AGId ?? null;
-  if (!id) throw new Error(`AccountGroup "LOANS AND ADVANCES" (Code='LNA') not found`);
-  loansAndAdvancesGroupIdCache = id;
-  return id;
-}
-
-/**
- * One shared "Inter-Company Loan" ledger head per counterparty COMPANY PAIR
- * (order-independent — company A borrowing from B and B borrowing from A
- * later both reuse the same head), auto-created the first time a transfer
- * happens between that pair. Trial Balance filters GeneralLedgerEntry by
- * CompanyId, so the same LHeadId correctly nets to a receivable in the
- * lending company's own filtered view and a payable in the borrowing
- * company's — and nets to ~zero with no company filter, which is exactly
- * the right behaviour for an inter-company elimination in a consolidated
- * view. A later reverse-direction transfer (repayment) posts against the
- * same head with legs flipped, so the balance winds down naturally — no
- * separate "repayment" mode needed anywhere in this feature.
- */
-async function resolveOrCreateLoanHead(pool, companyIdA, companyIdB, createdBy) {
-  const lowId = Math.min(companyIdA, companyIdB);
-  const highId = Math.max(companyIdA, companyIdB);
-  const code = `FT-LOAN-${lowId}-${highId}`;
-
-  const existing = await pool.request().input("code", sql.NVarChar(50), code).query(
-    `SELECT TOP 1 LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = @code`,
-  );
-  if (existing.recordset.length) return existing.recordset[0];
-
-  const companies = await pool.request().input("a", sql.Int, lowId).input("b", sql.Int, highId).query(
-    `SELECT id, name FROM dbo.enterprise WHERE id IN (@a, @b) AND business_type = 'C'`,
-  );
-  const nameA = companies.recordset.find((c) => c.id === lowId)?.name || `Company ${lowId}`;
-  const nameB = companies.recordset.find((c) => c.id === highId)?.name || `Company ${highId}`;
-  const headName = `Inter-Company Loan — ${nameA} / ${nameB}`;
-  const groupId = await getLoansAndAdvancesGroupId(pool);
-
-  const insert = await pool.request()
-    .input("LHeadName", sql.NVarChar(200), headName)
-    .input("LHeadCode", sql.NVarChar(20), code)
-    .input("LHeadAddress", sql.NVarChar(300), "N/A")
-    .input("LHeadContactPerson", sql.VarChar(100), "N/A")
-    .input("LHeadStatus", sql.Bit, 1)
-    .input("LHeadType", sql.VarChar(50), "LN")
-    .input("LBelongsTo", sql.Int, groupId)
-    .input("Status", sql.NVarChar(20), "Approved")
-    .input("ApprovedBy", sql.NVarChar(100), createdBy)
-    .input("CreatedBy", sql.NVarChar(100), createdBy)
-    .query(`
-      INSERT INTO dbo.AccountHeadMaster
-        (LHeadName, LHeadCode, LHeadAddress, LHeadContactPerson, LHeadStatus, LHeadType, LBelongsTo,
-         Status, ApprovedBy, ApprovedAt, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.LHeadId
-      VALUES
-        (@LHeadName, @LHeadCode, @LHeadAddress, @LHeadContactPerson, @LHeadStatus, @LHeadType, @LBelongsTo,
-         @Status, @ApprovedBy, SYSDATETIME(), @CreatedBy, SYSDATETIME())
-    `);
-  return { LHeadId: insert.recordset[0].LHeadId, LHeadName: headName };
-}
-
 /**
  * Fund Transfer approved.
  *
- * Intra-company (same company, two of its own bank accounts):
+ * Intra-company (same company, two of its own bank accounts) — no loan
+ * involved, per explicit instruction:
  *   Dr Destination Bank
  *   Cr Source Bank
  *
- * Inter-company (different companies): booked as an inter-company loan, not
- * a trade transaction — see resolveOrCreateLoanHead() above and migration
- * 291's header comment for the full rationale. Two independent, separately
- * balanced vouchers are posted (each company's own books must balance on
- * their own):
- *   Source company's books:      Dr Loan (receivable) / Cr Source Bank
- *   Destination company's books: Dr Destination Bank / Cr Loan (payable)
+ * Inter-company (different companies): booked as a real dbo.LoanSanction
+ * record (LoanType='Inter-Company', no interest, single bullet
+ * installment) — not an ad-hoc GL head invented by this feature. Reuses
+ * createLoanSanctionInternal() from routes/loanSanction.js, the same logic
+ * the Loan Sanction page itself uses, so this loan shows up in the Loan
+ * Dashboard/register exactly like one sanctioned by hand, with the same
+ * per-company Loan ledger heads (LenderLHeadId/BorrowerLHeadId — one per
+ * company, reused across every loan that company is ever a party to).
+ *
+ * The loan's own creation only credits the borrower's On-Account balance —
+ * it deliberately does NOT touch GeneralLedgerEntry (a sanctioned loan can
+ * predate real disbursement). Fund Transfer, unlike a loan sanctioned by
+ * hand, *is* the disbursement — real cash actually left one bank and
+ * arrived at another — so this posts the combined bank-movement +
+ * lender/borrower legs itself, in one shot, instead of also calling
+ * loanSanction.js's separate POST /:id/post-to-gl (which would double-count
+ * both loan heads). See that route's own guard against exactly this.
+ *   Source (lender) company's books:      Dr Lender Loan head / Cr Source Bank
+ *   Destination (borrower) company's books: Dr Destination Bank / Cr Borrower Loan head
  */
 async function postFundTransferApproval(pool, ftId, userEmail) {
   if (await hasPosting(pool, "FundTransfer", ftId))
@@ -791,9 +738,21 @@ async function postFundTransferApproval(pool, ftId, userEmail) {
     return { posted: true };
   }
 
-  const loanHead = await resolveOrCreateLoanHead(pool, ft.SourceCompanyId, ft.DestinationCompanyId, userEmail);
-  await pool.request().input("id", sql.Int, ftId).input("lh", sql.Int, loanHead.LHeadId)
-    .query(`UPDATE dbo.FundTransfer SET LoanHeadId = @lh WHERE FTId = @id`);
+  const { createLoanSanctionInternal } = require("../routes/loanSanction");
+  const { loanId, loanNo, lenderLHeadId, borrowerLHeadId } = await createLoanSanctionInternal({
+    loanType: "Inter-Company",
+    lenderCompanyId: ft.SourceCompanyId,
+    lenderBankAccountId: ft.SourceBankId,
+    borrowerCompanyId: ft.DestinationCompanyId,
+    borrowerBankAccountId: ft.DestinationBankId,
+    loanDate: ft.TransferDate,
+    amount,
+    hasInterest: false,
+    purpose: `Inter-Company Fund Transfer ${docNo}${note}`,
+  }, userEmail);
+
+  await pool.request().input("id", sql.Int, ftId).input("loanId", sql.Int, loanId)
+    .query(`UPDATE dbo.FundTransfer SET LinkedLoanId = @loanId WHERE FTId = @id`);
 
   await postVoucher(pool, {
     voucherNo: docNo,
@@ -803,7 +762,7 @@ async function postFundTransferApproval(pool, ftId, userEmail) {
     companyId: ft.SourceCompanyId,
     createdBy: userEmail,
     legs: [
-      { lHeadId: loanHead.LHeadId, debit: amount, narration: `${docNo} — inter-company loan receivable (funds sent)${note}` },
+      { lHeadId: lenderLHeadId, debit: amount, narration: `${docNo} — inter-company loan ${loanNo} receivable (funds sent)${note}` },
       { lHeadId: ft.SourceBankId, credit: amount, narration: `${docNo} — fund transfer out` },
     ],
   });
@@ -816,10 +775,10 @@ async function postFundTransferApproval(pool, ftId, userEmail) {
     createdBy: userEmail,
     legs: [
       { lHeadId: ft.DestinationBankId, debit: amount, narration: `${docNo} — fund transfer in` },
-      { lHeadId: loanHead.LHeadId, credit: amount, narration: `${docNo} — inter-company loan payable (funds received)${note}` },
+      { lHeadId: borrowerLHeadId, credit: amount, narration: `${docNo} — inter-company loan ${loanNo} payable (funds received)${note}` },
     ],
   });
-  return { posted: true, loanHeadId: loanHead.LHeadId };
+  return { posted: true, loanId, loanNo };
 }
 
 module.exports = {
@@ -834,6 +793,5 @@ module.exports = {
   resolvePaymentSupplierHeadId,
   postReceivedPaymentApproval,
   postJournalVoucherApproval,
-  resolveOrCreateLoanHead,
   postFundTransferApproval,
 };
