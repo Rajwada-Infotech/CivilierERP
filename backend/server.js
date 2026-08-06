@@ -176,6 +176,7 @@ const ALL_ROUTES = [
   { path: "/api/on-account", file: "./routes/onAccount" },
   { path: "/api/received-payment", file: "./routes/receivedPayment" },
   { path: "/api/journal-voucher", file: "./routes/journalVoucher" },
+  { path: "/api/fund-transfer", file: "./routes/fundTransfer" },
   { path: "/api/contract", file: "./routes/contract" },
   { path: "/api/reports/journal-voucher", file: "./routes/journalVoucherReports" },
   { path: "/api/purchase-orders", file: "./routes/purchaseOrders" },
