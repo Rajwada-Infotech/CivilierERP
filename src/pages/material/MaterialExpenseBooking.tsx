@@ -1606,7 +1606,7 @@ export default function MaterialExpenseBooking() {
                             }}
                             className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                           >
-                            <option value="">Select supplier or contractor</option>
+                            <option value="">Select Payable Party</option>
                             {supplierHeads.length > 0 && (
                               <optgroup label="Suppliers">
                                 {supplierHeads.map((s) => (

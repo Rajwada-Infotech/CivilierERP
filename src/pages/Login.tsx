@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { Eye, EyeOff, Truck, Building2, ArrowUpRight } from "lucide-react";
+import { Eye, EyeOff, Truck, Building2, ArrowUpRight, Smartphone } from "lucide-react";
 import {
   motion,
   AnimatePresence,
@@ -579,6 +579,30 @@ export default function Login() {
   return (
     <div className="min-h-screen w-full flex items-center justify-center px-4 py-8 overflow-x-hidden overflow-y-auto relative"
       style={{ background: "#0d0a1a" }}>
+
+      {/* Get the Android app — moved here from the Home dashboard header so
+          it's reachable before signing in, not just after. */}
+      <motion.button
+        type="button"
+        onClick={() => navigate("/download-android-app")}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3, duration: 0.5 }}
+        className="absolute top-4 right-4 sm:top-6 sm:right-6 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold transition-colors"
+        style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(167,139,250,0.30)", color: "#c4b5fd" }}
+        title="Download our Android app"
+      >
+        <motion.span
+          className="inline-flex"
+          animate={{ y: [0, -2.5, 0] }}
+          transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <Smartphone size={12} />
+        </motion.span>
+        Get the Android app
+      </motion.button>
 
       {/* Subtle full-page grid — no crane here */}
       <div className="absolute inset-0 z-0 pointer-events-none"
