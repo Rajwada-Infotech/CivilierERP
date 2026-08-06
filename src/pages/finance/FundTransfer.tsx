@@ -25,7 +25,8 @@ import { cn } from "@/lib/utils";
 import {
   Plus, ArrowLeftRight, Building2, Landmark, Loader2, RefreshCw,
   CheckCircle2, Clock, FileText, AlertCircle, Search, X, ExternalLink,
-  Calendar, ShieldCheck,
+  Calendar, ShieldCheck, Wallet, BookOpen, Hash, CalendarDays, ChevronDown,
+  AlertTriangle, Info, CalendarClock,
 } from "lucide-react";
 import {
   getFundTransfers,
@@ -34,11 +35,25 @@ import {
   type FundTransferSummary,
   type FundTransferDetail,
   type FundTransferType,
+  type FundTransferMode,
 } from "@/api/fundTransferApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
+import { fetchChequeLots, fetchChequeNumbers, deductChequeFromLot } from "@/pages/finance/payment/api";
+import type { ChequeLot } from "@/pages/finance/payment/types";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
+
+const PAYMENT_MODES: FundTransferMode[] = ["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "UPI", "RTGS", "IMPS", "Card"];
+const CHEQUE_MODES: FundTransferMode[] = ["Cheque", "Post-Dated Cheque"];
+const DIGITAL_MODES: FundTransferMode[] = ["NEFT", "UPI", "RTGS", "IMPS", "Card"];
+const DIGITAL_REF_LABEL: Record<string, string> = {
+  NEFT: "NEFT UTR Number",
+  UPI: "UPI Transaction ID",
+  RTGS: "RTGS UTR Number",
+  IMPS: "IMPS Reference No.",
+  Card: "Card Reference / Auth Code",
+};
 
 const STATUS_CFG: Record<string, { text: string; bar: string }> = {
   Draft:    { text: "text-muted-foreground", bar: "bg-border" },
@@ -234,6 +249,17 @@ function TransferDetailDialog({
               <DetailRow label="Source Bank" value={detail.SourceBankName || "—"} />
               <DetailRow label="Destination Company" value={detail.DestinationCompanyName || "—"} />
               <DetailRow label="Destination Bank" value={detail.DestinationBankName || "—"} />
+              <DetailRow label="Payment Mode" value={detail.Mode || "—"} />
+              {(detail.Mode === "Cheque" || detail.Mode === "Post-Dated Cheque") && (
+                <>
+                  <DetailRow label="Cheque No" value={detail.ChequeNo || "—"} mono />
+                  <DetailRow label="Cheque Lot" value={detail.ChequeLotNumber || "—"} mono />
+                  <DetailRow label="Cheque Date" value={fmtDate(detail.ChequeDate)} />
+                </>
+              )}
+              {detail.Mode && !["Cheque", "Post-Dated Cheque", "Cash"].includes(detail.Mode) && detail.DigitalRefNumber && (
+                <DetailRow label="Reference No" value={detail.DigitalRefNumber} mono />
+              )}
               {detail.Narration && <DetailRow label="Narration" value={detail.Narration} />}
               <DetailRow label="Created By" value={detail.CreatedBy || "—"} />
               <DetailRow label="Created At" value={fmtDate(detail.CreatedAt)} />
@@ -263,6 +289,35 @@ function TransferDetailDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Compact Mode chip for the register/detail views — shows the mode plus
+// whichever settlement detail is most useful at a glance (cheque no. for
+// Cheque/PDC, the reference number for digital modes).
+function ModeChip({
+  mode,
+  chequeNo,
+  digitalRefNumber,
+}: {
+  mode: string | null;
+  chequeNo?: string | null;
+  digitalRefNumber?: string | null;
+}) {
+  if (!mode) return <span className="text-muted-foreground text-xs">—</span>;
+  const isCheque = mode === "Cheque" || mode === "Post-Dated Cheque";
+  return (
+    <span className="inline-flex items-center gap-1 text-xs">
+      <span className="font-medium text-foreground">{mode}</span>
+      {isCheque && chequeNo && (
+        <span className="text-muted-foreground font-mono">· #{chequeNo}</span>
+      )}
+      {!isCheque && digitalRefNumber && (
+        <span className="text-muted-foreground font-mono truncate max-w-[100px]" title={digitalRefNumber}>
+          · {digitalRefNumber}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -299,7 +354,109 @@ export default function FundTransfer() {
   const [amount, setAmount] = useState("");
   const [narration, setNarration] = useState("");
 
+  // Payment Mode — mirrors the Payment page's own Mode workflow (Cash /
+  // Cheque / PDC / NEFT / UPI / RTGS / IMPS / Card), because the source
+  // bank leaving the money is a real bank account and the mode of
+  // settlement (which cheque leaf, which UTR) is exactly as relevant here
+  // as it is on a Payment.
+  const [mode, setMode] = useState<FundTransferMode | "">("");
+  const [chequeLots, setChequeLots] = useState<ChequeLot[]>([]);
+  const [loadingLots, setLoadingLots] = useState(false);
+  const [chequeLotId, setChequeLotId] = useState<number | null>(null);
+  const [chequeLotNumber, setChequeLotNumber] = useState("");
+  const [chequeNumbers, setChequeNumbers] = useState<{ number: string; used: boolean; bounced: boolean }[]>([]);
+  const [loadingCheques, setLoadingCheques] = useState(false);
+  const [chequeNo, setChequeNo] = useState("");
+  const [chequeDate, setChequeDate] = useState("");
+  const [validatingCheque, setValidatingCheque] = useState(false);
+  const [digitalRefNumber, setDigitalRefNumber] = useState("");
+
   const [selectedFTId, setSelectedFTId] = useState<number | null>(null);
+
+  const isChequeMode = CHEQUE_MODES.includes(mode as FundTransferMode);
+  const isDigitalMode = DIGITAL_MODES.includes(mode as FundTransferMode);
+  const isPostDated = mode === "Post-Dated Cheque";
+
+  // The cheque book being drawn from belongs to the SOURCE bank — that's
+  // the account the money (and the physical cheque) actually leaves from.
+  useEffect(() => {
+    if (!isChequeMode || !sourceBankId) { setChequeLots([]); return; }
+    setLoadingLots(true);
+    fetchChequeLots(parseInt(sourceBankId, 10))
+      .then((lots) => {
+        setChequeLots(lots);
+        if (lots.length > 0 && !chequeLotId) {
+          setChequeLotId(lots[0].CId);
+          setChequeLotNumber(lots[0].ChequeLotNumber);
+          setChequeNo("");
+        }
+      })
+      .catch(() => setChequeLots([]))
+      .finally(() => setLoadingLots(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isChequeMode, sourceBankId]);
+
+  useEffect(() => {
+    if (!chequeLotId) { setChequeNumbers([]); return; }
+    setLoadingCheques(true);
+    fetchChequeNumbers(chequeLotId)
+      .then(setChequeNumbers)
+      .catch(() => setChequeNumbers([]))
+      .finally(() => setLoadingCheques(false));
+  }, [chequeLotId]);
+
+  // Banks are tagged to a company by name (BankRecord.BCompanyName), not a
+  // numeric FK — resolve the selected company's label and match against
+  // that, same as Payment.tsx would need to but doesn't do today. Only
+  // show banks actually belonging to whichever company is picked on that
+  // side, instead of every active bank regardless of company.
+  const sourceCompanyLabel = companies.find((c) => String(c.id) === sourceCompanyId)?.label;
+  const destCompanyLabel = companies.find((c) => String(c.id) === destCompanyId)?.label;
+  const sourceBanksForCompany = sourceCompanyId
+    ? banks.filter((b) => b.BCompanyName === sourceCompanyLabel)
+    : banks;
+  const destBanksForCompany = (destCompanyId ? banks.filter((b) => b.BCompanyName === destCompanyLabel) : banks)
+    .filter((b) => String(b.BId) !== sourceBankId);
+
+  // Drop a bank selection that no longer belongs to its (now-changed) company.
+  useEffect(() => {
+    if (sourceBankId && !sourceBanksForCompany.some((b) => String(b.BId) === sourceBankId)) {
+      setSourceBankId("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceCompanyId]);
+  useEffect(() => {
+    if (destBankId && !destBanksForCompany.some((b) => String(b.BId) === destBankId)) {
+      setDestBankId("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destCompanyId]);
+
+  const activeLot = chequeLots.find((l) => l.CId === chequeLotId) ?? null;
+  const availableCheques = chequeNumbers.filter((c) => !c.used && !c.bounced);
+
+  const handleLotSelect = (lotIdStr: string) => {
+    const lotId = Number(lotIdStr);
+    const lot = chequeLots.find((l) => l.CId === lotId);
+    if (!lot) return;
+    setChequeLotId(lot.CId);
+    setChequeLotNumber(lot.ChequeLotNumber);
+    setChequeNo("");
+  };
+
+  const handleChequeSelect = async (num: string) => {
+    setChequeNo(num);
+    if (!num || !chequeLotId) return;
+    setValidatingCheque(true);
+    try {
+      await deductChequeFromLot(chequeLotId, num);
+    } catch (err: any) {
+      toast.error(err.message);
+      setChequeNo("");
+    } finally {
+      setValidatingCheque(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -351,6 +508,25 @@ export default function FundTransfer() {
     setDestBankId("");
     setAmount("");
     setNarration("");
+    setMode("");
+    setChequeLots([]);
+    setChequeLotId(null);
+    setChequeLotNumber("");
+    setChequeNumbers([]);
+    setChequeNo("");
+    setChequeDate("");
+    setDigitalRefNumber("");
+  };
+
+  const handleModeChange = (m: FundTransferMode) => {
+    setMode(m);
+    if (!CHEQUE_MODES.includes(m)) {
+      setChequeLotId(null);
+      setChequeLotNumber("");
+      setChequeNo("");
+      setChequeDate("");
+    }
+    if (!DIGITAL_MODES.includes(m)) setDigitalRefNumber("");
   };
 
   const submit = async () => {
@@ -366,6 +542,12 @@ export default function FundTransfer() {
       toast.error("Inter-company transfer requires two different companies — pick a destination company.");
       return;
     }
+    if (!mode) { toast.error("Select a payment mode."); return; }
+    if (isChequeMode && (!chequeLotId || !chequeNo)) {
+      toast.error("Select a cheque lot and cheque number.");
+      return;
+    }
+    if (isChequeMode && !chequeDate) { toast.error("Enter the cheque date."); return; }
     const amt = Number(amount);
     if (!(amt > 0)) { toast.error("Enter an amount greater than 0."); return; }
 
@@ -380,6 +562,14 @@ export default function FundTransfer() {
         DestinationBankId: parseInt(destBankId, 10),
         Amount: amt,
         Narration: narration || undefined,
+        Mode: mode as FundTransferMode,
+        ...(isChequeMode ? {
+          ChequeLotId: chequeLotId!,
+          ChequeLotNumber: chequeLotNumber,
+          ChequeNo: chequeNo,
+          ChequeDate: chequeDate,
+        } : {}),
+        ...(isDigitalMode && digitalRefNumber ? { DigitalRefNumber: digitalRefNumber } : {}),
       });
       toast.success("Fund Transfer created and submitted for approval");
       setDialogOpen(false);
@@ -552,6 +742,7 @@ export default function FundTransfer() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <TypeBadge type={t.TransferType} />
                     <StatusBadge status={t.Status} />
+                    <ModeChip mode={t.Mode} chequeNo={t.ChequeNo} digitalRefNumber={t.DigitalRefNumber} />
                   </div>
                 </div>
               ))
@@ -565,6 +756,7 @@ export default function FundTransfer() {
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Date</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Type</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">From → To</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Mode</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Amount</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Status</th>
               </tr>
@@ -572,14 +764,14 @@ export default function FundTransfer() {
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="py-16 text-center">
+                  <td colSpan={7} className="py-16 text-center">
                     <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
                     <p className="text-sm text-muted-foreground mt-2">Loading transfers…</p>
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-20 text-center">
+                  <td colSpan={7} className="py-20 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <ArrowLeftRight size={36} className="opacity-20" />
                       <p className="text-sm font-medium">
@@ -622,6 +814,9 @@ export default function FundTransfer() {
                           <LoanLink loanId={t.LinkedLoanId} loanNo={t.LinkedLoanNo} status={t.LinkedLoanStatus} />
                         </div>
                       )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <ModeChip mode={t.Mode} chequeNo={t.ChequeNo} digitalRefNumber={t.DigitalRefNumber} />
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-foreground tabular-nums">
                       {formatINR(t.Amount || 0)}
@@ -730,14 +925,18 @@ export default function FundTransfer() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-medium text-muted-foreground">Bank Account *</label>
-                  <Select value={sourceBankId} onValueChange={setSourceBankId}>
+                  <Select value={sourceBankId} onValueChange={setSourceBankId} disabled={!sourceCompanyId}>
                     <SelectTrigger className="h-9 text-sm bg-background">
-                      <SelectValue placeholder="Select bank…" />
+                      <SelectValue placeholder={sourceCompanyId ? "Select bank…" : "Select a company first"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {banks.map((b) => (
-                        <SelectItem key={b.BId} value={String(b.BId)} className="text-sm">{bankLabel(b)}</SelectItem>
-                      ))}
+                      {sourceBanksForCompany.length === 0 ? (
+                        <div className="px-2 py-3 text-xs text-muted-foreground text-center">No banks linked to this company.</div>
+                      ) : (
+                        sourceBanksForCompany.map((b) => (
+                          <SelectItem key={b.BId} value={String(b.BId)} className="text-sm">{bankLabel(b)}</SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -777,14 +976,18 @@ export default function FundTransfer() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-medium text-muted-foreground">Bank Account *</label>
-                  <Select value={destBankId} onValueChange={setDestBankId}>
+                  <Select value={destBankId} onValueChange={setDestBankId} disabled={!destCompanyId}>
                     <SelectTrigger className="h-9 text-sm bg-background">
-                      <SelectValue placeholder="Select bank…" />
+                      <SelectValue placeholder={destCompanyId ? "Select bank…" : "Select a company first"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {banks.filter((b) => String(b.BId) !== sourceBankId).map((b) => (
-                        <SelectItem key={b.BId} value={String(b.BId)} className="text-sm">{bankLabel(b)}</SelectItem>
-                      ))}
+                      {destBanksForCompany.length === 0 ? (
+                        <div className="px-2 py-3 text-xs text-muted-foreground text-center">No other banks linked to this company.</div>
+                      ) : (
+                        destBanksForCompany.map((b) => (
+                          <SelectItem key={b.BId} value={String(b.BId)} className="text-sm">{bankLabel(b)}</SelectItem>
+                        ))
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -802,6 +1005,158 @@ export default function FundTransfer() {
                 />
               </div>
             )}
+
+            {/* Payment Mode — same workflow as the Payment page's own Mode
+                selector: choosing Cheque/PDC pulls a leaf from the SOURCE
+                bank's cheque book (shared with Payment — a leaf claimed
+                here can't be claimed there and vice versa); choosing a
+                digital mode just asks for the settlement reference. */}
+            <div className="space-y-2">
+              <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-muted-foreground font-heading">
+                <Wallet size={11} /> Payment Mode *
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {PAYMENT_MODES.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => handleModeChange(m)}
+                    className={cn(
+                      "px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all",
+                      mode === m
+                        ? "border-primary bg-primary/10 text-primary shadow-sm"
+                        : "border-border text-muted-foreground hover:bg-muted/40 hover:border-border/80",
+                    )}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+
+              {isChequeMode && (
+                <div className="rounded-xl border border-border bg-muted/10 p-3 sm:p-3.5 space-y-3 mt-1">
+                  {!sourceBankId ? (
+                    <p className="text-xs text-muted-foreground">Select the source bank account first.</p>
+                  ) : loadingLots ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 size={13} className="animate-spin" /> Loading cheque lots…
+                    </div>
+                  ) : chequeLots.length === 0 ? (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600">
+                      <AlertTriangle size={12} /> No active cheque lots found for this bank.
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-medium text-muted-foreground">Cheque Lot</label>
+                      <div className="relative">
+                        <BookOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                        <select
+                          value={chequeLotId ? String(chequeLotId) : ""}
+                          onChange={(e) => handleLotSelect(e.target.value)}
+                          className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+                        >
+                          <option value="">— Select lot —</option>
+                          {chequeLots.map((lot) => (
+                            <option key={lot.CId} value={String(lot.CId)}>
+                              {lot.ChequeLotNumber}
+                              {lot.RemainingCheques != null ? `  (${lot.RemainingCheques} remaining)` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                      </div>
+                    </div>
+                  )}
+
+                  {chequeLotId && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-medium text-muted-foreground">Cheque Number *</label>
+                        <div className="relative">
+                          <Hash size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                          <select
+                            value={chequeNo}
+                            onChange={(e) => handleChequeSelect(e.target.value)}
+                            disabled={loadingCheques || validatingCheque}
+                            className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 font-mono"
+                          >
+                            <option value="">— Select cheque number —</option>
+                            {availableCheques.map((c) => (
+                              <option key={c.number} value={c.number}># {c.number}</option>
+                            ))}
+                          </select>
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
+                            {loadingCheques || validatingCheque ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <ChevronDown size={14} />
+                            )}
+                          </div>
+                        </div>
+                        {availableCheques.length === 0 && !loadingCheques && (
+                          <p className="text-[11px] text-amber-600 flex items-center gap-1 mt-1">
+                            <AlertTriangle size={10} /> No available cheques left in this lot.
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-medium text-muted-foreground">
+                          {isPostDated ? "Post-Dated Cheque Date *" : "Cheque Date *"}
+                        </label>
+                        <div className="relative">
+                          <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                          <input
+                            type="date"
+                            value={chequeDate}
+                            min={isPostDated ? new Date().toISOString().slice(0, 10) : undefined}
+                            max={isPostDated ? undefined : new Date().toISOString().slice(0, 10)}
+                            onChange={(e) => setChequeDate(e.target.value)}
+                            className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {isPostDated && chequeDate && (() => {
+                    const fmt = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+                    const chequeD = new Date(chequeDate);
+                    const validUntil = new Date(chequeD);
+                    validUntil.setMonth(validUntil.getMonth() + 3);
+                    const isExpired = validUntil < new Date();
+                    return isExpired ? (
+                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-red-500/8 border border-red-500/30 text-xs text-red-600 dark:text-red-400">
+                        <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                        <span>Cheque dated {fmt(chequeD)} expired on <strong>{fmt(validUntil)}</strong>. Please obtain a new cheque.</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-indigo-500/5 border border-indigo-500/20 text-xs text-indigo-600 dark:text-indigo-400">
+                        <CalendarClock size={13} className="shrink-0 mt-0.5" />
+                        <span>PDC scheduled for {fmt(chequeD)} — valid until <strong>{fmt(validUntil)}</strong>.</span>
+                      </div>
+                    );
+                  })()}
+                  {isPostDated && !chequeDate && (
+                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-violet-500/5 border border-violet-500/20 text-xs text-violet-600 dark:text-violet-400">
+                      <Info size={13} className="shrink-0 mt-0.5" />
+                      <span>Post-dated cheques are generally valid for <strong>3 months</strong> from the cheque date.</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isDigitalMode && (
+                <div className="mt-1 space-y-1.5">
+                  <label className="text-[11px] font-medium text-muted-foreground">{DIGITAL_REF_LABEL[mode] ?? "Reference Number"}</label>
+                  <Input
+                    className="h-9"
+                    value={digitalRefNumber}
+                    onChange={(e) => setDigitalRefNumber(e.target.value)}
+                    placeholder={`Enter ${DIGITAL_REF_LABEL[mode]?.toLowerCase() ?? "reference number"}…`}
+                  />
+                </div>
+              )}
+            </div>
 
             {/* Amount, date, narration */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">

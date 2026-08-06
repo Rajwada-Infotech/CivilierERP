@@ -18,6 +18,16 @@ async function handleResponse<T = unknown>(res: Response): Promise<T> {
 
 export type FundTransferType = "Intra" | "Inter";
 
+export type FundTransferMode =
+  | "Cash"
+  | "Cheque"
+  | "Post-Dated Cheque"
+  | "NEFT"
+  | "UPI"
+  | "RTGS"
+  | "IMPS"
+  | "Card";
+
 export interface FundTransferPayload {
   TransferDate: string;
   TransferType: FundTransferType;
@@ -28,6 +38,16 @@ export interface FundTransferPayload {
   Amount: number;
   Narration?: string;
   finYear?: string;
+  Mode?: FundTransferMode;
+  // Cheque / Post-Dated Cheque — mirrors the same cheque-lot mechanism
+  // Payment uses (see ChequePanel.tsx), so a leaf claimed here is unusable
+  // in Payment and vice versa.
+  ChequeLotId?: number;
+  ChequeLotNumber?: string;
+  ChequeNo?: string;
+  ChequeDate?: string;
+  // NEFT / UPI / RTGS / IMPS / Card — one free-text reference field.
+  DigitalRefNumber?: string;
 }
 
 export interface FundTransferSummary {
@@ -53,6 +73,12 @@ export interface FundTransferSummary {
   LinkedLoanId: number | null;
   LinkedLoanNo: string | null;
   LinkedLoanStatus: string | null;
+  Mode: FundTransferMode | null;
+  ChequeNo: string | null;
+  ChequeLotNumber: string | null;
+  ChequeDate: string | null;
+  IsPostDated: boolean;
+  DigitalRefNumber: string | null;
   CreatedBy: string | null;
   CreatedAt: string;
 }

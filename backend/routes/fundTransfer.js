@@ -40,7 +40,62 @@ function validateTransfer(b) {
     return "Inter-company transfer requires two different companies — use Intra-company for the same company's own banks.";
   const amount = Number(b.Amount);
   if (!(amount > 0)) return "Amount must be greater than 0.";
+
+  const mode = b.Mode || null;
+  const VALID_MODES = ["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "UPI", "RTGS", "IMPS", "Card"];
+  if (mode && !VALID_MODES.includes(mode)) return "Invalid payment Mode.";
+  if (mode === "Cheque" || mode === "Post-Dated Cheque") {
+    if (!b.ChequeLotId || !b.ChequeNo) return "Select a cheque lot and cheque number for this mode.";
+    if (!b.ChequeDate) return "Cheque date is required for this mode.";
+  }
   return null;
+}
+
+// A cheque leaf is shared physical stock across Payment and Fund Transfer —
+// reject if the same (lot, number) is already claimed by either module
+// (excluding this transfer's own row on an update) or was cancelled.
+async function assertChequeAvailable(pool, lotId, chequeNo, excludeFTId) {
+  const dupPayment = await pool.request()
+    .input("ChequeLotId", sql.Int, lotId)
+    .input("ChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
+      SELECT COUNT(*) AS cnt FROM dbo.NewPayment
+      WHERE PChequeLotId = @ChequeLotId AND PChequeNo = @ChequeNo
+        AND Status NOT IN ('Rejected', 'Deleted')
+    `);
+  if (dupPayment.recordset[0].cnt > 0) {
+    const err = new Error("Cheque number already used in a Payment.");
+    err.status = 409;
+    throw err;
+  }
+
+  const ftReq = pool.request()
+    .input("ChequeLotId", sql.Int, lotId)
+    .input("ChequeNo", sql.NVarChar(50), String(chequeNo));
+  let ftQuery = `
+    SELECT COUNT(*) AS cnt FROM dbo.FundTransfer
+    WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo
+      AND Status NOT IN ('Rejected', 'Deleted')
+  `;
+  if (excludeFTId) {
+    ftReq.input("ExcludeFTId", sql.Int, excludeFTId);
+    ftQuery += " AND FTId <> @ExcludeFTId";
+  }
+  const dupFT = await ftReq.query(ftQuery);
+  if (dupFT.recordset[0].cnt > 0) {
+    const err = new Error("Cheque number already used in another Fund Transfer.");
+    err.status = 409;
+    throw err;
+  }
+
+  const cancelled = await pool.request()
+    .input("ChequeLotId", sql.Int, lotId)
+    .input("ChequeNo", sql.NVarChar(50), String(chequeNo))
+    .query(`SELECT COUNT(*) AS cnt FROM dbo.CancelledCheque WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo`);
+  if (cancelled.recordset[0].cnt > 0) {
+    const err = new Error("This cheque number has been cancelled and cannot be reissued.");
+    err.status = 409;
+    throw err;
+  }
 }
 
 // ── GET / — list, with filters ──────────────────────────────────────────────
@@ -79,6 +134,7 @@ router.get("/", authenticateToken, async (req, res) => {
              ft.SourceBankId, sb.LHeadName AS SourceBankName,
              ft.DestinationBankId, db.LHeadName AS DestinationBankName,
              ft.LinkedLoanId, ls.LoanNo AS LinkedLoanNo, ls.Status AS LinkedLoanStatus,
+             ft.Mode, ft.ChequeNo, ft.ChequeLotNumber, ft.ChequeDate, ft.IsPostDated, ft.DigitalRefNumber,
              ft.CreatedBy, ft.CreatedAt
       FROM dbo.FundTransfer ft
       LEFT JOIN dbo.enterprise sc ON sc.id = ft.SourceCompanyId
@@ -137,6 +193,11 @@ router.post("/", authenticateToken, requirePageRight("fund-transfer", "create"),
     const linesError = validateTransfer(b);
     if (linesError) return res.status(400).json({ error: linesError });
 
+    const isChequeMode = b.Mode === "Cheque" || b.Mode === "Post-Dated Cheque";
+    if (isChequeMode) {
+      await assertChequeAvailable(pool, parseInt(b.ChequeLotId, 10), b.ChequeNo, null);
+    }
+
     const dtId = await resolveDocTypeId(pool, sql, "FT");
     const finalDocNo = await lockNextDocNumber(pool, sql, {
       docTypeId: dtId,
@@ -157,14 +218,23 @@ router.post("/", authenticateToken, requirePageRight("fund-transfer", "create"),
       .input("Amount", sql.Decimal(18, 2), Number(b.Amount))
       .input("Narration", sql.NVarChar(500), b.Narration || null)
       .input("DocTypeId", sql.Int, dtId || null)
+      .input("Mode", sql.NVarChar(30), b.Mode || null)
+      .input("ChequeLotId", sql.Int, isChequeMode ? parseInt(b.ChequeLotId, 10) : null)
+      .input("ChequeLotNumber", sql.NVarChar(50), isChequeMode ? (b.ChequeLotNumber || null) : null)
+      .input("ChequeNo", sql.NVarChar(20), isChequeMode ? String(b.ChequeNo) : null)
+      .input("ChequeDate", sql.Date, isChequeMode ? (b.ChequeDate || null) : null)
+      .input("IsPostDated", sql.Bit, b.Mode === "Post-Dated Cheque" ? 1 : 0)
+      .input("DigitalRefNumber", sql.NVarChar(100), b.DigitalRefNumber || null)
       .input("CreatedBy", sql.NVarChar(150), user).query(`
         INSERT INTO dbo.FundTransfer
           (DocNo, TransferDate, TransferType, SourceCompanyId, DestinationCompanyId,
-           SourceBankId, DestinationBankId, Amount, Narration, Status, DocTypeId, CreatedBy)
+           SourceBankId, DestinationBankId, Amount, Narration, Status, DocTypeId, CreatedBy,
+           Mode, ChequeLotId, ChequeLotNumber, ChequeNo, ChequeDate, IsPostDated, DigitalRefNumber)
         OUTPUT INSERTED.FTId
         VALUES
           (@DocNo, @TransferDate, @TransferType, @SourceCompanyId, @DestinationCompanyId,
-           @SourceBankId, @DestinationBankId, @Amount, @Narration, 'Draft', @DocTypeId, @CreatedBy)
+           @SourceBankId, @DestinationBankId, @Amount, @Narration, 'Draft', @DocTypeId, @CreatedBy,
+           @Mode, @ChequeLotId, @ChequeLotNumber, @ChequeNo, @ChequeDate, @IsPostDated, @DigitalRefNumber)
       `);
     const newId = insert.recordset[0].FTId;
 
@@ -183,7 +253,7 @@ router.post("/", authenticateToken, requirePageRight("fund-transfer", "create"),
 
     res.status(201).json({ FTId: newId, DocNo: finalDocNo, message: "Fund Transfer created" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -208,6 +278,11 @@ router.put("/:id", authenticateToken, requirePageRight("fund-transfer", "edit"),
     const linesError = validateTransfer(b);
     if (linesError) return res.status(400).json({ error: linesError });
 
+    const isChequeMode = b.Mode === "Cheque" || b.Mode === "Post-Dated Cheque";
+    if (isChequeMode) {
+      await assertChequeAvailable(pool, parseInt(b.ChequeLotId, 10), b.ChequeNo, id);
+    }
+
     const updateResult = await pool.request()
       .input("id", sql.Int, id)
       .input("TransferDate", sql.Date, b.TransferDate)
@@ -218,12 +293,22 @@ router.put("/:id", authenticateToken, requirePageRight("fund-transfer", "edit"),
       .input("DestinationBankId", sql.Int, parseInt(b.DestinationBankId, 10))
       .input("Amount", sql.Decimal(18, 2), Number(b.Amount))
       .input("Narration", sql.NVarChar(500), b.Narration || null)
+      .input("Mode", sql.NVarChar(30), b.Mode || null)
+      .input("ChequeLotId", sql.Int, isChequeMode ? parseInt(b.ChequeLotId, 10) : null)
+      .input("ChequeLotNumber", sql.NVarChar(50), isChequeMode ? (b.ChequeLotNumber || null) : null)
+      .input("ChequeNo", sql.NVarChar(20), isChequeMode ? String(b.ChequeNo) : null)
+      .input("ChequeDate", sql.Date, isChequeMode ? (b.ChequeDate || null) : null)
+      .input("IsPostDated", sql.Bit, b.Mode === "Post-Dated Cheque" ? 1 : 0)
+      .input("DigitalRefNumber", sql.NVarChar(100), b.DigitalRefNumber || null)
       .input("UpdatedBy", sql.NVarChar(150), user).query(`
         UPDATE dbo.FundTransfer SET
           TransferDate=@TransferDate, TransferType=@TransferType,
           SourceCompanyId=@SourceCompanyId, DestinationCompanyId=@DestinationCompanyId,
           SourceBankId=@SourceBankId, DestinationBankId=@DestinationBankId,
           Amount=@Amount, Narration=@Narration,
+          Mode=@Mode, ChequeLotId=@ChequeLotId, ChequeLotNumber=@ChequeLotNumber,
+          ChequeNo=@ChequeNo, ChequeDate=@ChequeDate, IsPostDated=@IsPostDated,
+          DigitalRefNumber=@DigitalRefNumber,
           UpdatedBy=@UpdatedBy, UpdatedAt=SYSDATETIME()
         WHERE FTId=@id AND Status='Draft'
       `);
@@ -235,7 +320,7 @@ router.put("/:id", authenticateToken, requirePageRight("fund-transfer", "edit"),
     await bumpCacheVersion("fund-transfer");
     res.json({ message: "Fund Transfer updated" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

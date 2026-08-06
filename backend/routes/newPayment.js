@@ -398,6 +398,16 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
       usedRes.recordset.filter((r) => r.IsBounced).map((r) => String(r.PChequeNo))
     );
 
+    // A cheque leaf consumed by a Fund Transfer is just as unavailable as
+    // one consumed by a Payment — same physical cheque book, same lot.
+    const ftUsedRes = await pool.request().input("ChequeLotId", sql.Int, lotId)
+      .query(`
+        SELECT ChequeNo FROM dbo.FundTransfer
+        WHERE ChequeLotId = @ChequeLotId AND ChequeNo IS NOT NULL
+          AND Status NOT IN ('Rejected', 'Deleted')
+      `);
+    ftUsedRes.recordset.forEach((r) => usedSet.add(String(r.ChequeNo)));
+
     // Cancelled cheques are permanently blocked from reissue even though
     // cancellation detaches the originating payment's PChequeLotId (so they
     // no longer show up in usedSet above) — see chequeCancellation.js.
@@ -475,6 +485,22 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
         .json({ error: "Cheque number already used in another payment" });
     }
 
+    // Same leaf, same cheque book — also block if a Fund Transfer already
+    // claimed this number from this lot.
+    const ftDupRes = await pool
+      .request()
+      .input("ChequeLotId", sql.Int, lotId)
+      .input("ChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
+        SELECT COUNT(*) AS cnt FROM dbo.FundTransfer
+        WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo
+          AND Status NOT IN ('Rejected', 'Deleted')
+      `);
+    if (ftDupRes.recordset[0].cnt > 0) {
+      return res
+        .status(409)
+        .json({ error: "Cheque number already used in a Fund Transfer" });
+    }
+
     // Cancelled cheques are permanently blocked — cancellation detaches
     // PChequeLotId from the payment row, so the check above alone wouldn't
     // catch a previously-cancelled number being picked again.
@@ -489,12 +515,17 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
         .json({ error: "This cheque number has been cancelled and cannot be reissued." });
     }
 
-    // Count remaining available cheques (exclude Rejected/Deleted)
+    // Count remaining available cheques (exclude Rejected/Deleted), across
+    // both Payment and Fund Transfer usage of this same lot.
     const usedRes = await pool.request().input("PChequeLotId", sql.Int, lotId)
       .query(`
-      SELECT COUNT(*) AS usedCount FROM dbo.NewPayment
-      WHERE PChequeLotId = @PChequeLotId AND PChequeNo IS NOT NULL
-        AND Status NOT IN ('Rejected', 'Deleted')
+      SELECT
+        (SELECT COUNT(*) FROM dbo.NewPayment
+          WHERE PChequeLotId = @PChequeLotId AND PChequeNo IS NOT NULL
+            AND Status NOT IN ('Rejected', 'Deleted')) +
+        (SELECT COUNT(*) FROM dbo.FundTransfer
+          WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
+            AND Status NOT IN ('Rejected', 'Deleted')) AS usedCount
     `);
     const totalCheques = lot.ChequeEndNumber - lot.ChequeStartNumber + 1;
     const usedCount = usedRes.recordset[0].usedCount;
