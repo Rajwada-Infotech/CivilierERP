@@ -189,6 +189,25 @@ export const toggleEmiPaid = (loanId: number, emiId: number, paid: boolean) =>
 export const deleteLoanSanction = (id: number) =>
   fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => handle(r));
 
+// Only the administrative fields — Loan Doc No, Purpose, Remarks, and the
+// Inter-Company bank A/C tags — can be edited after sanction. The financial
+// core (amount, rate, tenure, counterparties) is immutable since it already
+// drove the EMI schedule and GL postings.
+export interface LoanEditPayload {
+  loanDocNo?: string | null;
+  purpose?: string | null;
+  remarks?: string | null;
+  lenderBankAccountId?: number | string | null;
+  borrowerBankAccountId?: number | string | null;
+}
+
+export const updateLoanSanction = (id: number, payload: LoanEditPayload) =>
+  fetchWithAuth(`${BASE}/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).then((r) => handle(r));
+
 export const getPayableEmis = () =>
   fetchWithAuth(`${BASE}/emi-payable`).then((r) => handle<PayableEmi[]>(r));
 

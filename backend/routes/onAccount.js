@@ -335,8 +335,14 @@ router.post("/apply-adjustment", requirePageRight("on-account-adjustment", "crea
         .input("PDate", sql.Date, new Date())
         .input("PBankID", sql.Int, dummyBank.recordset[0].LHeadId)
         .input("PBankName", sql.VarChar, dummyBank.recordset[0].LHeadName)
-        .input("PProject", sql.VarChar, "")
-        .input("PCompany", sql.VarChar, "")
+        .input("PProject", sql.VarChar, eb?.ProjectId != null ? String(eb.ProjectId) : "")
+        // PCompany feeds the Payment Register / new-payment list's
+        // ISNULL(ec.name, np.PCompany) resolution (TRY_CAST(np.PCompany AS
+        // INT) = enterprise.id) — this was previously hardcoded to "", so
+        // synthetic OA-adjustment payments always showed a blank Company
+        // there even though the invoice's company was already looked up
+        // above for the OnAccountLedger entry.
+        .input("PCompany", sql.VarChar, eb?.ECompanyId != null ? String(eb.ECompanyId) : "")
         .input("PExpenseRef", sql.NVarChar(100), expenseRef)
         .input("DocNo", sql.NVarChar(100), syntheticDocNo)
         .input("PCreatedAt", sql.DateTime, new Date())
