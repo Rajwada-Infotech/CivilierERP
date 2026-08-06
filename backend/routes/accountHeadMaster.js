@@ -581,7 +581,7 @@ router.get("/options", async (req, res) => {
     // so this exclusion is unconditional rather than gated on the requested
     // type — without it the same project name shows up twice (once as its
     // legitimate Supplier ledger, once as this mislabelled Customer one).
-    let query = `SELECT LHeadId AS id, LHeadName AS label, LHeadContactPerson AS contactPerson
+    let query = `SELECT LHeadId AS id, LHeadName AS label, LHeadContactPerson AS contactPerson, RTRIM(LHeadType) AS type
                  FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1 AND ISNULL(LHeadCode, '') NOT LIKE '%CUST%'`;
     const request = pool.request();
     if (req.query.type) {

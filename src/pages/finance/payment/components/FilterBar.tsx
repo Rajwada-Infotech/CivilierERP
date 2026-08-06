@@ -2,6 +2,7 @@ import React from "react";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Building2, FolderKanban, CalendarDays, FileText, Search, X, ChevronDown } from "lucide-react";
 import type { BookingFilters } from "../types";
+import { PARTY_TYPE_LABELS } from "../api";
 
 export function FilterBar({
   companyOptions,
@@ -19,7 +20,7 @@ export function FilterBar({
     belongs_to?: number | null;
     company_id?: number | null;
   }[];
-  supplierOptions: { id: number; label: string }[];
+  supplierOptions: { id: number; label: string; type?: string }[];
   finYearOptions: { id: number; label: string }[];
   filters: BookingFilters;
   onChange: (key: keyof BookingFilters, value: string) => void;
@@ -37,7 +38,21 @@ export function FilterBar({
     : projectOptions;
   const projects = filteredProjectOptions.map((o) => o.label);
   const finYears = finYearOptions.map((o) => o.label);
-  const suppliers = supplierOptions.map((o) => o.label);
+
+  // Suppliers get grouped by category (Suppliers / Contractors / Brokers)
+  // instead of one flat list — see PARTY_TYPE_LABELS.
+  const supplierGroups = (() => {
+    const groups = new Map<string, { id: number; label: string }[]>();
+    supplierOptions.forEach((o) => {
+      const key = PARTY_TYPE_LABELS[(o.type ?? "").trim()] ?? "Other";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(o);
+    });
+    const order = ["Suppliers", "Contractors", "Brokers", "Other"];
+    return [...groups.keys()]
+      .sort((a, b) => order.indexOf(a) - order.indexOf(b))
+      .map((groupLabel) => ({ groupLabel, items: groups.get(groupLabel)! }));
+  })();
 
   const activeCount = Object.values(filters).filter(Boolean).length;
 
@@ -68,13 +83,6 @@ export function FilterBar({
       icon: CalendarDays,
       items: finYears,
       placeholder: "All years",
-    },
-    {
-      key: "supplier",
-      label: "Supplier",
-      icon: FileText,
-      items: suppliers,
-      placeholder: "All suppliers",
     },
   ];
 
@@ -154,6 +162,35 @@ export function FilterBar({
             </div>
           </div>
         ))}
+
+        {/* Supplier / Contractor / Broker — grouped by category, unlike the flat lists above */}
+        <div className="space-y-1">
+          <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+            <FileText size={9} /> Supplier
+          </label>
+          <div className="relative">
+            <select
+              value={filters.supplier || ""}
+              onChange={(e) => onChange("supplier", e.target.value)}
+              className="w-full appearance-none pl-2 pr-7 py-1.5 rounded-lg text-xs bg-background border border-border/70 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              <option value="">All suppliers</option>
+              {supplierGroups.map(({ groupLabel, items }) => (
+                <optgroup key={groupLabel} label={groupLabel}>
+                  {items.map((item) => (
+                    <option key={item.id} value={item.label}>
+                      {item.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <ChevronDown
+              size={11}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            />
+          </div>
+        </div>
       </div>
 
       {activeCount > 0 && (

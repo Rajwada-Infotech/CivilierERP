@@ -91,6 +91,7 @@ import {
   fetchProjectOptions,
   fetchSupplierOptions,
   fetchFinYearOptions,
+  PARTY_TYPE_LABELS,
 } from "./payment/api";
 import { blankForm, dbToRecord } from "./payment/formHelpers";
 import {
@@ -684,7 +685,7 @@ const Payment: React.FC = () => {
   });
 
   const { data: supplierOptions = [] } = useQuery<
-    { id: number; label: string }[]
+    { id: number; label: string; type?: string }[]
   >({
     queryKey: ["supplier-options-payment-filter"],
     queryFn: fetchSupplierOptions,
@@ -2072,11 +2073,30 @@ const Payment: React.FC = () => {
                           className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                         >
                           <option value="">Select party…</option>
-                          {supplierOptions.map((s) => (
-                            <option key={s.id} value={String(s.id)}>
-                              {s.label}
-                            </option>
-                          ))}
+                          {(() => {
+                            // Group by category (Suppliers / Contractors / Brokers) so the
+                            // list isn't one flat undifferentiated block — falls back to a
+                            // single "Other" group for any row missing a recognised type.
+                            const groups = new Map<string, typeof supplierOptions>();
+                            supplierOptions.forEach((s) => {
+                              const key = PARTY_TYPE_LABELS[(s.type ?? "").trim()] ?? "Other";
+                              if (!groups.has(key)) groups.set(key, []);
+                              groups.get(key)!.push(s);
+                            });
+                            const order = ["Suppliers", "Contractors", "Brokers", "Other"];
+                            const sortedKeys = [...groups.keys()].sort(
+                              (a, b) => order.indexOf(a) - order.indexOf(b),
+                            );
+                            return sortedKeys.map((groupLabel) => (
+                              <optgroup key={groupLabel} label={groupLabel}>
+                                {groups.get(groupLabel)!.map((s) => (
+                                  <option key={s.id} value={String(s.id)}>
+                                    {s.label}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ));
+                          })()}
                         </select>
                         <ChevronDown
                           size={11}
@@ -3636,10 +3656,10 @@ const Payment: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* 6. Supplier / Contractor */}
+                        {/* 6. Supplier / Contractor / Broker */}
                         <div className="space-y-1.5">
                           <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                            <Truck size={10} /> Supplier / Contractor
+                            <Truck size={10} /> Supplier / Contractor / Broker
                           </label>
                           <div className="relative">
                             <input

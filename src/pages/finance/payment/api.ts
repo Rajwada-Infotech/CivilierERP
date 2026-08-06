@@ -176,12 +176,22 @@ export const fetchProjectOptions = async (): Promise<
   return res.json().catch(() => ({}));
 };
 
+export const PARTY_TYPE_LABELS: Record<string, string> = {
+  S: "Suppliers",
+  C: "Contractors",
+  BR: "Brokers",
+};
+
 export const fetchSupplierOptions = async (): Promise<
-  { id: number; label: string }[]
+  { id: number; label: string; type?: string }[]
 > => {
-  // Suppliers + Contractors — the Payee/Party field also has to resolve a
-  // Contract's ContactPartyId, which can point to either.
-  const res = await fetchWithAuth("/api/account-head/options?type=S,C");
+  // Suppliers + Contractors + Brokers — the Payee/Party field also has to
+  // resolve a Contract's ContactPartyId, which can point to any of these.
+  // Brokers are ledger accounts with LHeadType='BR' (same AccountHeadMaster
+  // pattern as Suppliers/Contractors — see crm-brokerage's Broker Master).
+  // `type` (raw LHeadType: 'S'/'C'/'BR') comes back from the API so the
+  // Payment page can group the dropdown by category — see PARTY_TYPE_LABELS.
+  const res = await fetchWithAuth("/api/account-head/options?type=S,C,BR");
   if (!res.ok) return [];
   return res.json().catch(() => ({}));
 };

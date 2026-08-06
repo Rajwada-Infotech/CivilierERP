@@ -339,7 +339,12 @@ const PortalAgreement: React.FC = () => {
     }
   };
 
-  if (!agreement && !timeline.salesDeed) {
+  // IdentityProof-type documents are visible/uploadable before the
+  // agreement itself is sent (see GET /agreement/documents' own carve-out),
+  // so the empty-state placeholder must not block the whole page just
+  // because `agreement` is still null — that would hide the very "upload
+  // your ID proof" section this early access exists for.
+  if (!agreement && !timeline.salesDeed && documents.length === 0) {
     return (
       <div className="space-y-6">
         <PageHeader eyebrow="Finance" title="Agreement" />

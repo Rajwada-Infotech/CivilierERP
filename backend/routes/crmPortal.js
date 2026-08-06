@@ -399,7 +399,13 @@ router.get("/agreement/documents", async (req, res) => {
       FROM dbo.CrmAgreementDocument d
       JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
-      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
+      -- IdentityProof-type documents are the "first batch" — KYC paperwork
+      -- the customer can and should upload right away, well before the
+      -- Legal Executive's Sale Agreement paper exists or the agreement is
+      -- formally sent. Every other document type stays gated behind
+      -- SentToCustomerAt (the actual legal content shouldn't be visible
+      -- until it's been through senior approval and been shared).
+      WHERE b.ApplicationId = @aid AND (ag.SentToCustomerAt IS NOT NULL OR d.DocumentType = 'IdentityProof')
       ORDER BY d.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -433,13 +439,15 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
       if (appId === null) return;
       const docId = parseInt(req.params.docId, 10);
 
+      // Same early-access carve-out as GET /agreement/documents — IdentityProof
+      // uploads don't wait on SentToCustomerAt.
       const check = await pool.request().input("aid", sql.Int, appId).input("did", sql.Int, docId).query(`
         SELECT d.Id, d.AgreementId, d.Status, d.DocumentType, ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
         FROM dbo.CrmAgreementDocument d
         JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
         JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND d.Id = @did
+        WHERE b.ApplicationId = @aid AND (ag.SentToCustomerAt IS NOT NULL OR d.DocumentType = 'IdentityProof') AND d.Id = @did
       `);
       if (!check.recordset.length) {
         return res.status(404).json({ error: "Document not found" });
@@ -497,12 +505,15 @@ router.get("/agreement/documents/file/:docId", async (req, res) => {
     const appId = await resolveAndAssertApplication(pool, req, res);
     if (appId === null) return;
     const docId = parseInt(req.params.docId);
+    // Same early-access carve-out as GET /agreement/documents — a customer
+    // must be able to preview/download an IdentityProof file they already
+    // uploaded, even before the agreement itself has been sent.
     const result = await pool.request().input("aid", sql.Int, appId).input("did", sql.Int, docId).query(`
       SELECT d.FileName, d.FileBase64, d.MimeType
       FROM dbo.CrmAgreementDocument d
       JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
-      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND d.Id = @did
+      WHERE b.ApplicationId = @aid AND (ag.SentToCustomerAt IS NOT NULL OR d.DocumentType = 'IdentityProof') AND d.Id = @did
     `);
     if (!result.recordset.length || !result.recordset[0].FileBase64) return res.status(404).json({ error: "File not found" });
     const doc = result.recordset[0];

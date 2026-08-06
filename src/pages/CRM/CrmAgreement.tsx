@@ -61,23 +61,39 @@ function unverifiedMandatoryDocs(documents: any[] | undefined): any[] {
   return (documents || []).filter((d) => d.IsMandatory && d.Status !== "Verified");
 }
 
+// Agreement Followup — % of mandatory document TYPES that actually have a
+// file attached. Computed live from the same `documents` array already
+// fetched (never a stored/stale snapshot), mirroring the backend's own
+// agreementFollowupProgress() in crmAgreements.js exactly — 0 required docs
+// means 0%, not a vacuous 100%, since "nothing requested yet" isn't "done."
+function followupProgress(documents: any[] | undefined): { required: number; uploaded: number; percent: number } {
+  const mandatory = (documents || []).filter((d) => d.IsMandatory);
+  const required = mandatory.length;
+  const uploaded = mandatory.filter((d) => d.FilePath).length;
+  const percent = required > 0 ? Math.round((uploaded / required) * 100) : 0;
+  return { required, uploaded, percent };
+}
+
+// Module-level so both agreementStepStates() and the component's own
+// useState can share the exact same type — the stepper's steps and the tab
+// bar below it must always agree on what tabs actually exist.
+const AGR_TABS = ["Overview", "Legal & Approval", "Documents"] as const;
+type AgrTab = typeof AGR_TABS[number];
+
 // A single, honest read of where this agreement actually is in its real
 // lifecycle — mirrors the exact same gates the buttons below already
-// enforce (senior approval -> sent -> customer approval -> date agreed ->
-// executed -> registered), just rendered as a progress trail instead of
-// scattered status pills, so the workflow is legible at a glance instead of
-// something staff have to piece together from separate fields.
+// enforce (legal exec -> followup -> senior approval -> sent -> customer
+// approval -> date agreed -> executed -> registered), just rendered as a
+// progress trail instead of scattered status pills, so the workflow is
+// legible at a glance instead of something staff have to piece together
+// from separate fields. Each step carries the tab it belongs to — same
+// pattern as CrmBookingDetail.tsx's own checklist row, where tapping a step
+// jumps straight to the section that covers it.
 type StepState = "done" | "current" | "upcoming";
-function agreementStepStates(a: any): { label: string; state: StepState }[] {
-  // Legal Executive assignment gets its own dedicated step, not just a
-  // buried precondition inside "Executed" — it's a real, server-enforced
-  // mandate (mark-executed 400s without one) and deserves the same
-  // visibility as every other real gate in this lifecycle. Placed right
-  // after Prepared since assignment can and should happen as soon as the
-  // agreement exists, well before execution is anywhere close — waiting
-  // until the last step to surface it would defeat the point of showing it
-  // as a distinct stage at all.
+function agreementStepStates(a: any, documents: any[] | undefined): { label: string; state: StepState; tab: AgrTab }[] {
   const legalAssigned = !!a?.LegalExecutiveId;
+  const followup = followupProgress(documents);
+  const followupDone = followup.required > 0 && followup.percent === 100;
   const senior = a?.SeniorApprovalStatus === "Approved";
   const sent = !!a?.SentToCustomerAt;
   const custApproved = a?.CustomerApprovalStatus === "Approved";
@@ -85,22 +101,25 @@ function agreementStepStates(a: any): { label: string; state: StepState }[] {
   const executed = a?.Status === "Executed" || a?.Status === "Registered";
   const registered = a?.Status === "Registered";
   return [
-    { label: "Prepared",             state: "done" },
-    { label: "Legal Exec. Assigned", state: legalAssigned ? "done" : "current" },
-    { label: "Senior Approval",      state: senior ? "done" : legalAssigned ? "current" : "upcoming" },
-    { label: "Sent to Customer",     state: sent ? "done" : senior ? "current" : "upcoming" },
-    { label: "Customer Approval",    state: custApproved ? "done" : sent ? "current" : "upcoming" },
-    { label: "Date Agreed",          state: dated ? "done" : custApproved ? "current" : "upcoming" },
-    { label: "Executed",             state: executed ? "done" : dated ? "current" : "upcoming" },
-    { label: "Registered",           state: registered ? "done" : executed ? "current" : "upcoming" },
+    { label: "Initialisation",       state: "done" as StepState,                                                    tab: "Overview" as AgrTab },
+    { label: "Legal Exec. Assigned", state: (legalAssigned ? "done" : "current") as StepState,                      tab: "Legal & Approval" as AgrTab },
+    { label: `Agreement Followup${followup.required > 0 ? ` (${followup.percent}%)` : ""}`,
+      state: (followupDone ? "done" : legalAssigned ? "current" : "upcoming") as StepState,                         tab: "Documents" as AgrTab },
+    { label: "Senior Approval",      state: (senior ? "done" : followupDone ? "current" : "upcoming") as StepState,       tab: "Legal & Approval" as AgrTab },
+    { label: "Sent to Customer",     state: (sent ? "done" : senior ? "current" : "upcoming") as StepState,               tab: "Legal & Approval" as AgrTab },
+    { label: "Customer Approval",    state: (custApproved ? "done" : sent ? "current" : "upcoming") as StepState,         tab: "Legal & Approval" as AgrTab },
+    { label: "Date Agreed",          state: (dated ? "done" : custApproved ? "current" : "upcoming") as StepState,        tab: "Legal & Approval" as AgrTab },
+    { label: "Execution Follow-ups", state: (executed ? "done" : dated ? "current" : "upcoming") as StepState,            tab: "Documents" as AgrTab },
+    { label: "Registered",           state: (registered ? "done" : executed ? "current" : "upcoming") as StepState,       tab: "Overview" as AgrTab },
   ];
 }
-function AgreementStepper({ steps }: { steps: { label: string; state: StepState }[] }) {
+function AgreementStepper({ steps, activeTab, onStepClick }: { steps: { label: string; state: StepState; tab: AgrTab }[]; activeTab: AgrTab; onStepClick: (t: AgrTab) => void }) {
   return (
     <div className="flex items-center overflow-x-auto thin-scroll">
       {steps.map((s, i) => (
         <React.Fragment key={s.label}>
-          <div className="flex items-center gap-1.5 shrink-0">
+          <button onClick={() => onStepClick(s.tab)}
+            className={`flex items-center gap-1.5 shrink-0 rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 transition-colors ${activeTab === s.tab ? "bg-muted/40" : ""}`}>
             <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
               s.state === "done" ? "bg-green-500 text-white"
               : s.state === "current" ? "bg-primary text-primary-foreground"
@@ -108,7 +127,7 @@ function AgreementStepper({ steps }: { steps: { label: string; state: StepState 
               {s.state === "done" ? <Check size={11} /> : i + 1}
             </span>
             <span className={`text-xs font-medium whitespace-nowrap ${s.state === "upcoming" ? "text-muted-foreground" : ""}`}>{s.label}</span>
-          </div>
+          </button>
           {i < steps.length - 1 && (
             <div className={`w-5 sm:w-8 h-px mx-1.5 shrink-0 ${steps[i + 1].state !== "upcoming" ? "bg-green-400" : "bg-border"}`} />
           )}
@@ -189,6 +208,27 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
   const [audit, setAudit] = useState<any[] | null>(null);
   const [remarks, setRemarks] = useState(doc.Remarks || "");
   const [saving, setSaving] = useState(false);
+  const [attaching, setAttaching] = useState(false);
+  const attachInputRef = useRef<HTMLInputElement>(null);
+
+  const attachFile = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    setAttaching(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetchWithAuth(`${API}/${agreementId}/documents/${doc.Id}/attach`, { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      toast.success("File uploaded");
+      onReviewed();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setAttaching(false);
+    }
+  };
 
   useEffect(() => {
     if (!doc.FilePath) return;
@@ -250,7 +290,20 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
             <div className="flex items-center justify-center min-h-[240px] bg-muted/30 rounded-lg overflow-hidden">
               {!doc.FilePath && !doc.DocumentUrl ? (
                 <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">
-                  <Clock size={22} /> Awaiting upload from customer — nothing to preview yet.
+                  <Clock size={22} />
+                  {doc.UploadedByType === "Customer" ? (
+                    "Awaiting upload from customer — nothing to preview yet."
+                  ) : (
+                    <>
+                      Not yet uploaded — Legal Executive to attach.
+                      <input type="file" ref={attachInputRef} className="hidden"
+                        onChange={(e) => attachFile(e.target.files)} />
+                      <button onClick={() => attachInputRef.current?.click()} disabled={attaching}
+                        className="mt-1 flex items-center gap-1.5 px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                        <Upload size={12} /> {attaching ? "Uploading..." : "Upload File"}
+                      </button>
+                    </>
+                  )}
                 </div>
               ) : doc.DocumentUrl && !doc.FilePath ? (
                 <a href={doc.DocumentUrl} target="_blank" rel="noreferrer" className="flex flex-col items-center gap-2 py-8 text-primary text-sm hover:underline">
@@ -266,13 +319,13 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
                 <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">{mimeIcon(doc.MimeType)} Preview not available.</div>
               )}
             </div>
-            {doc.FilePath && (
+            {!!doc.FilePath && (
               <div className="flex justify-between items-center text-xs text-muted-foreground">
                 <span>{doc.FileName} {doc.FileSize ? `· ${fmtBytes(doc.FileSize)}` : ""}{doc.IssuedBy ? ` · by ${doc.IssuedBy}` : ""}</span>
                 {blobUrl && <a href={blobUrl} download={doc.FileName} className="text-primary hover:underline flex items-center gap-1"><Download size={12} /> Download</a>}
               </div>
             )}
-            {doc.FilePath && (
+            {!!doc.FilePath && (
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Remarks {doc.Status !== "Verified" ? "(required to reject)" : ""}</label>
                 <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2}
@@ -310,11 +363,11 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
         )}
 
         <div className="flex justify-end gap-2 pt-2 border-t border-border">
-          {doc.FilePath && doc.Status !== "Verified" && (
+          {!!doc.FilePath && doc.Status !== "Verified" && (
             <button onClick={() => setStatus("Verified")} disabled={saving}
               className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-40">Verify</button>
           )}
-          {doc.FilePath && doc.Status !== "Rejected" && (
+          {!!doc.FilePath && doc.Status !== "Rejected" && (
             <button onClick={() => setStatus("Rejected")} disabled={saving}
               className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">Reject</button>
           )}
@@ -382,9 +435,9 @@ const CrmAgreement: React.FC = () => {
   // scrolling together), which read as a messy wall of text rather than a
   // step-by-step flow. Header actions + the lifecycle Stepper/Next-Action
   // banner stay always visible above the tabs since they're global, not
-  // section-specific.
-  const AGR_TABS = ["Overview", "Legal & Approval", "Documents"] as const;
-  type AgrTab = typeof AGR_TABS[number];
+  // section-specific. AGR_TABS/AgrTab are declared at module scope (shared
+  // with agreementStepStates) so the stepper's steps can each carry a real
+  // tab and stay clickable, same as Booking's own checklist row.
   const [agrTab, setAgrTab] = useState<AgrTab>("Overview");
   useEffect(() => { setAgrTab("Overview"); }, [selectedId]);
 
@@ -790,7 +843,7 @@ const CrmAgreement: React.FC = () => {
                   from separate status pills scattered further down. */}
               {detail.agreement?.Status !== "Cancelled" && (
                 <div className="rounded-xl border border-border p-4 space-y-3">
-                  <AgreementStepper steps={agreementStepStates(detail.agreement)} />
+                  <AgreementStepper steps={agreementStepStates(detail.agreement, detail.documents)} activeTab={agrTab} onStepClick={setAgrTab} />
                   {(() => {
                     const a = detail.agreement;
                     const pendingDocs = unverifiedMandatoryDocs(detail.documents);
@@ -1280,14 +1333,23 @@ const CrmAgreement: React.FC = () => {
                 {!detail.documents?.length ? (
                   <div className="p-4 text-center text-muted-foreground text-sm">No documents uploaded yet</div>
                 ) : (detail.documents as any[]).map((d: any) => {
-                  const awaitingCustomer = d.Status === "Requested" && !d.FilePath && !d.DocumentUrl;
+                  // "Requested" no longer always means waiting on the
+                  // customer — the SaleAgreement baseline document (seeded
+                  // automatically on every agreement) is staff/Legal-
+                  // Executive-uploaded, so it needs its own label instead of
+                  // the misleading "Awaiting upload from customer" that was
+                  // previously shown for every Requested-status document
+                  // regardless of who's actually supposed to attach it.
+                  const awaitingUpload = d.Status === "Requested" && !d.FilePath && !d.DocumentUrl;
+                  const awaitingCustomer = awaitingUpload && d.UploadedByType === "Customer";
+                  const awaitingStaff = awaitingUpload && d.UploadedByType !== "Customer";
                   return (
                     <div key={d.Id} className="px-4 py-3 border-b border-border last:border-0 flex items-center justify-between gap-3">
                       <button
                         onClick={() => setPreviewDoc(d)}
                         className="flex items-center gap-3 text-left min-w-0"
                       >
-                        {awaitingCustomer ? <Clock size={16} className="text-amber-500 shrink-0" /> : mimeIcon(d.MimeType)}
+                        {awaitingUpload ? <Clock size={16} className="text-amber-500 shrink-0" /> : mimeIcon(d.MimeType)}
                         <div className="min-w-0">
                           <div className="text-sm font-medium flex items-center gap-1.5">
                             {d.Label || d.DocumentType.replace(/([A-Z])/g, " $1").trim()}
@@ -1302,6 +1364,8 @@ const CrmAgreement: React.FC = () => {
                           </div>
                           {awaitingCustomer ? (
                             <div className="text-xs text-amber-600">Awaiting upload from customer{d.RequestedAt ? ` · requested ${String(d.RequestedAt).slice(0, 10)}` : ""}</div>
+                          ) : awaitingStaff ? (
+                            <div className="text-xs text-amber-600">Not yet uploaded — Legal Executive to attach{d.RequestedAt ? ` · requested ${String(d.RequestedAt).slice(0, 10)}` : ""}</div>
                           ) : (
                             <>
                               {d.FileName && <div className="text-xs text-muted-foreground truncate max-w-xs">{d.FileName}{d.FileSize ? ` · ${fmtBytes(d.FileSize)}` : ""}</div>}
@@ -1312,11 +1376,11 @@ const CrmAgreement: React.FC = () => {
                       </button>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${docStatusColor[d.Status] || ""}`}>{d.Status}</span>
-                        {d.FilePath && d.Status !== "Verified" && (
+                        {!!d.FilePath && d.Status !== "Verified" && (
                           <button title="Quick verify" onClick={() => handleDocStatusChange(d.Id, "Verified")}
                             className="p-1 rounded hover:bg-green-100 text-green-600"><Check size={14} /></button>
                         )}
-                        {d.FilePath && d.Status !== "Rejected" && (
+                        {!!d.FilePath && d.Status !== "Rejected" && (
                           <button title="Reject (opens review — a reason is required)" onClick={() => setPreviewDoc(d)}
                             className="p-1 rounded hover:bg-red-100 text-red-600"><X size={14} /></button>
                         )}
