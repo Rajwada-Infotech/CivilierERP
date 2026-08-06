@@ -62,6 +62,10 @@ import {
   RefreshCw,
   History,
   Users,
+  Layers,
+  ListChecks,
+  IndianRupee,
+  MessageSquare,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -108,6 +112,7 @@ import { ModeInfoBanner } from "./payment/components/ModeInfoBanner";
 import { ChequePanel } from "./payment/components/ChequePanel";
 import { DigitalRefPanel } from "./payment/components/DigitalRefPanel";
 import { CardPanel } from "./payment/components/CardPanel";
+import { getPayableEmis, payLoan, type PayableEmi } from "@/api/loanSanctionApi";
 import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
 import { previewOAAdjustment } from "@/api/onAccountAdjustment";
 
@@ -522,7 +527,7 @@ const Payment: React.FC = () => {
         ${[companyDetail?.phone_number, companyDetail?.email].filter(Boolean).join("  ·  ")}
       </div>
       <div style="font-size:11px;color:#6b7280;margin-top:2px;">
-        ${[companyDetail?.gst_no ? `GSTIN: ${companyDetail.gst_no}` : null, companyDetail?.pan_no ? `PAN: ${companyDetail.pan_no}` : null].filter(Boolean).join("  ·  ")}
+        ${[companyDetail?.gst_no ? `GSTIN: ${companyDetail.gst_no}` : null, companyDetail?.pan ? `PAN: ${companyDetail.pan}` : null].filter(Boolean).join("  ·  ")}
       </div>
     </div>
     <div style="text-align:right;">
@@ -811,6 +816,89 @@ const Payment: React.FC = () => {
     }));
   };
 
+  // ── Loan EMI source ──────────────────────────────────────────────────────
+  // selectedLoanEmi is the anchor row clicked in the picker — it identifies
+  // the loan and seeds the initial selection, but the modal lets the user
+  // widen this to multiple EMIs on the same loan, or switch to a lump sum
+  // covering the whole (or partial) outstanding balance.
+  const [selectedLoanEmi, setSelectedLoanEmi] = useState<PayableEmi | null>(null);
+  const [loanPaymentDetailsOpen, setLoanPaymentDetailsOpen] = useState(false);
+  const [loanPayMode, setLoanPayMode] = useState<"emis" | "lumpsum">("emis");
+  const [selectedLoanEmiIds, setSelectedLoanEmiIds] = useState<number[]>([]);
+  const [loanLumpSumAmount, setLoanLumpSumAmount] = useState("");
+  const [loanLateFee, setLoanLateFee] = useState("");
+  const [loanPaymentNotes, setLoanPaymentNotes] = useState("");
+  const { data: loanEmiOptions = [], isLoading: loanEmisLoading } = useQuery<PayableEmi[]>({
+    queryKey: ["payment-loan-emis"],
+    queryFn: getPayableEmis,
+    staleTime: 60_000,
+  });
+  // Every other pending EMI on the same loan — lets the modal offer "pay
+  // multiple EMIs at once" without a second fetch.
+  const loanSiblingEmis = selectedLoanEmi
+    ? loanEmiOptions.filter((e) => e.LoanId === selectedLoanEmi.LoanId).sort((a, b) => a.InstallmentNo - b.InstallmentNo)
+    : [];
+  const loanSelectedEmisTotal = loanSiblingEmis
+    .filter((e) => selectedLoanEmiIds.includes(e.EMIId))
+    .reduce((s, e) => s + Number(e.EMIAmount), 0);
+  const loanOutstandingTotal = loanSiblingEmis.reduce((s, e) => s + Number(e.EMIAmount), 0);
+
+  const applyLoanPaymentAmount = useCallback((mode: "emis" | "lumpsum", emiIds: number[], lumpSum: string, sibs: PayableEmi[]) => {
+    const total = mode === "lumpsum"
+      ? Number(lumpSum) || 0
+      : sibs.filter((e) => emiIds.includes(e.EMIId)).reduce((s, e) => s + Number(e.EMIAmount), 0);
+    setForm((prev) => ({ ...prev, amount: total }));
+  }, []);
+
+  const handleLoanEmiSelect = (emi: PayableEmi) => {
+    setSelectedLoanEmi(emi);
+    setSelectedContract(null);
+    setLoanPayMode("emis");
+    setSelectedLoanEmiIds([emi.EMIId]);
+    setLoanLumpSumAmount("");
+    setLoanLateFee("");
+    setLoanPaymentNotes("");
+    setForm((prev) => ({
+      ...prev,
+      paymentName: `Loan EMI ${emi.InstallmentNo} — ${emi.LoanNo} (${emi.BorrowerName})`,
+      expenseRef: "",
+      expenseId: "",
+      contractId: "",
+      amount: Number(emi.EMIAmount),
+    }));
+    // Late fee / loan-specific charges — and now multi-EMI / lump-sum
+    // selection — are handled in a dedicated modal, not the regular
+    // payment form.
+    setLoanPaymentDetailsOpen(true);
+  };
+  const toggleLoanEmiSelected = (emiId: number) => {
+    setSelectedLoanEmiIds((prev) => {
+      const next = prev.includes(emiId) ? prev.filter((id) => id !== emiId) : [...prev, emiId];
+      applyLoanPaymentAmount("emis", next, loanLumpSumAmount, loanSiblingEmis);
+      return next;
+    });
+  };
+  const setLoanPayModeAndSync = (mode: "emis" | "lumpsum") => {
+    setLoanPayMode(mode);
+    if (mode === "lumpsum" && !loanLumpSumAmount) {
+      setLoanLumpSumAmount(String(loanOutstandingTotal));
+      applyLoanPaymentAmount("lumpsum", selectedLoanEmiIds, String(loanOutstandingTotal), loanSiblingEmis);
+    } else {
+      applyLoanPaymentAmount(mode, selectedLoanEmiIds, loanLumpSumAmount, loanSiblingEmis);
+    }
+  };
+  // Only clears the loan-side selection state — deliberately does NOT touch
+  // paymentName/amount, since this also fires defensively whenever an
+  // invoice/contract is picked (to un-highlight a previous loan pick), and
+  // must not stomp on the fields that selection just set.
+  const clearLoanEmiLink = () => {
+    setSelectedLoanEmi(null);
+    setSelectedLoanEmiIds([]);
+    setLoanLumpSumAmount("");
+    setLoanLateFee("");
+    setLoanPaymentNotes("");
+  };
+
   // ── Stats ──────────────────────────────────────────────────────────────────
 
   const totalAmount = dbItems.reduce((s, p) => s + (p.PAmount || 0), 0);
@@ -833,6 +921,8 @@ const Payment: React.FC = () => {
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setSelectedContract(null);
+    clearLoanEmiLink();
+    setLoanPaymentDetailsOpen(false);
     setFormLiveRemaining(null);
     setFormKnownTotalPaid(null);
     setView("form");
@@ -841,6 +931,8 @@ const Payment: React.FC = () => {
 
   const openEdit = (rec: PaymentRecord) => {
     setSelectedContract(null);
+    clearLoanEmiLink();
+    setLoanPaymentDetailsOpen(false);
     setEditingId(rec.id);
     const { id, ...rest } = rec;
     const matchedOption = rest.expenseRef
@@ -864,6 +956,9 @@ const Payment: React.FC = () => {
     setLinkedGRNs([]);
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
+    setSelectedContract(null);
+    clearLoanEmiLink();
+    setLoanPaymentDetailsOpen(false);
   };
 
   const blank = blankForm();
@@ -903,10 +998,19 @@ const Payment: React.FC = () => {
             chequeAccountNumber: "",
             chequeIfsc: "",
           }
-        : {
-            // Auto-fill cheque date to today if not already set
-            chequeDate: prev.chequeDate || today,
-          }),
+        : newMode === "Cheque"
+          ? {
+              // Plain (non-PDC) cheque: defaults to today but is editable —
+              // backdate it to whenever the cheque was actually issued.
+              // Never clobber a date the user already picked.
+              chequeDate: prev.chequeDate || today,
+            }
+          : {
+              // Post-Dated Cheque: auto-fill today as a starting point only
+              // if not already set — the user is expected to pick a future
+              // date, so don't clobber one they've already chosen.
+              chequeDate: prev.chequeDate || today,
+            }),
       // Clear digital fields when switching away from digital modes
       ...(!["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(newMode)
         ? {
@@ -1510,6 +1614,16 @@ const Payment: React.FC = () => {
           return false;
         }
       }
+      // Plain Cheque (not PDC) can be backdated to when it was actually
+      // issued, but never dated in the future — a future-dated cheque is by
+      // definition a Post-Dated Cheque, its own mode.
+      if (form.mode === "Cheque" && form.chequeDate) {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        if (form.chequeDate > todayStr) {
+          toast.error("Cheque date cannot be in the future — use Post-Dated Cheque for a future date.");
+          return false;
+        }
+      }
     }
 
     if (form.mode === "Cash" && !form.amount) {
@@ -1559,6 +1673,7 @@ const Payment: React.FC = () => {
       docDate: form.date || "",
       docTypeId: form.docType || null,
       remarks: form.paymentName || null,
+      notes: form.notes || null,
       // PaymentPayloadSchema fields
       supplierId: form.expenseRef || null,
       partyId: form.partyId ?? null,
@@ -1604,7 +1719,35 @@ const Payment: React.FC = () => {
         toast.success("Payment updated.");
       } else {
         await addPayment(payload);
-        toast.success(reissueCtx ? "Re-issue payment saved. Linked to original." : "Payment saved.");
+        // A Loan EMI payment isn't just a NewPayment record — it also has to
+        // actually settle the EMI on the loan itself (mark it paid, run the
+        // payoff/early-closure check, generate the payment ref). That's what
+        // the loan-sanction backend's own /pay endpoint does; this triggers
+        // it right after the payment record is created.
+        if (selectedLoanEmi) {
+          try {
+            const res = await payLoan(selectedLoanEmi.LoanId, {
+              emiIds: loanPayMode === "emis" ? selectedLoanEmiIds : undefined,
+              lumpSumAmount: loanPayMode === "lumpsum" ? loanLumpSumAmount : undefined,
+              paymentDate: form.date,
+              lateFee: loanLateFee || undefined,
+              notes: loanPaymentNotes || `Paid via Payment — ${form.paymentName}`,
+            });
+            toast.success(
+              res.loanClosed
+                ? `Loan ${selectedLoanEmi.LoanNo} fully repaid and closed. Ref: ${res.paymentRef}`
+                : `Loan payment settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef}`,
+            );
+            queryClient.invalidateQueries({ queryKey: ["payment-loan-emis"] });
+            queryClient.invalidateQueries({ queryKey: ["loan-sanctions"] });
+          } catch (loanErr: any) {
+            toast.error(
+              `Payment saved, but the loan payment could not be settled: ${loanErr.message}. Settle it manually from the Loan Sanction page.`,
+            );
+          }
+        } else {
+          toast.success(reissueCtx ? "Re-issue payment saved. Linked to original." : "Payment saved.");
+        }
       }
       queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
@@ -1923,7 +2066,33 @@ const Payment: React.FC = () => {
                           selectedContract={selectedContract}
                           onContractSelect={handleContractSelect}
                           onContractClear={clearContractLink}
+                          loanEmis={loanEmiOptions}
+                          loanEmisLoading={loanEmisLoading}
+                          selectedLoanEmi={selectedLoanEmi}
+                          onLoanEmiSelect={handleLoanEmiSelect}
+                          onLoanEmiClear={clearLoanEmiLink}
                         />
+                        {selectedLoanEmi && (
+                          <p className="text-[11px] text-muted-foreground flex items-center gap-2 flex-wrap">
+                            <span>
+                              {loanPayMode === "lumpsum"
+                                ? "Lump sum"
+                                : `${selectedLoanEmiIds.length} EMI${selectedLoanEmiIds.length === 1 ? "" : "s"} selected`}
+                              {" · "}
+                              <span className="font-mono font-medium text-foreground/80">{formatINR(form.amount ?? 0)}</span>
+                            </span>
+                            <span>
+                              Late fee: <span className="font-mono font-medium text-foreground/80">{loanLateFee ? formatINR(Number(loanLateFee)) : "—"}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setLoanPaymentDetailsOpen(true)}
+                              className="text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
+                            >
+                              Edit loan payment details
+                            </button>
+                          </p>
+                        )}
                         <div className="flex items-center gap-2 pt-1">
                           {filteredOptions.length === 0 && !loadingExpense && (
                             <p className="text-[11px] text-muted-foreground">Invoice not visible?</p>
@@ -2508,6 +2677,16 @@ const Payment: React.FC = () => {
                   </Field>
                 </div>
 
+                <Field label="Remarks">
+                  <textarea
+                    value={form.notes}
+                    onChange={(e) => set("notes", e.target.value)}
+                    placeholder="Any additional notes for this payment (optional)"
+                    rows={2}
+                    className="w-full px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                  />
+                </Field>
+
                 {oaAdjustmentsForInvoice.length > 0 && (
                   <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 space-y-1">
                     {oaAdjustmentsForInvoice.map((adj, i) => (
@@ -3091,7 +3270,7 @@ const Payment: React.FC = () => {
                         const borderCls =
                           ds === "Success" || ds === "Cheque Cleared"
                             ? "border-emerald-500"
-                            : ds === "Cheque Bounced"
+                            : ds === "Cheque Bounced" || ds === "Cheque Cancelled"
                             ? "border-red-500"
                             : ds === "Reissued"
                             ? "border-violet-500"
@@ -3103,7 +3282,7 @@ const Payment: React.FC = () => {
                         const badgeCls =
                           ds === "Success" || ds === "Cheque Cleared"
                             ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
-                            : ds === "Cheque Bounced"
+                            : ds === "Cheque Bounced" || ds === "Cheque Cancelled"
                             ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20"
                             : ds === "Reissued"
                             ? "bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20"
@@ -3137,6 +3316,11 @@ const Payment: React.FC = () => {
                                   return bank ? <><span>·</span><span className="font-medium text-foreground/70">{bank}</span></> : null;
                                 })()}
                                 {p.PChequeNo && <><span>·</span><span>Chq {p.PChequeNo}</span></>}
+                                {!!p.PIsChequeCancelled && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold">
+                                    Cancelled Cheque
+                                  </span>
+                                )}
                                 {(p.BounceCharge ?? 0) > 0 && (
                                   <span className="text-amber-600 dark:text-amber-400 font-medium">
                                     +{formatINR(p.BounceCharge!)} bank charge
@@ -4025,7 +4209,7 @@ const Payment: React.FC = () => {
                                     ? "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800"
                                   : rec.displayStatus === "Cheque Issued"
                                     ? "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800"
-                                  : rec.displayStatus === "Cheque Bounced"
+                                  : rec.displayStatus === "Cheque Bounced" || rec.displayStatus === "Cheque Cancelled"
                                     ? "bg-red-100 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800"
                                   : rec.displayStatus === "Reissued"
                                     ? "bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-400 dark:border-violet-800"
@@ -4181,37 +4365,43 @@ const Payment: React.FC = () => {
               </button>
             </div>
 
-            {/* Tab strip */}
-            {viewingRec.expenseRef && (
-              <div className="flex border-b border-border px-5 bg-muted/10">
-                {(["details", "chain", "posting"] as const).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setDetailTab(t)}
-                    className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
-                      detailTab === t
-                        ? "border-primary text-primary"
-                        : "border-transparent text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {t === "details" ? "Details" : t === "chain" ? "Payment Chain" : "Posting"}
-                    {t === "chain" && paymentChainData && (
-                      <span className="ml-1.5 text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-semibold">
-                        {paymentChainData.payments.length}
-                      </span>
-                    )}
-                    {t === "posting" && pmtPostingData?.isPosted && (
-                      <span className="ml-1.5 text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.5 rounded-full font-semibold">✓</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* Tab strip — shown for every payment, including direct/TOD
+                ones with no linked invoice: Posting always applies (via the
+                per-payment fallback URL below), and Payment Chain shows an
+                explanatory empty state instead of just vanishing. */}
+            <div className="flex border-b border-border px-5 bg-muted/10">
+              {(["details", "chain", "posting"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setDetailTab(t)}
+                  className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                    detailTab === t
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t === "details" ? "Details" : t === "chain" ? "Payment Chain" : "Posting"}
+                  {t === "chain" && paymentChainData && (
+                    <span className="ml-1.5 text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-semibold">
+                      {paymentChainData.payments.length}
+                    </span>
+                  )}
+                  {t === "posting" && pmtPostingData?.isPosted && (
+                    <span className="ml-1.5 text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.5 rounded-full font-semibold">✓</span>
+                  )}
+                </button>
+              ))}
+            </div>
 
             {/* Body */}
             <div className="p-5 space-y-4 flex-1 overflow-y-auto">
 
               {/* ── Payment Chain Tab ── */}
+              {detailTab === "chain" && !viewingRec.expenseRef && (
+                <p className="text-center text-xs text-muted-foreground py-8">
+                  This is a direct payment with no linked invoice — there's no payment chain to show.
+                </p>
+              )}
               {detailTab === "chain" && viewingRec.expenseRef && (
                 <div className="space-y-3">
                   {/* Invoice summary */}
@@ -4276,21 +4466,21 @@ const Payment: React.FC = () => {
                             ds === "Success" || ds === "Cheque Cleared" ? "border-l-emerald-500" :
                             ds === "Pending" ? "border-l-amber-500" :
                             ds === "Cheque Issued" ? "border-l-blue-500" :
-                            ds === "Cheque Bounced" ? "border-l-red-500" :
+                            ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "border-l-red-500" :
                             ds === "Reissued" ? "border-l-violet-500" :
                             "border-l-gray-400";
                           const dotColor =
                             ds === "Success" || ds === "Cheque Cleared" ? "bg-emerald-500" :
                             ds === "Pending" ? "bg-amber-500" :
                             ds === "Cheque Issued" ? "bg-blue-500" :
-                            ds === "Cheque Bounced" ? "bg-red-500" :
+                            ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "bg-red-500" :
                             ds === "Reissued" ? "bg-violet-500" :
                             "bg-gray-400";
                           const badgeClass =
                             ds === "Success" || ds === "Cheque Cleared" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400" :
                             ds === "Pending" ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400" :
                             ds === "Cheque Issued" ? "bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400" :
-                            ds === "Cheque Bounced" ? "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400" :
+                            ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400" :
                             ds === "Reissued" ? "bg-violet-500/10 border-violet-500/20 text-violet-700 dark:text-violet-400" :
                             "bg-gray-500/10 border-gray-500/20 text-gray-700 dark:text-gray-400";
                           return (
@@ -4311,6 +4501,11 @@ const Payment: React.FC = () => {
                                   <span className="font-mono font-semibold text-foreground text-xs">{formatINR(Number(p.PAmount ?? 0))}</span>
                                   {p.PMode && <span>· {p.PMode}</span>}
                                   {p.PChequeNo && <span>· Chq #{p.PChequeNo}</span>}
+                                  {!!p.PIsChequeCancelled && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold">
+                                      Cancelled Cheque
+                                    </span>
+                                  )}
                                 </div>
                                 {p.BounceDate && (
                                   <div className="text-[10px] text-red-600 dark:text-red-400 flex items-center gap-1">
@@ -4435,8 +4630,8 @@ const Payment: React.FC = () => {
                         viewingCompanyDetail.gst_no
                           ? `GSTIN: ${viewingCompanyDetail.gst_no}`
                           : null,
-                        viewingCompanyDetail.pan_no
-                          ? `PAN: ${viewingCompanyDetail.pan_no}`
+                        viewingCompanyDetail.pan
+                          ? `PAN: ${viewingCompanyDetail.pan}`
                           : null,
                       ]
                         .filter(Boolean)
@@ -4649,6 +4844,9 @@ const Payment: React.FC = () => {
                     value: viewingRec.projectSite || "—",
                   },
                   { label: "Expense Ref", value: viewingRec.expenseRef || "—" },
+                  ...(viewingRec.notes
+                    ? [{ label: "Remarks", value: viewingRec.notes }]
+                    : []),
                   ...(viewingRec.bankName
                     ? [{ label: "Bank", value: viewingRec.bankName }]
                     : []),
@@ -4940,6 +5138,250 @@ const Payment: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Loan Payment Details — pick single/multiple EMIs or a lump sum for
+          this loan, plus late fee / notes. Separate from the main payment
+          form since a loan repayment carries charges (bank-applied or
+          company-set late fee) and a payoff shape that invoice/contract
+          payments don't have. */}
+      {loanPaymentDetailsOpen && selectedLoanEmi && (() => {
+        const base = loanPayMode === "lumpsum" ? Number(loanLumpSumAmount) || 0 : loanSelectedEmisTotal;
+        const fee = Number(loanLateFee) || 0;
+        const willPayOff = loanPayMode === "lumpsum" && loanOutstandingTotal > 0 && Number(loanLumpSumAmount) >= loanOutstandingTotal;
+        return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-card border border-border shadow-2xl max-h-[88vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="px-6 pt-6 pb-5 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border-b border-border">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/15 shrink-0">
+                  <Receipt size={18} className="text-amber-600" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-heading font-bold text-foreground text-base">
+                    Loan Payment Details
+                  </h3>
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    <span className="font-mono text-xs font-semibold text-foreground/80">{selectedLoanEmi.LoanNo}</span>
+                    <span className="text-muted-foreground/50">·</span>
+                    <span className="text-xs text-muted-foreground truncate">{selectedLoanEmi.BorrowerName}</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                      {selectedLoanEmi.LoanType}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5 space-y-5 overflow-y-auto">
+              {/* Payment mode toggle */}
+              <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-muted/50">
+                <button
+                  type="button"
+                  onClick={() => setLoanPayModeAndSync("emis")}
+                  className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    loanPayMode === "emis" ? "bg-card shadow-sm text-primary border border-border" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <ListChecks size={13} /> Select EMI(s)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLoanPayModeAndSync("lumpsum")}
+                  className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    loanPayMode === "lumpsum" ? "bg-card shadow-sm text-primary border border-border" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Layers size={13} /> Lump Sum
+                </button>
+              </div>
+
+              {loanPayMode === "emis" ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                      Installments
+                    </label>
+                    <span className="text-[11px] text-muted-foreground">
+                      {selectedLoanEmiIds.length} selected
+                    </span>
+                  </div>
+                  <div className="rounded-xl border border-border divide-y divide-border max-h-48 overflow-y-auto">
+                    {loanSiblingEmis.map((e) => {
+                      const checked = selectedLoanEmiIds.includes(e.EMIId);
+                      return (
+                        <label
+                          key={e.EMIId}
+                          className={`flex items-center gap-2.5 px-3 py-2.5 text-sm cursor-pointer transition-colors ${
+                            checked ? "bg-primary/5" : "hover:bg-muted/40"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleLoanEmiSelected(e.EMIId)}
+                            className="w-4 h-4 rounded accent-primary cursor-pointer shrink-0"
+                          />
+                          <span className="flex-1 min-w-0">
+                            <span className="flex items-center gap-1.5">
+                              <span className="font-medium">EMI {e.InstallmentNo}</span>
+                              {!!e.IsOverdue && (
+                                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-red-500/15 text-red-600 dark:text-red-400">
+                                  OVERDUE
+                                </span>
+                              )}
+                            </span>
+                            <span className="block text-[11px] text-muted-foreground">
+                              Due {new Date(e.DueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                            </span>
+                          </span>
+                          <span className="font-mono text-xs font-semibold shrink-0">{formatINR(e.EMIAmount)}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                    Lump Sum Amount
+                  </label>
+                  <div className="relative">
+                    <IndianRupee size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      autoComplete="off"
+                      value={loanLumpSumAmount}
+                      onChange={(e) => {
+                        setLoanLumpSumAmount(e.target.value);
+                        applyLoanPaymentAmount("lumpsum", selectedLoanEmiIds, e.target.value, loanSiblingEmis);
+                      }}
+                      placeholder="Enter amount"
+                      className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Outstanding on this loan: <span className="font-mono font-medium text-foreground/80">{formatINR(loanOutstandingTotal)}</span>
+                  </p>
+                  {willPayOff && (
+                    <p className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                      <CheckCircle2 size={12} /> This pays it off — the loan will close automatically.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Late fee */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                  Late Fee <span className="normal-case text-muted-foreground/70">({selectedLoanEmi.LoanType === "Bank Loan" ? "bank-applied" : "company-set"}, optional)</span>
+                </label>
+                <div className="relative">
+                  <IndianRupee size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    autoComplete="off"
+                    value={loanLateFee}
+                    onChange={(e) => setLoanLateFee(e.target.value)}
+                    placeholder="0"
+                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+                {!!selectedLoanEmi.IsOverdue && (
+                  <p className="flex items-center gap-1.5 text-[11px] text-red-500">
+                    <AlertCircle size={11} /> This loan has an overdue installment — a late fee may apply.
+                  </p>
+                )}
+              </div>
+
+              {/* Breakdown — makes clear the late fee is added on top of the
+                  EMI/lump-sum amount, not folded into it, before this gets
+                  recorded as a single loan payment (principal+interest,
+                  late fee, and grand total tracked separately). */}
+              <div className="rounded-xl border border-primary/20 bg-primary/[0.04] px-4 py-3.5 space-y-2 text-xs tabular-nums">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    {loanPayMode === "lumpsum" ? "Lump sum amount" : "Selected EMI(s)"}
+                  </span>
+                  <span className="font-mono font-medium text-foreground">{formatINR(base)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Late fee</span>
+                  <span className="font-mono font-medium text-foreground">{formatINR(fee)}</span>
+                </div>
+                <div className="flex items-center justify-between pt-2 border-t border-primary/15">
+                  <span className="font-heading font-semibold text-foreground text-[13px]">Total to pay</span>
+                  <span className="font-mono font-bold text-primary text-base">{formatINR(base + fee)}</span>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                  Notes (optional)
+                </label>
+                <div className="relative">
+                  <MessageSquare size={13} className="absolute left-3 top-2.5 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={loanPaymentNotes}
+                    onChange={(e) => setLoanPaymentNotes(e.target.value)}
+                    placeholder="Reason for late fee, remarks…"
+                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20">
+              <button
+                onClick={() => {
+                  clearLoanEmiLink();
+                  setLoanPaymentDetailsOpen(false);
+                  // Selecting a loan EMI cleared the invoice/contract side
+                  // and set form fields directly — undo that too so
+                  // cancelling leaves a clean form, not a half-filled one.
+                  setForm((prev) => ({ ...prev, paymentName: "", amount: null }));
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Cancel Loan Payment
+              </button>
+              <button
+                onClick={() => {
+                  if (base <= 0) {
+                    toast.error(loanPayMode === "lumpsum" ? "Enter a lump sum amount" : "Select at least one EMI");
+                    return;
+                  }
+                  setForm((prev) => ({
+                    ...prev,
+                    paymentName:
+                      loanPayMode === "lumpsum"
+                        ? `Loan Lump Sum — ${selectedLoanEmi.LoanNo} (${selectedLoanEmi.BorrowerName})`
+                        : `Loan EMI${selectedLoanEmiIds.length > 1 ? "s" : ""} ${loanSiblingEmis.filter((e) => selectedLoanEmiIds.includes(e.EMIId)).map((e) => e.InstallmentNo).join(", ")} — ${selectedLoanEmi.LoanNo} (${selectedLoanEmi.BorrowerName})`,
+                    // The actual bank/cheque transaction is the full amount
+                    // that changes hands — principal+interest (or lump sum)
+                    // plus the late fee, not just the EMI/lump-sum portion.
+                    amount: base + fee,
+                  }));
+                  setLoanPaymentDetailsOpen(false);
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
     </>
   );
 };

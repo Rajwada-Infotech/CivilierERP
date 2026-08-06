@@ -14,6 +14,7 @@ export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
       { label: "Received Payment",  path: "/received-payments",      pageKey: "received-payment" },
       { label: "Fund Transfer",     path: "/fund-transfer",          pageKey: "fund-transfer" },
       { label: "BRS",               path: "/brs",                    pageKey: "brs" },
+      { label: "Cheque Cancellation", path: "/finance/cheque-cancellation", pageKey: "cheque-cancellation" },
     ],
   },
   { label: "Journal Voucher", icon: DocumentText, path: "/journal-voucher", pageKey: "journal-voucher" },

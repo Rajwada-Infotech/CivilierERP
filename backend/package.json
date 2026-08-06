@@ -22,7 +22,7 @@
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
-    "fast-uri": ">=3.1.4",
+    "fast-uri": ">=4.1.2",
     "helmet": "^8.1.0",
     "ioredis": "^5.3.2",
     "jsonwebtoken": "^9.0.3",
@@ -76,7 +76,7 @@
   "overrides": {
     "ajv": ">=8.18.0",
     "uuid": "^11.1.1",
-    "fast-uri": ">=3.1.4",
+    "fast-uri": ">=4.1.2",
     "ip-address": ">=10.1.1",
     "qs": ">=6.15.2",
     "ws": ">=8.21.1",
@@ -84,6 +84,6 @@
     "js-yaml": ">=4.2.0",
     "body-parser": ">=2.3.0",
     "@babel/core": ">=7.29.6 <8.0.0",
-    "brace-expansion": ">=1.1.16"
+    "brace-expansion": ">=5.0.9"
   }
 }

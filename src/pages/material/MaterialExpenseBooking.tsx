@@ -34,6 +34,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  SelectGroup,
+  SelectLabel,
 } from "@/components/ui/select";
 import {
   Plus,
@@ -109,6 +111,7 @@ import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
 import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
 import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
 import { DirectItemsTable } from "./ExpenseBooking/DirectItemsTable";
+import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
 import type {
   CompanyOption,
   ProjectOption,
@@ -234,6 +237,9 @@ export default function MaterialExpenseBooking() {
   const [supplierHeads, setSupplierHeads] = useState<
     { id: number; label: string; paymentTerms: string | null }[]
   >([]);
+  const [contractorHeads, setContractorHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
@@ -352,10 +358,12 @@ export default function MaterialExpenseBooking() {
         );
       },
     );
+    // Other Expenses only ever books against the "Direct Expense Booking"
+    // (DINV) document type now — the legacy REQ/ExB-ISS/ExB-PAY/FA rows that
+    // used to show here were leftover general-purpose doc types, not
+    // actually meant for this picker.
     load<TodItem>("tod", "/api/document-type", setTodList, setLoadingTOD, (r) =>
-      (Array.isArray(r) ? r : []).filter(
-        (t) => !["PO", "WO"].includes((t as any).ModuleTag ?? ""),
-      ),
+      (Array.isArray(r) ? r : []).filter((t) => (t as any).Prefix === "DINV"),
     );
 
     _mastersCache.grn = null;
@@ -442,6 +450,20 @@ export default function MaterialExpenseBooking() {
           err instanceof Error ? err.message : "Something went wrong",
         );
       });
+    apiFetch("/api/account-head?type=C")
+      .then((list: any[]) => {
+        const heads = (Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        }));
+        setContractorHeads(heads);
+      })
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
     apiFetch("/api/billing-terms")
       .then((list: BillingTermOption[]) =>
         setBillingTerms(
@@ -477,20 +499,26 @@ export default function MaterialExpenseBooking() {
     value: Omit<ExpenseRecord, "id">[K],
   ) => setForm((prev) => ({ ...prev, [field]: value }));
 
-  // Due Date tracks Vendor Invoice Date + the selected Payment Term's Days,
-  // recomputed live any time either changes — not just at the moment a
-  // supplier/term is first picked. Single source of truth for dueDate so
-  // editing the invoice date after the fact keeps it correct in real time.
+  // Due Date tracks Payment Term's Days from a base date, recomputed live
+  // any time either changes — not just at the moment a supplier/term is
+  // first picked. Single source of truth for dueDate so editing the invoice
+  // date after the fact keeps it correct in real time.
+  //
+  // Base date prefers Vendor Invoice Date (the supplier's own invoice date)
+  // but falls back to Booking Date when no vendor invoice date has been
+  // entered yet — otherwise picking a Payment Term before filling in the
+  // (optional) vendor invoice date silently did nothing.
   useEffect(() => {
-    if (!form.paymentTermId || !form.vendorInvoiceDate) return;
+    const baseDateStr = form.vendorInvoiceDate || form.bookingDate;
+    if (!form.paymentTermId || !baseDateStr) return;
     const term = paymentTermOptions.find((t) => t.Id === form.paymentTermId);
     if (!term || term.CreditDays == null) return;
-    const base = new Date(form.vendorInvoiceDate);
+    const base = new Date(baseDateStr);
     if (isNaN(base.getTime())) return;
     base.setDate(base.getDate() + term.CreditDays);
     const next = base.toISOString().split("T")[0];
     setForm((prev) => (prev.dueDate === next ? prev : { ...prev, dueDate: next }));
-  }, [form.paymentTermId, form.vendorInvoiceDate, paymentTermOptions]);
+  }, [form.paymentTermId, form.vendorInvoiceDate, form.bookingDate, paymentTermOptions]);
 
   const resolveCostCenterForProject = useCallback(
     (projectId?: number | null) => {
@@ -1157,8 +1185,11 @@ export default function MaterialExpenseBooking() {
     statusCounts["Pending"] ??
     records.filter((r) => r.status === "Pending").length;
   const emiCount = records.filter((r) => r.emi?.enabled).length;
-  const vendorLabel =
-    selectedDoc?.kind === "WORK_DONE" ? "Contractor" : "Supplier / Vendor";
+  const vendorLabel = selectedDoc?.vendorLabel
+    ? selectedDoc.kind === "WORK_DONE"
+      ? "Contractor"
+      : "Supplier / Vendor"
+    : "Payable To";
   const isPOorWO =
     selectedDoc?.kind === "PO" ||
     selectedDoc?.kind === "WORK_DONE" ||
@@ -1476,7 +1507,10 @@ export default function MaterialExpenseBooking() {
                         <Select value={form.supplier || "__none__"} onValueChange={(val) => {
                           const name = val === "__none__" ? "" : val;
                           set("supplier", name);
-                          const head = name ? supplierHeads.find((s) => s.label === name) : undefined;
+                          const head = name
+                            ? supplierHeads.find((s) => s.label === name) ??
+                              contractorHeads.find((c) => c.label === name)
+                            : undefined;
                           set("supplierLHeadId", head?.id ?? null);
                           // Other Expenses (TOD) bookings have no source-doc
                           // label to name themselves after — keep the
@@ -1499,13 +1533,26 @@ export default function MaterialExpenseBooking() {
                           }
                         }}>
                           <SelectTrigger className={selectTriggerCls}>
-                            <SelectValue placeholder="All suppliers" />
+                            <SelectValue placeholder="Select supplier or contractor" />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="__none__">— None —</SelectItem>
-                            {supplierHeads.map((s) => (
-                              <SelectItem key={s.id} value={s.label}>{s.label}</SelectItem>
-                            ))}
+                            {supplierHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Suppliers</SelectLabel>
+                                {supplierHeads.map((s) => (
+                                  <SelectItem key={`s-${s.id}`} value={s.label}>{s.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            {contractorHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Contractors</SelectLabel>
+                                {contractorHeads.map((c) => (
+                                  <SelectItem key={`c-${c.id}`} value={c.label}>{c.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
                           </SelectContent>
                         </Select>
                       )}
@@ -1700,7 +1747,7 @@ export default function MaterialExpenseBooking() {
 
                   <div className="space-y-2">
                     <Field
-                      label="Booking Name"
+                      label="Purpose of Expense Booking"
                       hint={
                         selectedDoc?.nameLabel
                           ? "Auto-filled from selected document — editable"
@@ -1809,8 +1856,15 @@ export default function MaterialExpenseBooking() {
                         accounts, so a free-text GL field there is unused and
                         confusing. */}
                     {isDirect && selectedDoc?.kind === "TOD" && (
-                      <Field label="GL Account">
-                        <Input value={form.glAccount ?? ""} onChange={(e) => set("glAccount", e.target.value)} placeholder="Optional GL account" />
+                      <Field label="GL Account" hint="Posts this invoice's debit leg against the selected ledger head">
+                        <GLAccountSelect
+                          value={form.glAccountId ?? null}
+                          onChange={(id, label) => {
+                            set("glAccountId", id);
+                            set("glAccount", label ?? "");
+                          }}
+                          placeholder="Select GL account..."
+                        />
                       </Field>
                     )}
                   </div>

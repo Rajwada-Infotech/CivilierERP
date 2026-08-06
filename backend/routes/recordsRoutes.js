@@ -186,6 +186,78 @@ async function fetchGRNAttachments(pool, actor) {
   }));
 }
 
+async function fetchLoanNocAttachments(pool, actor) {
+  if (actor.role === "customer") return [];
+  const tableCheck = await pool.request().query(
+    "SELECT 1 AS f FROM sys.tables WHERE object_id = OBJECT_ID('dbo.LoanNOCAttachments')"
+  );
+  if (!tableCheck.recordset[0]) return [];
+  const result = await pool.request().query(`
+    SELECT
+      a.AttachmentId,
+      a.LoanId,
+      ls.LoanNo,
+      a.FileName,
+      a.MimeType,
+      a.FileSize,
+      a.UploadedBy,
+      a.UploadedAt
+    FROM dbo.LoanNOCAttachments a
+    LEFT JOIN dbo.LoanSanction ls ON ls.LoanId = a.LoanId
+    ORDER BY a.UploadedAt DESC
+  `);
+  return result.recordset.map((r) => ({
+    source: "loan-noc",
+    sourceId: r.AttachmentId,
+    module: "Loan NOC",
+    docRef: r.LoanNo || `Loan-${r.LoanId}`,
+    docLabel: r.LoanNo ? `NOC - ${r.LoanNo}` : `NOC - Loan #${r.LoanId}`,
+    filename: r.FileName,
+    mimeType: r.MimeType,
+    size: r.FileSize,
+    uploadedBy: r.UploadedBy || null,
+    uploadedAt: r.UploadedAt,
+    url: `/api/loan-sanction/noc/${r.AttachmentId}`,
+  }));
+}
+
+async function fetchLoanDocumentAttachments(pool, actor) {
+  if (actor.role === "customer") return [];
+  const tableCheck = await pool.request().query(
+    "SELECT 1 AS f FROM sys.tables WHERE object_id = OBJECT_ID('dbo.LoanDocumentAttachments')"
+  );
+  if (!tableCheck.recordset[0]) return [];
+  const result = await pool.request().query(`
+    SELECT
+      a.AttachmentId,
+      a.LoanId,
+      a.DocType,
+      ls.LoanNo,
+      ls.LoanDocNo,
+      a.FileName,
+      a.MimeType,
+      a.FileSize,
+      a.UploadedBy,
+      a.UploadedAt
+    FROM dbo.LoanDocumentAttachments a
+    LEFT JOIN dbo.LoanSanction ls ON ls.LoanId = a.LoanId
+    ORDER BY a.UploadedAt DESC
+  `);
+  return result.recordset.map((r) => ({
+    source: "loan-document",
+    sourceId: r.AttachmentId,
+    module: "Loan Document",
+    docRef: r.LoanDocNo || r.LoanNo || `Loan-${r.LoanId}`,
+    docLabel: `${r.DocType} - ${r.LoanNo || `Loan #${r.LoanId}`}${r.LoanDocNo ? ` (${r.LoanDocNo})` : ""}`,
+    filename: r.FileName,
+    mimeType: r.MimeType,
+    size: r.FileSize,
+    uploadedBy: r.UploadedBy || null,
+    uploadedAt: r.UploadedAt,
+    url: `/api/loan-sanction/document/${r.AttachmentId}`,
+  }));
+}
+
 // Contract attachments are stored as a JSON array of
 // {name, url (base64 data URI), type, size} in dbo.Contract.Attachments —
 // no dedicated attachments table, so this unpacks that column per row.
@@ -270,6 +342,8 @@ const SOURCES = [
   // "vault" (Follow-Up's Document Vault) removed — the Follow-Up module and
   // its tables (including FollowupDocumentVault) were dropped entirely.
   { key: "grn", label: "GRN", fetch: fetchGRNAttachments },
+  { key: "loan-noc", label: "Loan NOC", fetch: fetchLoanNocAttachments },
+  { key: "loan-document", label: "Loan Document", fetch: fetchLoanDocumentAttachments },
   { key: "contract", label: "Contract", fetch: fetchContractAttachments },
   { key: "personal", label: "Personal Vault", fetch: fetchPersonalVaultAttachments },
 ];

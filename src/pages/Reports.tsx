@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
-import { exportToCsv } from "@/lib/export";
+import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import {
   Building2,
@@ -36,7 +36,6 @@ import {
   Wrench,
   Receipt,
   Store,
-  Download,
   ChevronLeft,
   AlertCircle,
   Loader2,
@@ -48,6 +47,7 @@ import {
   Settings2,
   Warehouse,
   XCircle,
+  Ban,
   Wallet,
   Megaphone,
   Target,
@@ -194,6 +194,33 @@ const ALL_REPORTS: ReportDef[] = [
       {
         header: "Date",
         accessor: (r) => (r.PDate ? String(r.PDate).slice(0, 10) : "—"),
+      },
+      { header: "Document Number", accessor: "DocNo" },
+    ],
+  },
+  {
+    id: "payment-reason-report",
+    label: "Payment Reason Report",
+    description: "Outward payments grouped and filterable by Payment Reason",
+    icon: Receipt,
+    color: "#9333ea",
+    apiPath: "/api/payment-reason-master/report",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "Reason", accessor: "ReasonName" },
+      { header: "Company", accessor: (r) => (r.Company ?? "—") as string },
+      { header: "Project", accessor: (r) => (r.Project ?? "—") as string },
+      { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
+      { header: "Mode", accessor: (r) => (r.Mode ?? "—") as string },
+      {
+        header: "Date",
+        accessor: (r) => (r.Date ? String(r.Date).slice(0, 10) : "—"),
       },
       { header: "Document Number", accessor: "DocNo" },
     ],
@@ -444,6 +471,39 @@ const ALL_REPORTS: ReportDef[] = [
       {
         header: "Re-issued Via",
         accessor: (r) => (r.ReplacementDocNo ?? "—") as string,
+      },
+    ],
+  },
+  {
+    id: "cancelled-cheques-report",
+    label: "Cancelled Cheques",
+    description: "Every cheque cancelled via Finance → Cheque Cancellation",
+    icon: Ban,
+    color: "#dc2626",
+    apiPath: "/api/cheque-cancellation",
+    defaultParams: { limit: "500" },
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+      dataKey: "data",
+    },
+    columns: [
+      { header: "Cheque No", accessor: (r) => (r.ChequeNo ?? "—") as string },
+      { header: "Lot Number", accessor: (r) => (r.ChequeLotNumber ?? "—") as string },
+      { header: "Bank", accessor: (r) => (r.BankName ?? "—") as string },
+      { header: "A/C Number", accessor: (r) => (r.AccountNumber ?? "—") as string },
+      { header: "Payment Doc No", accessor: (r) => (r.DocNo ?? "—") as string },
+      { header: "Payment Name", accessor: (r) => (r.PPaymentName ?? "—") as string },
+      { header: "Amount", accessor: (r) => fmt(r.PAmount as number) },
+      { header: "Company", accessor: (r) => (r.PCompanyName ?? "—") as string },
+      { header: "Reason", accessor: (r) => (r.Reason ?? "—") as string },
+      { header: "Cancelled By", accessor: (r) => (r.CancelledBy ?? "—") as string },
+      {
+        header: "Cancelled At",
+        accessor: (r) => (r.CancelledAt ? String(r.CancelledAt).slice(0, 10) : "—"),
       },
     ],
   },
@@ -1547,6 +1607,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
     icon: IndianRupee,
     reportIds: [
       "payment-register",
+      "payment-reason-report",
       "received-payment",
       "emi-register",
       "pending-payment",
@@ -1556,6 +1617,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "journal-voucher-report",
       "on-account-report",
       "pdc-report",
+      "cancelled-cheques-report",
     ],
   },
   {
@@ -1845,6 +1907,18 @@ const ReportTable: React.FC<{
       .catch(() => {});
   }, [isStockSummary]);
 
+  // ── Payment Reason switcher (payment-reason-report only) ─────────────────
+  const isPaymentReasonReport = report.id === "payment-reason-report";
+  const [reasonFilter, setReasonFilter] = useState<string>("");
+  const [reasonOptions, setReasonOptions] = useState<{ id: number; name: string }[]>([]);
+  useEffect(() => {
+    if (!isPaymentReasonReport) return;
+    fetchWithAuth("/api/payment-reason-master/options")
+      .then((r) => r.json().catch(() => []))
+      .then((list) => setReasonOptions(Array.isArray(list) ? list : []))
+      .catch(() => {});
+  }, [isPaymentReasonReport]);
+
   const buildParams = (): Record<string, string> => {
     const fc = report.filterConfig ?? {};
     const f: Record<string, string> = {};
@@ -1877,6 +1951,9 @@ const ReportTable: React.FC<{
 
     // Stock summary: pass selected godownId to inventory-master
     if (isStockSummary && godownId) f["godownId"] = godownId;
+
+    // Payment Reason Report: scope to a single reason when selected
+    if (isPaymentReasonReport && reasonFilter) f["reason"] = reasonFilter;
 
     return f;
   };
@@ -1914,6 +1991,7 @@ const ReportTable: React.FC<{
     filters.rangeFrom,
     filters.rangeTo,
     godownId,
+    reasonFilter,
   ]);
 
   useEffect(() => {
@@ -1996,13 +2074,39 @@ const ReportTable: React.FC<{
             </div>
           )}
 
-          <button
-            onClick={() => exportToCsv(rows, report.columns, report.id)}
+          {/* Reason switcher — payment-reason-report only */}
+          {isPaymentReasonReport && reasonOptions.length > 0 && (
+            <div className="relative flex items-center">
+              <Receipt
+                size={11}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <select
+                value={reasonFilter}
+                onChange={(e) => setReasonFilter(e.target.value)}
+                className="appearance-none pl-7 pr-6 py-1.5 h-[30px] rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              >
+                <option value="">All Reasons</option>
+                {reasonOptions.map((r) => (
+                  <option key={r.id} value={r.name}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={11}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
+          )}
+
+          <ExportMenu
+            data={rows as unknown as Record<string, unknown>[]}
+            columns={report.columns}
+            title={report.label}
+            filename={report.id}
             disabled={loading || rows.length === 0}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-all"
-          >
-            <Download size={11} /> Export CSV
-          </button>
+          />
         </div>
       </div>
 

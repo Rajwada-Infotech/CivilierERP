@@ -74,6 +74,45 @@ const computeSubtotal = (items) => {
   }, 0);
 };
 
+// A PO must be all-Goods or all-Service — never a mix. Goods items always
+// have to be received via a GRN before they can be invoiced; Service items
+// can be invoiced directly with no GRN (see the "service-eligible" PO
+// endpoint used for direct/TOD invoicing). Mixing the two on one PO would
+// make that invoice-eligibility ambiguous per line, so a Material Request
+// containing both (e.g. Cement + Sand as Goods, Plastering as Service) must
+// be split into separate POs by item type. Mirrors the same check in
+// PurchaseOrderMaster.tsx's validate() — this is the server-side backstop
+// in case that client-side check is ever bypassed.
+async function assertNoMixedItemTypes(pool, poItemsArray) {
+  const itemIds = [
+    ...new Set(
+      (Array.isArray(poItemsArray) ? poItemsArray : [])
+        .map((it) => it.itemId)
+        .filter((id) => id && typeof id === "string"),
+    ),
+  ];
+  if (itemIds.length < 2) return; // can't mix with 0-1 distinct items
+
+  const request = pool.request();
+  const idParams = itemIds.map((id, i) => {
+    const p = `mtItemId${i}`;
+    request.input(p, sql.UniqueIdentifier, id);
+    return `@${p}`;
+  });
+  const result = await request.query(`
+    SELECT DISTINCT M_Type FROM dbo.Item_Master_Group
+    WHERE M_Id IN (${idParams.join(",")}) AND M_Type IS NOT NULL AND M_Type <> ''
+  `);
+  const types = new Set(result.recordset.map((r) => r.M_Type));
+  if (types.has("Goods") && types.has("Service")) {
+    const err = new Error(
+      "This PO mixes Goods and Service items. Create separate POs — one for the Goods items (they'll need a GRN) and another for the Service items (can be invoiced directly).",
+    );
+    err.status = 400;
+    throw err;
+  }
+}
+
 // Resolve a FinYear.FId from its FName label (e.g. "2026-2027", "FY 2026-27",
 // "AY24-25"). The label is whatever the frontend's Financial Year dropdown
 // happens to display, and that name is free-text — it can contain any
@@ -270,6 +309,8 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
     err.status = 400;
     throw err;
   }
+
+  await assertNoMixedItemTypes(pool, poItemsArray);
 
   // Enforce: a PO can only be raised against a paid Sale Invoice
   // (Sale Order workflow — Migration 111).
@@ -950,6 +991,8 @@ router.put(
         return res.status(400).json({ error: "SupplierID is required." });
       }
 
+      await assertNoMixedItemTypes(getPool(), poItemsArray);
+
       const allowPostApproval = await resolveAllowPostApproval(req, "purchase-orders");
       await guardEdit("purchase-orders", id, { allowPostApproval });
 
@@ -1058,7 +1101,7 @@ router.put(
         /* ignore */
       }
       console.error("PUT PurchaseOrders error:", err);
-      res.status(500).json({ error: err.message });
+      res.status(err.status || 500).json({ error: err.message });
     }
   },
 );

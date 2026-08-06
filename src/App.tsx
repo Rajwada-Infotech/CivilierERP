@@ -113,7 +113,10 @@ const Tasks = lazy(() => import("./pages/Tasks"));
 const Transactions = lazy(() => import("./pages/finance/Transactions"));
 const Payment = lazy(() => import("./pages/finance/Payment"));
 const Brs = lazy(() => import("./pages/finance/Brs"));
+const ChequeCancellation = lazy(() => import("./pages/finance/ChequeCancellation"));
 const Records = lazy(() => import("./pages/records/Records"));
+const LoanDashboard = lazy(() => import("./pages/loan/LoanDashboard"));
+const LoanSanction = lazy(() => import("./pages/loan/LoanSanction"));
 const CivilWorkDprDashboard = lazy(
   () => import("./pages/civilworkdpr/CivilWorkDprDashboard"),
 );
@@ -748,10 +751,34 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/finance/cheque-cancellation"
+        element={
+          <ProtectedRoute pageKey="cheque-cancellation">
+            <ChequeCancellation />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/records"
         element={
           <ProtectedRoute pageKey="records">
             <Records />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/loan"
+        element={
+          <ProtectedRoute pageKey="loan-dashboard">
+            <LoanDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/loan/sanction"
+        element={
+          <ProtectedRoute pageKey="loan-sanction">
+            <LoanSanction />
           </ProtectedRoute>
         }
       />

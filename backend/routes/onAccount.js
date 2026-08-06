@@ -335,8 +335,14 @@ router.post("/apply-adjustment", requirePageRight("on-account-adjustment", "crea
         .input("PDate", sql.Date, new Date())
         .input("PBankID", sql.Int, dummyBank.recordset[0].LHeadId)
         .input("PBankName", sql.VarChar, dummyBank.recordset[0].LHeadName)
-        .input("PProject", sql.VarChar, "")
-        .input("PCompany", sql.VarChar, "")
+        .input("PProject", sql.VarChar, eb?.ProjectId != null ? String(eb.ProjectId) : "")
+        // PCompany feeds the Payment Register / new-payment list's
+        // ISNULL(ec.name, np.PCompany) resolution (TRY_CAST(np.PCompany AS
+        // INT) = enterprise.id) — this was previously hardcoded to "", so
+        // synthetic OA-adjustment payments always showed a blank Company
+        // there even though the invoice's company was already looked up
+        // above for the OnAccountLedger entry.
+        .input("PCompany", sql.VarChar, eb?.ECompanyId != null ? String(eb.ECompanyId) : "")
         .input("PExpenseRef", sql.NVarChar(100), expenseRef)
         .input("DocNo", sql.NVarChar(100), syntheticDocNo)
         .input("PCreatedAt", sql.DateTime, new Date())
@@ -496,6 +502,50 @@ router.get("/adjustable", requirePageRight("on-account-adjustment", "view"), asy
         ORDER BY m.MilestoneNo ASC
       ) nm
       WHERE oa.TxnType = 'CREDIT' AND oa.RefType = 'CrmOnAccountPayment'
+        ${partyFilter}
+
+      UNION ALL
+
+      -- Sanctioned loans — see routes/loanSanction.js. Amount lands as a
+      -- CREDIT on the borrower's system-generated "Loan - <Company>" ledger
+      -- head; visible here for adjustment, same as a vendor's excess payment.
+      SELECT
+        oa.OAId,
+        oa.PartyId,
+        ahm.LHeadName  AS PartyName,
+        ahm.LHeadType  AS PartyTypeCode,
+        oa.TxnDate     AS PaymentDate,
+        oa.RefDocNo    AS PaymentDocNo,
+        oa.Amount              AS ExcessAmount,
+        ls.LoanNo               AS InvoiceRef,
+        NULL                    AS PaymentAmount,
+        NULL                    AS ENetAmount,
+        NULL                    AS EAmount,
+        NULL                    AS ECgstRate,
+        NULL                    AS ESgstRate,
+        NULL                    AS EBillingTermsData,
+        NULL                    AS EDiscountData,
+        NULL                    AS ESourceType,
+        NULL                    AS ESourceId,
+        NULL                    AS ELinkedGrnIds,
+        NULL                    AS GrnTotalAmount,
+        NULL                    AS InvoiceTotalPaid,
+        ls.LoanNo               AS InvoiceDocNo,
+        pb.Balance             AS AvailableBalance,
+        oa.Notes,
+        'Loan'                  AS Source,
+        NULL                    AS CrmBookingNo,
+        NULL                    AS CrmProjectName,
+        NULL                    AS CrmUnitNo,
+        NULL                    AS CrmApplicantName,
+        NULL                    AS CrmNextMilestoneName,
+        NULL                    AS CrmNextMilestoneDue,
+        NULL                    AS CrmNextMilestoneDueDate
+      FROM dbo.OnAccountLedger oa
+      JOIN PartyBalance pb ON pb.PartyId = oa.PartyId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oa.PartyId
+      LEFT JOIN dbo.LoanSanction ls ON ls.LoanId = oa.RefId AND oa.RefType = 'Loan'
+      WHERE oa.TxnType = 'CREDIT' AND oa.RefType = 'Loan'
         ${partyFilter}
 
       ORDER BY AvailableBalance DESC, PaymentDate DESC

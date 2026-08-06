@@ -100,6 +100,18 @@ function displayChequeNo(
   return num != null ? String(num) : "—";
 }
 
+// Zero-pads a plain numeric cheque number ("61") to the required 6-digit
+// sequence ("000061") on blur, so the user doesn't have to remember to type
+// leading zeros every time. Left untouched if it's already 6+ chars (a full
+// MICR string) or contains non-digits (a partial MICR paste, not a plain
+// cheque number) — only the common "just typed the number" case is padded.
+function autoPadChequeNo(v: string): string {
+  const trimmed = v.trim();
+  if (trimmed.length === 0 || trimmed.length >= 6) return trimmed;
+  if (!/^\d+$/.test(trimmed)) return trimmed;
+  return trimmed.padStart(6, "0");
+}
+
 function calcTotal(start: string, end: string): number {
   if (start.length < 6 || end.length < 6) return 0;
   const s = micrSeq(start);
@@ -441,11 +453,6 @@ const ChequeMaster: React.FC = () => {
     setValue(k, v as never, { shouldValidate: !!errors[k] });
   };
 
-  const validate = async () => {
-    reset(form as ChequeMasterForm);
-    return trigger();
-  };
-
   const toPayload = (f: FormState) => ({
     CompanyId: f.companyId ? Number(f.companyId) : null,
     BankId: f.bankId ? Number(f.bankId) : null,
@@ -508,13 +515,24 @@ const ChequeMaster: React.FC = () => {
     micrSeq(form.chqEnd) >= micrSeq(form.chqStart);
 
   const handleSave = async () => {
-    if (!(await validate())) return;
+    // Defensive re-pad in case Save was reached without a blur event on
+    // either field (e.g. Enter-to-submit) — mirrors the onBlur handlers.
+    const padded: FormState = {
+      ...form,
+      chqStart: autoPadChequeNo(form.chqStart),
+      chqEnd: autoPadChequeNo(form.chqEnd),
+    };
+    if (padded.chqStart !== form.chqStart || padded.chqEnd !== form.chqEnd) {
+      setForm(padded);
+    }
+    reset(padded as ChequeMasterForm);
+    if (!(await trigger())) return;
     try {
       if (editingId) {
-        await updateCheque(editingId, toPayload(form));
+        await updateCheque(editingId, toPayload(padded));
         toast.success("Cheque lot updated!");
       } else {
-        await addCheque(toPayload(form));
+        await addCheque(toPayload(padded));
         toast.success("Cheque lot saved!");
       }
       await queryClient.invalidateQueries({ queryKey: ["cheques"] });
@@ -1015,6 +1033,7 @@ const ChequeMaster: React.FC = () => {
                       maxLength={15}
                       value={form.chqStart}
                       onChange={(e) => setField("chqStart", e.target.value.toUpperCase())}
+                      onBlur={(e) => setField("chqStart", autoPadChequeNo(e.target.value.toUpperCase()))}
                       placeholder="e.g. 600001"
                       className={`${inp} pl-8 font-mono tracking-widest ${errors.chqStart ? "border-destructive" : ""}`}
                     />
@@ -1042,6 +1061,7 @@ const ChequeMaster: React.FC = () => {
                       maxLength={15}
                       value={form.chqEnd}
                       onChange={(e) => setField("chqEnd", e.target.value.toUpperCase())}
+                      onBlur={(e) => setField("chqEnd", autoPadChequeNo(e.target.value.toUpperCase()))}
                       placeholder="e.g. 600050"
                       className={`${inp} pl-8 font-mono tracking-widest ${errors.chqEnd ? "border-destructive" : ""}`}
                     />

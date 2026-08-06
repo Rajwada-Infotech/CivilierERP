@@ -128,7 +128,7 @@ export interface CompanyDetail {
   state: string | null;
   pincode?: string | null;
   gst_no?: string | null;
-  pan_no?: string | null;
+  pan?: string | null;
 }
 
 export const getCompanyById = async (id: number): Promise<CompanyDetail> => {

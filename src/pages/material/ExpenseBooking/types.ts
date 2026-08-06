@@ -158,8 +158,14 @@ export interface ExpenseRecord {
   // ── Expense Allocation (Step 6 spec) ────────────────────────────────────────
   /** Cost Centre / Department for expense allocation */
   costCenter?: string;
-  /** GL Account code or name for accounting entry */
+  /** GL Account code or name for accounting entry (display label, legacy free-text fallback) */
   glAccount?: string;
+  /** AccountHeadMaster.LHeadId (LHeadType='GL') — the actual GL Account chosen from the General Ledger master */
+  glAccountId?: number | null;
+  /** Resolved GL account name (from the ledger master, read-only, populated on fetch) */
+  glAccountName?: string | null;
+  /** Immediate Account Group id the GL account belongs to (for rendering the nested parent tree on view) */
+  glAccountGroupId?: number | null;
   /** Work Done doc reference — auto-populated when source is WO_PO or WORK_DONE */
   workDoneRef?: string;
   /** Additional charges: freight, insurance, etc. JSON array {label, amount} */

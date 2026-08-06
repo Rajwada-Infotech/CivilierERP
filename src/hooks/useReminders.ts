@@ -10,7 +10,8 @@ export type ReminderType =
   | "emi_installment"
   | "material_request"
   | "pdc"
-  | "followup";
+  | "followup"
+  | "loan_emi";
 
 // Which module owns each reminder type — drives the bell's "only this
 // module's reminders" scoping everywhere except the Home dashboard, which
@@ -24,6 +25,7 @@ export const REMINDER_TYPE_MODULE: Record<ReminderType, string> = {
   tds: "finance",
   pdc: "finance",
   followup: "followup",
+  loan_emi: "loan",
 };
 
 export interface ReminderItem {
@@ -82,6 +84,32 @@ async function fetchEmiReminders(): Promise<ReminderItem[]> {
       amount: inst.amount,
       path: `/material/expense-booking?view=${inst.expenseBookingId}`,
     }));
+  } catch {
+    return [];
+  }
+}
+
+// Unpaid loan EMIs due within 7 days (or overdue) — the backend already
+// filters to that window (see routes/loanSanction.js's /emi-reminders), so
+// this is just a reshape into ReminderItems.
+async function fetchLoanEmiReminders(): Promise<ReminderItem[]> {
+  try {
+    const res = await fetchWithAuth("/api/loan-sanction/emi-reminders");
+    if (!res.ok) return [];
+    const rows: any[] = await res.json();
+    return rows.map((inst) => {
+      const dueDate = String(inst.DueDate).slice(0, 10);
+      return {
+        id: `loan-emi-${inst.LoanId}-${inst.InstallmentNo}`,
+        type: "loan_emi" as ReminderType,
+        title: `${inst.LoanNo} · EMI ${inst.InstallmentNo}`,
+        subtitle: `${inst.BorrowerName || "Loan"} · ₹${Number(inst.EMIAmount).toLocaleString("en-IN")}`,
+        dueDate,
+        urgency: classifyUrgency(dueDate),
+        amount: inst.EMIAmount,
+        path: `/loan/sanction?view=${inst.LoanId}`,
+      };
+    });
   } catch {
     return [];
   }
@@ -340,7 +368,7 @@ export async function fetchAllReminders(
     toList(tdsRes),
     toList(woRes),
   ]);
-  const [, emiItems, mrItems, pdcItems, followupItems] = await Promise.all([
+  const [, emiItems, mrItems, pdcItems, followupItems, loanEmiItems] = await Promise.all([
     Promise.resolve().then(() => {
       process(poList, "purchase_order", "PurchaseOrderID", "PO", "/material/purchase-order");
       process(grnList, "grn", "GRNID", "GRN", "/material/grn");
@@ -351,12 +379,14 @@ export async function fetchAllReminders(
     fetchMaterialRequestReminders().catch(() => [] as ReminderItem[]),
     fetchPdcReminders().catch(() => [] as ReminderItem[]),
     fetchFollowUpReminders().catch(() => [] as ReminderItem[]),
+    fetchLoanEmiReminders().catch(() => [] as ReminderItem[]),
   ]);
 
   items.push(...emiItems);
   items.push(...mrItems);
   items.push(...pdcItems);
   items.push(...followupItems);
+  items.push(...loanEmiItems);
 
   return items.sort((a, b) => {
     const order = { overdue: 0, today: 1, soon: 2, upcoming: 3 };

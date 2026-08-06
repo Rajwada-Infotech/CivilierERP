@@ -60,6 +60,7 @@ import {
   Data,
   Profile,
   Logout,
+  MoneyRecive,
 } from "iconsax-react";
 
 import { useModule } from "@/contexts/ModuleContext";
@@ -85,6 +86,7 @@ import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { crmNavItems } from "./sidebars/CrmSidebar";
+import { loanNavItems } from "./sidebars/LoanSidebar";
 import type {
   NavItem as DesktopNavItem,
   SubItem as DesktopSubItem,
@@ -144,6 +146,14 @@ const MODULE_META: Record<
     icon: Receipt21,
     label: "Material",
     route: MODULE_DASHBOARD_ROUTES.material,
+  },
+  loan: {
+    h: 142,
+    s: 71,
+    l: 45,
+    icon: MoneyRecive,
+    label: "Loan",
+    route: MODULE_DASHBOARD_ROUTES.loan,
   },
   followup: {
     h: 174,
@@ -704,6 +714,8 @@ export const MobileNav: React.FC = () => {
         return adaptItems(salesAutomationNavItems as DesktopNavItem[]);
       case "crm":
         return adaptItems(crmNavItems as DesktopNavItem[]);
+      case "loan":
+        return adaptItems(loanNavItems as DesktopNavItem[]);
       default:
         return [];
     }

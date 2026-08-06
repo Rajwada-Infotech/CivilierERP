@@ -29,6 +29,7 @@ import {
   fmtQty,
 } from "@/pages/material/ExpenseBooking/helpers";
 import type { ExpenseRecord } from "@/pages/material/ExpenseBooking/types";
+import { GLAccountPath } from "@/components/finance/GLAccountPath";
 
 interface GRNItemLine {
   itemName?: string;
@@ -1202,7 +1203,13 @@ export function ExpenseBookingPreviewModal({
                   { label: "Vendor Invoice No", value: previewRecord.vendorInvoiceNo, mono: true },
                   { label: "Vendor Invoice Date", value: previewRecord.vendorInvoiceDate },
                   { label: "Cost Centre", value: previewRecord.costCenter },
-                  { label: "GL Account", value: previewRecord.glAccount },
+                  // GL Account is rendered separately below (as its full nested
+                  // chart-of-accounts path) when it's a proper ledger-master
+                  // reference; only fall back to a plain tile for legacy
+                  // free-text-only records that predate the GL master link.
+                  ...(!previewRecord.glAccountId
+                    ? [{ label: "GL Account", value: previewRecord.glAccount }]
+                    : []),
                   { label: "Work Done Ref", value: previewRecord.workDoneRef, mono: true, accent: "text-violet-600 dark:text-violet-400" },
                 ] as { label: string; value: any; mono?: boolean; accent?: string }[])
                   .filter((f) => !!f.value)
@@ -1213,6 +1220,15 @@ export function ExpenseBookingPreviewModal({
                     </div>
                   ))}
               </div>
+              {previewRecord.glAccountId && (
+                <div className="mt-3 px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1.5">GL Account (Chart of Accounts)</p>
+                  <GLAccountPath
+                    glAccountName={previewRecord.glAccountName || previewRecord.glAccount}
+                    glAccountGroupId={previewRecord.glAccountGroupId}
+                  />
+                </div>
+              )}
               {previewRecord.additionalCharges &&
                 previewRecord.additionalCharges.length > 0 && (
                   <div className="mt-3 rounded-xl border border-border overflow-hidden">

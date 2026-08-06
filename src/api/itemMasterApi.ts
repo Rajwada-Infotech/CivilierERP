@@ -26,6 +26,10 @@ export interface DbItem {
   ParentGroupName: string | null;
   default_supplier_id: number | null;
   DefaultSupplierName: string | null;
+  M_GLHeadId: number | null;
+  GLHeadName: string | null;
+  M_CostCenterId: number | null;
+  CostCenterName: string | null;
 }
 
 export const getItems = async (): Promise<DbItem[]> => {

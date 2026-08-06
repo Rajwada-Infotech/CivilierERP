@@ -49,9 +49,8 @@ interface FinanceDashboardData {
   };
   cheques: {
     totalCount: number;
-    pendingCount: number;
-    draftCount: number;
-    clearedCount: number;
+    activeCount: number;
+    inactiveCount: number;
   };
   cards: {
     totalCount: number;
@@ -133,7 +132,7 @@ const EMPTY_DATA: FinanceDashboardData = {
     approvedCount: 0,
     draftCount: 0,
   },
-  cheques: { totalCount: 0, pendingCount: 0, draftCount: 0, clearedCount: 0 },
+  cheques: { totalCount: 0, activeCount: 0, inactiveCount: 0 },
   cards: { totalCount: 0, activeCount: 0, inactiveCount: 0 },
   banks: { totalCount: 0, activeCount: 0 },
   recentPaymentsMade: [],
@@ -259,7 +258,7 @@ const FinanceDashboard = () => {
                   {
                     label: "Cheque Lots",
                     value: data?.cheques.totalCount.toString() ?? "0",
-                    sub: `${data?.cheques.clearedCount ?? 0} cleared · ${data?.cheques.pendingCount ?? 0} active`,
+                    sub: `${data?.cheques.activeCount ?? 0} active · ${data?.cheques.inactiveCount ?? 0} inactive`,
                     icon: BookOpen,
                     accentColor: "#f59e0b",
                     onClick: () => navigate("/masters/cheque"),
@@ -550,27 +549,19 @@ const FinanceDashboard = () => {
                 />
                 <FinanceGlassCard
                   label="Active Lots"
-                  value={(data?.cheques.pendingCount ?? 0).toString()}
+                  value={(data?.cheques.activeCount ?? 0).toString()}
                   sub={`${data?.cheques.totalCount ?? 0} total registered`}
                   icon={Clock}
                   accentColor="#f59e0b"
                   trend={
-                    (data?.cheques.pendingCount ?? 0) > 0 ? "up" : "neutral"
+                    (data?.cheques.activeCount ?? 0) > 0 ? "up" : "neutral"
                   }
                   onClick={() => navigate("/masters/cheque")}
                 />
                 <FinanceGlassCard
-                  label="Draft Lots"
-                  value={(data?.cheques.draftCount ?? 0).toString()}
-                  sub="Lots not yet activated"
-                  icon={Clock}
-                  accentColor="#3b82f6"
-                  onClick={() => navigate("/masters/cheque")}
-                />
-                <FinanceGlassCard
-                  label="Cleared Lots"
-                  value={(data?.cheques.clearedCount ?? 0).toString()}
-                  sub="Fully utilised cheque lots"
+                  label="Inactive Lots"
+                  value={(data?.cheques.inactiveCount ?? 0).toString()}
+                  sub="Deactivated cheque lots"
                   icon={CheckCircle2}
                   accentColor="#10b981"
                   onClick={() => navigate("/masters/cheque")}

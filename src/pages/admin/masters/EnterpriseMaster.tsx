@@ -680,7 +680,7 @@ export default function EnterpriseMaster() {
 
       <AdminShell
         title="Enterprise Master"
-        subtitle="Manage enterprises, companies and business units"
+        subtitle="Manage enterprises for the companies and projects"
         icon={Building2}
         action={
           !showForm &&

@@ -8,6 +8,39 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 
+// Where an AccountHeadMaster ledger head (Supplier/Contractor/Customer/Bank/GL)
+// can actually be referenced from — used to tell the user WHICH real
+// documents (POs, GRNs, invoices, payments…) are blocking a group deletion,
+// instead of just naming the one ledger account. Each check is independently
+// wrapped so a missing table/column in a given environment doesn't blank
+// out the whole list.
+const USAGE_SOURCES = [
+  { label: "Purchase Orders", table: "dbo.PurchaseOrders", column: "SupplierID", path: "/material/purchase-order" },
+  { label: "GRNs", table: "dbo.GoodsReceiptNotes", column: "SupplierID", path: "/material/grn" },
+  { label: "Expense Bookings / Invoices", table: "dbo.ExpenseBooking", column: "LHeadId", path: "/material/expense-booking" },
+  { label: "Payments", table: "dbo.NewPayment", column: "PPartyId", path: "/finance/payment" },
+  { label: "Work Orders (as Supplier)", table: "dbo.WorkOrderHeader", column: "SupplierId", path: "/material/work-order" },
+  { label: "Work Orders (as Contractor)", table: "dbo.WorkOrderHeader", column: "ContractorId", path: "/material/work-order" },
+  { label: "On Account Ledger", table: "dbo.OnAccountLedger", column: "PartyId", path: "/finance/on-account-adjustment" },
+];
+
+async function findLinkedUsage(pool, lHeadId) {
+  const usage = [];
+  for (const src of USAGE_SOURCES) {
+    try {
+      const r = await pool
+        .request()
+        .input("id", sql.Int, lHeadId)
+        .query(`SELECT COUNT(*) AS cnt FROM ${src.table} WHERE ${src.column} = @id`);
+      const count = r.recordset[0]?.cnt ?? 0;
+      if (count > 0) usage.push({ label: src.label, count, path: src.path });
+    } catch {
+      // Table/column not present in this environment — skip silently.
+    }
+  }
+  return usage;
+}
+
 router.get("/", authenticateToken, cache("account-group", 300), async (req, res) => {
   try {
     const pool = getPool();
@@ -198,19 +231,26 @@ router.delete("/:id", authenticateToken, requirePageRight("account-group", "dele
         GL: "General Ledger",
       };
       const pageLabel = typeLabels[sample.LHeadType] || "General Ledger";
+      const usage = await findLinkedUsage(pool, sample.LHeadId);
 
       console.warn(
         `[AccountGroup DELETE] Blocked: AGId=${id} (subtree: [${subtreeIds}]) ` +
-          `linked to ${pageLabel} account LHeadId=${sample.LHeadId} (${sample.LHeadName})`,
+          `linked to ${pageLabel} account LHeadId=${sample.LHeadId} (${sample.LHeadName}); ` +
+          `used in: ${usage.map((u) => `${u.label}(${u.count})`).join(", ") || "none found"}`,
       );
+
+      const usageSuffix = usage.length
+        ? ` It's used in ${usage.map((u) => `${u.label} (${u.count})`).join(", ")}.`
+        : "";
 
       return res.status(409).json({
         error:
           `This Account Group cannot be deleted — it is linked to a ${pageLabel} record: ` +
-          `"${sample.LHeadName}". Please delete or reassign this ${pageLabel} record first.`,
+          `"${sample.LHeadName}".${usageSuffix} Please delete or reassign this ${pageLabel} record first.`,
         code: "HAS_LINKED_ACCOUNTS",
         linkedType: pageLabel,
         linkedName: sample.LHeadName,
+        usedIn: usage,
       });
     }
 

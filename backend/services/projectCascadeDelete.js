@@ -95,7 +95,8 @@ async function deleteProjectCascade(pool, projectId, projectName) {
            JOIN dbo.UnitMaster u ON u.Id = app.PreferredUnitId
          WHERE u.ProjectId = @pid) AS ApplicationRefs
     `);
-    const { BookingRefs, ApplicationRefs } = crmBlockers.recordset[0];
+    const { BookingRefs, ApplicationRefs } =
+      crmBlockers.recordset[0] ?? { BookingRefs: 0, ApplicationRefs: 0 };
     if (BookingRefs > 0 || ApplicationRefs > 0) {
       const parts = [];
       if (BookingRefs > 0) parts.push(`${BookingRefs} CRM Booking(s)`);

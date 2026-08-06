@@ -3,6 +3,7 @@
 export interface DbPayment {
   PPaymentID: number;
   PPaymentName: string | null;
+  PRemarks?: string | null;
   PMode: string | null;
   PAmount: number | null;
   PDocType: string | null;
@@ -136,6 +137,9 @@ export interface GRNRef {
 export interface PaymentRecord {
   id: string;
   paymentName: string;
+  // A genuine remarks/notes field, distinct from paymentName ("Payment
+  // Purpose") — stored as PRemarks on dbo.NewPayment.
+  notes: string;
   paidTo: string;
   supplierContact: string;
   mode: string;

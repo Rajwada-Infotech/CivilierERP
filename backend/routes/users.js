@@ -262,7 +262,8 @@ router.get(
         SELECT u.id, u.name, u.email, u.RoleId,
                r.RName AS roleName,
                u.created_datetime, u.discontinue,
-               ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets
+               ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets,
+               u.avatar_url
         FROM dbo.users u
         LEFT JOIN dbo.Role r ON u.RoleId = r.RId
       `);

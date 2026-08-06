@@ -1009,8 +1009,8 @@ export default function HomePage() {
                 stats={[
                   { label: "Total payments", value: fin?.payments?.totalCount ?? 0, accent: "#3b82f6" },
                   { label: "Paid this month (₹L)", value: Math.round((fin?.payments?.thisMonthAmount ?? 0) / 100000), accent: "#10b981", icon: TrendingUp },
-                  { label: "Open POs", value: fin?.purchaseOrders?.openCount ?? 0, accent: "#f59e0b" },
-                  { label: "Cheque lots", value: fin?.cheques?.pendingCount ?? 0, accent: fin?.cheques?.pendingCount ? "#ef4444" : undefined, icon: CreditCard },
+                  { label: "Active suppliers", value: fin?.parties?.activeSupplierCount ?? 0, accent: "#8b5cf6" },
+                  { label: "Cheque lots", value: fin?.cheques?.totalCount ?? 0, accent: fin?.cheques?.totalCount ? "#0891b2" : undefined, icon: CreditCard },
                 ]} />
             )}
 

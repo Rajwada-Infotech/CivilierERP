@@ -5,12 +5,13 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { Plus, Edit2, Trash2, RotateCcw, AlertTriangle } from "lucide-react";
+import { Plus, Edit2, Trash2, RotateCcw, AlertTriangle, X } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
   getPaymentReasons, createPaymentReason, updatePaymentReason, deletePaymentReason,
+  permanentlyDeletePaymentReason,
   type PaymentReason,
 } from "@/api/paymentReasonApi";
 
@@ -30,6 +31,8 @@ export default function PaymentReasonMaster() {
   const [form, setForm]         = useState(EMPTY);
   const [saving, setSaving]     = useState(false);
   const [deleting, setDeleting] = useState<PaymentReason | null>(null);
+  const [purging, setPurging]   = useState<PaymentReason | null>(null);
+  const [purgeBusy, setPurgeBusy] = useState(false);
 
   const openCreate = () => { setEditing(null); setForm(EMPTY); setOpen(true); };
   const openEdit   = (r: PaymentReason) => {
@@ -69,6 +72,20 @@ export default function PaymentReasonMaster() {
       toast.error(e.message ?? "Delete failed");
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const handlePurge = async (r: PaymentReason) => {
+    setPurgeBusy(true);
+    try {
+      await permanentlyDeletePaymentReason(r.id);
+      toast.success("Reason permanently deleted");
+      await invalidate();
+      setPurging(null);
+    } catch (e: any) {
+      toast.error(e.message ?? "Delete failed");
+    } finally {
+      setPurgeBusy(false);
     }
   };
 
@@ -134,13 +151,22 @@ export default function PaymentReasonMaster() {
                 <Edit2 size={13} />
               </button>
             )}
+            {rights.canDelete && (
+              <button
+                onClick={() => setPurging(r)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                title="Delete permanently"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
             {rights.canDelete && r.isActive && (
               <button
                 onClick={() => setDeleting(r)}
                 className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                 title="Deactivate"
               >
-                <Trash2 size={13} />
+                <X size={13} />
               </button>
             )}
             {rights.canEdit && !r.isActive && (
@@ -260,6 +286,38 @@ export default function PaymentReasonMaster() {
               className="px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
             >
               Deactivate
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Permanent delete confirm dialog */}
+      <Dialog open={!!purging} onOpenChange={() => !purgeBusy && setPurging(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle size={16} /> Permanently Delete Reason
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground pt-1">
+            This will permanently remove <strong>{purging?.name}</strong> from the database. This
+            cannot be undone. If it's already used by existing payments, deletion will be blocked —
+            use Deactivate instead.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              onClick={() => setPurging(null)}
+              disabled={purgeBusy}
+              className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => purging && handlePurge(purging)}
+              disabled={purgeBusy}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
+            >
+              {purgeBusy ? "Deleting…" : "Delete Permanently"}
             </button>
           </div>
         </DialogContent>

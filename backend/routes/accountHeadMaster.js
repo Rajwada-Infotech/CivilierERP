@@ -957,7 +957,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
         .request()
         .input("id", sql.Int, req.params.id)
         .input("password", sql.NVarChar(255), newSupplierPasswordHash)
-        .query("UPDATE dbo.users SET password=@password WHERE LinkedLHeadId=@id AND role='supplier'");
+        .query("UPDATE dbo.users SET password=@password WHERE LinkedLHeadId=@id AND RoleId = (SELECT RId FROM dbo.Role WHERE LOWER(RName) = 'supplier')");
     }
 
     await tx.commit();

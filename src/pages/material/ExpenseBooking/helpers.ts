@@ -288,6 +288,9 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     vendorInvoiceDate: "",
     costCenter: "",
     glAccount: "",
+    glAccountId: null,
+    glAccountName: null,
+    glAccountGroupId: null,
     workDoneRef: "",
     additionalCharges: [],
     paymentTermId: null,
@@ -456,6 +459,9 @@ export function dbToRecord(row: any): ExpenseRecord {
       : "",
     costCenter: row.ECostCenter ?? "",
     glAccount: row.EGLAccount ?? "",
+    glAccountId: row.EGLAccountId ?? null,
+    glAccountName: row.EGLAccountName ?? null,
+    glAccountGroupId: row.EGLAccountGroupId ?? null,
     workDoneRef: row.EWorkDoneRef ?? "",
     paymentTermId: row.PaymentTermId ?? null,
     additionalCharges: (() => {
@@ -546,6 +552,7 @@ export function recordToDb(
         : null,
     ECostCenter: form.costCenter || null,
     EGLAccount: form.glAccount || null,
+    EGLAccountId: form.glAccountId ?? null,
     EWorkDoneRef: form.workDoneRef || null,
     PaymentTermId: form.paymentTermId ?? null,
     // Persist direct (TOD) line items as JSON; null when no items.

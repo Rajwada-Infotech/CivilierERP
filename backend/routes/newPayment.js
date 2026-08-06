@@ -33,6 +33,24 @@ function normalizeBankId(value) {
   return Number.isFinite(bankId) && bankId > 0 ? bankId : null;
 }
 
+// Resolves the dbo.FinYear row a payment date falls into — the year in the
+// payment's own PDate IS the financial year it belongs to, independent of
+// DocYear (which only reflects the calendar year the doc number was issued
+// in). Used so direct/manual payments (no linked ExpenseBooking) are still
+// correctly filterable/displayable by Financial Year in Reports.
+async function resolveFinYearId(pool, pDate) {
+  if (!pDate) return null;
+  const result = await pool
+    .request()
+    .input("PDate", sql.Date, pDate)
+    .query(`
+      SELECT TOP 1 FId FROM dbo.FinYear
+      WHERE @PDate >= FStartDate AND @PDate <= FEndDate
+      ORDER BY FStartDate DESC
+    `);
+  return result.recordset[0]?.FId ?? null;
+}
+
 // syncBillStatus is imported from ../utils/syncBillStatus
 // Wrap to match existing call sites that pass (pool, expenseRef) without sql
 const _syncBillStatus = (pool, expenseRef) => syncBillStatus(pool, sql, expenseRef);
@@ -75,7 +93,12 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     }
     if (companyId) conditions.push(`np.PCompany = @companyId`);
     if (project) conditions.push(`np.PProject LIKE @project`);
-    if (finYear) conditions.push(`np.DocYear  = @finYear`);
+    // Filters by the FinYear the payment's own PDate falls into (PFinYearId
+    // — resolved at save time, see resolveFinYearId), matching the same
+    // dbo.FinYear.FId the Reports page's FY dropdown sends. NOT DocYear,
+    // which is just the calendar year the doc number happened to be issued
+    // in and never matches a FinYear.FId.
+    if (finYear) conditions.push(`np.PFinYearId = @finYear`);
     if (docNumber) conditions.push(`np.DocNo LIKE @docNumber`);
     if (docDate) conditions.push(`CAST(np.PCreatedAt AS DATE) = @docDate`);
     if (dateParam) conditions.push(`np.PDate = @dateParam`);
@@ -94,7 +117,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (search) request.input("search", sql.NVarChar(200), `%${search}%`);
     if (companyId) request.input("companyId", sql.NVarChar(50), companyId);
     if (project) request.input("project", sql.NVarChar(200), `%${project}%`);
-    if (finYear) request.input("finYear", sql.SmallInt, parseInt(finYear));
+    if (finYear) request.input("finYear", sql.Int, parseInt(finYear));
     if (docNumber)
       request.input("docNumber", sql.NVarChar(100), `%${docNumber}%`);
     if (docDate) request.input("docDate", sql.Date, docDate);
@@ -116,7 +139,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (companyId) dataRequest.input("companyId", sql.NVarChar(50), companyId);
     if (project)
       dataRequest.input("project", sql.NVarChar(200), `%${project}%`);
-    if (finYear) dataRequest.input("finYear", sql.SmallInt, parseInt(finYear));
+    if (finYear) dataRequest.input("finYear", sql.Int, parseInt(finYear));
     if (docNumber)
       dataRequest.input("docNumber", sql.NVarChar(100), `%${docNumber}%`);
     if (docDate) dataRequest.input("docDate", sql.Date, docDate);
@@ -132,18 +155,26 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         -- Project name (resolved from EB → enterprise, or PO → enterprise)
         COALESCE(ep.name, po_proj.name, np.PProject)       AS PProjectName,
-        -- Supplier name from ExpenseBooking resolved chain
-        CASE
-          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
-          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
-          ELSE grn2_sup.LHeadName
-        END                                                AS PSupplierName,
+        -- Supplier/contractor name — from the ExpenseBooking resolved chain
+        -- when this payment is linked to an invoice, otherwise fall back to
+        -- the party (PPartyId) picked directly on a direct/TOD payment.
+        COALESCE(
+          CASE
+            WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
+            WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
+            ELSE grn2_sup.LHeadName
+          END,
+          party_head.LHeadName
+        )                                                  AS PSupplierName,
         -- Supplier contact person
-        CASE
-          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadContactPerson
-          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadContactPerson
-          ELSE grn2_sup.LHeadContactPerson
-        END                                                AS PSupplierContact,
+        COALESCE(
+          CASE
+            WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadContactPerson
+            WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadContactPerson
+            ELSE grn2_sup.LHeadContactPerson
+          END,
+          party_head.LHeadContactPerson
+        )                                                  AS PSupplierContact,
         -- Net Payable (the payment amount already on np.PAmount, but also expose EB net for reference)
         ISNULL(eb.ENetAmount, eb.EAmount)                  AS EBNetPayable,
         -- Tax amount: computed as (ENetAmount - EAmount) when both are set, else 0
@@ -167,7 +198,10 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
             AND eb.ESourceType = 'GRN'
         )                                                  AS HSNCodes,
         -- Financial year from ExpenseBooking
-        ISNULL(eb.EFinYear, '')                            AS EBFinYear,
+        -- Financial year: prefer the linked ExpenseBooking's own EFinYear;
+        -- for direct/manual payments (no linked EB) fall back to the FinYear
+        -- resolved from the payment's own PDate (see resolveFinYearId).
+        ISNULL(eb.EFinYear, ISNULL(pfy.FName, ''))         AS EBFinYear,
         -- Ref Doc = the ExpenseBooking DocNo
         eb.EDocNo                                          AS RefDoc,
         -- Expense Booking primary key — used by "Pay Remaining" to pre-fill the form
@@ -190,6 +224,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
             WHERE r2.ReplacesPaymentId = np.PPaymentID
               AND r2.Status NOT IN ('Rejected', 'Deleted')
           ) THEN 'Reissued'
+          WHEN np.PIsChequeCancelled = 1
+            THEN 'Cheque Cancelled'
           WHEN COALESCE(brc_list.IsBounced, 0) = 1
             THEN 'Cheque Bounced'
           WHEN COALESCE(brc_list.IsMatched, 0) = 1
@@ -210,6 +246,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         END                                                AS DisplayStatus
       FROM dbo.NewPayment np
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
       LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
       -- Resolve company
       LEFT JOIN dbo.enterprise ec
@@ -235,6 +272,9 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
       LEFT JOIN dbo.AccountHeadMaster grn2_sup
         ON grn2_sup.LHeadId = grn2.SupplierID
+      -- Resolve party directly picked on a direct/TOD payment (no linked EB)
+      LEFT JOIN dbo.AccountHeadMaster party_head
+        ON party_head.LHeadId = np.PPartyId
       -- BRS state for DisplayStatus
       LEFT JOIN dbo.BankReconciliation brc_list
         ON  brc_list.SourceType = 'PAYMENT'
@@ -289,11 +329,20 @@ router.get("/cheque-lots", async (req, res) => {
         bm.BBranch      AS BankBranch,
         bm.BAccountType AS BankAccountType,
         cm.Remarks,
-        -- Remaining: explicit arithmetic avoids computed-column resolution issues
-        (cm.ChequeEndNumber - cm.ChequeStartNumber + 1) - ISNULL((
-          SELECT COUNT(*) FROM dbo.NewPayment np
-          WHERE np.PChequeLotId = cm.CId AND np.PChequeNo IS NOT NULL
-        ), 0) AS RemainingCheques
+        -- Remaining: explicit arithmetic avoids computed-column resolution issues.
+        -- Subtracts both cheques currently attached to an active payment AND
+        -- cancelled cheques (dbo.CancelledCheque — permanently blocked from
+        -- reissue even though cancellation detaches PChequeLotId from the
+        -- originating NewPayment row).
+        (cm.ChequeEndNumber - cm.ChequeStartNumber + 1)
+          - ISNULL((
+              SELECT COUNT(*) FROM dbo.NewPayment np
+              WHERE np.PChequeLotId = cm.CId AND np.PChequeNo IS NOT NULL
+            ), 0)
+          - ISNULL((
+              SELECT COUNT(*) FROM dbo.CancelledCheque cc
+              WHERE cc.ChequeLotId = cm.CId
+            ), 0) AS RemainingCheques
       FROM dbo.ChequeMaster cm
       LEFT JOIN dbo.BankMaster bm ON cm.BankId = bm.BId
       ${whereClause}
@@ -328,7 +377,11 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
         .json({ error: "Cheque lot not found or inactive" });
     }
 
-    const { ChequeStartNumber, ChequeEndNumber } = lotRes.recordset[0];
+    // mssql returns BIGINT columns as JS strings, not numbers — comparing
+    // ("61" <= "100") lexicographically is false, so without Number()
+    // coercion the loop below never runs and every lot looks empty.
+    const ChequeStartNumber = Number(lotRes.recordset[0].ChequeStartNumber);
+    const ChequeEndNumber = Number(lotRes.recordset[0].ChequeEndNumber);
 
     // Fetch all cheque numbers used from this lot, plus their bounce status
     const usedRes = await pool.request().input("PChequeLotId", sql.Int, lotId)
@@ -345,11 +398,23 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
       usedRes.recordset.filter((r) => r.IsBounced).map((r) => String(r.PChequeNo))
     );
 
+    // Cancelled cheques are permanently blocked from reissue even though
+    // cancellation detaches the originating payment's PChequeLotId (so they
+    // no longer show up in usedSet above) — see chequeCancellation.js.
+    const cancelledRes = await pool.request().input("ChequeLotId", sql.Int, lotId)
+      .query(`SELECT ChequeNo FROM dbo.CancelledCheque WHERE ChequeLotId = @ChequeLotId`);
+    const cancelledSet = new Set(cancelledRes.recordset.map((r) => String(r.ChequeNo)));
+
     // Build list of all cheque numbers in range
     const cheques = [];
     for (let n = ChequeStartNumber; n <= ChequeEndNumber; n++) {
       const num = String(n);
-      cheques.push({ number: num, used: usedSet.has(num), bounced: bouncedSet.has(num) });
+      cheques.push({
+        number: num,
+        used: usedSet.has(num),
+        bounced: bouncedSet.has(num),
+        cancelled: cancelledSet.has(num),
+      });
     }
 
     res.json(cheques);
@@ -383,7 +448,12 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
         .json({ error: "Cheque lot not found or inactive" });
     }
 
-    const lot = lotRes.recordset[0];
+    // Same string-vs-number BIGINT coercion issue as /cheque-numbers/:lotId.
+    const lot = {
+      ...lotRes.recordset[0],
+      ChequeStartNumber: Number(lotRes.recordset[0].ChequeStartNumber),
+      ChequeEndNumber: Number(lotRes.recordset[0].ChequeEndNumber),
+    };
     const num = parseInt(chequeNo);
     if (num < lot.ChequeStartNumber || num > lot.ChequeEndNumber) {
       return res.status(400).json({ error: "Cheque number out of lot range" });
@@ -403,6 +473,20 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
       return res
         .status(409)
         .json({ error: "Cheque number already used in another payment" });
+    }
+
+    // Cancelled cheques are permanently blocked — cancellation detaches
+    // PChequeLotId from the payment row, so the check above alone wouldn't
+    // catch a previously-cancelled number being picked again.
+    const cancelledDupRes = await pool
+      .request()
+      .input("ChequeLotId", sql.Int, lotId)
+      .input("ChequeNo", sql.NVarChar(50), String(chequeNo))
+      .query(`SELECT COUNT(*) AS cnt FROM dbo.CancelledCheque WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo`);
+    if (cancelledDupRes.recordset[0].cnt > 0) {
+      return res
+        .status(409)
+        .json({ error: "This cheque number has been cancelled and cannot be reissued." });
     }
 
     // Count remaining available cheques (exclude Rejected/Deleted)
@@ -430,6 +514,7 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
 router.post("/", requirePageRight("new-payment", "create"), validateBody(paymentBodySchema), async (req, res) => {
   const {
     PPaymentName,
+    PRemarks,
     PMode,
     PAmount,
     PDocType,
@@ -564,12 +649,20 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     const docYear = parseInt(parts[parts.length - 2], 10) || null;
     const docSerial = parseInt(parts[parts.length - 1], 10) || null;
 
+    // The financial year a payment belongs to is the one its own PDate falls
+    // into — not DocYear (the calendar year the doc number happened to be
+    // locked in, always "today"). Resolved once here so it's filterable and
+    // displayable via Reports even for direct/manual payments with no
+    // linked ExpenseBooking to inherit a fin year from.
+    const pFinYearId = await resolveFinYearId(pool, PDate);
+
     // All new payments auto-submit to Pending for approval — no manual submit step.
     const initialStatus = "Pending";
 
     const insertResult = await pool
       .request()
       .input("PPaymentName", sql.VarChar, PPaymentName || "")
+      .input("PRemarks", sql.NVarChar(1000), PRemarks || null)
       .input("PMode", sql.VarChar, PMode || "")
       .input("PAmount", sql.Decimal(18, 2), PAmount != null ? Number(PAmount) : null)
       .input("PDocType", sql.VarChar, PDocType || "N/A")
@@ -603,6 +696,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("DocTypeId", sql.Int, docTypeId)
       .input("DocYear", sql.SmallInt, docYear)
       .input("DocSerial", sql.Int, docSerial)
+      .input("PFinYearId", sql.Int, pFinYearId)
       .input("ParentDocNo", sql.NVarChar(100), parentDocNo || null)
       .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo || null)
       // Audit
@@ -616,23 +710,23 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("PApprovedBy", sql.NVarChar(100), null)
       .input("Status", sql.NVarChar(20), initialStatus).query(`
         INSERT INTO dbo.NewPayment (
-          PPaymentName, PMode, PAmount, PDocType, PDate,
+          PPaymentName, PRemarks, PMode, PAmount, PDocType, PDate,
           PBankID, PBankName, PProject, PCompany, PExpenseRef,
           PChequeNo, PChequeLotId, PChequeLotNumber, PChequeDate,
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
-          DocNo, DocTypeId, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
+          DocNo, DocTypeId, DocYear, DocSerial, PFinYearId, ParentDocNo, RootExBDocNo,
           ReplacesPaymentId, BounceCharge, ContractId, PPartyId, OASkipAutoApply,
           PCreatedAt, PCreatedBy, PApprovedBy, Status
         )
         OUTPUT INSERTED.PPaymentID
         VALUES (
-          @PPaymentName, @PMode, @PAmount, @PDocType, @PDate,
+          @PPaymentName, @PRemarks, @PMode, @PAmount, @PDocType, @PDate,
           @PBankID, @PBankName, @PProject, @PCompany, @PExpenseRef,
           @PChequeNo, @PChequeLotId, @PChequeLotNumber, @PChequeDate,
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
-          @DocNo, @DocTypeId, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
+          @DocNo, @DocTypeId, @DocYear, @DocSerial, @PFinYearId, @ParentDocNo, @RootExBDocNo,
           @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId, @OASkipAutoApply,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
         )
@@ -693,6 +787,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
   const { id } = req.params;
   const {
     PPaymentName,
+    PRemarks,
     PMode,
     PAmount,
     PDocType,
@@ -761,14 +856,20 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       }
     }
 
+    // Re-resolve the Financial Year whenever the payment date is edited — it
+    // always tracks the payment's own PDate, same as on create.
+    const pFinYearIdUpdate = await resolveFinYearId(pool, PDate);
+
     await pool
       .request()
       .input("PPaymentID", sql.Int, id)
       .input("PPaymentName", sql.VarChar, PPaymentName || "")
+      .input("PRemarks", sql.NVarChar(1000), PRemarks || null)
       .input("PMode", sql.VarChar, PMode || "")
       .input("PAmount", sql.Decimal(18, 2), PAmount != null ? Number(PAmount) : null)
       .input("PDocType", sql.VarChar, PDocType || "N/A")
       .input("PDate", sql.Date, PDate || null)
+      .input("PFinYearId", sql.Int, pFinYearIdUpdate)
       .input("PBankID", sql.Int, normalizeBankId(PBankID))
       .input("PBankName", sql.VarChar, PBankName || null)
       .input("PProject", sql.VarChar, PProject || "")
@@ -799,6 +900,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PUpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.NewPayment SET
           PPaymentName         = @PPaymentName,
+          PRemarks             = @PRemarks,
           PMode                = @PMode,
           PAmount              = @PAmount,
           PDocType             = @PDocType,
@@ -1210,16 +1312,22 @@ router.get("/:id", async (req, res) => {
         np.*,
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         COALESCE(ep.name, po_proj.name, np.PProject)       AS PProjectName,
-        CASE
-          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
-          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
-          ELSE grn2_sup.LHeadName
-        END                                                AS PSupplierName,
-        CASE
-          WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadContactPerson
-          WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadContactPerson
-          ELSE grn2_sup.LHeadContactPerson
-        END                                                AS PSupplierContact,
+        COALESCE(
+          CASE
+            WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
+            WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
+            ELSE grn2_sup.LHeadName
+          END,
+          party_head.LHeadName
+        )                                                  AS PSupplierName,
+        COALESCE(
+          CASE
+            WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadContactPerson
+            WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadContactPerson
+            ELSE grn2_sup.LHeadContactPerson
+          END,
+          party_head.LHeadContactPerson
+        )                                                  AS PSupplierContact,
         ISNULL(eb.ENetAmount, eb.EAmount)                  AS EBNetPayable,
         CASE
           WHEN eb.ENetAmount IS NOT NULL AND eb.EAmount IS NOT NULL
@@ -1227,7 +1335,7 @@ router.get("/:id", async (req, res) => {
           ELSE 0
         END                                                AS TaxAmount,
         ISNULL(eb.EAmount, 0)                              AS TaxableAmount,
-        ISNULL(eb.EFinYear, '')                            AS EBFinYear,
+        ISNULL(eb.EFinYear, ISNULL(pfy.FName, ''))         AS EBFinYear,
         eb.EDocNo                                          AS RefDoc,
         eb.EDocDate                                        AS EBDocDate,
         eb.ERemarks                                        AS EBDescription,
@@ -1237,6 +1345,7 @@ router.get("/:id", async (req, res) => {
         ahm.LHeadName                                      AS BankAccountName
       FROM dbo.NewPayment np
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
       LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
       LEFT JOIN dbo.enterprise ec
         ON ec.id = TRY_CAST(np.PCompany AS INT) AND ec.business_type = 'C'
@@ -1253,6 +1362,7 @@ router.get("/:id", async (req, res) => {
       LEFT JOIN dbo.GoodsReceiptNotes grn2
         ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
       LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
+      LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadName = np.PBankName AND ahm.LHeadType = 'B'
       WHERE np.PPaymentID = @id
     `);
@@ -1306,6 +1416,7 @@ router.get("/detail/:id", async (req, res) => {
           COALESCE(brc_list.IsBounced, 0) AS IsBounced,
           CASE
             WHEN EXISTS (SELECT 1 FROM dbo.NewPayment r2 WHERE r2.ReplacesPaymentId = np.PPaymentID AND r2.Status NOT IN ('Rejected','Deleted')) THEN 'Reissued'
+            WHEN np.PIsChequeCancelled = 1 THEN 'Cheque Cancelled'
             WHEN COALESCE(brc_list.IsBounced, 0) = 1 THEN 'Cheque Bounced'
             WHEN COALESCE(brc_list.IsMatched, 0) = 1 AND np.PMode IN ('Cheque','Post-Dated Cheque') THEN 'Cheque Cleared'
             WHEN np.Status = 'Approved' AND np.PMode IN ('Cheque','Post-Dated Cheque') THEN 'Cheque Issued'
@@ -1351,6 +1462,7 @@ router.get("/chain/:expenseRef", async (req, res) => {
           np.PChequeDate,
           np.PChequeIfsc,
           np.PBankName,
+          np.PIsChequeCancelled,
           np.ReplacesPaymentId,
           np.BounceCharge,
           np.PCreatedBy,
@@ -1373,6 +1485,8 @@ router.get("/chain/:expenseRef", async (req, res) => {
               WHERE r2.ReplacesPaymentId = np.PPaymentID
                 AND r2.Status NOT IN ('Rejected', 'Deleted')
             ) THEN 'Reissued'
+            WHEN np.PIsChequeCancelled = 1
+              THEN 'Cheque Cancelled'
             WHEN COALESCE(brc.IsBounced, 0) = 1
               THEN 'Cheque Bounced'
             WHEN COALESCE(brc.IsMatched, 0) = 1
