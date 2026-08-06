@@ -1,5 +1,6 @@
 import React from "react";
 import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { Input } from "@/components/ui/input";
@@ -22,22 +23,16 @@ import {
 import { cn } from "@/lib/utils";
 import {
   Plus, ArrowLeftRight, Building2, Landmark, Loader2, RefreshCw,
-  CheckCircle2, Clock, FileText, AlertCircle, Search, X, Check,
-  History, ArrowUpRight, ArrowDownRight, ChevronRight, ArrowLeft, Wallet,
+  CheckCircle2, Clock, FileText, AlertCircle, Search, X, ExternalLink,
+  Calendar, ShieldCheck,
 } from "lucide-react";
 import {
   getFundTransfers,
+  getFundTransfer,
   createFundTransfer,
-  approveFundTransfer,
-  rejectFundTransfer,
-  getLoans,
-  getLoan,
   type FundTransferSummary,
+  type FundTransferDetail,
   type FundTransferType,
-  type LoanSummary,
-  type LoanDetail,
-  type LoanSide,
-  type LoanLedgerEntry,
 } from "@/api/fundTransferApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
@@ -132,6 +127,144 @@ function FlowConnector({
   );
 }
 
+// An Inter-Company transfer creates a real dbo.LoanSanction record on
+// approval (see postFundTransferApproval in generalLedger.js) — this links
+// straight into the Loan Sanction module's own deep-link support
+// ("/loan/sanction?view=<id>"), the same pattern the Reminder Bell uses,
+// rather than duplicating any loan-balance/ledger UI here.
+function LoanLink({ loanId, loanNo, status }: { loanId: number; loanNo: string | null; status: string | null }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); navigate(`/loan/sanction?view=${loanId}`); }}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-violet-400/20 bg-violet-500/5 text-[10px] font-mono text-violet-600 hover:bg-violet-500/15 transition-colors"
+      title="Open in Loan Sanction"
+    >
+      <Landmark size={9} /> {loanNo || `LN-${loanId}`}{status ? ` · ${status}` : ""} <ExternalLink size={9} />
+    </button>
+  );
+}
+
+// Read-only detail view — approval now happens exclusively through the
+// Approval Inbox (see MODULE_CONFIG in src/pages/admin/ApprovalInbox.tsx),
+// so this is purely informational: full party/bank breakdown, GL posting
+// confirmation, and a link out to the linked loan if there is one.
+function DetailRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2 border-b border-border/60 last:border-0">
+      <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading shrink-0">{label}</span>
+      <span className={cn("text-sm text-foreground text-right", mono && "font-mono")}>{value}</span>
+    </div>
+  );
+}
+
+function TransferDetailDialog({
+  ftId,
+  onClose,
+}: {
+  ftId: number;
+  onClose: () => void;
+}) {
+  const [detail, setDetail] = useState<FundTransferDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getFundTransfer(ftId)
+      .then((d) => { if (!cancelled) setDetail(d); })
+      .catch((err: any) => { if (!cancelled) toast.error(err?.message || "Failed to load transfer"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [ftId]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden">
+        <DialogHeader className="px-6 py-4 border-b border-border">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+              <ArrowLeftRight size={15} className="text-primary" />
+            </div>
+            <div className="min-w-0">
+              <DialogTitle className="text-sm font-semibold font-heading font-mono">
+                {detail?.DocNo || `FT-${ftId}`}
+              </DialogTitle>
+              <DialogDescription className="text-[11px] mt-0.5">Fund Transfer details</DialogDescription>
+            </div>
+            {detail && (
+              <div className="ml-auto flex items-center gap-1.5">
+                <TypeBadge type={detail.TransferType} />
+                <StatusBadge status={detail.Status} />
+              </div>
+            )}
+          </div>
+        </DialogHeader>
+
+        {loading || !detail ? (
+          <div className="py-16 text-center">
+            <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
+            <p className="text-sm text-muted-foreground mt-2">Loading…</p>
+          </div>
+        ) : (
+          <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
+            <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 overflow-x-auto">
+              <FlowConnector
+                sourceLabel={detail.SourceBankName || "—"}
+                sourceSub={detail.SourceCompanyName}
+                destLabel={detail.DestinationBankName || "—"}
+                destSub={detail.DestinationCompanyName}
+                amount={formatINR(detail.Amount || 0)}
+                type={detail.TransferType}
+              />
+            </div>
+
+            {detail.TransferType === "Inter" && detail.LinkedLoanId && (
+              <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-violet-400/20 bg-violet-500/5">
+                <span className="text-xs text-muted-foreground">Booked as an inter-company loan</span>
+                <LoanLink loanId={detail.LinkedLoanId} loanNo={detail.LinkedLoanNo} status={detail.LinkedLoanStatus} />
+              </div>
+            )}
+
+            <div>
+              <DetailRow label="Transfer Date" value={fmtDate(detail.TransferDate)} />
+              <DetailRow label="Amount" value={<span className="font-mono font-semibold">{formatINR(detail.Amount || 0)}</span>} />
+              <DetailRow label="Source Company" value={detail.SourceCompanyName || "—"} />
+              <DetailRow label="Source Bank" value={detail.SourceBankName || "—"} />
+              <DetailRow label="Destination Company" value={detail.DestinationCompanyName || "—"} />
+              <DetailRow label="Destination Bank" value={detail.DestinationBankName || "—"} />
+              {detail.Narration && <DetailRow label="Narration" value={detail.Narration} />}
+              <DetailRow label="Created By" value={detail.CreatedBy || "—"} />
+              <DetailRow label="Created At" value={fmtDate(detail.CreatedAt)} />
+              <DetailRow
+                label="GL Posting"
+                value={
+                  detail.Status === "Approved" ? (
+                    <span className={cn("inline-flex items-center gap-1", detail.PostedToGL ? "text-emerald-700" : "text-rose-700")}>
+                      <ShieldCheck size={13} /> {detail.PostedToGL ? "Posted" : "Not posted"}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Pending approval</span>
+                  )
+                }
+              />
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
+          >
+            Close
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function fmtDate(d?: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
@@ -143,238 +276,13 @@ function bankLabel(b: BankRecord) {
   return `${b.BName || `Bank #${b.BId}`}${acct}${company}`;
 }
 
-function BalancePill({ side }: { side: LoanSide }) {
-  const settled = Math.abs(side.NetBalance) < 0.01;
-  const owed = side.NetBalance > 0;
-  return (
-    <div className={cn(
-      "flex items-center justify-between gap-2 px-3 py-2 rounded-lg border",
-      settled ? "border-border bg-muted/20" : owed ? "border-emerald-400/25 bg-emerald-500/5" : "border-rose-400/25 bg-rose-500/5",
-    )}>
-      <div className="min-w-0">
-        <p className="text-xs font-semibold text-foreground truncate">{side.CompanyName}</p>
-        <p className={cn("text-[10px] font-medium mt-0.5", settled ? "text-muted-foreground" : owed ? "text-emerald-700" : "text-rose-700")}>
-          {settled ? "Settled" : owed ? "Owed to this company" : "Owes to counterparty"}
-        </p>
-      </div>
-      <div className="flex items-center gap-1 shrink-0">
-        {!settled && (owed ? <ArrowUpRight size={13} className="text-emerald-600" /> : <ArrowDownRight size={13} className="text-rose-600" />)}
-        <span className={cn("font-mono text-sm font-bold tabular-nums", settled ? "text-muted-foreground" : owed ? "text-emerald-700" : "text-rose-700")}>
-          {formatINR(Math.abs(side.NetBalance))}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function LoanRegisterView({
-  loans,
-  loading,
-  onOpen,
-}: {
-  loans: LoanSummary[];
-  loading: boolean;
-  onOpen: (lHeadId: number) => void;
-}) {
-  if (loading) {
-    return (
-      <div className="py-16 text-center">
-        <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
-        <p className="text-sm text-muted-foreground mt-2">Loading the loan register…</p>
-      </div>
-    );
-  }
-  if (loans.length === 0) {
-    return (
-      <div className="py-20 text-center rounded-lg border border-border bg-card">
-        <div className="flex flex-col items-center gap-3 text-muted-foreground">
-          <Landmark size={36} className="opacity-20" />
-          <p className="text-sm font-medium">No inter-company loans yet</p>
-          <p className="text-xs max-w-sm">
-            A loan account opens automatically the first time an Inter-Company Fund Transfer is approved between two companies.
-          </p>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-3">
-      <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-md border border-border bg-muted/20 text-[11px] text-muted-foreground border-l-[3px] border-l-violet-500">
-        <Wallet size={13} className="shrink-0 mt-0.5 text-violet-600" />
-        <span>
-          One ledger account per company pair, shared by every Inter-Company transfer between them in either
-          direction. Balances are derived live from the General Ledger — a reverse transfer repays the loan
-          automatically.
-        </span>
-      </div>
-      {loans.map((loan) => (
-        <button
-          key={loan.LHeadId}
-          onClick={() => onOpen(loan.LHeadId)}
-          className="w-full text-left rounded-lg border border-border bg-card p-4 hover:border-violet-400/40 hover:bg-violet-500/[0.02] transition-colors"
-        >
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0">
-                <Landmark size={13} className="text-violet-600" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-foreground truncate">{loan.LHeadName}</p>
-                <p className="text-[10px] font-mono text-muted-foreground">{loan.LHeadCode}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 shrink-0 text-right">
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">Transfers</p>
-                <p className="text-sm font-mono font-semibold text-foreground">{loan.TransferCount}</p>
-              </div>
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">Last Activity</p>
-                <p className="text-sm font-mono font-semibold text-foreground">{fmtDate(loan.LastActivity)}</p>
-              </div>
-              <ChevronRight size={16} className="text-muted-foreground" />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {loan.Sides.map((side) => <BalancePill key={side.CompanyId} side={side} />)}
-          </div>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// Each approved Inter-Company transfer contributes exactly two legs to the
-// shared loan head (one per company) — group raw GL entries back into one
-// row per real-world transfer event, rather than showing raw debit/credit
-// legs, which reads far closer to an actual passbook.
-function buildLoanTimeline(entries: LoanLedgerEntry[]) {
-  const bySource = new Map<number, LoanLedgerEntry[]>();
-  for (const e of entries) {
-    if (!bySource.has(e.SourceId)) bySource.set(e.SourceId, []);
-    bySource.get(e.SourceId)!.push(e);
-  }
-  return [...bySource.entries()]
-    .map(([sourceId, legs]) => {
-      const drLeg = legs.find((l) => Number(l.DebitAmount) > 0);
-      const crLeg = legs.find((l) => Number(l.CreditAmount) > 0);
-      const first = legs[0];
-      return {
-        sourceId,
-        docNo: first.DocNo,
-        date: first.VoucherDate,
-        status: first.TransferStatus,
-        amount: Number(drLeg?.DebitAmount || crLeg?.CreditAmount || 0),
-        fromCompany: drLeg?.CompanyName || "—",
-        toCompany: crLeg?.CompanyName || "—",
-      };
-    })
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.sourceId - b.sourceId);
-}
-
-function LoanDetailView({
-  detail,
-  loading,
-  onBack,
-}: {
-  detail: LoanDetail | null;
-  loading: boolean;
-  onBack: () => void;
-}) {
-  const timeline = useMemo(() => (detail ? buildLoanTimeline(detail.entries) : []), [detail]);
-
-  // Current balance per company, derived the same way the register's own
-  // summary is (net Dr-Cr per CompanyId) — kept in sync with GET /loans
-  // without a second round trip, since the raw entries are already here.
-  const sides = useMemo(() => {
-    if (!detail) return [];
-    const byCompany = new Map<number, { CompanyId: number; CompanyName: string; NetBalance: number }>();
-    for (const e of detail.entries) {
-      if (!byCompany.has(e.CompanyId)) {
-        byCompany.set(e.CompanyId, { CompanyId: e.CompanyId, CompanyName: e.CompanyName || `Company ${e.CompanyId}`, NetBalance: 0 });
-      }
-      const side = byCompany.get(e.CompanyId)!;
-      side.NetBalance += Number(e.DebitAmount || 0) - Number(e.CreditAmount || 0);
-    }
-    return [...byCompany.values()].map((s) => ({ ...s, NetBalance: Math.round(s.NetBalance * 100) / 100 }));
-  }, [detail]);
-
-  return (
-    <div className="space-y-4">
-      <button onClick={onBack} className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-        <ArrowLeft size={13} /> Back to Loan Register
-      </button>
-
-      {loading || !detail ? (
-        <div className="py-16 text-center">
-          <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
-          <p className="text-sm text-muted-foreground mt-2">Loading loan ledger…</p>
-        </div>
-      ) : (
-        <>
-          <div className="rounded-lg border border-border bg-card p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Landmark size={15} className="text-violet-600" />
-              <h2 className="text-sm font-semibold text-foreground font-heading">{detail.LHeadName}</h2>
-            </div>
-            <p className="text-[11px] font-mono text-muted-foreground mb-3">
-              {detail.LHeadCode} · opened {fmtDate(detail.OpenedAt)}
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {sides.map((side) => <BalancePill key={side.CompanyId} side={side} />)}
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-card overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-1.5">
-              <History size={13} className="text-muted-foreground" />
-              <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Transfer History</h3>
-            </div>
-            {timeline.length === 0 ? (
-              <div className="py-10 text-center text-sm text-muted-foreground">No transfers recorded yet</div>
-            ) : (
-              <div className="divide-y divide-border">
-                {timeline.map((ev) => (
-                  <div key={ev.sourceId} className="px-4 py-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded text-foreground">{ev.docNo || `FT-${ev.sourceId}`}</span>
-                        <span className="text-[11px] text-muted-foreground tabular-nums">{fmtDate(ev.date)}</span>
-                        {ev.status && <StatusBadge status={ev.status} />}
-                      </div>
-                      <p className="text-xs text-foreground mt-1 truncate">
-                        <span className="font-medium">{ev.fromCompany}</span>
-                        <span className="text-muted-foreground"> → </span>
-                        <span className="font-medium">{ev.toCompany}</span>
-                      </p>
-                    </div>
-                    <span className="font-mono text-sm font-semibold text-foreground tabular-nums shrink-0">
-                      {formatINR(ev.amount)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 export default function FundTransfer() {
   const rights = usePageRights("fund-transfer");
-  const [activeTab, setActiveTab] = useState<"transfers" | "loans">("transfers");
   const [transfers, setTransfers] = useState<FundTransferSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<FundTransferType | null>(null);
-
-  const [loans, setLoans] = useState<LoanSummary[]>([]);
-  const [loansLoading, setLoansLoading] = useState(true);
-  const [loanDetail, setLoanDetail] = useState<LoanDetail | null>(null);
-  const [loanDetailLoading, setLoanDetailLoading] = useState(false);
 
   const [companies, setCompanies] = useState<{ id: number; label: string }[]>([]);
   const [banks, setBanks] = useState<BankRecord[]>([]);
@@ -390,7 +298,7 @@ export default function FundTransfer() {
   const [amount, setAmount] = useState("");
   const [narration, setNarration] = useState("");
 
-  const [acting, setActing] = useState<{ id: number; action: "approve" | "reject" } | null>(null);
+  const [selectedFTId, setSelectedFTId] = useState<number | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -404,34 +312,8 @@ export default function FundTransfer() {
     }
   };
 
-  const loadLoans = async () => {
-    setLoansLoading(true);
-    try {
-      const data = await getLoans();
-      setLoans(data);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to load the loan register");
-    } finally {
-      setLoansLoading(false);
-    }
-  };
-
-  const openLoanDetail = async (lHeadId: number) => {
-    setActiveTab("loans");
-    setLoanDetailLoading(true);
-    try {
-      const detail = await getLoan(lHeadId);
-      setLoanDetail(detail);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to load loan ledger");
-    } finally {
-      setLoanDetailLoading(false);
-    }
-  };
-
   useEffect(() => {
     load();
-    loadLoans();
     getEnterpriseOptions(undefined, "C")
       .then((rows) => setCompanies(rows.map((r) => ({ id: r.id, label: r.label }))))
       .catch(() => setCompanies([]));
@@ -468,33 +350,6 @@ export default function FundTransfer() {
     setDestBankId("");
     setAmount("");
     setNarration("");
-  };
-
-  const handleApprove = async (id: number) => {
-    setActing({ id, action: "approve" });
-    try {
-      await approveFundTransfer(id);
-      toast.success("Fund Transfer approved and posted to GL");
-      load();
-      loadLoans();
-    } catch (err: any) {
-      toast.error(err?.message || "Approval failed");
-    } finally {
-      setActing(null);
-    }
-  };
-
-  const handleReject = async (id: number) => {
-    setActing({ id, action: "reject" });
-    try {
-      await rejectFundTransfer(id);
-      toast.success("Fund Transfer rejected");
-      load();
-    } catch (err: any) {
-      toast.error(err?.message || "Rejection failed");
-    } finally {
-      setActing(null);
-    }
   };
 
   const submit = async () => {
@@ -594,32 +449,7 @@ export default function FundTransfer() {
           </div>
         }
       >
-        {/* ── Section tabs ── */}
-        <div className="flex items-center gap-1 border-b border-border mb-5">
-          <button
-            onClick={() => setActiveTab("transfers")}
-            className={cn(
-              "flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold border-b-2 -mb-px transition-colors font-heading",
-              activeTab === "transfers" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <ArrowLeftRight size={13} /> Transfers
-          </button>
-          <button
-            onClick={() => { setActiveTab("loans"); setLoanDetail(null); }}
-            className={cn(
-              "flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold border-b-2 -mb-px transition-colors font-heading",
-              activeTab === "loans" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Landmark size={13} /> Loan Ledger
-            {loans.length > 0 && (
-              <span className="px-1.5 py-0 rounded-full bg-violet-500/10 text-violet-700 text-[10px] font-mono">{loans.length}</span>
-            )}
-          </button>
-        </div>
-
-        {activeTab === "transfers" && !loading && (
+        {!loading && (
           <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border rounded-lg border border-border bg-card mb-5">
             {[
               { label: "Total Transfers", value: stats.total,    color: "text-foreground", onClick: () => { setStatusFilter(null); setTypeFilter(null); }, active: !statusFilter && !typeFilter },
@@ -639,7 +469,6 @@ export default function FundTransfer() {
           </div>
         )}
 
-        {activeTab === "transfers" && <>
         <div className="relative mb-4">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -689,7 +518,11 @@ export default function FundTransfer() {
               </div>
             ) : (
               filtered.map((t) => (
-                <div key={t.FTId} className="px-4 py-3.5 hover:bg-muted/20 transition-colors">
+                <div
+                  key={t.FTId}
+                  onClick={() => setSelectedFTId(t.FTId)}
+                  className="px-4 py-3.5 hover:bg-muted/20 transition-colors cursor-pointer"
+                >
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
@@ -710,39 +543,14 @@ export default function FundTransfer() {
                       type={t.TransferType}
                     />
                   </div>
-                  {t.TransferType === "Inter" && t.LoanHeadName && t.LoanHeadId && (
-                    <button
-                      onClick={() => openLoanDetail(t.LoanHeadId!)}
-                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-violet-400/20 bg-violet-500/5 text-[10px] font-mono text-violet-600 mb-2 hover:bg-violet-500/15 transition-colors"
-                    >
-                      <Landmark size={9} /> {t.LoanHeadName} <ChevronRight size={9} />
-                    </button>
-                  )}
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <TypeBadge type={t.TransferType} />
-                      <StatusBadge status={t.Status} />
+                  {t.TransferType === "Inter" && t.LinkedLoanId && (
+                    <div className="mb-2">
+                      <LoanLink loanId={t.LinkedLoanId} loanNo={t.LinkedLoanNo} status={t.LinkedLoanStatus} />
                     </div>
-                    {t.Status === "Pending" && rights.canEdit && (
-                      <div className="flex gap-1">
-                        <button
-                          disabled={acting?.id === t.FTId}
-                          onClick={() => handleApprove(t.FTId)}
-                          title="Approve"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
-                        >
-                          {acting?.id === t.FTId && acting.action === "approve" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-                        </button>
-                        <button
-                          disabled={acting?.id === t.FTId}
-                          onClick={() => handleReject(t.FTId)}
-                          title="Reject"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
-                        >
-                          {acting?.id === t.FTId && acting.action === "reject" ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
-                        </button>
-                      </div>
-                    )}
+                  )}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <TypeBadge type={t.TransferType} />
+                    <StatusBadge status={t.Status} />
                   </div>
                 </div>
               ))
@@ -758,20 +566,19 @@ export default function FundTransfer() {
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">From → To</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Amount</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Status</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="py-16 text-center">
+                  <td colSpan={6} className="py-16 text-center">
                     <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
                     <p className="text-sm text-muted-foreground mt-2">Loading transfers…</p>
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-20 text-center">
+                  <td colSpan={6} className="py-20 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <ArrowLeftRight size={36} className="opacity-20" />
                       <p className="text-sm font-medium">
@@ -790,7 +597,11 @@ export default function FundTransfer() {
                 </tr>
               ) : (
                 filtered.map((t) => (
-                  <tr key={t.FTId} className="hover:bg-muted/30 transition-colors group">
+                  <tr
+                    key={t.FTId}
+                    onClick={() => setSelectedFTId(t.FTId)}
+                    className="hover:bg-muted/30 transition-colors group cursor-pointer"
+                  >
                     <td className="px-4 py-3">
                       <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
                         {t.DocNo || `FT-${t.FTId}`}
@@ -805,49 +616,16 @@ export default function FundTransfer() {
                         type={t.TransferType}
                         compact
                       />
-                      {t.TransferType === "Inter" && t.LoanHeadName && t.LoanHeadId && (
-                        <button
-                          onClick={() => openLoanDetail(t.LoanHeadId!)}
-                          className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded border border-violet-400/20 bg-violet-500/5 text-[10px] font-mono text-violet-600 hover:bg-violet-500/15 transition-colors"
-                        >
-                          <Landmark size={9} /> {t.LoanHeadName} <ChevronRight size={9} />
-                        </button>
+                      {t.TransferType === "Inter" && t.LinkedLoanId && (
+                        <div className="mt-1">
+                          <LoanLink loanId={t.LinkedLoanId} loanNo={t.LinkedLoanNo} status={t.LinkedLoanStatus} />
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-foreground tabular-nums">
                       {formatINR(t.Amount || 0)}
                     </td>
                     <td className="px-4 py-3"><StatusBadge status={t.Status} /></td>
-                    <td className="px-4 py-3 text-right">
-                      {t.Status === "Pending" && rights.canEdit && (
-                        <div className="flex justify-end gap-1">
-                          <button
-                            disabled={acting?.id === t.FTId}
-                            onClick={() => handleApprove(t.FTId)}
-                            title="Approve"
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
-                          >
-                            {acting?.id === t.FTId && acting.action === "approve" ? (
-                              <Loader2 size={13} className="animate-spin" />
-                            ) : (
-                              <Check size={13} />
-                            )}
-                          </button>
-                          <button
-                            disabled={acting?.id === t.FTId}
-                            onClick={() => handleReject(t.FTId)}
-                            title="Reject"
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
-                          >
-                            {acting?.id === t.FTId && acting.action === "reject" ? (
-                              <Loader2 size={13} className="animate-spin" />
-                            ) : (
-                              <X size={13} />
-                            )}
-                          </button>
-                        </div>
-                      )}
-                    </td>
                   </tr>
                 ))
               )}
@@ -862,140 +640,143 @@ export default function FundTransfer() {
             </div>
           )}
         </div>
-        </>}
-
-        {activeTab === "loans" && (
-          loanDetail || loanDetailLoading ? (
-            <LoanDetailView
-              detail={loanDetail}
-              loading={loanDetailLoading}
-              onBack={() => setLoanDetail(null)}
-            />
-          ) : (
-            <LoanRegisterView
-              loans={loans}
-              loading={loansLoading}
-              onOpen={openLoanDetail}
-            />
-          )
-        )}
       </FinanceShell>
+
+      {selectedFTId != null && (
+        <TransferDetailDialog ftId={selectedFTId} onClose={() => setSelectedFTId(null)} />
+      )}
 
       {/* ── New Fund Transfer Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
-        <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
-          <DialogHeader className="px-5 py-4 border-b border-border">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                <ArrowLeftRight size={15} className="text-primary" />
+        <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-7 py-5 border-b border-border">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                <ArrowLeftRight size={18} className="text-primary" />
               </div>
               <div>
-                <DialogTitle className="text-sm font-semibold font-heading">New Fund Transfer</DialogTitle>
-                <DialogDescription className="text-[11px] mt-0.5">
-                  Inter-company transfers book automatically as a loan between the two companies.
+                <DialogTitle className="text-base font-semibold font-heading">New Fund Transfer</DialogTitle>
+                <DialogDescription className="text-xs mt-0.5">
+                  Move cash between bank accounts. Inter-company transfers create a Loan Sanction record automatically.
                 </DialogDescription>
               </div>
             </div>
           </DialogHeader>
 
-          <div className="px-5 py-4 space-y-4">
+          <div className="px-7 py-6 space-y-6 max-h-[75vh] overflow-y-auto">
             {/* Type toggle */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => setTransferType("Intra")}
                 className={cn(
-                  "flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-colors",
-                  transferType === "Intra" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted",
+                  "flex items-center gap-3 px-4 py-3.5 rounded-xl border-2 text-left transition-colors",
+                  transferType === "Intra" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40",
                 )}
               >
-                <Building2 size={13} /> Intra-Company
+                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0", transferType === "Intra" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}>
+                  <Building2 size={16} />
+                </div>
+                <div className="min-w-0">
+                  <p className={cn("text-sm font-semibold", transferType === "Intra" ? "text-primary" : "text-foreground")}>Intra-Company</p>
+                  <p className="text-[11px] text-muted-foreground">Between two banks of the same company</p>
+                </div>
               </button>
               <button
                 type="button"
                 onClick={() => setTransferType("Inter")}
                 className={cn(
-                  "flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-colors",
-                  transferType === "Inter" ? "border-violet-500 bg-violet-500/10 text-violet-600" : "border-border text-muted-foreground hover:bg-muted",
+                  "flex items-center gap-3 px-4 py-3.5 rounded-xl border-2 text-left transition-colors",
+                  transferType === "Inter" ? "border-violet-500 bg-violet-500/5" : "border-border hover:bg-muted/40",
                 )}
               >
-                <Landmark size={13} /> Inter-Company (Loan)
+                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0", transferType === "Inter" ? "bg-violet-500/15 text-violet-600" : "bg-muted text-muted-foreground")}>
+                  <Landmark size={16} />
+                </div>
+                <div className="min-w-0">
+                  <p className={cn("text-sm font-semibold", transferType === "Inter" ? "text-violet-700" : "text-foreground")}>Inter-Company (Loan)</p>
+                  <p className="text-[11px] text-muted-foreground">Between two different companies</p>
+                </div>
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Source Company *</label>
-                <Select value={sourceCompanyId} onValueChange={setSourceCompanyId}>
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Select company…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {companies.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)} className="text-sm">{c.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Destination Company *</label>
-                <Select
-                  value={destCompanyId}
-                  onValueChange={setDestCompanyId}
-                  disabled={transferType === "Intra"}
-                >
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder={transferType === "Intra" ? "Same as source" : "Select company…"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {companies
-                      .filter((c) => transferType === "Inter" ? String(c.id) !== sourceCompanyId : true)
-                      .map((c) => (
+            {/* Source / Destination panels */}
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-4 items-stretch">
+              <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-3">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground font-heading">From</p>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-medium text-muted-foreground">Company *</label>
+                  <Select value={sourceCompanyId} onValueChange={setSourceCompanyId}>
+                    <SelectTrigger className="h-10 text-sm bg-background">
+                      <SelectValue placeholder="Select company…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {companies.map((c) => (
                         <SelectItem key={c.id} value={String(c.id)} className="text-sm">{c.label}</SelectItem>
                       ))}
-                  </SelectContent>
-                </Select>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-medium text-muted-foreground">Bank Account *</label>
+                  <Select value={sourceBankId} onValueChange={setSourceBankId}>
+                    <SelectTrigger className="h-10 text-sm bg-background">
+                      <SelectValue placeholder="Select bank…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {banks.map((b) => (
+                        <SelectItem key={b.BId} value={String(b.BId)} className="text-sm">{bankLabel(b)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Source Bank *</label>
-                <Select value={sourceBankId} onValueChange={setSourceBankId}>
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Select bank…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {banks.map((b) => (
-                      <SelectItem key={b.BId} value={String(b.BId)} className="text-sm">{bankLabel(b)}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Destination Bank *</label>
-                <Select value={destBankId} onValueChange={setDestBankId}>
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Select bank…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {banks.filter((b) => String(b.BId) !== sourceBankId).map((b) => (
-                      <SelectItem key={b.BId} value={String(b.BId)} className="text-sm">{bankLabel(b)}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="hidden md:flex items-center justify-center">
+                <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center shrink-0">
+                  <ArrowLeftRight size={15} className="text-muted-foreground" />
+                </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Date *</label>
-                <Input type="date" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Amount *</label>
-                <Input type="number" min={0} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+              <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-3">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground font-heading">To</p>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-medium text-muted-foreground">Company *</label>
+                  <Select
+                    value={destCompanyId}
+                    onValueChange={setDestCompanyId}
+                    disabled={transferType === "Intra"}
+                  >
+                    <SelectTrigger className="h-10 text-sm bg-background">
+                      <SelectValue placeholder={transferType === "Intra" ? "Same as source" : "Select company…"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {companies
+                        .filter((c) => transferType === "Inter" ? String(c.id) !== sourceCompanyId : true)
+                        .map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)} className="text-sm">{c.label}</SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-medium text-muted-foreground">Bank Account *</label>
+                  <Select value={destBankId} onValueChange={setDestBankId}>
+                    <SelectTrigger className="h-10 text-sm bg-background">
+                      <SelectValue placeholder="Select bank…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {banks.filter((b) => String(b.BId) !== sourceBankId).map((b) => (
+                        <SelectItem key={b.BId} value={String(b.BId)} className="text-sm">{bankLabel(b)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
 
             {(sourceBankId || destBankId) && (
-              <div className="rounded-lg border border-dashed border-border bg-muted/20 px-3 py-2.5 overflow-x-auto">
+              <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 overflow-x-auto">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground font-heading mb-1.5">Preview</p>
                 <FlowConnector
                   sourceLabel={banks.find((b) => String(b.BId) === sourceBankId)?.BName || "Source bank"}
@@ -1006,24 +787,38 @@ export default function FundTransfer() {
               </div>
             )}
 
+            {/* Amount, date, narration */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">
+                  <Calendar size={11} /> Date *
+                </label>
+                <Input type="date" className="h-10" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Amount *</label>
+                <Input type="number" min={0} step="0.01" className="h-10 font-mono" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+              </div>
+            </div>
+
             <div className="space-y-1.5">
               <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Narration</label>
-              <Input value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="Reason for this transfer" />
+              <Input className="h-10" value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="Reason for this transfer" />
             </div>
 
             {transferType === "Inter" && (
-              <div className="flex items-start gap-2.5 pl-3 pr-3 py-2.5 rounded-md border border-border bg-muted/20 text-[11px] text-muted-foreground border-l-[3px] border-l-violet-500">
-                <Landmark size={13} className="shrink-0 mt-0.5 text-violet-600" />
+              <div className="flex items-start gap-2.5 pl-4 pr-4 py-3 rounded-lg border border-border bg-muted/20 text-xs text-muted-foreground border-l-[3px] border-l-violet-500">
+                <Landmark size={14} className="shrink-0 mt-0.5 text-violet-600" />
                 <span>
-                  <span className="font-semibold text-foreground">Books as an inter-company loan on approval.</span> The
-                  source company's books record a receivable, the destination company's a payable, against a shared
-                  loan account for this company pair. A reverse-direction transfer later repays it automatically.
+                  <span className="font-semibold text-foreground">Creates a Loan Sanction record on approval.</span> The
+                  source company becomes the lender, the destination company the borrower — no interest, single
+                  bullet repayment. Find and manage it afterward in the Loan Sanction module.
                 </span>
               </div>
             )}
           </div>
 
-          <DialogFooter className="px-5 py-3.5 border-t border-border bg-muted/20">
+          <DialogFooter className="px-7 py-4 border-t border-border bg-muted/20">
             <button
               onClick={() => setDialogOpen(false)}
               className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
@@ -1033,7 +828,7 @@ export default function FundTransfer() {
             <button
               onClick={submit}
               disabled={saving}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg gradient-accent text-white text-sm font-semibold transition-all disabled:opacity-50"
+              className="flex items-center gap-1.5 px-5 py-2 rounded-lg gradient-accent text-white text-sm font-semibold transition-all disabled:opacity-50"
             >
               {saving && <Loader2 size={13} className="animate-spin" />}
               Submit for Approval

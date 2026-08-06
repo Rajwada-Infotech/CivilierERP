@@ -33,6 +33,7 @@ import {
   SlidersHorizontal,
   Eye,
   FileText,
+  Landmark,
 } from "lucide-react";
 import {
   Dialog,
@@ -179,6 +180,13 @@ const MODULE_CONFIG: Record<
     navPath: "/material/stock-transfer",
     apiEndpoint: "/api/inter-company-transfer",
     label: "Inter-Company Transfers",
+  },
+  "fund-transfer": {
+    icon: Landmark,
+    color: "text-violet-600 bg-violet-600/10",
+    navPath: "/fund-transfer",
+    apiEndpoint: "/api/fund-transfer",
+    label: "Fund Transfers",
   },
   "crm-bookings": {
     icon: Home,
@@ -382,6 +390,7 @@ const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
   "material-issues": { icon: "text-cyan-500", active: "bg-cyan-500 border-cyan-500" },
   "journal-voucher": { icon: "text-amber-600", active: "bg-amber-600 border-amber-600" },
   "inter-company-transfer": { icon: "text-fuchsia-600", active: "bg-fuchsia-600 border-fuchsia-600" },
+  "fund-transfer": { icon: "text-violet-600", active: "bg-violet-600 border-violet-600" },
   "sale-orders": { icon: "text-lime-600", active: "bg-lime-600 border-lime-600" },
   "vehicle-in-out": { icon: "text-sky-600", active: "bg-sky-600 border-sky-600" },
   contracts: { icon: "text-purple-500", active: "bg-purple-500 border-purple-500" },

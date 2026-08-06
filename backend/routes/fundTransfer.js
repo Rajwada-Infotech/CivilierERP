@@ -78,138 +78,20 @@ router.get("/", authenticateToken, async (req, res) => {
              ft.DestinationCompanyId, dc.name AS DestinationCompanyName,
              ft.SourceBankId, sb.LHeadName AS SourceBankName,
              ft.DestinationBankId, db.LHeadName AS DestinationBankName,
-             ft.LoanHeadId, lh.LHeadName AS LoanHeadName,
+             ft.LinkedLoanId, ls.LoanNo AS LinkedLoanNo, ls.Status AS LinkedLoanStatus,
              ft.CreatedBy, ft.CreatedAt
       FROM dbo.FundTransfer ft
       LEFT JOIN dbo.enterprise sc ON sc.id = ft.SourceCompanyId
       LEFT JOIN dbo.enterprise dc ON dc.id = ft.DestinationCompanyId
       LEFT JOIN dbo.AccountHeadMaster sb ON sb.LHeadId = ft.SourceBankId
       LEFT JOIN dbo.AccountHeadMaster db ON db.LHeadId = ft.DestinationBankId
-      LEFT JOIN dbo.AccountHeadMaster lh ON lh.LHeadId = ft.LoanHeadId
+      LEFT JOIN dbo.LoanSanction ls ON ls.LoanId = ft.LinkedLoanId
     `;
     if (conditions.length) query += " WHERE " + conditions.join(" AND ");
     query += " ORDER BY ft.TransferDate DESC, ft.FTId DESC";
 
     const result = await request.query(query);
     res.json(result.recordset);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── GET /loans — the Inter-Company Loan register ────────────────────────────
-// One row per counterparty COMPANY PAIR (see resolveOrCreateLoanHead() in
-// generalLedger.js — one shared LHeadType='LN' head per pair, reused across
-// every transfer between them, in either direction). Registered before
-// "/:id" below, or Express would treat "loans" as an id.
-//
-// The running balance is derived straight from GeneralLedgerEntry rather
-// than stored anywhere — the ledger IS the source of truth, exactly like
-// Trial Balance. Two independent per-company balances are computed (net
-// Dr-Cr scoped by CompanyId), which is what actually lets each side's own
-// books stay correct — see the migration 291 header comment for why a
-// single shared head + per-company filtering is the right design here.
-router.get("/loans", authenticateToken, async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT
-        lh.LHeadId, lh.LHeadName, lh.LHeadCode, lh.CreatedAt AS OpenedAt,
-        gle.CompanyId,
-        SUM(gle.DebitAmount) AS TotalDebit,
-        SUM(gle.CreditAmount) AS TotalCredit,
-        MAX(gle.VoucherDate) AS LastActivity,
-        COUNT(DISTINCT gle.SourceId) AS TransferCount
-      FROM dbo.AccountHeadMaster lh
-      JOIN dbo.GeneralLedgerEntry gle ON gle.LHeadId = lh.LHeadId AND gle.SourceType = 'FundTransfer' AND gle.IsReversed = 0
-      WHERE lh.LHeadType = 'LN' AND lh.LHeadCode LIKE 'FT-LOAN-%'
-      GROUP BY lh.LHeadId, lh.LHeadName, lh.LHeadCode, lh.CreatedAt, gle.CompanyId
-    `);
-
-    // Pivot the two per-company rows for each head into one record — every
-    // pair has exactly two sides (the company that sent, the company that
-    // received), and callers want both balances side by side, not two
-    // separate rows to reconcile themselves.
-    const byHead = new Map();
-    for (const row of result.recordset) {
-      if (!byHead.has(row.LHeadId)) {
-        byHead.set(row.LHeadId, {
-          LHeadId: row.LHeadId,
-          LHeadName: row.LHeadName,
-          LHeadCode: row.LHeadCode,
-          OpenedAt: row.OpenedAt,
-          LastActivity: row.LastActivity,
-          TransferCount: 0,
-          sides: [],
-        });
-      }
-      const head = byHead.get(row.LHeadId);
-      // Positive = net debit = this company is owed (receivable); negative
-      // = net credit = this company owes (payable) — the natural sign of a
-      // ledger balance, not a re-derived label.
-      const net = Number(row.TotalDebit || 0) - Number(row.TotalCredit || 0);
-      head.sides.push({ CompanyId: row.CompanyId, NetBalance: Math.round(net * 100) / 100 });
-      head.TransferCount = Math.max(head.TransferCount, Number(row.TransferCount) || 0);
-      if (row.LastActivity && (!head.LastActivity || row.LastActivity > head.LastActivity)) {
-        head.LastActivity = row.LastActivity;
-      }
-    }
-
-    const companyIds = [...new Set(result.recordset.map((r) => r.CompanyId).filter(Boolean))];
-    let companyNames = {};
-    if (companyIds.length) {
-      const cReq = pool.request();
-      const placeholders = companyIds.map((id, i) => { cReq.input(`c${i}`, sql.Int, id); return `@c${i}`; });
-      const companyRows = await cReq.query(`SELECT id, name FROM dbo.enterprise WHERE id IN (${placeholders.join(",")})`);
-      companyNames = Object.fromEntries(companyRows.recordset.map((c) => [c.id, c.name]));
-    }
-
-    const loans = [...byHead.values()].map((head) => ({
-      LHeadId: head.LHeadId,
-      LHeadName: head.LHeadName,
-      LHeadCode: head.LHeadCode,
-      OpenedAt: head.OpenedAt,
-      LastActivity: head.LastActivity,
-      TransferCount: head.TransferCount,
-      Sides: head.sides.map((s) => ({
-        CompanyId: s.CompanyId,
-        CompanyName: companyNames[s.CompanyId] || `Company ${s.CompanyId}`,
-        NetBalance: s.NetBalance,
-      })),
-    }));
-
-    res.json(loans);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── GET /loans/:lHeadId — passbook-style ledger for one loan head ───────────
-router.get("/loans/:lHeadId", authenticateToken, async (req, res) => {
-  try {
-    const pool = getPool();
-    const lHeadId = parseInt(req.params.lHeadId, 10);
-    if (isNaN(lHeadId)) return res.status(400).json({ error: "Invalid id" });
-
-    const head = await pool.request().input("id", sql.Int, lHeadId).query(`
-      SELECT LHeadId, LHeadName, LHeadCode, CreatedAt AS OpenedAt
-      FROM dbo.AccountHeadMaster
-      WHERE LHeadId = @id AND LHeadType = 'LN' AND LHeadCode LIKE 'FT-LOAN-%'
-    `);
-    if (!head.recordset.length) return res.status(404).json({ error: "Loan account not found" });
-
-    const entries = await pool.request().input("id", sql.Int, lHeadId).query(`
-      SELECT gle.EntryId, gle.VoucherNo, gle.VoucherDate, gle.DebitAmount, gle.CreditAmount,
-             gle.Narration, gle.CompanyId, co.name AS CompanyName, gle.SourceId,
-             ft.DocNo, ft.TransferType, ft.Status AS TransferStatus
-      FROM dbo.GeneralLedgerEntry gle
-      LEFT JOIN dbo.enterprise co ON co.id = gle.CompanyId
-      LEFT JOIN dbo.FundTransfer ft ON ft.FTId = gle.SourceId AND gle.SourceType = 'FundTransfer'
-      WHERE gle.LHeadId = @id AND gle.SourceType = 'FundTransfer' AND gle.IsReversed = 0
-      ORDER BY gle.VoucherDate, gle.EntryId
-    `);
-
-    res.json({ ...head.recordset[0], entries: entries.recordset });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -226,13 +108,13 @@ router.get("/:id", authenticateToken, async (req, res) => {
       SELECT ft.*,
              sc.name AS SourceCompanyName, dc.name AS DestinationCompanyName,
              sb.LHeadName AS SourceBankName, db.LHeadName AS DestinationBankName,
-             lh.LHeadName AS LoanHeadName
+             ls.LoanNo AS LinkedLoanNo, ls.Status AS LinkedLoanStatus
       FROM dbo.FundTransfer ft
       LEFT JOIN dbo.enterprise sc ON sc.id = ft.SourceCompanyId
       LEFT JOIN dbo.enterprise dc ON dc.id = ft.DestinationCompanyId
       LEFT JOIN dbo.AccountHeadMaster sb ON sb.LHeadId = ft.SourceBankId
       LEFT JOIN dbo.AccountHeadMaster db ON db.LHeadId = ft.DestinationBankId
-      LEFT JOIN dbo.AccountHeadMaster lh ON lh.LHeadId = ft.LoanHeadId
+      LEFT JOIN dbo.LoanSanction ls ON ls.LoanId = ft.LinkedLoanId
       WHERE ft.FTId = @id
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
@@ -417,3 +299,4 @@ router.put("/:id/reject", authenticateToken, requirePageRight("fund-transfer", "
 });
 
 module.exports = router;
+

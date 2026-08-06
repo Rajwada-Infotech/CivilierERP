@@ -497,6 +497,32 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "fund-transfer") {
+      queries.push(`
+        SELECT
+          'fund-transfer'                        AS Module,
+          'Fund Transfer'                        AS ModuleLabel,
+          CAST(ft.FTId AS NVARCHAR)              AS RecordId,
+          ISNULL(ft.DocNo, CONCAT('FT#', CAST(ft.FTId AS NVARCHAR))) AS Reference,
+          ft.TransferDate                        AS RecordDate,
+          ft.Status,
+          sc.name                                AS ContractorName,
+          dc.name                                AS SupplierName,
+          ft.Amount                              AS Amount,
+          ${NULL_EXTRA}
+          CAST(ft.CreatedBy AS NVARCHAR(255))    AS CreatedBy,
+          ''                                      AS ApprovedBy,
+          ''                                      AS ApprovedAt,
+          ''                                      AS RejectedBy,
+          ISNULL(CAST(ft.Narration AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ft.CreatedAt                            AS LastModified
+        FROM dbo.FundTransfer ft
+        LEFT JOIN dbo.enterprise sc ON sc.id = ft.SourceCompanyId
+        LEFT JOIN dbo.enterprise dc ON dc.id = ft.DestinationCompanyId
+        WHERE ft.Status = 'Pending'
+      `);
+    }
+
     // crm-applications was removed here — Applications no longer go through
     // an admin approval step (a Booking is auto-attempted straight off
     // submission, see crmApplications.js PUT /:id/submit). Booking Approval
@@ -748,6 +774,7 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.VehicleInOut       WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.JournalVoucher     WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.InterCompanyTransfer WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.FundTransfer       WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmApplication     WHERE Status = 'Pending' AND IsActive = 1) +
         (SELECT COUNT(*) FROM dbo.CrmBooking         WHERE Status = 'Pending' AND IsActive = 1 AND ReadyForApprovalAt IS NOT NULL) +
         (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE SeniorApprovalStatus = 'Pending') +
