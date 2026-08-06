@@ -73,18 +73,21 @@ import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
+// Mirrors the visible table's own column order (Doc No → Date → Fin Year →
+// Company → Project → Customer → Mode → Deposit Bank → Amount → Status)
+// so the export reads like the page it came from.
 const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Doc No", accessor: "docNo" },
-  { header: "Received From", accessor: "receivedFrom" },
-  { header: "Customer", accessor: "customerName" },
-  { header: "Project", accessor: "projectName" },
-  { header: "Company", accessor: "companyName" },
-  { header: "Mode", accessor: "mode" },
   { header: "Date", accessor: "docDate" },
+  { header: "Fin Year", accessor: (r) => String((r as any).finYear || "—") },
+  { header: "Company", accessor: "companyName" },
+  { header: "Project", accessor: "projectName" },
+  { header: "Customer", accessor: (r) => String(r.customerName || r.receivedFrom || "—") },
+  { header: "Mode", accessor: "mode" },
+  { header: "Deposit Bank", accessor: "depositBankName" },
   { header: "Amount", accessor: (r) => formatINR(Number(r.amount || 0)) },
-  { header: "Bank", accessor: "depositBankName" },
-  { header: "Transaction / Cheque Ref", accessor: (r) => String(r.transactionId || r.checkNumber || "") },
   { header: "Status", accessor: "status" },
+  { header: "Transaction / Cheque Ref", accessor: (r) => String(r.transactionId || r.checkNumber || "") },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────

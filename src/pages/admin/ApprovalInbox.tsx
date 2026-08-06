@@ -275,6 +275,16 @@ const DATE_APPROVER_ROLES = ["super_admin"];
 const SUB_GATE_SUFFIX: Record<string, string> = { "crm-agreement-date": "date", "crm-sales-deed-director": "director" };
 const SUB_GATE_MODULES = new Set(Object.keys(SUB_GATE_SUFFIX));
 
+// Modules the backend keeps deliberately role-locked (see
+// MODULE_APPROVER_ROLE_OVERRIDES in approvalService.js) — the
+// "approval-inbox" page-right fallback must not open these.
+const RESTRICTED_MODULES = new Set([
+  "journal-voucher",
+  "inter-company-transfer",
+  "fund-transfer",
+  ...SUB_GATE_MODULES,
+]);
+
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
 
 // Modules whose page already supports a "?view=<RecordId>" deep link that
@@ -768,6 +778,7 @@ const InboxRow: React.FC<{
           : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
           : undefined
         }
+        restricted={RESTRICTED_MODULES.has(item.Module)}
         onSuccess={(action) => {
           if (action === "approve" || action === "reject") {
             onOptimisticUpdate(item.RecordId, item.Module);

@@ -375,13 +375,22 @@ export default function LoanSanctionPage() {
         remarks: editForm.remarks || null,
         lenderBankAccountId: editForm.lenderBankAccountId || null,
         borrowerBankAccountId: editForm.borrowerBankAccountId || null,
-        loanDate: editForm.loanDate,
-        amount: editForm.amount,
-        hasInterest: editForm.hasInterest,
-        interestType: editForm.interestType,
-        interestRate: editForm.hasInterest ? editForm.interestRate || null : null,
-        tenureMonths: editForm.tenureMonths || null,
-        dueDate: isInterCompany && !editForm.hasInterest ? editForm.dueDate || null : null,
+        // Financial-core fields are only sent when repayment hasn't started
+        // yet — the backend treats their mere presence in the body as "the
+        // caller wants to touch the financial core" and 409s once any EMI
+        // is paid, so admin-only edits after that point must omit them
+        // entirely rather than resend the unchanged (disabled) values.
+        ...(paidEmis === 0
+          ? {
+              loanDate: editForm.loanDate,
+              amount: editForm.amount,
+              hasInterest: editForm.hasInterest,
+              interestType: editForm.interestType,
+              interestRate: editForm.hasInterest ? editForm.interestRate || null : null,
+              tenureMonths: editForm.tenureMonths || null,
+              dueDate: isInterCompany && !editForm.hasInterest ? editForm.dueDate || null : null,
+            }
+          : {}),
       });
       toast.success("Loan details updated");
       setEditingDetails(false);
@@ -878,6 +887,11 @@ export default function LoanSanctionPage() {
                     {editingDetails && (
                       <div className="rounded-xl border border-primary/30 bg-primary/[0.03] p-4 space-y-4">
                         <SectionLabel icon={Pencil} label="Edit Loan Details" />
+                        {paidEmis > 0 && (
+                          <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1.5 -mt-2">
+                            <AlertTriangle size={11} /> This loan already has repayments recorded — amount, interest, tenure and dates are locked. Only Loan Doc No, Purpose, Remarks, and bank A/C tags can be edited.
+                          </p>
+                        )}
                         <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1.5">
                             <label className={labelCls}>Loan Doc No.</label>
@@ -887,6 +901,78 @@ export default function LoanSanctionPage() {
                               onChange={(e) => setEditForm((f) => ({ ...f, loanDocNo: e.target.value }))}
                             />
                           </div>
+                          <div className="space-y-1.5">
+                            <label className={labelCls}>Loan Date</label>
+                            <input
+                              type="date"
+                              className={inputCls}
+                              disabled={paidEmis > 0}
+                              value={editForm.loanDate}
+                              onChange={(e) => setEditForm((f) => ({ ...f, loanDate: e.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className={labelCls}>Amount</label>
+                            <input
+                              type="number"
+                              className={inputCls}
+                              disabled={paidEmis > 0}
+                              value={editForm.amount}
+                              onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className={labelCls}>Tenure (months)</label>
+                            <input
+                              type="number"
+                              className={inputCls}
+                              disabled={paidEmis > 0}
+                              value={editForm.tenureMonths}
+                              onChange={(e) => setEditForm((f) => ({ ...f, tenureMonths: e.target.value.replace(/[^0-9]/g, "") }))}
+                            />
+                          </div>
+                          <div className="space-y-1.5 col-span-2 flex items-center justify-between rounded-lg border border-border px-3.5 py-2.5">
+                            <span className="text-sm font-medium text-foreground">Interest-bearing loan</span>
+                            <button
+                              type="button"
+                              disabled={paidEmis > 0}
+                              onClick={() => setEditForm((f) => ({ ...f, hasInterest: !f.hasInterest }))}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
+                                editForm.hasInterest ? "bg-emerald-500" : "bg-muted"
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
+                                  editForm.hasInterest ? "translate-x-6" : "translate-x-1"
+                                }`}
+                              />
+                            </button>
+                          </div>
+                          {editForm.hasInterest && (
+                            <div className="space-y-1.5">
+                              <label className={labelCls}>Interest Rate (% p.a.)</label>
+                              <input
+                                type="number"
+                                className={inputCls}
+                                disabled={paidEmis > 0}
+                                value={editForm.interestRate}
+                                onChange={(e) => setEditForm((f) => ({ ...f, interestRate: e.target.value.replace(/[^0-9.]/g, "") }))}
+                              />
+                            </div>
+                          )}
+                          {isInterCompanyType && !editForm.hasInterest && (
+                            <div className="space-y-1.5">
+                              <label className={labelCls}>Repayment Due Date</label>
+                              <input
+                                type="date"
+                                className={inputCls}
+                                disabled={paidEmis > 0}
+                                value={editForm.dueDate}
+                                min={editForm.loanDate || undefined}
+                                onChange={(e) => setEditForm((f) => ({ ...f, dueDate: e.target.value }))}
+                              />
+                            </div>
+                          )}
                           {isInterCompanyType && (
                             <>
                               <div className="space-y-1.5">

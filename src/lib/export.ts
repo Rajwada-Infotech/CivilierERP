@@ -462,16 +462,26 @@ export async function exportToPdf(
       fillColor: [248, 250, 252],
     },
     columnStyles: {
+      // Give every column a floor width sized to its own header text, so
+      // autoTable's 'auto' width mode never squeezes a header narrower than
+      // the word itself — without this, a header like "Company" gets a
+      // computed width shorter than the word, and jsPDF hard-wraps it
+      // mid-word ("Compan" / "y") once the table has enough columns to
+      // outgrow the page. This is a floor, not a fixed width — columns with
+      // wider body content still grow past it.
+      ...Object.fromEntries(
+        columns.map((c, i) => [i, { minCellWidth: c.header.length * 4.6 + 16 }]),
+      ),
       // Right-align numeric columns heuristically — columns whose header contains
       // "Amount", "No", "Count" get right alignment
       ...Object.fromEntries(
         columns
           .map((c, i) =>
             /amount|count|qty|no\.?$/i.test(c.header)
-              ? [i, { halign: "right" as const }]
+              ? [i, { minCellWidth: c.header.length * 4.6 + 16, halign: "right" as const }]
               : null,
           )
-          .filter(Boolean) as [number, { halign: "right" }][],
+          .filter(Boolean) as [number, { minCellWidth: number; halign: "right" }][],
       ),
       // Optional per-export override for specific column indices (e.g. tighter
       // left padding on a name/account column with deep indentation).
