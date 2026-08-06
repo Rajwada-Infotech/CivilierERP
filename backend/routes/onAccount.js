@@ -283,13 +283,33 @@ router.post("/apply-adjustment", requirePageRight("on-account-adjustment", "crea
     const balance = parseFloat(balRes.recordset[0]?.balance ?? 0);
     if (balance <= 0) return res.status(400).json({ error: "No On Account balance available" });
 
-    const applyAmt = Math.min(amount, balance);
-
-    // Get invoice details for companyId/projectId
+    // Get invoice details for companyId/projectId, and — critically — how
+    // much is actually still owed. This endpoint only ever checked the
+    // PARTY's on-account balance, never the INVOICE's own remaining amount,
+    // so once an invoice was fully paid by one adjustment, nothing stopped
+    // it being "applied" again and again against the same already-settled
+    // invoice as long as the party still had leftover OA balance — each
+    // call created its own OnAccountLedger debit + synthetic Dummy Bank
+    // payment, which is exactly how the same invoice ends up with a wall of
+    // identical duplicate "On Account Adjustment" entries.
     const ebRes = await pool.request().input("EDocNo", sql.NVarChar(100), expenseRef).query(`
-      SELECT TOP 1 ECompanyId, TRY_CAST(EProjectName AS INT) AS ProjectId FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo
+      SELECT TOP 1 ECompanyId, TRY_CAST(EProjectName AS INT) AS ProjectId,
+             ENetAmount, EAmount, ETotalPaid, ERemainingAmount, EBillStatus
+      FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo
     `);
     const eb = ebRes.recordset[0];
+    let invoiceRemainingCap = null;
+    if (eb) {
+      const netAmount = parseFloat(eb.ENetAmount ?? 0) > 0 ? parseFloat(eb.ENetAmount) : (parseFloat(eb.EAmount ?? 0) || 0);
+      const totalPaid = parseFloat(eb.ETotalPaid ?? 0) || 0;
+      const invoiceRemaining = eb.ERemainingAmount != null ? parseFloat(eb.ERemainingAmount) : Math.max(0, netAmount - totalPaid);
+      if (eb.EBillStatus === "Paid" || invoiceRemaining <= 0) {
+        return res.status(400).json({ error: "This invoice is already fully paid — no further On Account adjustment is needed." });
+      }
+      invoiceRemainingCap = invoiceRemaining;
+    }
+
+    const applyAmt = Math.min(amount, balance, invoiceRemainingCap ?? amount);
 
     await pool.request()
       .input("PartyId",     sql.Int,           party.partyId)

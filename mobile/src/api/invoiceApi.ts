@@ -292,6 +292,25 @@ export async function fetchSupplierHeads(): Promise<SupplierHead[]> {
   return (Array.isArray(raw) ? raw : []).map((h: any) => ({ id: h.LHeadId, label: h.LHeadName }));
 }
 
+// The "Payable To" field isn't Supplier-only — a Direct/Other-Expense
+// invoice can be payable to a Contractor or a Broker too, matching web's
+// MaterialExpenseBooking.tsx (supplierHeads/contractorHeads/brokerHeads,
+// account-head types S/C/BR). Mobile previously only ever fetched type=S,
+// so Contractors and Brokers silently never showed up in the picker.
+export async function fetchContractorHeads(): Promise<SupplierHead[]> {
+  const res = await fetchWithAuth("/api/account-head?type=C");
+  if (!res.ok) return [];
+  const raw = await res.json().catch(() => []);
+  return (Array.isArray(raw) ? raw : []).map((h: any) => ({ id: h.LHeadId, label: h.LHeadName }));
+}
+
+export async function fetchBrokerHeads(): Promise<SupplierHead[]> {
+  const res = await fetchWithAuth("/api/account-head?type=BR");
+  if (!res.ok) return [];
+  const raw = await res.json().catch(() => []);
+  return (Array.isArray(raw) ? raw : []).map((h: any) => ({ id: h.LHeadId, label: h.LHeadName }));
+}
+
 export interface ExpenseBookingPayload {
   EName: string;
   LHeadId?: number | null;

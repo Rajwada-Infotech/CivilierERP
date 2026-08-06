@@ -1562,8 +1562,9 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
       const maxResult = await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId)
+        .input("PrefixLen", sql.Int, prefix.length)
         .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
+          SELECT MAX(TRY_CAST(SUBSTRING(DocNo, @PrefixLen + 1, 6) AS INT)) AS MaxSeq
           FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
           WHERE TypeOfDocId = @TypeOfDocId
             AND DocNo LIKE @Prefix
@@ -1573,8 +1574,9 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
       const ebMaxResult = await transaction
         .request()
         .input("EDocTypeId2", sql.Int, typeId)
+        .input("Prefix2Len", sql.Int, prefix.length)
         .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
+          SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, @Prefix2Len + 1, 6) AS INT)) AS MaxSeq
           FROM dbo.ExpenseBooking WITH (UPDLOCK, HOLDLOCK)
           WHERE EDocTypeId = @EDocTypeId2
             AND EDocNo LIKE @Prefix2
@@ -1650,6 +1652,16 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
         throw err;
       }
     }
+
+    // The doc-number reservation loop above INSERTed/claimed its row in
+    // DocNumberSequence keyed by the un-prefixed value — keep that exact
+    // string for the RecordId back-patch below. Prepending "ExB/" onto
+    // `finalDocNo` for display/storage on ExpenseBooking.EDocNo used to
+    // also change what the back-patch searched for, so the UPDATE never
+    // matched any row, RecordId stayed NULL forever, and every subsequent
+    // booking's reservation loop treated the row as an abandoned ghost
+    // reservation and reclaimed the SAME number instead of incrementing.
+    const reservedDocNo = finalDocNo;
 
     // Prepend ExB/ prefix to every expense booking doc number
     if (finalDocNo && !finalDocNo.startsWith("ExB/")) {
@@ -1781,10 +1793,10 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
 
     const newExpenseId = insertResult.recordset[0]?.NewId;
 
-    if (finalDocNo && newExpenseId) {
+    if (reservedDocNo && newExpenseId) {
       await transaction
         .request()
-        .input("DocNo", sql.NVarChar(100), finalDocNo)
+        .input("DocNo", sql.NVarChar(100), reservedDocNo)
         .input("RecordId", sql.Int, parseInt(newExpenseId, 10)).query(`
           UPDATE dbo.DocNumberSequence
           SET RecordId = @RecordId
@@ -2103,6 +2115,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       bookingIgstRate = direct.bookingIgstRate;
     }
 
+    let isDinvDocType = false;
     if (EDocTypeId) {
       const typeId = parseInt(EDocTypeId, 10);
       const finYear = (EFinYear || "").toString().trim();
@@ -2110,7 +2123,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       const typeResult = await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId).query(`
-          SELECT Prefix, FullPrefix, StartingDocNo
+          SELECT Prefix, FullPrefix, StartingDocNo, DocNoPrefix
           FROM dbo.TypeOfDoc
           WHERE TypeOfDocId = @TypeOfDocId AND IsActive = 1
         `);
@@ -2123,6 +2136,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           .json({ error: "Selected document type not found or inactive." });
       }
 
+      // Direct Expense Booking (DINV) numbers are meant to stand on their
+      // own — DocNoPrefix already reads "DINV", so stacking the generic
+      // "INV/" module prefix on top ("INV/DINV000001/...") was redundant.
+      isDinvDocType = typeRow.DocNoPrefix === "DINV";
+
       const rawPrefix = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
       const prefix = rawPrefix.replace(/\d+$/, "");
       const startFrom = typeRow.StartingDocNo ?? 1;
@@ -2131,8 +2149,9 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       const maxResult = await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId)
+        .input("PrefixLen", sql.Int, prefix.length)
         .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
+          SELECT MAX(TRY_CAST(SUBSTRING(DocNo, @PrefixLen + 1, 6) AS INT)) AS MaxSeq
           FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
           WHERE TypeOfDocId = @TypeOfDocId
             AND DocNo LIKE @Prefix
@@ -2142,8 +2161,9 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       const ebMaxResult = await transaction
         .request()
         .input("EDocTypeId2", sql.Int, typeId)
+        .input("Prefix2Len", sql.Int, prefix.length)
         .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
+          SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, @Prefix2Len + 1, 6) AS INT)) AS MaxSeq
           FROM dbo.ExpenseBooking WITH (UPDLOCK, HOLDLOCK)
           WHERE EDocTypeId = @EDocTypeId2
             AND EDocNo LIKE @Prefix2
@@ -2227,8 +2247,21 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       }
     }
 
-    // Prepend INV/ prefix to every expense booking doc number
-    if (finalDocNo && !finalDocNo.startsWith("INV/")) {
+    // The doc-number reservation loop above INSERTed/claimed its row in
+    // DocNumberSequence keyed by the un-prefixed value — keep that exact
+    // string for the RecordId back-patch below. Prepending "INV/" onto
+    // `finalDocNo` for display/storage on ExpenseBooking.EDocNo used to
+    // also change what the back-patch searched for, so the UPDATE never
+    // matched any row, RecordId stayed NULL forever, and every subsequent
+    // booking's reservation loop treated the row as an abandoned ghost
+    // reservation and reclaimed the SAME number instead of incrementing —
+    // e.g. every Direct Expense Booking (DINV) landing on INV/DINV000001.
+    const reservedDocNo = finalDocNo;
+
+    // Prepend INV/ prefix to every expense booking doc number — except
+    // Direct Expense Bookings (DINV), which already carry their own
+    // distinct prefix and don't need the generic "INV/" stacked on top.
+    if (finalDocNo && !isDinvDocType && !finalDocNo.startsWith("INV/")) {
       finalDocNo = `INV/${finalDocNo}`;
     }
 
@@ -2363,10 +2396,10 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
 
     const newExpenseId = insertResult.recordset[0]?.NewId;
 
-    if (finalDocNo && newExpenseId) {
+    if (reservedDocNo && newExpenseId) {
       await transaction
         .request()
-        .input("DocNo", sql.NVarChar(100), finalDocNo)
+        .input("DocNo", sql.NVarChar(100), reservedDocNo)
         .input("RecordId", sql.Int, parseInt(newExpenseId, 10)).query(`
           UPDATE dbo.DocNumberSequence
           SET RecordId = @RecordId
@@ -2770,15 +2803,17 @@ router.put(
                 const maxResult = await pool
                   .request()
                   .input("TypeOfDocId", sql.Int, parentRow.EDocTypeId)
+                  .input("PrefixLen", sql.Int, prefix.length)
                   .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
-                  SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
+                  SELECT MAX(TRY_CAST(SUBSTRING(DocNo, @PrefixLen + 1, 6) AS INT)) AS MaxSeq
                   FROM dbo.DocNumberSequence WHERE TypeOfDocId = @TypeOfDocId AND DocNo LIKE @Prefix
                 `);
                 const ebMaxResult = await pool
                   .request()
                   .input("EDocTypeId2", sql.Int, parentRow.EDocTypeId)
+                  .input("Prefix2Len", sql.Int, prefix.length)
                   .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
-                  SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
+                  SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, @Prefix2Len + 1, 6) AS INT)) AS MaxSeq
                   FROM dbo.ExpenseBooking WHERE EDocTypeId = @EDocTypeId2 AND EDocNo LIKE @Prefix2
                 `);
 

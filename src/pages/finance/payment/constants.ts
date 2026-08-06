@@ -77,11 +77,13 @@ export const IFSC_BANK_MAP: Record<string, string> = {
 
 // ─── Export columns ──────────────────────────────────────────────────────────
 
-// Mirrors the visible desktop table's own column order (Payment Purpose →
-// Doc No → Expense Ref → Amount → Status), then appends the supplementary
-// detail fields the compact table doesn't have room for — so the export
-// reads like the page it came from instead of a differently-ordered dump.
+// Company / Project lead so exports can be filtered/grouped by entity at a
+// glance, then follows the visible desktop table's own column order
+// (Payment Purpose → Doc No → Expense Ref → Amount → Status), appending the
+// supplementary detail fields the compact table doesn't have room for.
 export const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Company", accessor: "company" },
+  { header: "Project", accessor: "project" },
   { header: "Payment Purpose", accessor: "paymentName" },
   { header: "Doc No", accessor: "docNo" },
   { header: "Expense Ref", accessor: "expenseRef" },
@@ -92,8 +94,6 @@ export const EXPORT_COLUMNS: ExportColumn[] = [
   // cancelled or bounced cheque still exported as "Approved" before.
   { header: "Status", accessor: (r: any) => r.displayStatus || r.status || "—" },
   { header: "Paid To", accessor: "paidTo" },
-  { header: "Company", accessor: "company" },
-  { header: "Project", accessor: "project" },
   { header: "Mode", accessor: "mode" },
   { header: "Date", accessor: "date" },
   { header: "Bank", accessor: "bankName" },

@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ChevronDown, Search, X, FileText, Wallet, Receipt, Truck, CreditCard, Check } from "lucide-react-native";
 import {
   fetchPOOptions, fetchWorkDoneOptions, fetchExpenseDocTypes, fetchNextExpenseDocNumber,
-  fetchSupplierHeads, createExpenseBooking, updateExpenseBooking, fetchInvoiceById,
+  fetchSupplierHeads, fetchContractorHeads, fetchBrokerHeads, createExpenseBooking, updateExpenseBooking, fetchInvoiceById,
   fetchGRNOptions, fetchGRNDetail, aggregateGRNsForInvoice,
   fetchBillingTermOptions, billingTermToConfig, fetchCostCenterOptionsInv,
   generateEmiSchedule, computeBreakdown,
@@ -201,6 +201,18 @@ export default function NewInvoiceScreen() {
   const { data: allProjects = EMPTY_LIST } = useQuery({ queryKey: ["inv-projects"], queryFn: fetchProjectOptions });
   const { data: finYears = [] } = useQuery({ queryKey: ["inv-finyears"], queryFn: fetchFinYearOptions });
   const { data: supplierHeads = [] } = useQuery({ queryKey: ["inv-supplier-heads"], queryFn: fetchSupplierHeads });
+  const { data: contractorHeads = [] } = useQuery({ queryKey: ["inv-contractor-heads"], queryFn: fetchContractorHeads });
+  const { data: brokerHeads = [] } = useQuery({ queryKey: ["inv-broker-heads"], queryFn: fetchBrokerHeads });
+  // "Payable To" spans all three party types — merged once here so the
+  // picker and the id lookup on select both read from one combined list.
+  const payableParties = useMemo(
+    () => [
+      ...supplierHeads.map((s) => ({ ...s, group: "Supplier" })),
+      ...contractorHeads.map((c) => ({ ...c, group: "Contractor" })),
+      ...brokerHeads.map((b) => ({ ...b, group: "Broker" })),
+    ],
+    [supplierHeads, contractorHeads, brokerHeads],
+  );
   const { data: poList = EMPTY_LIST, isLoading: poLoading } = useQuery({ queryKey: ["inv-po-list"], queryFn: fetchPOOptions, enabled: sourceKind === "PO" });
   const { data: wdList = EMPTY_LIST, isLoading: wdLoading } = useQuery({ queryKey: ["inv-wd-list"], queryFn: fetchWorkDoneOptions, enabled: sourceKind === "WORK_DONE" });
   const { data: grnList = EMPTY_LIST, isLoading: grnLoading } = useQuery({ queryKey: ["inv-grn-list"], queryFn: fetchGRNOptions, enabled: sourceKind === "GRN" });
@@ -457,7 +469,7 @@ export default function NewInvoiceScreen() {
           <PickerField
             label="Supplier / Vendor"
             value={supplier}
-            placeholder="Select supplier…"
+            placeholder="Select payable party…"
             onPress={() => setSupplierPickerOpen(true)}
             disabled={!!selectedPO || !!selectedWD || !!grnMerged}
           />
@@ -633,11 +645,11 @@ export default function NewInvoiceScreen() {
       />
       <OptionSheet
         visible={supplierPickerOpen}
-        title="Select Supplier"
-        options={supplierHeads.map((s) => ({ id: s.id, label: s.label }))}
+        title="Select Payable Party"
+        options={payableParties.map((p) => ({ id: p.id, label: p.label, sub: p.group }))}
         onClose={() => setSupplierPickerOpen(false)}
         onSelect={(id) => {
-          const head = supplierHeads.find((s) => String(s.id) === id);
+          const head = payableParties.find((p) => String(p.id) === id);
           setSupplier(head?.label ?? "");
           setSupplierLHeadId(head?.id ?? null);
           setSupplierPickerOpen(false);
