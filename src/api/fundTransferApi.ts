@@ -105,3 +105,59 @@ export const rejectFundTransfer = async (id: number, note?: string) => {
   });
   return handleResponse(res);
 };
+
+// ── Inter-Company Loan register ─────────────────────────────────────────────
+// One shared ledger head per counterparty company pair (see
+// resolveOrCreateLoanHead() in generalLedger.js) — every approved
+// Inter-company Fund Transfer between that pair, in either direction, posts
+// against it. Balance is derived live from GeneralLedgerEntry, never stored.
+
+export interface LoanSide {
+  CompanyId: number;
+  CompanyName: string;
+  /** Positive = this company is owed (receivable). Negative = this company owes (payable). */
+  NetBalance: number;
+}
+
+export interface LoanSummary {
+  LHeadId: number;
+  LHeadName: string;
+  LHeadCode: string;
+  OpenedAt: string;
+  LastActivity: string | null;
+  TransferCount: number;
+  Sides: LoanSide[];
+}
+
+export interface LoanLedgerEntry {
+  EntryId: number;
+  VoucherNo: string;
+  VoucherDate: string;
+  DebitAmount: number;
+  CreditAmount: number;
+  Narration: string | null;
+  CompanyId: number;
+  CompanyName: string | null;
+  SourceId: number;
+  DocNo: string | null;
+  TransferType: FundTransferType | null;
+  TransferStatus: string | null;
+}
+
+export interface LoanDetail {
+  LHeadId: number;
+  LHeadName: string;
+  LHeadCode: string;
+  OpenedAt: string;
+  entries: LoanLedgerEntry[];
+}
+
+export const getLoans = async (): Promise<LoanSummary[]> => {
+  const res = await fetchWithAuth(`${BASE}/loans`);
+  return handleResponse(res);
+};
+
+export const getLoan = async (lHeadId: number): Promise<LoanDetail> => {
+  const res = await fetchWithAuth(`${BASE}/loans/${lHeadId}`);
+  return handleResponse(res);
+};

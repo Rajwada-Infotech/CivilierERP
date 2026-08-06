@@ -23,14 +23,21 @@ import { cn } from "@/lib/utils";
 import {
   Plus, ArrowLeftRight, Building2, Landmark, Loader2, RefreshCw,
   CheckCircle2, Clock, FileText, AlertCircle, Search, X, Check,
+  History, ArrowUpRight, ArrowDownRight, ChevronRight, ArrowLeft, Wallet,
 } from "lucide-react";
 import {
   getFundTransfers,
   createFundTransfer,
   approveFundTransfer,
   rejectFundTransfer,
+  getLoans,
+  getLoan,
   type FundTransferSummary,
   type FundTransferType,
+  type LoanSummary,
+  type LoanDetail,
+  type LoanSide,
+  type LoanLedgerEntry,
 } from "@/api/fundTransferApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
@@ -136,11 +143,238 @@ function bankLabel(b: BankRecord) {
   return `${b.BName || `Bank #${b.BId}`}${acct}${company}`;
 }
 
+function BalancePill({ side }: { side: LoanSide }) {
+  const settled = Math.abs(side.NetBalance) < 0.01;
+  const owed = side.NetBalance > 0;
+  return (
+    <div className={cn(
+      "flex items-center justify-between gap-2 px-3 py-2 rounded-lg border",
+      settled ? "border-border bg-muted/20" : owed ? "border-emerald-400/25 bg-emerald-500/5" : "border-rose-400/25 bg-rose-500/5",
+    )}>
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-foreground truncate">{side.CompanyName}</p>
+        <p className={cn("text-[10px] font-medium mt-0.5", settled ? "text-muted-foreground" : owed ? "text-emerald-700" : "text-rose-700")}>
+          {settled ? "Settled" : owed ? "Owed to this company" : "Owes to counterparty"}
+        </p>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        {!settled && (owed ? <ArrowUpRight size={13} className="text-emerald-600" /> : <ArrowDownRight size={13} className="text-rose-600" />)}
+        <span className={cn("font-mono text-sm font-bold tabular-nums", settled ? "text-muted-foreground" : owed ? "text-emerald-700" : "text-rose-700")}>
+          {formatINR(Math.abs(side.NetBalance))}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function LoanRegisterView({
+  loans,
+  loading,
+  onOpen,
+}: {
+  loans: LoanSummary[];
+  loading: boolean;
+  onOpen: (lHeadId: number) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="py-16 text-center">
+        <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
+        <p className="text-sm text-muted-foreground mt-2">Loading the loan register…</p>
+      </div>
+    );
+  }
+  if (loans.length === 0) {
+    return (
+      <div className="py-20 text-center rounded-lg border border-border bg-card">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Landmark size={36} className="opacity-20" />
+          <p className="text-sm font-medium">No inter-company loans yet</p>
+          <p className="text-xs max-w-sm">
+            A loan account opens automatically the first time an Inter-Company Fund Transfer is approved between two companies.
+          </p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-md border border-border bg-muted/20 text-[11px] text-muted-foreground border-l-[3px] border-l-violet-500">
+        <Wallet size={13} className="shrink-0 mt-0.5 text-violet-600" />
+        <span>
+          One ledger account per company pair, shared by every Inter-Company transfer between them in either
+          direction. Balances are derived live from the General Ledger — a reverse transfer repays the loan
+          automatically.
+        </span>
+      </div>
+      {loans.map((loan) => (
+        <button
+          key={loan.LHeadId}
+          onClick={() => onOpen(loan.LHeadId)}
+          className="w-full text-left rounded-lg border border-border bg-card p-4 hover:border-violet-400/40 hover:bg-violet-500/[0.02] transition-colors"
+        >
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0">
+                <Landmark size={13} className="text-violet-600" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground truncate">{loan.LHeadName}</p>
+                <p className="text-[10px] font-mono text-muted-foreground">{loan.LHeadCode}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 shrink-0 text-right">
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">Transfers</p>
+                <p className="text-sm font-mono font-semibold text-foreground">{loan.TransferCount}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">Last Activity</p>
+                <p className="text-sm font-mono font-semibold text-foreground">{fmtDate(loan.LastActivity)}</p>
+              </div>
+              <ChevronRight size={16} className="text-muted-foreground" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {loan.Sides.map((side) => <BalancePill key={side.CompanyId} side={side} />)}
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Each approved Inter-Company transfer contributes exactly two legs to the
+// shared loan head (one per company) — group raw GL entries back into one
+// row per real-world transfer event, rather than showing raw debit/credit
+// legs, which reads far closer to an actual passbook.
+function buildLoanTimeline(entries: LoanLedgerEntry[]) {
+  const bySource = new Map<number, LoanLedgerEntry[]>();
+  for (const e of entries) {
+    if (!bySource.has(e.SourceId)) bySource.set(e.SourceId, []);
+    bySource.get(e.SourceId)!.push(e);
+  }
+  return [...bySource.entries()]
+    .map(([sourceId, legs]) => {
+      const drLeg = legs.find((l) => Number(l.DebitAmount) > 0);
+      const crLeg = legs.find((l) => Number(l.CreditAmount) > 0);
+      const first = legs[0];
+      return {
+        sourceId,
+        docNo: first.DocNo,
+        date: first.VoucherDate,
+        status: first.TransferStatus,
+        amount: Number(drLeg?.DebitAmount || crLeg?.CreditAmount || 0),
+        fromCompany: drLeg?.CompanyName || "—",
+        toCompany: crLeg?.CompanyName || "—",
+      };
+    })
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.sourceId - b.sourceId);
+}
+
+function LoanDetailView({
+  detail,
+  loading,
+  onBack,
+}: {
+  detail: LoanDetail | null;
+  loading: boolean;
+  onBack: () => void;
+}) {
+  const timeline = useMemo(() => (detail ? buildLoanTimeline(detail.entries) : []), [detail]);
+
+  // Current balance per company, derived the same way the register's own
+  // summary is (net Dr-Cr per CompanyId) — kept in sync with GET /loans
+  // without a second round trip, since the raw entries are already here.
+  const sides = useMemo(() => {
+    if (!detail) return [];
+    const byCompany = new Map<number, { CompanyId: number; CompanyName: string; NetBalance: number }>();
+    for (const e of detail.entries) {
+      if (!byCompany.has(e.CompanyId)) {
+        byCompany.set(e.CompanyId, { CompanyId: e.CompanyId, CompanyName: e.CompanyName || `Company ${e.CompanyId}`, NetBalance: 0 });
+      }
+      const side = byCompany.get(e.CompanyId)!;
+      side.NetBalance += Number(e.DebitAmount || 0) - Number(e.CreditAmount || 0);
+    }
+    return [...byCompany.values()].map((s) => ({ ...s, NetBalance: Math.round(s.NetBalance * 100) / 100 }));
+  }, [detail]);
+
+  return (
+    <div className="space-y-4">
+      <button onClick={onBack} className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+        <ArrowLeft size={13} /> Back to Loan Register
+      </button>
+
+      {loading || !detail ? (
+        <div className="py-16 text-center">
+          <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
+          <p className="text-sm text-muted-foreground mt-2">Loading loan ledger…</p>
+        </div>
+      ) : (
+        <>
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Landmark size={15} className="text-violet-600" />
+              <h2 className="text-sm font-semibold text-foreground font-heading">{detail.LHeadName}</h2>
+            </div>
+            <p className="text-[11px] font-mono text-muted-foreground mb-3">
+              {detail.LHeadCode} · opened {fmtDate(detail.OpenedAt)}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {sides.map((side) => <BalancePill key={side.CompanyId} side={side} />)}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-card overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-1.5">
+              <History size={13} className="text-muted-foreground" />
+              <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Transfer History</h3>
+            </div>
+            {timeline.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">No transfers recorded yet</div>
+            ) : (
+              <div className="divide-y divide-border">
+                {timeline.map((ev) => (
+                  <div key={ev.sourceId} className="px-4 py-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded text-foreground">{ev.docNo || `FT-${ev.sourceId}`}</span>
+                        <span className="text-[11px] text-muted-foreground tabular-nums">{fmtDate(ev.date)}</span>
+                        {ev.status && <StatusBadge status={ev.status} />}
+                      </div>
+                      <p className="text-xs text-foreground mt-1 truncate">
+                        <span className="font-medium">{ev.fromCompany}</span>
+                        <span className="text-muted-foreground"> → </span>
+                        <span className="font-medium">{ev.toCompany}</span>
+                      </p>
+                    </div>
+                    <span className="font-mono text-sm font-semibold text-foreground tabular-nums shrink-0">
+                      {formatINR(ev.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function FundTransfer() {
   const rights = usePageRights("fund-transfer");
+  const [activeTab, setActiveTab] = useState<"transfers" | "loans">("transfers");
   const [transfers, setTransfers] = useState<FundTransferSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<FundTransferType | null>(null);
+
+  const [loans, setLoans] = useState<LoanSummary[]>([]);
+  const [loansLoading, setLoansLoading] = useState(true);
+  const [loanDetail, setLoanDetail] = useState<LoanDetail | null>(null);
+  const [loanDetailLoading, setLoanDetailLoading] = useState(false);
 
   const [companies, setCompanies] = useState<{ id: number; label: string }[]>([]);
   const [banks, setBanks] = useState<BankRecord[]>([]);
@@ -170,8 +404,34 @@ export default function FundTransfer() {
     }
   };
 
+  const loadLoans = async () => {
+    setLoansLoading(true);
+    try {
+      const data = await getLoans();
+      setLoans(data);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to load the loan register");
+    } finally {
+      setLoansLoading(false);
+    }
+  };
+
+  const openLoanDetail = async (lHeadId: number) => {
+    setActiveTab("loans");
+    setLoanDetailLoading(true);
+    try {
+      const detail = await getLoan(lHeadId);
+      setLoanDetail(detail);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to load loan ledger");
+    } finally {
+      setLoanDetailLoading(false);
+    }
+  };
+
   useEffect(() => {
     load();
+    loadLoans();
     getEnterpriseOptions(undefined, "C")
       .then((rows) => setCompanies(rows.map((r) => ({ id: r.id, label: r.label }))))
       .catch(() => setCompanies([]));
@@ -216,6 +476,7 @@ export default function FundTransfer() {
       await approveFundTransfer(id);
       toast.success("Fund Transfer approved and posted to GL");
       load();
+      loadLoans();
     } catch (err: any) {
       toast.error(err?.message || "Approval failed");
     } finally {
@@ -283,17 +544,27 @@ export default function FundTransfer() {
   }), [transfers]);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return transfers;
-    const q = search.toLowerCase();
-    return transfers.filter(
-      (t) =>
-        (t.DocNo || "").toLowerCase().includes(q) ||
-        (t.Narration || "").toLowerCase().includes(q) ||
-        (t.SourceCompanyName || "").toLowerCase().includes(q) ||
-        (t.DestinationCompanyName || "").toLowerCase().includes(q) ||
-        (t.Status || "").toLowerCase().includes(q),
-    );
-  }, [transfers, search]);
+    let rows = transfers;
+    if (statusFilter) rows = rows.filter((t) => t.Status === statusFilter);
+    if (typeFilter) rows = rows.filter((t) => t.TransferType === typeFilter);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      rows = rows.filter(
+        (t) =>
+          (t.DocNo || "").toLowerCase().includes(q) ||
+          (t.Narration || "").toLowerCase().includes(q) ||
+          (t.SourceCompanyName || "").toLowerCase().includes(q) ||
+          (t.DestinationCompanyName || "").toLowerCase().includes(q) ||
+          (t.Status || "").toLowerCase().includes(q),
+      );
+    }
+    return rows;
+  }, [transfers, search, statusFilter, typeFilter]);
+
+  const toggleStatusFilter = (status: string) =>
+    setStatusFilter((prev) => (prev === status ? null : status));
+  const toggleTypeFilter = (type: FundTransferType) =>
+    setTypeFilter((prev) => (prev === type ? null : type));
 
   return (
     <>
@@ -323,22 +594,52 @@ export default function FundTransfer() {
           </div>
         }
       >
-        {!loading && (
+        {/* ── Section tabs ── */}
+        <div className="flex items-center gap-1 border-b border-border mb-5">
+          <button
+            onClick={() => setActiveTab("transfers")}
+            className={cn(
+              "flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold border-b-2 -mb-px transition-colors font-heading",
+              activeTab === "transfers" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <ArrowLeftRight size={13} /> Transfers
+          </button>
+          <button
+            onClick={() => { setActiveTab("loans"); setLoanDetail(null); }}
+            className={cn(
+              "flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold border-b-2 -mb-px transition-colors font-heading",
+              activeTab === "loans" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Landmark size={13} /> Loan Ledger
+            {loans.length > 0 && (
+              <span className="px-1.5 py-0 rounded-full bg-violet-500/10 text-violet-700 text-[10px] font-mono">{loans.length}</span>
+            )}
+          </button>
+        </div>
+
+        {activeTab === "transfers" && !loading && (
           <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border rounded-lg border border-border bg-card mb-5">
             {[
-              { label: "Total Transfers", value: stats.total,    color: "text-foreground" },
-              { label: "Approved",        value: stats.approved, color: "text-foreground" },
-              { label: "Pending",         value: stats.pending,  color: stats.pending > 0 ? "text-amber-700" : "text-foreground" },
-              { label: "Inter-Company",   value: stats.inter,    color: stats.inter > 0 ? "text-violet-700" : "text-foreground" },
-            ].map(({ label, value, color }) => (
-              <div key={label} className="px-4 py-3">
+              { label: "Total Transfers", value: stats.total,    color: "text-foreground", onClick: () => { setStatusFilter(null); setTypeFilter(null); }, active: !statusFilter && !typeFilter },
+              { label: "Approved",        value: stats.approved, color: "text-foreground", onClick: () => toggleStatusFilter("Approved"), active: statusFilter === "Approved" },
+              { label: "Pending",         value: stats.pending,  color: stats.pending > 0 ? "text-amber-700" : "text-foreground", onClick: () => toggleStatusFilter("Pending"), active: statusFilter === "Pending" },
+              { label: "Inter-Company",   value: stats.inter,    color: stats.inter > 0 ? "text-violet-700" : "text-foreground", onClick: () => toggleTypeFilter("Inter"), active: typeFilter === "Inter" },
+            ].map(({ label, value, color, onClick, active }) => (
+              <button
+                key={label}
+                onClick={onClick}
+                className={cn("px-4 py-3 text-left transition-colors hover:bg-muted/40", active && "bg-primary/5")}
+              >
                 <p className={cn("text-2xl font-bold leading-none tabular-nums font-mono", color)}>{value}</p>
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mt-1.5 font-heading">{label}</p>
-              </div>
+                <p className={cn("text-[10px] font-semibold uppercase tracking-wider mt-1.5 font-heading", active ? "text-primary" : "text-muted-foreground")}>{label}</p>
+              </button>
             ))}
           </div>
         )}
 
+        {activeTab === "transfers" && <>
         <div className="relative mb-4">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -353,6 +654,22 @@ export default function FundTransfer() {
             </button>
           )}
         </div>
+
+        {(statusFilter || typeFilter) && (
+          <div className="flex items-center gap-1.5 mb-4">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground font-heading">Filtered by:</span>
+            {statusFilter && (
+              <button onClick={() => setStatusFilter(null)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-border bg-muted text-[11px] font-medium text-foreground hover:bg-muted/60">
+                {statusFilter} <X size={10} />
+              </button>
+            )}
+            {typeFilter && (
+              <button onClick={() => setTypeFilter(null)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-violet-400/30 bg-violet-500/10 text-[11px] font-medium text-violet-700 hover:bg-violet-500/20">
+                {typeFilter === "Inter" ? "Inter-Company" : "Intra-Company"} <X size={10} />
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="rounded-lg border border-border bg-card overflow-hidden">
           <div className="md:hidden divide-y divide-border">
@@ -393,10 +710,13 @@ export default function FundTransfer() {
                       type={t.TransferType}
                     />
                   </div>
-                  {t.TransferType === "Inter" && t.LoanHeadName && (
-                    <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-violet-400/20 bg-violet-500/5 text-[10px] font-mono text-violet-600 mb-2">
-                      <Landmark size={9} /> {t.LoanHeadName}
-                    </div>
+                  {t.TransferType === "Inter" && t.LoanHeadName && t.LoanHeadId && (
+                    <button
+                      onClick={() => openLoanDetail(t.LoanHeadId!)}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-violet-400/20 bg-violet-500/5 text-[10px] font-mono text-violet-600 mb-2 hover:bg-violet-500/15 transition-colors"
+                    >
+                      <Landmark size={9} /> {t.LoanHeadName} <ChevronRight size={9} />
+                    </button>
                   )}
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -485,10 +805,13 @@ export default function FundTransfer() {
                         type={t.TransferType}
                         compact
                       />
-                      {t.TransferType === "Inter" && t.LoanHeadName && (
-                        <div className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded border border-violet-400/20 bg-violet-500/5 text-[10px] font-mono text-violet-600">
-                          <Landmark size={9} /> {t.LoanHeadName}
-                        </div>
+                      {t.TransferType === "Inter" && t.LoanHeadName && t.LoanHeadId && (
+                        <button
+                          onClick={() => openLoanDetail(t.LoanHeadId!)}
+                          className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded border border-violet-400/20 bg-violet-500/5 text-[10px] font-mono text-violet-600 hover:bg-violet-500/15 transition-colors"
+                        >
+                          <Landmark size={9} /> {t.LoanHeadName} <ChevronRight size={9} />
+                        </button>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-foreground tabular-nums">
@@ -531,7 +854,7 @@ export default function FundTransfer() {
             </tbody>
           </table>
 
-          {!loading && filtered.length > 0 && search && (
+          {!loading && filtered.length > 0 && (search || statusFilter || typeFilter) && (
             <div className="px-4 py-2.5 border-t border-border bg-muted/20">
               <p className="text-xs text-muted-foreground">
                 Showing {filtered.length} of {transfers.length} transfers
@@ -539,6 +862,23 @@ export default function FundTransfer() {
             </div>
           )}
         </div>
+        </>}
+
+        {activeTab === "loans" && (
+          loanDetail || loanDetailLoading ? (
+            <LoanDetailView
+              detail={loanDetail}
+              loading={loanDetailLoading}
+              onBack={() => setLoanDetail(null)}
+            />
+          ) : (
+            <LoanRegisterView
+              loans={loans}
+              loading={loansLoading}
+              onOpen={openLoanDetail}
+            />
+          )
+        )}
       </FinanceShell>
 
       {/* ── New Fund Transfer Dialog ── */}
