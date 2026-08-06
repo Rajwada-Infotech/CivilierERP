@@ -10,7 +10,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { ensurePortalUser } = require("../services/crmPortalProvision");
 const { emitNotification } = require("../services/notify");
-const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoGenerateAgreementInvoice, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep } = require("../services/crmWorkflowGuards");
+const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoGenerateAgreementInvoice, maybeAutoCreateLegalMilestone, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep, syncLegalMilestoneFromDocument } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 // Senior approval is gated to admin/super_admin/dba via this shared engine —
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
@@ -108,6 +108,26 @@ async function agreementExecutedLockReason(pool, agreementId) {
     return `this agreement is already ${status}`;
   }
   return null;
+}
+
+// "Agreement Followup" step — % of this agreement's mandatory document
+// TYPES that actually have a file attached. Deliberately computed live on
+// every call (never stored) so it can never go stale through a reject/
+// resend/recheck cycle — the moment a document's file changes, the next
+// read reflects it automatically. Zero mandatory documents requested yet
+// means 0%, not a vacuous 100% — staff must actually request/attach the
+// real paperwork before this can complete; there being nothing to check
+// yet doesn't count as "checked."
+async function agreementFollowupProgress(pool, agreementId) {
+  const result = await pool.request().input("id", sql.Int, agreementId).query(`
+    SELECT COUNT(*) AS Required, SUM(CASE WHEN FileBase64 IS NOT NULL THEN 1 ELSE 0 END) AS Uploaded
+    FROM dbo.CrmAgreementDocument WHERE AgreementId = @id AND IsMandatory = 1
+  `);
+  const row = result.recordset[0] || { Required: 0, Uploaded: 0 };
+  const required = Number(row.Required) || 0;
+  const uploaded = Number(row.Uploaded) || 0;
+  const percent = required > 0 ? Math.round((uploaded / required) * 100) : 0;
+  return { required, uploaded, percent };
 }
 
 // GET / — all agreements
@@ -265,6 +285,31 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
       `);
     const agreementId = result.recordset[0].Id;
 
+    // Same standing SaleAgreement request maybeAutoCreateAgreement() seeds
+    // for the normal (auto-created) path — this manual "New Agreement"
+    // dialog is the fallback path (e.g. no unit preselected on the
+    // Application), and must guarantee the same baseline: every agreement,
+    // however it was created, always has the real legal paperwork tracked
+    // as a mandatory document from day one.
+    await pool.request()
+      .input("agid", sql.Int, agreementId)
+      .input("cb", sql.Int, actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmAgreementDocument
+          (AgreementId, DocumentType, Label, IsMandatory, Status, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
+        VALUES (@agid, 'SaleAgreement', 'Sale Agreement (Legal Paperwork)', 1, 'Requested', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
+      `);
+
+    // Same auto-start maybeAutoCreateAgreement() does for the normal path —
+    // this manual dialog must not leave the booking without a Legal
+    // Milestone tracker just because the agreement didn't come from the
+    // auto-create trigger.
+    try {
+      await maybeAutoCreateLegalMilestone(pool, bookingId, actorId(req));
+    } catch (e) {
+      console.error("[crm-agreements] legal milestone auto-start failed:", e.message);
+    }
+
     // Parallel: auto-create the customer portal login the moment agreement
     // preparation begins, so the customer can start tracking progress.
     // The agreement above is already committed by this point (no transaction
@@ -358,6 +403,17 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
     if (!legalCheck0.recordset.length) return res.status(404).json({ error: "Agreement not found" });
     if (!legalCheck0.recordset[0].LegalExecutiveId) {
       return res.status(400).json({ error: "A Legal Executive must be assigned before this agreement can receive senior approval — use PUT /:id/assign-legal" });
+    }
+    // Agreement Followup gate — mandatory paperwork must actually be
+    // attached (100% of required document types have a real file) before
+    // this can be senior-approved. Computed live, never cached, so a
+    // reject/resend cycle can never leave a stale "done" behind.
+    const followup0 = await agreementFollowupProgress(pool0, id);
+    if (followup0.required === 0) {
+      return res.status(400).json({ error: "No mandatory agreement documents have been requested/attached yet — add the required paperwork before this can receive senior approval" });
+    }
+    if (followup0.percent < 100) {
+      return res.status(400).json({ error: `Agreement Followup is only ${followup0.percent}% complete (${followup0.uploaded}/${followup0.required} mandatory documents attached) — all required paperwork must be attached before senior approval` });
     }
     // The Admin Approval Inbox's Approve/Reject buttons render through the
     // shared ApprovalActions component (src/components/ApprovalActions.tsx),
@@ -810,7 +866,7 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
     const actor = actorId(req);
 
     const old = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, LegalExecutiveId, AgreementNo FROM dbo.CrmAgreement WHERE Id = @id");
+      .query("SELECT Status, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, LegalExecutiveId, AgreementNo, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
     if (!old.recordset.length) return res.status(404).json({ error: "Agreement not found" });
     const oldRow = old.recordset[0];
 
@@ -880,6 +936,7 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
     // same as at creation time — so the handoff to "the legal person" is
     // never just a silent database field nobody checks.
     if (newLegalExecutiveId && newLegalExecutiveId !== oldRow.LegalExecutiveId) {
+      await syncLegalMilestoneStep(pool, oldRow.BookingId, "LegalReview", actor);
       await emitNotification(pool, newLegalExecutiveId, "crm_agreement_legal_assigned",
         "Agreement Assigned For Preparation",
         `${oldRow.AgreementNo} assigned to you for legal preparation.`,
@@ -912,7 +969,7 @@ router.put("/:id/assign-legal", requirePageRight("crm-agreements", "edit"), asyn
     if (lockReason) return res.status(409).json({ error: `Cannot reassign — ${lockReason}. Cancel the agreement instead.` });
 
     const old = await pool.request().input("id", sql.Int, id)
-      .query("SELECT LegalExecutiveId, AgreementNo, Status FROM dbo.CrmAgreement WHERE Id = @id");
+      .query("SELECT LegalExecutiveId, AgreementNo, Status, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
     if (!old.recordset.length) return res.status(404).json({ error: "Agreement not found" });
     const oldRow = old.recordset[0];
     if (["Registered", "Cancelled"].includes(oldRow.Status)) {
@@ -927,6 +984,7 @@ router.put("/:id/assign-legal", requirePageRight("crm-agreements", "edit"), asyn
     ]);
 
     if (newId && newId !== oldRow.LegalExecutiveId) {
+      await syncLegalMilestoneStep(pool, oldRow.BookingId, "LegalReview", actor);
       await emitNotification(pool, newId, "crm_agreement_legal_assigned",
         "Agreement Assigned For Preparation",
         `${oldRow.AgreementNo} assigned to you for legal preparation.`,
@@ -1115,7 +1173,7 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
       .query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
     const nextVersion = ver.recordset[0].N;
 
-    await pool.request()
+    const inserted = await pool.request()
       .input("agid",  sql.Int,            agreementId)
       .input("dtype", sql.NVarChar(100),  b.DocumentType)
       .input("url",   sql.NVarChar(2000), b.DocumentUrl  || null)
@@ -1129,8 +1187,10 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
       .query(`
         INSERT INTO dbo.CrmAgreementDocument
           (AgreementId, DocumentType, DocumentUrl, FileName, IssuedBy, Status, Remarks, UploadedAt, VersionNo, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
         VALUES (@agid, @dtype, @url, @fname, @iby, @st, @rem, ISNULL(@uat, SYSDATETIME()), @ver, @cb, SYSDATETIME())
       `);
+    await syncLegalMilestoneFromDocument(pool, inserted.recordset[0].Id, actorId(req));
     res.status(201).json({ success: true, version: nextVersion });
   } catch (e) {
     console.error("[crm-agreements] POST documents error:", e.message);
@@ -1155,6 +1215,35 @@ router.post("/:id/documents/request", requirePageRight("crm-documents", "create"
     if (lockReason) return res.status(409).json({ error: `Cannot request a document — ${lockReason}.` });
     const execLockReason = await agreementExecutedLockReason(pool, agreementId);
     if (execLockReason) return res.status(409).json({ error: `Cannot request a document — ${execLockReason}.` });
+
+    // An already-open request for this exact document type (Status still
+    // 'Requested' — asked for, nothing uploaded yet) must be reused, not
+    // duplicated. Previously this always inserted a fresh, ever-incrementing
+    // VersionNo row regardless of whether an unfulfilled request already
+    // existed, so clicking "Request from Customer" twice for the same type
+    // (e.g. re-confirming a request, or a staff double-click) silently
+    // spawned a second "field" for the same document — inflating the
+    // Agreement Followup denominator and showing the same document type
+    // twice in the list. Re-requesting the SAME open slot just refreshes it
+    // in place. A genuinely new version is still created when the prior
+    // attempt was Rejected or Verified — those are real, resolved outcomes,
+    // not an open request sitting untouched.
+    const openReq = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), b.DocumentType)
+      .query("SELECT TOP 1 Id FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype AND Status = 'Requested' ORDER BY VersionNo DESC");
+    if (openReq.recordset.length) {
+      const existingId = openReq.recordset[0].Id;
+      await pool.request()
+        .input("id", sql.Int, existingId)
+        .input("label", sql.NVarChar(200), b.Label || null)
+        .input("mand", sql.Bit, !!b.IsMandatory)
+        .input("rb", sql.Int, actorId(req))
+        .query(`
+          UPDATE dbo.CrmAgreementDocument SET
+            Label = ISNULL(@label, Label), IsMandatory = @mand, RequestedBy = @rb, RequestedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      return res.status(200).json({ success: true, id: existingId, reused: true });
+    }
 
     const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), b.DocumentType)
       .query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
@@ -1229,9 +1318,63 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
           `);
         inserted.push(result.recordset[0].Id);
       }
+      if (inserted.length) await syncLegalMilestoneFromDocument(pool, inserted[inserted.length - 1], actorId(req));
       res.status(201).json({ success: true, ids: inserted, count: inserted.length });
     } catch (e) {
       console.error("[crm-agreements] upload documents error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
+
+// POST /:id/documents/:docId/attach — attach a file to an EXISTING
+// Requested/Rejected row in place (the Legal Executive fulfilling a
+// mandatory placeholder like SaleAgreement). Distinct from
+// /:id/documents/upload above, which always inserts a brand-new row —
+// using that for a mandatory placeholder left the original Requested row
+// permanently empty, so Agreement Followup % could never reach 100%. This
+// mirrors the customer-portal fulfillment route (crmPortal.js) on the
+// staff side.
+router.post("/:id/documents/:docId/attach", requirePageRight("crm-documents", "create"), (req, res) => {
+  upload.single("file")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    try {
+      const pool = getPool();
+      const agreementId = parseInt(req.params.id);
+      const docId = parseInt(req.params.docId);
+
+      const cur = await pool.request()
+        .input("id", sql.Int, docId).input("agid", sql.Int, agreementId)
+        .query("SELECT Id, Status FROM dbo.CrmAgreementDocument WHERE Id = @id AND AgreementId = @agid");
+      if (!cur.recordset.length) return res.status(404).json({ error: "Document not found for this agreement" });
+      if (!["Requested", "Rejected"].includes(cur.recordset[0].Status)) {
+        return res.status(400).json({ error: "This document already has a file — use Add Document to upload a corrected version instead" });
+      }
+
+      const lockReason = await getAgreementBookingLockReason(pool, agreementId);
+      if (lockReason) return res.status(409).json({ error: `Cannot upload a document — ${lockReason}.` });
+      const execLockReason = await agreementExecutedLockReason(pool, agreementId);
+      if (execLockReason) return res.status(409).json({ error: `Cannot upload a document — ${execLockReason}.` });
+
+      await pool.request()
+        .input("id", sql.Int, docId)
+        .input("fname", sql.NVarChar(300), req.file.originalname)
+        .input("fb64", sql.NVarChar(sql.MAX), req.file.buffer.toString("base64"))
+        .input("fs", sql.BigInt, req.file.size)
+        .input("mt", sql.NVarChar(150), req.file.mimetype)
+        .input("cb", sql.Int, actorId(req))
+        .query(`
+          UPDATE dbo.CrmAgreementDocument SET
+            FileName = @fname, FileBase64 = @fb64, FileSize = @fs, MimeType = @mt,
+            Status = 'Uploaded', Remarks = NULL, UploadedAt = SYSDATETIME(), UploadedByType = 'Staff', CreatedBy = ISNULL(CreatedBy, @cb)
+          WHERE Id = @id
+        `);
+      await syncLegalMilestoneFromDocument(pool, docId, actorId(req));
+
+      res.json({ success: true });
+    } catch (e) {
+      console.error("[crm-agreements] attach document error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });
@@ -1363,6 +1506,7 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
       await logCrmAudit(pool, "AgreementDocument", docId, actor, [
         { field: "Status", oldVal: oldRow.Status, newVal: b.Status },
       ]);
+      await syncLegalMilestoneFromDocument(pool, docId, actor);
     }
 
     res.json({ success: true });
@@ -1466,6 +1610,7 @@ router.put("/documents/bulk-review", requirePageRight("crm-documents", "edit"), 
 
         if (status !== row.Status) {
           await logCrmAudit(pool, "AgreementDocument", docId, actor, [{ field: "Status", oldVal: row.Status, newVal: status }]);
+          await syncLegalMilestoneFromDocument(pool, docId, actor);
         }
         results.succeeded.push(docId);
       } catch (innerErr) {

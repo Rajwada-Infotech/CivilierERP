@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -7,7 +7,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Search, FileText, FileImage, FileSpreadsheet, File as FileIcon, Eye,
   Clock, XCircle, ArrowUpRight, Download, Check, X, ChevronDown, ChevronRight,
-  AlertTriangle, History, ListChecks, LayoutList, FolderClock, RotateCcw,
+  AlertTriangle, History, ListChecks, LayoutList, FolderClock, RotateCcw, Upload,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
@@ -135,7 +135,28 @@ function ReviewDialog({ doc, onClose, onReviewed }: { doc: any; onClose: () => v
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<"preview" | "history">("preview");
   const [audit, setAudit] = useState<any[] | null>(null);
+  const [attaching, setAttaching] = useState(false);
+  const attachInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  const attachFile = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    setAttaching(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetchWithAuth(`${API}/${doc.AgreementId}/documents/${doc.Id}/attach`, { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      toast.success("File uploaded");
+      onReviewed();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setAttaching(false);
+    }
+  };
 
   useEffect(() => {
     if (!doc.FilePath) return;
@@ -199,7 +220,20 @@ function ReviewDialog({ doc, onClose, onReviewed }: { doc: any; onClose: () => v
             <div className="flex items-center justify-center min-h-[240px] bg-muted/30 rounded-lg overflow-hidden">
               {!doc.FilePath ? (
                 <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">
-                  <Clock size={22} /> Awaiting upload from customer — nothing to preview yet.
+                  <Clock size={22} />
+                  {doc.UploadedByType === "Customer" ? (
+                    "Awaiting upload from customer — nothing to preview yet."
+                  ) : (
+                    <>
+                      Not yet uploaded — Legal Executive to attach.
+                      <input type="file" ref={attachInputRef} className="hidden"
+                        onChange={(e) => attachFile(e.target.files)} />
+                      <button onClick={() => attachInputRef.current?.click()} disabled={attaching}
+                        className="mt-1 flex items-center gap-1.5 px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                        <Upload size={12} /> {attaching ? "Uploading..." : "Upload File"}
+                      </button>
+                    </>
+                  )}
                 </div>
               ) : !blobUrl ? (
                 <span className="text-sm text-muted-foreground">Loading preview…</span>
@@ -212,7 +246,7 @@ function ReviewDialog({ doc, onClose, onReviewed }: { doc: any; onClose: () => v
               )}
             </div>
 
-            {doc.FilePath && (
+            {!!doc.FilePath && (
               <div className="flex justify-between items-center text-xs text-muted-foreground">
                 <span>{doc.FileName} {doc.FileSize ? `· ${fmtBytes(doc.FileSize)}` : ""}</span>
                 {blobUrl && <a href={blobUrl} download={doc.FileName} className="text-primary hover:underline flex items-center gap-1"><Download size={12} /> Download</a>}
@@ -262,15 +296,15 @@ function ReviewDialog({ doc, onClose, onReviewed }: { doc: any; onClose: () => v
             Open in Agreements <ArrowUpRight size={12} />
           </button>
           <div className="flex gap-2">
-            {doc.FilePath && doc.Status !== "Verified" && (
+            {!!doc.FilePath && doc.Status !== "Verified" && (
               <button onClick={() => setStatus("Verified")} disabled={saving}
                 className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-40">Verify</button>
             )}
-            {doc.FilePath && doc.Status !== "Rejected" && (
+            {!!doc.FilePath && doc.Status !== "Rejected" && (
               <button onClick={() => { if (!remarks.trim()) { toast.error("Remarks are required to reject"); return; } setStatus("Rejected"); }}
                 disabled={saving} className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">Reject</button>
             )}
-            {doc.FilePath && (doc.Status === "Verified" || doc.Status === "Rejected") && (
+            {!!doc.FilePath && (doc.Status === "Verified" || doc.Status === "Rejected") && (
               <button onClick={() => setStatus("Submitted")} disabled={saving}
                 className="px-3 py-1.5 text-xs border border-amber-300 text-amber-600 rounded-lg font-medium hover:bg-amber-50 disabled:opacity-40">
                 Revert to Review

@@ -11,7 +11,7 @@ const BKG_API = "/api/crm/bookings";
 
 const STEPS = [
   { key: "DocCollection",     label: "Document Collection" },
-  { key: "LegalReview",       label: "Legal Review" },
+  { key: "LegalReview",       label: "Legal Executive Assigned" },
   { key: "Drafting",          label: "Drafting" },
   { key: "InternalApproval",  label: "Internal Approval" },
   { key: "DocShared",         label: "Document Shared" },
@@ -19,6 +19,14 @@ const STEPS = [
   { key: "DirectorMeeting",   label: "Director Meeting" },
   { key: "FinalExecution",    label: "Final Execution" },
 ];
+
+// Every step but DirectorMeeting now auto-ticks the instant its real-world
+// equivalent happens on the Agreement page (see syncLegalMilestoneStep /
+// syncLegalMilestoneFromDocument in crmWorkflowGuards.js) — a manual
+// "Mark Complete" for those would just be a way to fake a step that hasn't
+// actually happened yet. DirectorMeeting has no digital trace (a literal
+// in-person meeting), so it stays the one manual checkbox on this page.
+const MANUAL_STEPS = new Set(["DirectorMeeting"]);
 
 async function fetchAll(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
@@ -38,6 +46,15 @@ const CrmLegalMilestones: React.FC = () => {
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
 
   const selected = (trackers as any[]).find((t: any) => t.Id === selectedId);
+
+  // Legal Milestone trackers are now auto-started the moment a booking's
+  // agreement is created (see maybeAutoCreateLegalMilestone), so this
+  // manual dialog is only ever needed as a fallback for a booking that
+  // somehow doesn't have one yet — never to start a second tracker for a
+  // booking that already has one (the backend already 409s on that, but
+  // the dropdown shouldn't even offer it).
+  const trackedBookingIds = new Set((trackers as any[]).map((t: any) => t.BookingId));
+  const startableBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
 
   const handleStart = async () => {
     if (!bookingId) { toast.error("Booking is required"); return; }
@@ -127,10 +144,14 @@ const CrmLegalMilestones: React.FC = () => {
                       </div>
                     </div>
                     {!isDone && (
-                      <button onClick={() => handleStepUpdate(s.key, "Completed")}
-                        className="text-xs px-2 py-1 border border-border rounded-lg hover:bg-muted transition-colors whitespace-nowrap">
-                        Mark Complete
-                      </button>
+                      MANUAL_STEPS.has(s.key) ? (
+                        <button onClick={() => handleStepUpdate(s.key, "Completed")}
+                          className="text-xs px-2 py-1 border border-border rounded-lg hover:bg-muted transition-colors whitespace-nowrap">
+                          Mark Complete
+                        </button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">Auto-synced</span>
+                      )
                     )}
                   </div>
                 );
@@ -148,14 +169,17 @@ const CrmLegalMilestones: React.FC = () => {
             <select value={bookingId} onChange={(e) => setBookingId(e.target.value)}
               className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
               <option value="">Select booking</option>
-              {(bookings as any[]).map((b: any) => (
+              {startableBookings.map((b: any) => (
                 <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
               ))}
             </select>
+            {startableBookings.length === 0 && (
+              <p className="text-xs text-muted-foreground mt-1">Every booking either already has a legal workflow or has no agreement yet — trackers now start automatically once an agreement is created.</p>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => setNewDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleStart} disabled={saving}
+            <button onClick={handleStart} disabled={saving || startableBookings.length === 0}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Starting..." : "Start"}
             </button>

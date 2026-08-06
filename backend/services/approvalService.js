@@ -9,6 +9,7 @@ const {
   postExpenseBookingApproval,
   postPaymentApproval,
   postJournalVoucherApproval,
+  postFundTransferApproval,
 } = require("./generalLedger");
 
 // Module slug → general ledger poster, called once a record reaches full
@@ -20,6 +21,7 @@ const GL_POSTERS = {
   "expense-booking": postExpenseBookingApproval,
   payments: postPaymentApproval,
   "journal-voucher": postJournalVoucherApproval,
+  "fund-transfer": postFundTransferApproval,
 };
 
 // Map module slug → { table, pkCol, statusCol }
@@ -74,6 +76,11 @@ const MODULE_MAP = {
     pk: "ICTId",
     status: "Status",
   },
+  "fund-transfer": {
+    table: "dbo.FundTransfer",
+    pk: "FTId",
+    status: "Status",
+  },
   "crm-applications": { table: "dbo.CrmApplication", pk: "Id", status: "Status" },
   "crm-bookings": { table: "dbo.CrmBooking", pk: "Id", status: "Status" },
   // The "approval" on a CrmAgreement is specifically the senior sign-off gate
@@ -115,6 +122,7 @@ const MODULE_DOC_LINKS = {
   payments: "Payment",
   "journal-voucher": "Journal Voucher",
   "inter-company-transfer": "Inter-Company Transfer",
+  "fund-transfer": "Fund Transfer",
 };
 
 const APPROVER_ROLES = ["admin", "super_admin", "dba"];
@@ -133,6 +141,10 @@ const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 const MODULE_APPROVER_ROLE_OVERRIDES = {
   "journal-voucher": ["super_admin"],
   "inter-company-transfer": ["super_admin"],
+  // Fund Transfer moves real cash and, for inter-company transfers, books a
+  // loan between two legal entities — same scrutiny level as Journal
+  // Voucher / Inter-Company (Stock) Transfer, per explicit instruction.
+  "fund-transfer": ["super_admin"],
   "crm-applications": CRM_APPROVER_ROLES,
   "crm-bookings": CRM_APPROVER_ROLES,
   // legal_head added specifically here (not to CRM_APPROVER_ROLES generally) —
@@ -212,6 +224,7 @@ const WORKFLOW_ID_MAP = {
   "vehicle-in-out": "VehicleInOut",
   "journal-voucher": "JournalVoucher",
   "inter-company-transfer": "InterCompanyTransfer",
+  "fund-transfer": "FundTransfer",
   contracts: "Contract",
 };
 
