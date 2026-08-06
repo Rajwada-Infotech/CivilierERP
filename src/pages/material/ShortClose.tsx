@@ -160,7 +160,7 @@ export default function ShortClose() {
                   setSearched(false);
                   setSelectedIds(new Set());
                 }}
-                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition ${
+                className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border transition-all ${
                   docType === dt
                     ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm"
                     : "border-border text-muted-foreground hover:bg-muted"
@@ -236,12 +236,12 @@ export default function ShortClose() {
               <button
                 onClick={handleSearch}
                 disabled={isFetching}
-                className="w-full h-9 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white text-sm font-semibold disabled:opacity-50"
+                className="w-full h-9 inline-flex items-center justify-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all disabled:opacity-50"
               >
                 {isFetching ? (
-                  <Loader2 size={14} className="animate-spin" />
+                  <Loader2 size={13} className="animate-spin" />
                 ) : (
-                  <Search size={14} />
+                  <Search size={13} />
                 )}
                 Search
               </button>
@@ -263,7 +263,7 @@ export default function ShortClose() {
               {selectedIds.size > 0 && rights.canEdit && (
                 <button
                   onClick={() => setConfirmOpen(true)}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 transition"
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive hover:bg-destructive/90 transition-all"
                 >
                   <Archive size={13} />
                   Short Close {selectedIds.size} Selected
@@ -403,14 +403,14 @@ export default function ShortClose() {
               <button
                 onClick={() => setConfirmOpen(false)}
                 disabled={processMutation.isPending}
-                className="px-4 py-2 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:bg-muted transition disabled:opacity-50"
+                className="shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border text-muted-foreground hover:bg-muted transition-all disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={() => processMutation.mutate()}
                 disabled={processMutation.isPending}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 transition disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive hover:bg-destructive/90 transition-all disabled:opacity-50"
               >
                 {processMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />

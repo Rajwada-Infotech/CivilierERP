@@ -580,30 +580,6 @@ export default function Login() {
     <div className="min-h-screen w-full flex items-center justify-center px-4 py-8 overflow-x-hidden overflow-y-auto relative"
       style={{ background: "#0d0a1a" }}>
 
-      {/* Get the Android app — moved here from the Home dashboard header so
-          it's reachable before signing in, not just after. */}
-      <motion.button
-        type="button"
-        onClick={() => navigate("/download-android-app")}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3, duration: 0.5 }}
-        className="absolute top-4 right-4 sm:top-6 sm:right-6 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold transition-colors"
-        style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(167,139,250,0.30)", color: "#c4b5fd" }}
-        title="Download our Android app"
-      >
-        <motion.span
-          className="inline-flex"
-          animate={{ y: [0, -2.5, 0] }}
-          transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
-        >
-          <Smartphone size={12} />
-        </motion.span>
-        Get the Android app
-      </motion.button>
-
       {/* Subtle full-page grid — no crane here */}
       <div className="absolute inset-0 z-0 pointer-events-none"
         style={{ backgroundImage: "radial-gradient(circle, rgba(167,139,250,0.07) 1px, transparent 1px)", backgroundSize: "28px 28px" }} />
@@ -890,6 +866,20 @@ export default function Login() {
                 <p className="text-center text-[10px] text-white/20 mt-5">
                   Secure access · Role-based permissions · v{appVersion}
                 </p>
+
+                {/* Get the Android app — moved out of the floating top-right
+                    corner (looked orphaned, unrelated to the sign-in card)
+                    into a plain footer link near the other portal links, so
+                    it's reachable before signing in without competing for
+                    attention with the form itself. */}
+                <button
+                  type="button"
+                  onClick={() => navigate("/download-android-app")}
+                  className="group flex items-center justify-center gap-1.5 mx-auto mt-3 text-[11px] font-medium text-white/35 hover:text-violet-300 transition-colors"
+                >
+                  <Smartphone size={12} className="text-violet-300/70 group-hover:text-violet-300 transition-colors" />
+                  Get the Android app
+                </button>
 
                 {/* Other portals */}
                 <div className="mt-5 pt-5" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>

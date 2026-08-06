@@ -74,6 +74,134 @@ function BackgroundOrbs() {
   );
 }
 
+// ── Rising skyline: buildings self-construct floor by floor, tower crane
+// swings and lowers a load — the site's own "under construction" motif. ──────
+function ConstructionSkyline() {
+  // Each building: [x, width, floors, floorHeight]. Heights are derived so
+  // the silhouette reads as a real skyline instead of uniform bars.
+  const buildings: { x: number; w: number; floors: number; fh: number; delay: number }[] = [
+    { x: 40, w: 46, floors: 4, fh: 16, delay: 0 },
+    { x: 96, w: 60, floors: 7, fh: 15, delay: 0.15 },
+    { x: 168, w: 42, floors: 5, fh: 14, delay: 0.35 },
+    { x: 222, w: 70, floors: 9, fh: 16, delay: 0.05 },
+    { x: 306, w: 50, floors: 6, fh: 15, delay: 0.25 },
+    { x: 1560, w: 54, floors: 6, fh: 15, delay: 0.1 },
+    { x: 1626, w: 40, floors: 4, fh: 16, delay: 0.3 },
+    { x: 1678, w: 66, floors: 8, fh: 15, delay: 0 },
+    { x: 1756, w: 44, floors: 5, fh: 14, delay: 0.2 },
+  ];
+
+  return (
+    <div className="absolute inset-x-0 bottom-0 pointer-events-none overflow-hidden" style={{ height: 220 }}>
+      <svg
+        viewBox="0 0 1920 220"
+        preserveAspectRatio="xMidYMax slice"
+        className="absolute inset-0 w-full h-full"
+      >
+        {/* Ground / foundation line */}
+        <motion.line x1="0" y1="219" x2="1920" y2="219"
+          stroke="rgba(167,139,250,0.18)" strokeWidth="1"
+          initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+          transition={{ duration: 1.6, ease: "easeOut" }} />
+
+        {buildings.map((b, bi) => {
+          const total = b.floors * b.fh;
+          const top = 220 - total;
+          return (
+            <g key={bi}>
+              {/* Building rises up from the ground, then settles */}
+              <motion.rect
+                x={b.x} width={b.w} y={220} height={total}
+                fill="rgba(124,58,237,0.10)"
+                stroke="rgba(167,139,250,0.28)" strokeWidth="1"
+                initial={{ y: 220, height: 0 }}
+                animate={{ y: top, height: total }}
+                transition={{ duration: 1.1, delay: 0.6 + b.delay, ease: [0.16, 1, 0.3, 1] }}
+              />
+              {/* Floor divider lines, drawn in sequence after the shell settles */}
+              {Array.from({ length: b.floors - 1 }).map((_, fi) => (
+                <motion.line key={fi}
+                  x1={b.x} x2={b.x + b.w}
+                  y1={top + (fi + 1) * b.fh} y2={top + (fi + 1) * b.fh}
+                  stroke="rgba(167,139,250,0.14)" strokeWidth="1"
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                  transition={{ delay: 1.5 + b.delay + fi * 0.04, duration: 0.3 }} />
+              ))}
+              {/* A handful of lit windows blink on after construction finishes */}
+              {Array.from({ length: b.floors }).map((_, fi) =>
+                fi % 2 === 0 ? (
+                  <motion.rect key={fi}
+                    x={b.x + b.w / 2 - 3} width={6}
+                    y={top + fi * b.fh + b.fh / 2 - 3} height={6}
+                    fill="rgba(196,181,253,0.5)"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: [0, 0.9, 0.5] }}
+                    transition={{ delay: 1.9 + b.delay + fi * 0.06, duration: 1.2 }} />
+                ) : null,
+              )}
+            </g>
+          );
+        })}
+
+        {/* ── Tower crane, mid-right, swinging its jib over the skyline ── */}
+        <g transform="translate(430,0)">
+          <motion.line x1="0" y1="220" x2="0" y2="30" stroke="rgba(167,139,250,0.35)" strokeWidth="2"
+            initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1, delay: 0.3, ease: "easeOut" }} />
+          {/* Cross-bracing on the mast */}
+          {[60, 100, 140, 180].map((y, i) => (
+            <motion.line key={i} x1="-6" y1={220 - y + 14} x2="6" y2={220 - y}
+              stroke="rgba(167,139,250,0.18)" strokeWidth="1"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 + i * 0.08 }} />
+          ))}
+          {/* Jib arm + counter-jib, gently swinging about the mast top */}
+          <motion.g
+            style={{ transformOrigin: "0px 30px" }}
+            initial={{ opacity: 0, rotate: -6 }}
+            animate={{ opacity: 1, rotate: [-6, 6, -6] }}
+            transition={{
+              opacity: { delay: 1.1, duration: 0.5 },
+              rotate: { duration: 9, repeat: Infinity, ease: "easeInOut", delay: 1.1 },
+            }}>
+            <line x1="-40" y1="30" x2="160" y2="30" stroke="rgba(167,139,250,0.4)" strokeWidth="2" />
+            <line x1="-40" y1="30" x2="0" y2="6" stroke="rgba(167,139,250,0.28)" strokeWidth="1.5" />
+            <line x1="160" y1="30" x2="0" y2="6" stroke="rgba(167,139,250,0.28)" strokeWidth="1.5" />
+            <line x1="0" y1="6" x2="0" y2="30" stroke="rgba(167,139,250,0.28)" strokeWidth="1.5" />
+            {/* Trolley riding the jib, and the pulley the cable runs through —
+                both stay pinned to the arm; only the cable/hook below move,
+                so the rope never visually detaches from the crane. */}
+            <rect x="126" y="26" width="8" height="6" rx="1" fill="rgba(167,139,250,0.35)" />
+            <circle cx="130" cy="32" r="2" fill="none" stroke="rgba(167,139,250,0.5)" strokeWidth="1" />
+            {/* Hoist cable — top end fixed at the pulley (130,32); bottom end
+                (and the hook/load riding it) animate together so the rope
+                always spans the full gap, rather than the whole assembly
+                sliding away from its anchor. */}
+            <motion.line x1="130" y1="32" x2="130"
+              animate={{ y2: [70, 84, 70] }}
+              transition={{ duration: 3.4, repeat: Infinity, ease: "easeInOut", delay: 1.4 }}
+              stroke="rgba(167,139,250,0.35)" strokeWidth="1" />
+            <motion.g
+              animate={{ y: [70, 84, 70], rotate: [-3, 3, -3] }}
+              style={{ transformOrigin: "130px 0px" }}
+              transition={{
+                y: { duration: 3.4, repeat: Infinity, ease: "easeInOut", delay: 1.4 },
+                rotate: { duration: 2.6, repeat: Infinity, ease: "easeInOut", delay: 1.6 },
+              }}>
+              {/* Hook */}
+              <path d="M126,0 L126,6 Q126,10 130,10 Q134,10 134,6 L134,0"
+                fill="none" stroke="rgba(167,139,250,0.4)" strokeWidth="1" />
+              {/* Load block, slung from two chain lines */}
+              <line x1="124" y1="4" x2="120" y2="14" stroke="rgba(167,139,250,0.3)" strokeWidth="0.8" />
+              <line x1="136" y1="4" x2="140" y2="14" stroke="rgba(167,139,250,0.3)" strokeWidth="0.8" />
+              <rect x="118" y="14" width="24" height="14" rx="2" fill="rgba(124,58,237,0.28)" stroke="rgba(167,139,250,0.55)" strokeWidth="1" />
+              <line x1="118" y1="21" x2="142" y2="21" stroke="rgba(167,139,250,0.35)" strokeWidth="0.8" />
+            </motion.g>
+          </motion.g>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
 export default function Landing() {
   const navigate = useNavigate();
   const [exiting, setExiting] = useState(false);
@@ -94,6 +222,7 @@ export default function Landing() {
       style={{ height: "100dvh", background: "#0d0a1a", color: "#e5e7eb", fontFamily: '"DM Sans","Noto Sans",system-ui,sans-serif', display: "flex", flexDirection: "column" }}
     >
       <BackgroundOrbs />
+      <ConstructionSkyline />
 
       {/* ── Main content ── */}
       <div className="relative z-10 flex flex-col items-center justify-center flex-1 px-6 text-center">

@@ -4,10 +4,15 @@
 -- Run this once, after deploying the new backend code (crmWorkflowGuards.js,
 -- crmAgreements.js, crmPortal.js) but ideally in the same maintenance window,
 -- since the old columns stop being read/written the moment the new code is
--- live. Wrapped in a transaction; review the backfill logic against your
--- actual data before running on production.
-
-BEGIN TRAN;
+-- live. Review the backfill logic against your actual data before running
+-- on production.
+--
+-- NOTE: no explicit BEGIN TRAN/COMMIT TRAN here. The migration runner
+-- executes each GO-separated batch as its own request, so an explicit
+-- transaction spanning a GO boundary leaves @@TRANCOUNT=1 at the end of the
+-- first batch, which the mssql/tedious driver rejects outright before the
+-- second batch (and its COMMIT) ever runs. Each batch below already commits
+-- implicitly under SQL Server's autocommit mode, so no wrapper is needed.
 
 -- 1. Add the new columns.
 ALTER TABLE dbo.CrmAgreement ADD ProposedDate DATE NULL;
@@ -61,5 +66,3 @@ WHERE (ProposedDateByCompany IS NOT NULL OR ProposedDateByCustomer IS NOT NULL)
 --    manually after confirming step 3's result set looks right.
 -- ALTER TABLE dbo.CrmAgreement DROP COLUMN ProposedDateByCompany;
 -- ALTER TABLE dbo.CrmAgreement DROP COLUMN ProposedDateByCustomer;
-
-COMMIT TRAN;
