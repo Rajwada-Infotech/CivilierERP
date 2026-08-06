@@ -1558,14 +1558,25 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
       const prefix = rawPrefix.replace(/\d+$/, "");
       const startFrom = typeRow.StartingDocNo ?? 1;
 
-      // Count globally across ALL fin years — fin year is only a suffix
+      // Count globally across ALL fin years — fin year is only a suffix.
+      // The serial is extracted as "however many digits immediately follow
+      // the prefix", NOT a fixed-width substring — a fixed length (the old
+      // SUBSTRING(..., 6) here) silently drops any row whose actual digit
+      // count differs (e.g. a 5-digit number grabs a trailing "/" and
+      // TRY_CAST returns NULL), which understates the true max and can
+      // reset the sequence back to the starting number. PATINDEX finds the
+      // first non-digit character (the appended "/" sentinel guarantees a
+      // match even with no suffix) so this works for any padding width.
       const maxResult = await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId)
         .input("PrefixLen", sql.Int, prefix.length)
         .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(DocNo, @PrefixLen + 1, 6) AS INT)) AS MaxSeq
+          SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
           FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
+          CROSS APPLY (SELECT SUBSTRING(DocNo, @PrefixLen + 1, 30) AS afterPrefix) a
+          CROSS APPLY (SELECT CASE WHEN PATINDEX('%[0-9]%', a.afterPrefix) = 0 THEN ''
+                                    ELSE SUBSTRING(a.afterPrefix, PATINDEX('%[0-9]%', a.afterPrefix), 30) END AS remainder) t
           WHERE TypeOfDocId = @TypeOfDocId
             AND DocNo LIKE @Prefix
         `);
@@ -1576,8 +1587,11 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
         .input("EDocTypeId2", sql.Int, typeId)
         .input("Prefix2Len", sql.Int, prefix.length)
         .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, @Prefix2Len + 1, 6) AS INT)) AS MaxSeq
+          SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
           FROM dbo.ExpenseBooking WITH (UPDLOCK, HOLDLOCK)
+          CROSS APPLY (SELECT SUBSTRING(EDocNo, @Prefix2Len + 1, 30) AS afterPrefix) a
+          CROSS APPLY (SELECT CASE WHEN PATINDEX('%[0-9]%', a.afterPrefix) = 0 THEN ''
+                                    ELSE SUBSTRING(a.afterPrefix, PATINDEX('%[0-9]%', a.afterPrefix), 30) END AS remainder) t
           WHERE EDocTypeId = @EDocTypeId2
             AND EDocNo LIKE @Prefix2
         `);
@@ -2145,14 +2159,25 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       const prefix = rawPrefix.replace(/\d+$/, "");
       const startFrom = typeRow.StartingDocNo ?? 1;
 
-      // Count globally across ALL fin years — fin year is only a suffix
+      // Count globally across ALL fin years — fin year is only a suffix.
+      // The serial is extracted as "however many digits immediately follow
+      // the prefix", NOT a fixed-width substring — a fixed length (the old
+      // SUBSTRING(..., 6) here) silently drops any row whose actual digit
+      // count differs (e.g. a 5-digit number grabs a trailing "/" and
+      // TRY_CAST returns NULL), which understates the true max and can
+      // reset the sequence back to the starting number. PATINDEX finds the
+      // first non-digit character (the appended "/" sentinel guarantees a
+      // match even with no suffix) so this works for any padding width.
       const maxResult = await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId)
         .input("PrefixLen", sql.Int, prefix.length)
         .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(DocNo, @PrefixLen + 1, 6) AS INT)) AS MaxSeq
+          SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
           FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
+          CROSS APPLY (SELECT SUBSTRING(DocNo, @PrefixLen + 1, 30) AS afterPrefix) a
+          CROSS APPLY (SELECT CASE WHEN PATINDEX('%[0-9]%', a.afterPrefix) = 0 THEN ''
+                                    ELSE SUBSTRING(a.afterPrefix, PATINDEX('%[0-9]%', a.afterPrefix), 30) END AS remainder) t
           WHERE TypeOfDocId = @TypeOfDocId
             AND DocNo LIKE @Prefix
         `);
@@ -2163,8 +2188,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
         .input("EDocTypeId2", sql.Int, typeId)
         .input("Prefix2Len", sql.Int, prefix.length)
         .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, @Prefix2Len + 1, 6) AS INT)) AS MaxSeq
+          SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
           FROM dbo.ExpenseBooking WITH (UPDLOCK, HOLDLOCK)
+          CROSS APPLY (SELECT SUBSTRING(EDocNo, @Prefix2Len + 1, 30) AS afterPrefix) a
+          CROSS APPLY (SELECT CASE WHEN PATINDEX('%[0-9]%', a.afterPrefix) = 0 THEN ''
+                                    ELSE SUBSTRING(a.afterPrefix, PATINDEX('%[0-9]%', a.afterPrefix), 30) END AS remainder) t
           WHERE EDocTypeId = @EDocTypeId2
             AND EDocNo LIKE @Prefix2
         `);
@@ -2800,21 +2828,33 @@ router.put(
                 const startFrom = typeRow.StartingDocNo ?? 1;
                 const finYear = (parentRow.EFinYear || "").toString().trim();
 
+                // See the matching comment on the main create-path MAX
+                // lookups above — fixed-width SUBSTRING(...,6) silently
+                // drops rows whose digit count differs and can reset the
+                // sequence. PATINDEX-based extraction works for any width.
                 const maxResult = await pool
                   .request()
                   .input("TypeOfDocId", sql.Int, parentRow.EDocTypeId)
                   .input("PrefixLen", sql.Int, prefix.length)
                   .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
-                  SELECT MAX(TRY_CAST(SUBSTRING(DocNo, @PrefixLen + 1, 6) AS INT)) AS MaxSeq
-                  FROM dbo.DocNumberSequence WHERE TypeOfDocId = @TypeOfDocId AND DocNo LIKE @Prefix
+                  SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
+                  FROM dbo.DocNumberSequence
+                  CROSS APPLY (SELECT SUBSTRING(DocNo, @PrefixLen + 1, 30) AS afterPrefix) a
+                  CROSS APPLY (SELECT CASE WHEN PATINDEX('%[0-9]%', a.afterPrefix) = 0 THEN ''
+                                    ELSE SUBSTRING(a.afterPrefix, PATINDEX('%[0-9]%', a.afterPrefix), 30) END AS remainder) t
+                  WHERE TypeOfDocId = @TypeOfDocId AND DocNo LIKE @Prefix
                 `);
                 const ebMaxResult = await pool
                   .request()
                   .input("EDocTypeId2", sql.Int, parentRow.EDocTypeId)
                   .input("Prefix2Len", sql.Int, prefix.length)
                   .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
-                  SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, @Prefix2Len + 1, 6) AS INT)) AS MaxSeq
-                  FROM dbo.ExpenseBooking WHERE EDocTypeId = @EDocTypeId2 AND EDocNo LIKE @Prefix2
+                  SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
+                  FROM dbo.ExpenseBooking
+                  CROSS APPLY (SELECT SUBSTRING(EDocNo, @Prefix2Len + 1, 30) AS afterPrefix) a
+                  CROSS APPLY (SELECT CASE WHEN PATINDEX('%[0-9]%', a.afterPrefix) = 0 THEN ''
+                                    ELSE SUBSTRING(a.afterPrefix, PATINDEX('%[0-9]%', a.afterPrefix), 30) END AS remainder) t
+                  WHERE EDocTypeId = @EDocTypeId2 AND EDocNo LIKE @Prefix2
                 `);
 
                 const combined = Math.max(
