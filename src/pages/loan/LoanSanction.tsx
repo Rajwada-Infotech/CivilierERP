@@ -145,9 +145,9 @@ export default function LoanSanctionPage() {
   const [deleting, setDeleting] = useState(false);
 
   // Editing the safe administrative fields on an already-sanctioned loan —
-  // deliberately separate from the create form's state, since the
-  // financial core (amount/rate/tenure/counterparties) can't be edited
-  // after sanction without re-running the EMI schedule and GL postings.
+  // deliberately separate from the create form's state — everything here
+  // is editable except the parties' identity (loan type, lender/borrower
+  // company/bank/customer), which the backend also refuses to touch.
   const [editingDetails, setEditingDetails] = useState(false);
   const [editForm, setEditForm] = useState({
     loanDocNo: "",
@@ -155,6 +155,13 @@ export default function LoanSanctionPage() {
     remarks: "",
     lenderBankAccountId: "",
     borrowerBankAccountId: "",
+    loanDate: "",
+    amount: "",
+    hasInterest: false,
+    interestType: "CI" as InterestCalcType,
+    interestRate: "",
+    tenureMonths: "",
+    dueDate: "",
   });
   const [savingDetails, setSavingDetails] = useState(false);
 
@@ -323,7 +330,7 @@ export default function LoanSanctionPage() {
     setEditingDetails(false);
   };
 
-  const openEditDetails = (loan: LoanSanction) => {
+  const openEditDetails = async (loan: LoanSanction) => {
     setViewingLoan(loan);
     setTab("overview");
     setShowForm(true);
@@ -333,24 +340,56 @@ export default function LoanSanctionPage() {
       remarks: loan.Remarks || "",
       lenderBankAccountId: loan.LenderBankAccountId ? String(loan.LenderBankAccountId) : "",
       borrowerBankAccountId: loan.BorrowerBankAccountId ? String(loan.BorrowerBankAccountId) : "",
+      loanDate: loan.LoanDate ? loan.LoanDate.slice(0, 10) : "",
+      amount: loan.Amount != null ? String(loan.Amount) : "",
+      hasInterest: loan.HasInterest !== false,
+      interestType: (loan.InterestType as InterestCalcType) || "CI",
+      interestRate: loan.InterestRate != null ? String(loan.InterestRate) : "",
+      tenureMonths: loan.TenureMonths != null ? String(loan.TenureMonths) : "",
+      dueDate: "",
     });
     setEditingDetails(true);
+    // No-breakdown loans (Inter-Company simple transfer) keep their due
+    // date on the single EMI row rather than the loan itself — pull it in
+    // for the edit form so it isn't blank.
+    if (loan.LoanType === "Inter-Company" && loan.HasInterest === false) {
+      try {
+        const sched = await getLoanSchedule(loan.LoanId);
+        if (sched.length === 1) {
+          setEditForm((f) => ({ ...f, dueDate: sched[0].DueDate.slice(0, 10) }));
+        }
+      } catch {
+        // non-fatal — the field just stays blank
+      }
+    }
   };
 
   const handleSaveDetails = async () => {
     if (!viewingLoan) return;
     setSavingDetails(true);
     try {
+      const isInterCompany = viewingLoan.LoanType === "Inter-Company";
       await updateLoanSanction(viewingLoan.LoanId, {
         loanDocNo: editForm.loanDocNo || null,
         purpose: editForm.purpose || null,
         remarks: editForm.remarks || null,
         lenderBankAccountId: editForm.lenderBankAccountId || null,
         borrowerBankAccountId: editForm.borrowerBankAccountId || null,
+        loanDate: editForm.loanDate,
+        amount: editForm.amount,
+        hasInterest: editForm.hasInterest,
+        interestType: editForm.interestType,
+        interestRate: editForm.hasInterest ? editForm.interestRate || null : null,
+        tenureMonths: editForm.tenureMonths || null,
+        dueDate: isInterCompany && !editForm.hasInterest ? editForm.dueDate || null : null,
       });
       toast.success("Loan details updated");
       setEditingDetails(false);
-      await qc.invalidateQueries({ queryKey: ["loan-sanctions"] });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["loan-sanctions"] }),
+        qc.invalidateQueries({ queryKey: ["loan-schedule", viewingLoan.LoanId] }),
+        qc.invalidateQueries({ queryKey: ["loan-payments", viewingLoan.LoanId] }),
+      ]);
       const fresh = await getLoanSanctions();
       const updated = fresh.find((l) => l.LoanId === viewingLoan.LoanId);
       if (updated) setViewingLoan(updated);
