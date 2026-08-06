@@ -87,6 +87,18 @@ export async function proposeAgreementDate(proposedDate: string, applicationId: 
   return res.json();
 }
 
+// Accept the company's currently-proposed date as-is, no re-typing it.
+// Only valid when ProposedDateStatus === 'PendingCustomerReview' — i.e. it's
+// currently the customer's turn to respond to what the company proposed.
+export async function acceptAgreementDate(applicationId: number) {
+  const res = await fetch(`${API}/agreement/date/accept?applicationId=${applicationId}`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to accept date");
+  return res.json();
+}
+
 export async function respondAgreement(
   applicationId: number,
   decision: "Approve" | "Reject",

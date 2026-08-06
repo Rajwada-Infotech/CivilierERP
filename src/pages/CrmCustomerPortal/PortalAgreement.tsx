@@ -8,7 +8,7 @@ import {
   UploadCloud, Clock, XCircle,
 } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
-import { API, authHeaders, fetchAgreement, fetchAgreementDocuments, uploadAgreementDoc, proposeAgreementDate, respondAgreement, respondSalesDeed, fmtMoney, fmtDate, fmtBytes, maskAadhaar } from "./portalApi";
+import { API, authHeaders, fetchAgreement, fetchAgreementDocuments, uploadAgreementDoc, proposeAgreementDate, acceptAgreementDate, respondAgreement, respondSalesDeed, fmtMoney, fmtDate, fmtBytes, maskAadhaar } from "./portalApi";
 import {
   PageHeader, Card, CardHeader, InfoField, StatusPill, Stepper, StepState,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
@@ -17,12 +17,12 @@ import {
 
 type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
 
-// Consolidated Agreement Date status — one "Agreement Date" field plus a
-// badge cluster, replacing the old separate "Proposed Date (From the
-// company)" / "Proposed Date (You)" / "Agreement Date" fields. "Accepted"
-// lights up for both sides the instant AgreementDate is confirmed — matching
-// proposals finalizes as a single mutual event, there's no separate per-side
-// accept step, so both badges reflect that same moment.
+// Consolidated Agreement Date status — one live ProposedDate plus a status
+// (whose turn it is), replacing the old separate "Proposed Date (From the
+// company)" / "Proposed Date (You)" fields. Only ever one active badge at a
+// time until AgreementDate is confirmed, at which point both sides show
+// "Agreed" — matching finalizes as a single mutual event via super_admin
+// sign-off, there's no separate per-side accept-becomes-final step.
 const DATE_BADGE_TONES: Record<string, { bg: string; fg: string }> = {
   purple: { bg: "rgba(124,58,237,0.10)", fg: "#7C3AED" },
   blue:   { bg: "rgba(37,99,235,0.10)",  fg: "#2563EB" },
@@ -165,19 +165,17 @@ function UploadDocDialog({ doc, applicationId, onClose, onUploaded }: { doc: any
 }
 
 function ProposeDateDialog({
-  currentProposal, companyProposal, applicationId, onClose, onProposed,
-}: { currentProposal: string | null; companyProposal: string | null; applicationId: number; onClose: () => void; onProposed: () => void }) {
-  const [date, setDate] = useState(currentProposal ? String(currentProposal).slice(0, 10) : "");
+  currentProposal, isRevision, applicationId, onClose, onProposed,
+}: { currentProposal: string | null; isRevision: boolean; applicationId: number; onClose: () => void; onProposed: () => void }) {
+  const [date, setDate] = useState("");
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
     if (!date) { toast.error("Pick a date"); return; }
     setSaving(true);
     try {
-      const res = await proposeAgreementDate(date, applicationId);
-      toast.success(res.agreementDateSubmittedForApproval
-        ? "Both sides now agree — sent to our team for final sign-off"
-        : "Your proposed date was sent to our team");
+      await proposeAgreementDate(date, applicationId);
+      toast.success("Your proposed date was sent to our team");
       onProposed();
     } catch (e: any) {
       toast.error(e.message);
@@ -190,11 +188,11 @@ function ProposeDateDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>{currentProposal ? "Update Your Proposed Date" : "Propose an Agreement Date"}</DialogTitle>
+          <DialogTitle>{isRevision ? "Propose a Different Date" : "Propose an Agreement Date"}</DialogTitle>
           <DialogDescription>
-            {companyProposal
-              ? `We proposed ${fmtDate(companyProposal)}. Pick the same date to move it forward for sign-off, or suggest another.`
-              : "Suggest a date that works for you — we'll take it forward for sign-off the moment both sides agree."}
+            {currentProposal
+              ? `We proposed ${fmtDate(currentProposal)}. This sends a different date back to our team for their review.`
+              : "Suggest a date that works for you — we'll review it and either accept it or propose another."}
           </DialogDescription>
         </DialogHeader>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
@@ -324,6 +322,23 @@ const PortalAgreement: React.FC = () => {
     }
   };
 
+  // Accept the company's currently-proposed date as-is — no re-typing it.
+  // Only enabled when ProposedDateStatus shows it's the customer's turn.
+  const [acceptingDate, setAcceptingDate] = useState(false);
+  const handleAcceptDate = async () => {
+    setAcceptingDate(true);
+    try {
+      await acceptAgreementDate(applicationId);
+      toast.success("Date accepted — sent to our team for final sign-off");
+      qc.invalidateQueries({ queryKey: ["portal-agreement", applicationId] });
+      qc.invalidateQueries({ queryKey: ["portal-timeline"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setAcceptingDate(false);
+    }
+  };
+
   if (!agreement && !timeline.salesDeed) {
     return (
       <div className="space-y-6">
@@ -338,9 +353,6 @@ const PortalAgreement: React.FC = () => {
       </div>
     );
   }
-
-  const dateMismatch = agreement?.ProposedDateByCompany && agreement?.ProposedDateByCustomer
-    && new Date(agreement.ProposedDateByCompany).toDateString() !== new Date(agreement.ProposedDateByCustomer).toDateString();
 
   return (
     <div className="space-y-6">
@@ -377,19 +389,20 @@ const PortalAgreement: React.FC = () => {
             <InfoField label="Documents" value={needsAction.length > 0 ? `${onFile.length} on file, ${needsAction.length} needed` : onFile.length} />
           </div>
 
-          {(agreement.ProposedDateByCompany || agreement.ProposedDateByCustomer || agreement.AgreementDate) && (
+          {(agreement.ProposedDate || agreement.AgreementDate) && (
             <div className="px-5 sm:px-6 pb-5 flex flex-wrap gap-1.5">
-              <DateStatusBadge label="Proposed by Company" date={agreement.ProposedDateByCompany} color="purple" active={!!agreement.ProposedDateByCompany} />
-              <DateStatusBadge label="Proposed by You" date={agreement.ProposedDateByCustomer} color="blue" active={!!agreement.ProposedDateByCustomer} />
-              <DateStatusBadge label="Accepted by Company" color="green" active={!!agreement.AgreementDate} />
-              <DateStatusBadge label="Accepted by You" color="green" active={!!agreement.AgreementDate} />
-            </div>
-          )}
-
-          {dateMismatch && !agreement.AgreementDate && agreement.DateApprovalStatus !== "Pending" && (
-            <div className="mx-5 sm:mx-6 mb-5 text-xs rounded-lg p-3 flex items-start gap-2" style={{ background: GOLD_SOFT, color: "#8A6D14" }}>
-              <CalendarCheck2 size={13} className="mt-0.5 shrink-0" />
-              We proposed {fmtDate(agreement.ProposedDateByCompany)}; your response was {fmtDate(agreement.ProposedDateByCustomer)}. Once these dates match, it goes to our team for final sign-off.
+              <DateStatusBadge
+                label={
+                  agreement.AgreementDate ? "Agreed"
+                  : agreement.DateApprovalStatus === "Pending" ? "Matched"
+                  : agreement.ProposedDateStatus === "PendingCustomerReview" ? "Proposed by Company — your turn"
+                  : agreement.ProposedDateStatus === "PendingCompanyReview" ? "Proposed by You — awaiting Company"
+                  : "Proposed"
+                }
+                date={agreement.AgreementDate || agreement.ProposedDate}
+                color={agreement.AgreementDate ? "green" : agreement.ProposedDateStatus === "PendingCompanyReview" ? "blue" : "purple"}
+                active
+              />
             </div>
           )}
 
@@ -422,10 +435,30 @@ const PortalAgreement: React.FC = () => {
                     <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#8A6D14" }}>
                       <Clock size={16} /> Date agreed — awaiting our team's final sign-off
                     </div>
+                  ) : agreement.ProposedDateStatus === "PendingCustomerReview" ? (
+                    <div className="space-y-2">
+                      <p className="text-xs" style={{ color: TEXT_MUTED }}>
+                        We proposed {fmtDate(agreement.ProposedDate)} — accept it, or suggest a different date.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button onClick={handleAcceptDate} disabled={acceptingDate}
+                          className="px-5 py-2.5 text-white text-sm font-semibold rounded-lg shadow-sm hover:opacity-90 disabled:opacity-40" style={{ background: INK }}>
+                          {acceptingDate ? "Accepting..." : "Accept This Date"}
+                        </button>
+                        <button onClick={() => setProposeDateOpen(true)}
+                          className="px-5 py-2.5 text-sm font-semibold rounded-lg border border-slate-200 hover:bg-slate-50 flex items-center gap-1.5" style={{ color: TEXT }}>
+                          <CalendarCheck2 size={15} /> Propose a Different Date
+                        </button>
+                      </div>
+                    </div>
+                  ) : agreement.ProposedDateStatus === "PendingCompanyReview" ? (
+                    <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: TEXT_MUTED }}>
+                      <Clock size={16} /> You proposed {fmtDate(agreement.ProposedDate)} — awaiting our team's response
+                    </div>
                   ) : (
                     <button onClick={() => setProposeDateOpen(true)}
                       className="px-5 py-2.5 text-white text-sm font-semibold rounded-lg shadow-sm hover:opacity-90 flex items-center gap-1.5" style={{ background: INK }}>
-                      <CalendarCheck2 size={15} /> {agreement.ProposedDateByCustomer ? "Update Your Proposed Date" : "Propose Agreement Date"}
+                      <CalendarCheck2 size={15} /> Propose Agreement Date
                     </button>
                   )
                 )}
@@ -521,8 +554,8 @@ const PortalAgreement: React.FC = () => {
       {previewDoc && <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
       {proposeDateOpen && agreement && (
         <ProposeDateDialog
-          currentProposal={agreement.ProposedDateByCustomer}
-          companyProposal={agreement.ProposedDateByCompany}
+          currentProposal={agreement.ProposedDate}
+          isRevision={agreement.ProposedDateStatus === "PendingCustomerReview"}
           applicationId={applicationId}
           onClose={() => setProposeDateOpen(false)}
           onProposed={() => {
