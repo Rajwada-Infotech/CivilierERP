@@ -9,6 +9,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
+import { Button } from "@/components/ui/button";
 import { ExportMenu } from "@/components/ExportMenu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ExportColumn } from "@/lib/export";
@@ -285,13 +286,13 @@ export default function ChequeCancellation() {
                     </button>
                   )}
                 </div>
-                <button
+                <Button
                   onClick={runSearch}
                   disabled={searching}
-                  className="h-8 flex items-center justify-center gap-1.5 px-4 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-all"
+                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-primary hover:bg-primary/90 transition-all"
                 >
                   {searching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} Search
-                </button>
+                </Button>
               </div>
 
               {searched && results.length === 0 && (

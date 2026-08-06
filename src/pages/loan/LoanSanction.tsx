@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { GlassShell } from "@/components/dashboard/GlassShell";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import {
   Dialog,
@@ -127,6 +129,20 @@ const fmtDate = (d?: string | null) =>
   d
     ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
     : "—";
+
+const LOAN_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Loan No", accessor: "LoanNo" },
+  { header: "Type", accessor: "LoanType" },
+  { header: "Lender", accessor: (r: any) => r.LenderCompanyName || r.LenderBankName || "—" },
+  { header: "Borrower", accessor: (r: any) => r.BorrowerCompanyName || r.BorrowerCustomerName || "—" },
+  { header: "Loan Date", accessor: (r: any) => fmtDate(r.LoanDate) },
+  { header: "Amount", accessor: (r: any) => fmt(r.Amount) },
+  { header: "Interest Rate", accessor: (r: any) => (r.HasInterest && r.InterestRate != null ? `${r.InterestRate}%` : "—") },
+  { header: "Tenure (Months)", accessor: (r: any) => r.TenureMonths ?? "—" },
+  { header: "EMI Progress", accessor: (r: any) => `${r.PaidEMIs ?? 0}/${r.TotalEMIs ?? 0}` },
+  { header: "Status", accessor: "Status" },
+  { header: "Purpose", accessor: (r: any) => r.Purpose || "—" },
+];
 
 const LOAN_TYPE_COLORS: Record<LoanType, string> = {
   "Inter-Company": "#3b82f6",
@@ -679,12 +695,22 @@ export default function LoanSanctionPage() {
       accentColor={ACCENT}
       action={
         !showForm ? (
-          <button
-            onClick={openCreate}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-emerald-500 to-green-400 text-white hover:opacity-90 transition-opacity"
-          >
-            <Plus size={14} /> New Loan
-          </button>
+          <div className="flex items-center gap-2">
+            <ExportMenu
+              data={loans as unknown as Record<string, unknown>[]}
+              columns={LOAN_EXPORT_COLUMNS}
+              title="Loan Sanction"
+              filename="loan-sanctions"
+              disabled={isLoading || !loans.length}
+            />
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-green-500 to-lime-500 transition-all"
+            >
+              <Plus size={13} />
+              <span className="hidden sm:inline">New Loan</span>
+            </button>
+          </div>
         ) : undefined
       }
     >

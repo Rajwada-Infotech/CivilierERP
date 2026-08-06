@@ -563,13 +563,13 @@ export default function FixedAssetRecord() {
         action={
           <div className="flex gap-2">
             <button onClick={() => { resetForm(); setViewMode("list"); }}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg border border-border text-sm font-medium hover:bg-muted transition">
-              <ArrowLeft size={14} /> Back
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+              <ArrowLeft size={13} /> Back
             </button>
             {rights.canEdit && (
               <button onClick={() => goToEdit(d as unknown as FixedAssetListItem)}
-                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white text-sm font-semibold hover:shadow-lg transition">
-                <Pencil size={14} /> Edit
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all">
+                <Pencil size={13} /> Edit
               </button>
             )}
           </div>
@@ -727,12 +727,12 @@ export default function FixedAssetRecord() {
         action={
           <div className="flex gap-2">
             <button onClick={() => { resetForm(); setViewMode("list"); }}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg border border-border text-sm font-medium hover:bg-muted transition">
-              <ArrowLeft size={14} /> Cancel
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+              <ArrowLeft size={13} /> Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white text-sm font-semibold hover:shadow-lg transition disabled:opacity-50">
-              <Check size={14} /> {saving ? "Saving…" : "Save Asset"}
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all disabled:opacity-50">
+              <Check size={13} /> {saving ? "Saving…" : "Save Asset"}
             </button>
           </div>
         }
@@ -969,8 +969,8 @@ export default function FixedAssetRecord() {
       action={
         rights.canCreate && (
           <button onClick={goToCreate}
-            className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white text-sm font-semibold hover:shadow-lg transition">
-            <Plus size={16} /> New Asset
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all">
+            <Plus size={13} /> New Asset
           </button>
         )
       }
@@ -1131,7 +1131,7 @@ export default function FixedAssetRecord() {
           <p className="text-sm">No fixed assets found</p>
           {rights.canCreate && (
             <button onClick={goToCreate}
-              className="mt-2 inline-flex items-center gap-1.5 h-8 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium">
+              className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all">
               <Plus size={13} /> Add First Asset
             </button>
           )}
@@ -1227,11 +1227,11 @@ export default function FixedAssetRecord() {
             </div>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setDeleteId(null)}
-                className="h-8 px-3 rounded border border-border text-sm hover:bg-muted transition-colors">
+                className="shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
                 Cancel
               </button>
               <button onClick={() => deleteMut.mutate(deleteId!)} disabled={deleteMut.isPending}
-                className="h-8 px-3 rounded bg-destructive text-white text-sm font-medium disabled:opacity-50">
+                className="shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive transition-all disabled:opacity-50">
                 {deleteMut.isPending ? "Deleting…" : "Delete"}
               </button>
             </div>

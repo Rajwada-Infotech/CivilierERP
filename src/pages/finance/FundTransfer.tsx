@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import {
@@ -438,13 +439,13 @@ export default function FundTransfer() {
               <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
             </button>
             {rights.canCreate && (
-              <button
+              <Button
                 onClick={() => setDialogOpen(true)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg gradient-accent text-white text-sm font-semibold transition-all"
+                className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg gradient-accent transition-all"
               >
-                <Plus size={14} />
-                New Fund Transfer
-              </button>
+                <Plus size={13} />
+                <span className="hidden sm:inline">New Fund Transfer</span>
+              </Button>
             )}
           </div>
         }
@@ -648,13 +649,13 @@ export default function FundTransfer() {
 
       {/* ── New Fund Transfer Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
-        <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
-          <DialogHeader className="px-7 py-5 border-b border-border">
+        <DialogContent className="max-w-4xl p-0 gap-0 flex flex-col max-h-[96dvh] overflow-hidden">
+          <DialogHeader className="shrink-0 px-4 sm:px-7 py-3 sm:py-4 border-b border-border bg-gradient-to-br from-primary/5 via-transparent to-transparent">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 ring-1 ring-primary/20">
                 <ArrowLeftRight size={18} className="text-primary" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <DialogTitle className="text-base font-semibold font-heading">New Fund Transfer</DialogTitle>
                 <DialogDescription className="text-xs mt-0.5">
                   Move cash between bank accounts. Inter-company transfers create a Loan Sanction record automatically.
@@ -663,51 +664,61 @@ export default function FundTransfer() {
             </div>
           </DialogHeader>
 
-          <div className="px-7 py-6 space-y-6 max-h-[75vh] overflow-y-auto">
+          <div className="px-4 sm:px-7 py-3.5 sm:py-4 space-y-3.5 sm:space-y-4 flex-1 min-h-0 overflow-y-auto">
             {/* Type toggle */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
               <button
                 type="button"
                 onClick={() => setTransferType("Intra")}
                 className={cn(
-                  "flex items-center gap-3 px-4 py-3.5 rounded-xl border-2 text-left transition-colors",
-                  transferType === "Intra" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40",
+                  "relative flex items-center gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border-2 text-left transition-all",
+                  transferType === "Intra" ? "border-primary bg-primary/5 shadow-sm shadow-primary/10" : "border-border hover:bg-muted/40 hover:border-border/80",
                 )}
               >
-                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0", transferType === "Intra" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}>
-                  <Building2 size={16} />
+                <div className={cn("w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center shrink-0 transition-colors", transferType === "Intra" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}>
+                  <Building2 size={15} className="sm:hidden" />
+                  <Building2 size={16} className="hidden sm:block" />
                 </div>
                 <div className="min-w-0">
-                  <p className={cn("text-sm font-semibold", transferType === "Intra" ? "text-primary" : "text-foreground")}>Intra-Company</p>
-                  <p className="text-[11px] text-muted-foreground">Between two banks of the same company</p>
+                  <p className={cn("text-xs sm:text-sm font-semibold", transferType === "Intra" ? "text-primary" : "text-foreground")}>Intra-Company</p>
+                  <p className="hidden sm:block text-[11px] text-muted-foreground">Between two banks of the same company</p>
                 </div>
+                {transferType === "Intra" && (
+                  <CheckCircle2 size={14} className="absolute top-2 right-2 text-primary" />
+                )}
               </button>
               <button
                 type="button"
                 onClick={() => setTransferType("Inter")}
                 className={cn(
-                  "flex items-center gap-3 px-4 py-3.5 rounded-xl border-2 text-left transition-colors",
-                  transferType === "Inter" ? "border-violet-500 bg-violet-500/5" : "border-border hover:bg-muted/40",
+                  "relative flex items-center gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border-2 text-left transition-all",
+                  transferType === "Inter" ? "border-violet-500 bg-violet-500/5 shadow-sm shadow-violet-500/10" : "border-border hover:bg-muted/40 hover:border-border/80",
                 )}
               >
-                <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0", transferType === "Inter" ? "bg-violet-500/15 text-violet-600" : "bg-muted text-muted-foreground")}>
-                  <Landmark size={16} />
+                <div className={cn("w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center shrink-0 transition-colors", transferType === "Inter" ? "bg-violet-500/15 text-violet-600" : "bg-muted text-muted-foreground")}>
+                  <Landmark size={15} className="sm:hidden" />
+                  <Landmark size={16} className="hidden sm:block" />
                 </div>
                 <div className="min-w-0">
-                  <p className={cn("text-sm font-semibold", transferType === "Inter" ? "text-violet-700" : "text-foreground")}>Inter-Company (Loan)</p>
-                  <p className="text-[11px] text-muted-foreground">Between two different companies</p>
+                  <p className={cn("text-xs sm:text-sm font-semibold", transferType === "Inter" ? "text-violet-700" : "text-foreground")}>Inter-Company</p>
+                  <p className="hidden sm:block text-[11px] text-muted-foreground">Between two different companies</p>
                 </div>
+                {transferType === "Inter" && (
+                  <CheckCircle2 size={14} className="absolute top-2 right-2 text-violet-600" />
+                )}
               </button>
             </div>
 
             {/* Source / Destination panels */}
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-4 items-stretch">
-              <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-3">
-                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground font-heading">From</p>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 sm:gap-4 items-stretch">
+              <div className="rounded-xl border border-border bg-muted/10 p-3 sm:p-3.5 space-y-2.5">
+                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-muted-foreground font-heading">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary/60" /> From
+                </p>
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-medium text-muted-foreground">Company *</label>
                   <Select value={sourceCompanyId} onValueChange={setSourceCompanyId}>
-                    <SelectTrigger className="h-10 text-sm bg-background">
+                    <SelectTrigger className="h-9 text-sm bg-background">
                       <SelectValue placeholder="Select company…" />
                     </SelectTrigger>
                     <SelectContent>
@@ -720,7 +731,7 @@ export default function FundTransfer() {
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-medium text-muted-foreground">Bank Account *</label>
                   <Select value={sourceBankId} onValueChange={setSourceBankId}>
-                    <SelectTrigger className="h-10 text-sm bg-background">
+                    <SelectTrigger className="h-9 text-sm bg-background">
                       <SelectValue placeholder="Select bank…" />
                     </SelectTrigger>
                     <SelectContent>
@@ -732,14 +743,19 @@ export default function FundTransfer() {
                 </div>
               </div>
 
-              <div className="hidden md:flex items-center justify-center">
-                <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center shrink-0">
-                  <ArrowLeftRight size={15} className="text-muted-foreground" />
+              {/* Swap connector — a rotated chevron stack on mobile (stacked
+                  panels read top-to-bottom), the full icon on desktop where
+                  panels sit side by side. */}
+              <div className="flex md:flex-col items-center justify-center py-0.5 md:py-0">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-muted flex items-center justify-center shrink-0 ring-1 ring-border/60">
+                  <ArrowLeftRight size={14} className="text-muted-foreground rotate-90 md:rotate-0" />
                 </div>
               </div>
 
-              <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-3">
-                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground font-heading">To</p>
+              <div className="rounded-xl border border-border bg-muted/10 p-3 sm:p-3.5 space-y-2.5">
+                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-muted-foreground font-heading">
+                  <span className="w-1.5 h-1.5 rounded-full bg-violet-500/60" /> To
+                </p>
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-medium text-muted-foreground">Company *</label>
                   <Select
@@ -747,7 +763,7 @@ export default function FundTransfer() {
                     onValueChange={setDestCompanyId}
                     disabled={transferType === "Intra"}
                   >
-                    <SelectTrigger className="h-10 text-sm bg-background">
+                    <SelectTrigger className="h-9 text-sm bg-background">
                       <SelectValue placeholder={transferType === "Intra" ? "Same as source" : "Select company…"} />
                     </SelectTrigger>
                     <SelectContent>
@@ -762,7 +778,7 @@ export default function FundTransfer() {
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-medium text-muted-foreground">Bank Account *</label>
                   <Select value={destBankId} onValueChange={setDestBankId}>
-                    <SelectTrigger className="h-10 text-sm bg-background">
+                    <SelectTrigger className="h-9 text-sm bg-background">
                       <SelectValue placeholder="Select bank…" />
                     </SelectTrigger>
                     <SelectContent>
@@ -776,8 +792,8 @@ export default function FundTransfer() {
             </div>
 
             {(sourceBankId || destBankId) && (
-              <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 overflow-x-auto">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground font-heading mb-1.5">Preview</p>
+              <div className="rounded-lg border border-dashed border-border bg-muted/20 px-3.5 sm:px-4 py-2 overflow-x-auto">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground font-heading mb-1">Preview</p>
                 <FlowConnector
                   sourceLabel={banks.find((b) => String(b.BId) === sourceBankId)?.BName || "Source bank"}
                   destLabel={banks.find((b) => String(b.BId) === destBankId)?.BName || "Destination bank"}
@@ -788,26 +804,29 @@ export default function FundTransfer() {
             )}
 
             {/* Amount, date, narration */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5">
                 <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">
                   <Calendar size={11} /> Date *
                 </label>
-                <Input type="date" className="h-10" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} />
+                <Input type="date" className="h-9" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Amount *</label>
-                <Input type="number" min={0} step="0.01" className="h-10 font-mono" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-mono pointer-events-none">₹</span>
+                  <Input type="number" min={0} step="0.01" className="h-9 font-mono pl-7" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+                </div>
               </div>
             </div>
 
             <div className="space-y-1.5">
               <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Narration</label>
-              <Input className="h-10" value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="Reason for this transfer" />
+              <Input className="h-9" value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="Reason for this transfer" />
             </div>
 
             {transferType === "Inter" && (
-              <div className="flex items-start gap-2.5 pl-4 pr-4 py-3 rounded-lg border border-border bg-muted/20 text-xs text-muted-foreground border-l-[3px] border-l-violet-500">
+              <div className="flex items-start gap-2.5 pl-3.5 sm:pl-4 pr-3.5 sm:pr-4 py-2.5 rounded-lg border border-border bg-muted/20 text-xs text-muted-foreground border-l-[3px] border-l-violet-500">
                 <Landmark size={14} className="shrink-0 mt-0.5 text-violet-600" />
                 <span>
                   <span className="font-semibold text-foreground">Creates a Loan Sanction record on approval.</span> The
@@ -818,17 +837,17 @@ export default function FundTransfer() {
             )}
           </div>
 
-          <DialogFooter className="px-7 py-4 border-t border-border bg-muted/20">
+          <DialogFooter className="shrink-0 px-4 sm:px-7 py-3 border-t border-border bg-muted/20">
             <button
               onClick={() => setDialogOpen(false)}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
+              className="w-full sm:w-auto px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={submit}
               disabled={saving}
-              className="flex items-center gap-1.5 px-5 py-2 rounded-lg gradient-accent text-white text-sm font-semibold transition-all disabled:opacity-50"
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg gradient-accent text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-50"
             >
               {saving && <Loader2 size={13} className="animate-spin" />}
               Submit for Approval
