@@ -16,7 +16,25 @@ const GL_ACCOUNTS = {
   PURCHASE: "Purchase A/c",
   PENDING_GRN_PROVISION: "PROVISION FOR PENDING GRN A/C",
   PROVISIONAL_CREDIT: "Provisional Credit Available",
+  // Singleton pooled "advance to supplier/contractor" head (migration 178,
+  // AccountGroup wiring in 230) — was seeded but never actually posted to
+  // until postOnAccountAdjustment/postPaymentApproval below.
+  ON_ACCOUNT: "Company On Account A/c",
 };
+
+/** Same "advance / on account" Payment Reason match used by newPayment.js's
+ * standalone-advance OnAccountLedger hook — kept identical so GL posting and
+ * the OA-balance side-effect always agree on what counts as an advance. */
+function isAdvancePaymentReason(paymentName) {
+  const reasonNorm = (paymentName || "").trim().toLowerCase();
+  return (
+    reasonNorm.includes("advance") ||
+    reasonNorm.includes("on a/c") ||
+    reasonNorm.includes("on ac") ||
+    reasonNorm.includes("on-account") ||
+    reasonNorm.includes("on account")
+  );
+}
 
 // Small in-process cache — these are fixed system accounts, id never changes
 // once seeded, so there's no need to hit the DB on every posting call.
@@ -498,7 +516,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     .input("PPaymentID", sql.Int, paymentId)
     .query(`
       SELECT PPaymentID, PAmount, PDate, PBankID, PExpenseRef, DocNo,
-             PCompany, PProject, ContractId, PPartyId
+             PCompany, PProject, ContractId, PPartyId, PPaymentName
       FROM dbo.NewPayment
       WHERE PPaymentID = @PPaymentID
     `);
@@ -511,7 +529,19 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   if (amount <= 0)
     return { posted: false, reason: `Payment ${paymentId} amount is ${amount} (<= 0)` };
 
-  const supplierHeadId = await resolvePaymentSupplierHeadId(pool, payment);
+  // A standalone advance/on-account payment (no invoice, no contract — see
+  // newPayment.js's matching OnAccountLedger CREDIT hook) is booked as an
+  // advance ASSET, not a reduction of what we owe the party — so its Dr leg
+  // goes to the pooled "Company On Account A/c" head instead of the party's
+  // own payable head. Everything else (a real invoice payment) keeps
+  // debiting the party head as before.
+  const isStandaloneAdvance =
+    !payment.PExpenseRef && !payment.ContractId && payment.PPartyId &&
+    isAdvancePaymentReason(payment.PPaymentName);
+
+  const supplierHeadId = isStandaloneAdvance
+    ? await getGLHeadId(pool, GL_ACCOUNTS.ON_ACCOUNT)
+    : await resolvePaymentSupplierHeadId(pool, payment);
 
   if (!supplierHeadId)
     return {
@@ -537,7 +567,9 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
       {
         lHeadId: supplierHeadId,
         debit: amount,
-        narration: `${docNo} — payment made`,
+        narration: isStandaloneAdvance
+          ? `${docNo} — advance / on account payment`
+          : `${docNo} — payment made`,
       },
       {
         lHeadId: payment.PBankID,
@@ -547,6 +579,72 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     ],
   });
   return { posted: true };
+}
+
+/**
+ * On Account Adjustment — applies a party's existing advance balance against
+ * an invoice's outstanding payable. Pure internal transfer, no cash/bank
+ * account involved (per explicit spec — replaces the old "Dummy Bank"
+ * synthetic-payment mechanism entirely):
+ *
+ *   Dr <party's own head>            (reduces what we owe them — Payable)
+ *   Cr Company On Account A/c        (reduces the pooled advance asset)
+ *
+ * sourceId is the OnAccountLedger.OAId row this settles, so hasPosting()
+ * guards each individual adjustment idempotently.
+ */
+async function postOnAccountAdjustment(pool, {
+  oaId,
+  partyHeadId,
+  amount,
+  expenseRef,
+  voucherDate,
+  companyId = null,
+  projectId = null,
+  createdBy = null,
+}) {
+  if (await hasPosting(pool, "OnAccountAdjustment", oaId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const onAccountHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ON_ACCOUNT);
+  const voucherNo = `OA-ADJ-${expenseRef}-${oaId}`;
+
+  await postVoucher(pool, {
+    voucherNo,
+    voucherDate,
+    sourceType: "OnAccountAdjustment",
+    sourceId: oaId,
+    companyId,
+    projectId,
+    createdBy,
+    legs: [
+      {
+        lHeadId: partyHeadId,
+        debit: amount,
+        narration: `${voucherNo} — On Account adjusted against invoice ${expenseRef}`,
+      },
+      {
+        lHeadId: onAccountHeadId,
+        credit: amount,
+        narration: `${voucherNo} — On Account adjusted against invoice ${expenseRef}`,
+      },
+    ],
+  });
+  return { posted: true, voucherNo };
+}
+
+/** Reverse a previously-posted On Account Adjustment voucher (deleting the
+ * adjustment) — flips IsReversed so Trial Balance/hasPosting stop counting
+ * it, without deleting the audit row itself. */
+async function reverseOnAccountAdjustmentPosting(pool, oaId) {
+  await pool
+    .request()
+    .input("OAId", sql.Int, oaId)
+    .query(`
+      UPDATE dbo.GeneralLedgerEntry
+      SET IsReversed = 1
+      WHERE SourceType = 'OnAccountAdjustment' AND SourceId = @OAId AND IsReversed = 0
+    `);
 }
 
 /**
@@ -794,4 +892,6 @@ module.exports = {
   postReceivedPaymentApproval,
   postJournalVoucherApproval,
   postFundTransferApproval,
+  postOnAccountAdjustment,
+  reverseOnAccountAdjustmentPosting,
 };

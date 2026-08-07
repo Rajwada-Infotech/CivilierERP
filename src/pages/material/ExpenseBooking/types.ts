@@ -180,6 +180,10 @@ export interface ExpenseRecord {
   totalPaid?: number;
   /** ENetAmount - totalPaid */
   remainingAmount?: number;
+  /** Portion of totalPaid that came from On Account adjustments rather than
+   *  a real cash/bank payment (dbo.OnAccountLedger DEBIT rows) — see
+   *  backend/routes/onAccount.js's POST /apply-adjustment. */
+  onAccountAdjusted?: number;
 
   grnItems?: {
     itemName?: string;

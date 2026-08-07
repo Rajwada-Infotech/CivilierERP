@@ -46,6 +46,9 @@ export function RecordCard({
     return rec.netAmount && rec.netAmount > 0 ? rec.netAmount : rbd.netAmount;
   })();
 
+  const adjustedAmount = rec.onAccountAdjusted ?? 0;
+  const isFullyAdjusted = adjustedAmount > 0 && adjustedAmount >= effectiveNet;
+
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-3">
       {/* Header row */}
@@ -65,6 +68,12 @@ export function RecordCard({
         </div>
         <StatusBadge status={rec.status} />
       </div>
+
+      {adjustedAmount > 0 && (
+        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-semibold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 w-fit">
+          Adjusted {isFullyAdjusted ? "(Full)" : "(Partial)"} · ₹{fmt(adjustedAmount)}
+        </div>
+      )}
 
       {/* Detail grid */}
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">

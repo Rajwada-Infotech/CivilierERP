@@ -479,6 +479,8 @@ export function dbToRecord(row: any): ExpenseRecord {
       row.ERemainingAmount != null
         ? parseFloat(row.ERemainingAmount)
         : undefined,
+    onAccountAdjusted:
+      row.EOnAccountAdjusted != null ? parseFloat(row.EOnAccountAdjusted) : 0,
   };
 }
 

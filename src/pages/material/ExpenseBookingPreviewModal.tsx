@@ -30,6 +30,10 @@ import {
 } from "@/pages/material/ExpenseBooking/helpers";
 import type { ExpenseRecord } from "@/pages/material/ExpenseBooking/types";
 import { GLAccountPath } from "@/components/finance/GLAccountPath";
+import { getOAAdjustmentsForInvoice, reverseOAAdjustment, type OAInvoiceAdjustment } from "@/api/onAccountApi";
+import { toast } from "sonner";
+import { RotateCcw } from "lucide-react";
+import { ArrowDownCircle } from "lucide-react";
 
 interface GRNItemLine {
   itemName?: string;
@@ -80,9 +84,46 @@ export function ExpenseBookingPreviewModal({
   // but the record has a billingTermId pointing to the master)
   const [masterBillingTerms, setMasterBillingTerms] = useState<any[]>([]);
 
-  const [previewTab, setPreviewTab] = useState<"details" | "posting">(
+  const [previewTab, setPreviewTab] = useState<"details" | "posting" | "adjustments">(
     "details",
   );
+
+  // On-Account adjustments applied to this invoice — reuses the same
+  // dbo.OnAccountLedger-backed lookup the Payment page's amount breakdown
+  // already relies on (see backend/utils/oaAdjustments.js), so this tab and
+  // that breakdown never disagree about what's been applied.
+  const [oaAdjustments, setOaAdjustments] = useState<OAInvoiceAdjustment[]>([]);
+  const [oaAdjustmentsLoading, setOaAdjustmentsLoading] = useState(false);
+  const [reversingOAId, setReversingOAId] = useState<number | null>(null);
+
+  const reloadOAAdjustments = () => {
+    if (!previewRecord?.bookingReference) return;
+    setOaAdjustmentsLoading(true);
+    getOAAdjustmentsForInvoice(previewRecord.bookingReference)
+      .then(setOaAdjustments)
+      .catch(() => setOaAdjustments([]))
+      .finally(() => setOaAdjustmentsLoading(false));
+  };
+
+  useEffect(() => {
+    if (previewTab !== "adjustments" || !previewRecord?.bookingReference) return;
+    reloadOAAdjustments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewTab, previewRecord?.bookingReference]);
+
+  async function handleReverseAdjustment(oaId: number) {
+    if (!window.confirm("Reverse this On Account adjustment? The amount will be restored to the party's on-account balance and this invoice's outstanding balance will increase again.")) return;
+    setReversingOAId(oaId);
+    try {
+      await reverseOAAdjustment(oaId);
+      toast.success("Adjustment reversed");
+      reloadOAAdjustments();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to reverse adjustment");
+    } finally {
+      setReversingOAId(null);
+    }
+  }
   const [invPostingData, setInvPostingData] = useState<any | null>(null);
   const [invPostingLoading, setInvPostingLoading] = useState(false);
   const [invPosting, setInvPosting] = useState(false);
@@ -447,7 +488,7 @@ export function ExpenseBookingPreviewModal({
 
         {/* ── Tab bar ── */}
         <div className="flex items-center gap-1 px-4 sm:px-6 pt-1 border-b border-border bg-card expense-preview-print-hide">
-          {(["details", "posting"] as const).map((tab) => (
+          {(["details", "posting", "adjustments"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -461,10 +502,17 @@ export function ExpenseBookingPreviewModal({
             >
               {tab === "details" ? (
                 <FileText size={12} />
-              ) : (
+              ) : tab === "posting" ? (
                 <Wallet size={12} />
+              ) : (
+                <ArrowDownCircle size={12} />
               )}
-              {tab === "details" ? "Details" : "Posting"}
+              {tab === "details" ? "Details" : tab === "posting" ? "Posting" : "Adjustments"}
+              {tab === "adjustments" && oaAdjustments.length > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] bg-muted text-muted-foreground leading-none">
+                  {oaAdjustments.length}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -605,6 +653,107 @@ export function ExpenseBookingPreviewModal({
                 </>
               );
             })()}
+          </div>
+        )}
+
+        {previewTab === "adjustments" && (
+          <div className="px-4 sm:px-6 py-4 sm:py-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <ArrowDownCircle size={14} className="text-emerald-600 dark:text-emerald-400" />
+              <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                On Account Adjustment History
+              </span>
+            </div>
+
+            {oaAdjustmentsLoading ? (
+              <div className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-4 py-3">
+                <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                <p className="text-xs text-muted-foreground">Loading adjustment history…</p>
+              </div>
+            ) : oaAdjustments.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-10 rounded-xl border border-dashed border-border/60 text-center">
+                <ArrowDownCircle size={22} className="text-muted-foreground/30" />
+                <p className="text-xs text-muted-foreground">
+                  No On Account adjustments have been applied to this invoice yet.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Summary strip — total adjusted vs. this invoice's own Net
+                    Payable, matching the Bill Status section's numbers. */}
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
+                    <p className="text-xs text-muted-foreground">Total Adjusted from On A/C</p>
+                    <p className="font-mono text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                      ₹{fmt(oaAdjustments.reduce((s, a) => s + a.amount, 0))}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between px-4 py-2.5">
+                    <p className="text-xs text-muted-foreground">Invoice Net Payable</p>
+                    <p className="font-mono text-sm font-semibold">₹{fmt(displayNetAmount)}</p>
+                  </div>
+                </div>
+
+                {/* One card per adjustment — supports multiple adjustments
+                    against the same invoice, potentially from different
+                    on-account sources, each with its own audit detail. */}
+                <div className="space-y-2.5">
+                  {oaAdjustments.map((adj) => (
+                    <div key={adj.oaId} className="rounded-xl border border-border overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10 border-b border-border/60">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-foreground">{adj.partyName}</span>
+                          <span className="text-[10px] text-muted-foreground">On A/C Source</span>
+                          {adj.mode && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">
+                              {adj.mode}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                            ₹{fmt(adj.amount)}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => handleReverseAdjustment(adj.oaId)}
+                            disabled={reversingOAId === adj.oaId}
+                            title="Reverse this adjustment"
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+                          >
+                            <RotateCcw size={13} className={reversingOAId === adj.oaId ? "animate-spin" : ""} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-4 py-3 text-xs">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground/80">Adjustment Date</p>
+                          <p className="font-medium text-foreground mt-0.5">
+                            {adj.date ? new Date(adj.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground/80">Adjustment Doc No</p>
+                          <p className="font-mono font-medium text-foreground mt-0.5 truncate" title={adj.adjustmentDocNo || undefined}>
+                            {adj.adjustmentDocNo || "—"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground/80">Remaining On A/C Balance</p>
+                          <p className="font-mono font-medium text-foreground mt-0.5">₹{fmt(adj.partyRemainingBalance)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground/80">Performed By</p>
+                          <p className="font-medium text-foreground mt-0.5 truncate" title={adj.performedBy || undefined}>
+                            {adj.performedBy || "—"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 

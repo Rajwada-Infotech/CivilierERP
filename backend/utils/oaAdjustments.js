@@ -24,10 +24,16 @@ async function getOAAdjustmentsForInvoice(pool, sql, expenseRef) {
     .request()
     .input("RefDocNo", sql.NVarChar(100), expenseRef).query(`
       SELECT
+        oa.OAId     AS oaId,
         oa.Amount   AS amount,
         oa.PartyId  AS partyId,
         ISNULL(ahm.LHeadName, 'Unknown Party') AS partyName,
-        oa.TxnDate  AS date
+        oa.TxnDate  AS date,
+        oa.AdjustmentDocNo AS adjustmentDocNo,
+        oa.AdjRefDocNo AS sourcePaymentDocNo,
+        oa.Mode AS mode,
+        oa.CreatedBy AS performedBy,
+        ISNULL(ahm.OnAccountBalance, 0) AS partyRemainingBalance
       FROM dbo.OnAccountLedger oa
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oa.PartyId
       WHERE oa.TxnType = 'DEBIT'
@@ -36,10 +42,19 @@ async function getOAAdjustmentsForInvoice(pool, sql, expenseRef) {
       ORDER BY oa.TxnDate DESC, oa.OAId DESC
     `);
   return result.recordset.map((r) => ({
+    oaId: r.oaId,
     amount: parseFloat(r.amount) || 0,
     partyId: r.partyId,
     partyName: r.partyName,
     date: r.date,
+    adjustmentDocNo: r.adjustmentDocNo || null,
+    sourcePaymentDocNo: r.sourcePaymentDocNo || null,
+    mode: r.mode || null,
+    performedBy: r.performedBy || null,
+    // The party's CURRENT (materialized) balance — since OnAccountBalance is
+    // a running total rather than a per-row snapshot, this reflects the
+    // balance as of NOW, not as of this specific historical adjustment.
+    partyRemainingBalance: Math.max(0, parseFloat(r.partyRemainingBalance) || 0),
   }));
 }
 
