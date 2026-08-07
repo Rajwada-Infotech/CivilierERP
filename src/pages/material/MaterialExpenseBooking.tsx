@@ -34,6 +34,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  SelectGroup,
+  SelectLabel,
 } from "@/components/ui/select";
 import {
   Plus,
@@ -57,7 +59,6 @@ import {
   SlidersHorizontal,
   Clock,
   ShoppingCart,
-  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
@@ -1600,72 +1601,67 @@ export default function MaterialExpenseBooking() {
                           />
                         </div>
                       ) : (
-                        <div className="relative">
-                          <User
-                            size={13}
-                            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                          />
-                          <select
-                            value={form.supplier || ""}
-                            onChange={(e) => {
-                              const name = e.target.value;
-                              set("supplier", name);
-                              const head = name
-                                ? supplierHeads.find((s) => s.label === name) ??
-                                  contractorHeads.find((c) => c.label === name) ??
-                                  brokerHeads.find((b) => b.label === name)
-                                : undefined;
-                              set("supplierLHeadId", head?.id ?? null);
-                              // Other Expenses (TOD) bookings have no source-doc
-                              // label to name themselves after — keep the
-                              // booking name in sync with the chosen supplier.
-                              if (name && selectedDoc?.kind === "TOD") {
-                                set("bookingName", `Payment for ${name}`);
-                              }
-                              if (!name) return;
-                              if (head?.paymentTerms) {
-                                const termStr = head.paymentTerms.trim().toLowerCase();
-                                const match = paymentTermOptions.find(
-                                  (t) => t.TermName.trim().toLowerCase() === termStr,
-                                );
-                                // Due Date is derived by the live effect above
-                                // (Vendor Invoice Date + Days) — just set the term here.
-                                if (match) set("paymentTermId", match.Id);
-                              }
-                              if (!form.vendorInvoiceDate) {
-                                set("vendorInvoiceDate", new Date().toISOString().split("T")[0]);
-                              }
-                            }}
-                            className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                          >
-                            <option value="">Select Payable Party</option>
+                        <Select
+                          value={form.supplier || ""}
+                          onValueChange={(name) => {
+                            set("supplier", name);
+                            const head = name
+                              ? supplierHeads.find((s) => s.label === name) ??
+                                contractorHeads.find((c) => c.label === name) ??
+                                brokerHeads.find((b) => b.label === name)
+                              : undefined;
+                            set("supplierLHeadId", head?.id ?? null);
+                            // Other Expenses (TOD) bookings have no source-doc
+                            // label to name themselves after — keep the
+                            // booking name in sync with the chosen supplier.
+                            if (name && selectedDoc?.kind === "TOD") {
+                              set("bookingName", `Payment for ${name}`);
+                            }
+                            if (!name) return;
+                            if (head?.paymentTerms) {
+                              const termStr = head.paymentTerms.trim().toLowerCase();
+                              const match = paymentTermOptions.find(
+                                (t) => t.TermName.trim().toLowerCase() === termStr,
+                              );
+                              // Due Date is derived by the live effect above
+                              // (Vendor Invoice Date + Days) — just set the term here.
+                              if (match) set("paymentTermId", match.Id);
+                            }
+                            if (!form.vendorInvoiceDate) {
+                              set("vendorInvoiceDate", new Date().toISOString().split("T")[0]);
+                            }
+                          }}
+                        >
+                          <SelectTrigger className={selectTriggerCls}>
+                            <SelectValue placeholder="Select Payable Party" />
+                          </SelectTrigger>
+                          <SelectContent>
                             {supplierHeads.length > 0 && (
-                              <optgroup label="Suppliers">
+                              <SelectGroup>
+                                <SelectLabel>Suppliers</SelectLabel>
                                 {supplierHeads.map((s) => (
-                                  <option key={`s-${s.id}`} value={s.label}>{s.label}</option>
+                                  <SelectItem key={`s-${s.id}`} value={s.label}>{s.label}</SelectItem>
                                 ))}
-                              </optgroup>
+                              </SelectGroup>
                             )}
                             {contractorHeads.length > 0 && (
-                              <optgroup label="Contractors">
+                              <SelectGroup>
+                                <SelectLabel>Contractors</SelectLabel>
                                 {contractorHeads.map((c) => (
-                                  <option key={`c-${c.id}`} value={c.label}>{c.label}</option>
+                                  <SelectItem key={`c-${c.id}`} value={c.label}>{c.label}</SelectItem>
                                 ))}
-                              </optgroup>
+                              </SelectGroup>
                             )}
                             {brokerHeads.length > 0 && (
-                              <optgroup label="Brokers">
+                              <SelectGroup>
+                                <SelectLabel>Brokers</SelectLabel>
                                 {brokerHeads.map((b) => (
-                                  <option key={`b-${b.id}`} value={b.label}>{b.label}</option>
+                                  <SelectItem key={`b-${b.id}`} value={b.label}>{b.label}</SelectItem>
                                 ))}
-                              </optgroup>
+                              </SelectGroup>
                             )}
-                          </select>
-                          <ChevronDown
-                            size={11}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                          />
-                        </div>
+                          </SelectContent>
+                        </Select>
                       )}
                       {selectedDoc?.vendorLabel && (
                         <p className="text-[10px] text-muted-foreground">
