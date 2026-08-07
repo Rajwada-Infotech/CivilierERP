@@ -22,7 +22,7 @@ import {
 import { ASSET_CATEGORIES, CATEGORY_ICONS, CATEGORY_COLORS } from "./assetCategories";
 
 // ── constants ─────────────────────────────────────────────────────────────────
-const ASSET_STATUS_OPTIONS = ["Active", "Sold", "Scrapped", "Under Maintenance"] as const;
+const ASSET_STATUS_OPTIONS = ["Pending", "Active", "Sold", "Scrapped", "Under Maintenance"] as const;
 
 // Solid fills for the "Book Value by Category" bar chart — CATEGORY_COLORS
 // are subtle badge tints (bg-x/10), too washed out to read as a bar fill.
@@ -32,6 +32,7 @@ const BAR_PALETTE = [
 ];
 
 const STATUS_COLORS: Record<string, string> = {
+  Pending:             "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400",
   Active:              "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
   Sold:                "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
   Scrapped:            "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
@@ -321,6 +322,7 @@ export default function FixedAssetRecord() {
     let totalBookValue = 0;
     let activeCount = 0;
     let soldCount = 0;
+    let pendingCount = 0;
     for (const a of live) {
       totalCost += a.PurchaseCost || 0;
       const dc = a.PurchaseDate && a.DepreciationRate
@@ -329,8 +331,9 @@ export default function FixedAssetRecord() {
       totalBookValue += dc ? dc.bookValue : (a.PurchaseCost || 0);
       if (a.AssetStatus === "Active") activeCount++;
       if (a.AssetStatus === "Sold") soldCount++;
+      if (a.AssetStatus === "Pending") pendingCount++;
     }
-    return { count: live.length, totalCost, totalBookValue, activeCount, soldCount };
+    return { count: live.length, totalCost, totalBookValue, activeCount, soldCount, pendingCount };
   }, [assets]);
 
   // ── book value by category (for the portfolio-style bar chart) ───────────
@@ -991,8 +994,11 @@ export default function FixedAssetRecord() {
             </p>
           </div>
           <CardContent className="p-4">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <SummaryCard label="Total Assets" value={fmt(portfolioStats.count)} icon={Boxes} />
+              {portfolioStats.pendingCount > 0 && (
+                <SummaryCard label="Pending" value={fmt(portfolioStats.pendingCount)} color="text-violet-600 dark:text-violet-400" icon={AlertCircle} />
+              )}
               <SummaryCard label="Active" value={fmt(portfolioStats.activeCount)} color="text-emerald-600 dark:text-emerald-400" icon={PlayCircle} />
               <SummaryCard label="Sold" value={fmt(portfolioStats.soldCount)} color="text-amber-600 dark:text-amber-400" icon={IndianRupee} />
             </div>

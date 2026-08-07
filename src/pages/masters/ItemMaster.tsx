@@ -65,7 +65,7 @@ interface Item {
   itemName: string;
   description: string;
   shortCode: string;
-  itemType: "Service" | "Goods" | "";
+  itemType: "Service" | "Goods" | "Fixed Asset" | "";
   hsnCode: string;
   cgst: number;
   sgst: number;
@@ -719,10 +719,12 @@ const ItemMaster: React.FC = () => {
               ? "Service"
               : itemTypeRaw.toLowerCase() === "goods"
                 ? "Goods"
-                : "";
+                : itemTypeRaw.toLowerCase() === "fixed asset"
+                  ? "Fixed Asset"
+                  : "";
           if (!itemType)
             throw new Error(
-              `Item Type must be "Goods" or "Service" (got "${itemTypeRaw}")`,
+              `Item Type must be "Goods", "Service", or "Fixed Asset" (got "${itemTypeRaw}")`,
             );
 
           if (!itemGroupRaw) throw new Error("Item Group is required");
@@ -905,7 +907,9 @@ const ItemMaster: React.FC = () => {
             className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
               type === "Service"
                 ? "bg-blue-500/10 text-blue-600"
-                : "bg-green-500/10 text-green-600"
+                : type === "Fixed Asset"
+                  ? "bg-violet-500/10 text-violet-600"
+                  : "bg-green-500/10 text-green-600"
             }`}
           >
             {type}
@@ -1260,6 +1264,7 @@ const ItemMaster: React.FC = () => {
                 <option value="">Select type...</option>
                 <option value="Service">Service</option>
                 <option value="Goods">Goods</option>
+                <option value="Fixed Asset">Fixed Asset</option>
               </select>
             </Field>
             {/* HSN Code */}

@@ -21,6 +21,7 @@ const {
 const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier");
 const { buildDirectExpenseBooking } = require("../services/directExpenseBooking");
 const { computeMultiGRNInvoice } = require("../services/invoiceLinking");
+const { syncBillStatus } = require("../utils/syncBillStatus");
 
 // Base/GST for a single GRN's item lines.
 async function computeSingleGrnBaseTax(pool, grnId) {
@@ -3385,6 +3386,23 @@ router.put("/:id/approve", requirePageRight("expense-booking", "edit"), async (r
       userEmail,
       req.user?.role,
     );
+
+    // Initialize EBillStatus/ETotalPaid/ERemainingAmount the moment the
+    // invoice is approved — previously these only got set the first time a
+    // payment/adjustment touched the invoice, so a freshly-approved invoice
+    // with no payments yet had EBillStatus=NULL and showed as "Unknown" in
+    // pickers (e.g. the On Account Adjustment invoice list) instead of
+    // "Payment Due".
+    try {
+      const pool = getPool();
+      const docRes = await pool.request().input("Eid", sql.Int, id)
+        .query("SELECT EDocNo FROM dbo.ExpenseBooking WHERE Eid = @Eid");
+      const docNo = docRes.recordset[0]?.EDocNo;
+      if (docNo) await syncBillStatus(pool, sql, docNo);
+    } catch (syncErr) {
+      console.warn("syncBillStatus on invoice approve failed (non-fatal):", syncErr.message);
+    }
+
     await bumpCacheVersion("expense-booking");
     await bumpCacheVersion("expense-booking-options");
     await bumpCacheVersion("expense-booking-source-ids");

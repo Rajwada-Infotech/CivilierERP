@@ -10,6 +10,7 @@
 // Posting starts capturing from 2026-06-28 — no historical backfill.
 
 const { sql } = require("../db");
+const { autoCreateFixedAssetsFromGRN } = require("./fixedAssetAutoAlloc");
 
 // ── System GL account names (seeded by migration 125) ───────────────────────
 const GL_ACCOUNTS = {
@@ -221,6 +222,16 @@ async function postGRNApproval(pool, grnId, userEmail) {
           VALUES (@ItemID, @Qty, @UOM, 'IN', 'GRN', @RefID, @DocNo, @GodownID, GETDATE())
         `);
     }
+  }
+
+  // Fixed-asset-tagged items (Item Master M_Type='Fixed Asset') get a
+  // Pending Fixed Asset Record row the moment they're physically received —
+  // regardless of whether this GRN ends up postable to GL below (e.g. a
+  // free/zero-value receipt still received a real, trackable asset).
+  try {
+    await autoCreateFixedAssetsFromGRN(pool, grnId, userEmail);
+  } catch (err) {
+    console.error(`[postGRNApproval] fixed-asset auto-allocation failed for GRN ${grnId} (non-fatal):`, err.message);
   }
 
   const baseAmount = items.reduce(
