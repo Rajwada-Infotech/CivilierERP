@@ -103,6 +103,7 @@ const CrmSalesDeed: React.FC = () => {
   const [savingDeed, setSavingDeed] = useState(false);
   const [progressForm, setProgressForm] = useState({ ...EMPTY_PROGRESS_FORM });
   const [savingProgress, setSavingProgress] = useState(false);
+  const [sendingToCustomer, setSendingToCustomer] = useState(false);
 
   const { data: deeds = [], isLoading } = useQuery({ queryKey: ["crm-sales-deed"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
@@ -227,6 +228,29 @@ const CrmSalesDeed: React.FC = () => {
       toast.error(e.message);
     } finally {
       setSavingProgress(false);
+    }
+  };
+
+  // The customer-portal approval loop is normally auto-triggered the moment
+  // ExecutedBy is first set (see crmSalesDeed.js PUT /:id) — but that's a
+  // best-effort convenience, not the only path, so staff need an explicit
+  // fallback for cases the auto-trigger doesn't cover (e.g. it silently
+  // missed a deed whose ExecutedBy and RegistrationNo were set together in
+  // one request — a real bug that left a deed fully Registered with the
+  // customer never having been asked to approve it).
+  const handleSendToCustomer = async () => {
+    if (!detailId) return;
+    setSendingToCustomer(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${detailId}/send-to-customer`, { method: "PUT" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Sent to customer for approval");
+      qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSendingToCustomer(false);
     }
   };
 
@@ -527,6 +551,14 @@ const CrmSalesDeed: React.FC = () => {
                 <div>
                   <SectionLabel>Approvals</SectionLabel>
                   <DetailRow label="Customer Approval" value={<StatusBadge status={detail.CustomerApprovalStatus || "NotSent"} cfg={APPROVAL_CFG} />} />
+                  {!detail.SentToCustomerAt && detail.Status !== "Registered" && (
+                    <div className="flex justify-end pb-2">
+                      <button onClick={handleSendToCustomer} disabled={sendingToCustomer}
+                        className="px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted disabled:opacity-40 transition-colors">
+                        {sendingToCustomer ? "Sending..." : "Send to Customer for Approval"}
+                      </button>
+                    </div>
+                  )}
                   {detail.DirectorApprovalStatus && detail.DirectorApprovalStatus !== "NotRequired" && (
                     <DetailRow
                       label="Director Approval"

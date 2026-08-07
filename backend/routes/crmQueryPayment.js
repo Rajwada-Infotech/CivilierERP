@@ -1,7 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const multer = require("multer");
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -13,6 +11,24 @@ const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+
+// Base64 inflates payload ~33%, and the whole request shares one 10mb JSON
+// body cap (server.js) across every staged file plus JSON structure — so
+// this per-file cap has to leave real headroom, not just sit under 10mb
+// itself. Kept in sync with the client-side cap in CrmQueryPayment.tsx.
+const MAX_FILE_BYTES = 4 * 1024 * 1024;
+
+// Files arrive as base64 in the JSON body (not multipart) — decoded here
+// back into the exact bytes the client staged and previewed, then stored in
+// the existing VARBINARY(MAX) column exactly as a multipart upload would
+// have stored them. Throws on anything over the size cap or with no data.
+function decodeBase64File(f, label) {
+  if (!f || !f.base64 || !f.fileName) throw new Error(`${label}: fileName and base64 are required`);
+  const buffer = Buffer.from(f.base64, "base64");
+  if (!buffer.length) throw new Error(`${label}: file is empty`);
+  if (buffer.length > MAX_FILE_BYTES) throw new Error(`${label}: ${f.fileName} is too large (max ${(MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB)`);
+  return { fileName: f.fileName, mimeType: f.mimeType || "application/octet-stream", buffer };
+}
 
 // Amount is never stored on this table — it's read live from the Sales
 // Deed's own StampDuty + RegistrationFee fields, which stay the single
@@ -120,7 +136,7 @@ router.post("/", requirePageRight("crm-query-payment", "create"), async (req, re
 // flip Status -> InfoSent. This is the outbound half: staff sending the
 // customer what they need, not a document request FROM the customer (the
 // customer never uploads here — see crmPortal.js for their read-only view).
-router.post("/:id/info", requirePageRight("crm-query-payment", "edit"), upload.array("files", 10), async (req, res) => {
+router.post("/:id/info", requirePageRight("crm-query-payment", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
@@ -131,14 +147,23 @@ router.post("/:id/info", requirePageRight("crm-query-payment", "edit"), upload.a
     const activeErr = await requireActiveBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    const rawFiles = Array.isArray(req.body.files) ? req.body.files : [];
+    if (!rawFiles.length) return res.status(400).json({ error: "At least one file is required" });
+    let files;
+    try {
+      files = rawFiles.map((f, i) => decodeBase64File(f, `File ${i + 1}`));
+    } catch (decodeErr) {
+      return res.status(400).json({ error: decodeErr.message });
+    }
+
     const actor = actorId(req);
-    for (const file of req.files || []) {
+    for (const file of files) {
       await pool.request()
         .input("qpid", sql.Int, id)
         .input("dtype", sql.NVarChar(20), "Info")
-        .input("fname", sql.NVarChar(255), file.originalname)
-        .input("mtype", sql.NVarChar(100), file.mimetype)
-        .input("fsize", sql.Int, file.size)
+        .input("fname", sql.NVarChar(255), file.fileName)
+        .input("mtype", sql.NVarChar(100), file.mimeType)
+        .input("fsize", sql.Int, file.buffer.length)
         .input("fdata", sql.VarBinary(sql.MAX), file.buffer)
         .input("ub", sql.Int, actor)
         .query(`
@@ -163,7 +188,7 @@ router.post("/:id/info", requirePageRight("crm-query-payment", "edit"), upload.a
       createdBy: actor,
     });
 
-    res.json({ success: true, count: (req.files || []).length });
+    res.json({ success: true, count: files.length });
   } catch (e) {
     console.error("[crm-query-payment] POST /:id/info error:", e.message);
     res.status(500).json({ error: e.message });
@@ -174,7 +199,7 @@ router.post("/:id/info", requirePageRight("crm-query-payment", "edit"), upload.a
 // government. This is never company revenue (the company never receives
 // this money) — it's a staff attestation, optionally with the customer's
 // payment proof attached (DocType='Proof').
-router.post("/:id/confirm", requirePageRight("crm-query-payment", "edit"), upload.single("proof"), async (req, res) => {
+router.post("/:id/confirm", requirePageRight("crm-query-payment", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
@@ -188,15 +213,24 @@ router.post("/:id/confirm", requirePageRight("crm-query-payment", "edit"), uploa
     const activeErr = await requireActiveBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    let proof = null;
+    if (b.proof) {
+      try {
+        proof = decodeBase64File(b.proof, "Proof");
+      } catch (decodeErr) {
+        return res.status(400).json({ error: decodeErr.message });
+      }
+    }
+
     const actor = actorId(req);
-    if (req.file) {
+    if (proof) {
       await pool.request()
         .input("qpid", sql.Int, id)
         .input("dtype", sql.NVarChar(20), "Proof")
-        .input("fname", sql.NVarChar(255), req.file.originalname)
-        .input("mtype", sql.NVarChar(100), req.file.mimetype)
-        .input("fsize", sql.Int, req.file.size)
-        .input("fdata", sql.VarBinary(sql.MAX), req.file.buffer)
+        .input("fname", sql.NVarChar(255), proof.fileName)
+        .input("mtype", sql.NVarChar(100), proof.mimeType)
+        .input("fsize", sql.Int, proof.buffer.length)
+        .input("fdata", sql.VarBinary(sql.MAX), proof.buffer)
         .input("ub", sql.Int, actor)
         .query(`
           INSERT INTO dbo.CrmQueryPaymentAttachments (QueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)

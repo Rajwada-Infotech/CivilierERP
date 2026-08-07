@@ -388,7 +388,18 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     // moment the deed becomes legally Executed (ExecutedBy just filled in),
     // it's ready to show the customer. No separate manual "send" click
     // needed, same as the agreement's auto-send on senior approval.
-    if (newStatus === "Executed") {
+    //
+    // Keyed off "ExecutedBy was just set" (row.ExecutedBy was empty, b.ExecutedBy
+    // now provided) rather than `newStatus === "Executed"` — a request that
+    // sets ExecutedBy and RegistrationNo together jumps straight to
+    // newStatus === "Registered" and would never pass through "Executed",
+    // silently skipping the customer notification. That's exactly what
+    // happened to a real record: ExecutedBy and Status were both set,
+    // SentToCustomerAt stayed null forever, and everything downstream that
+    // depends on customer approval (Pre-Possession's gate, the portal's
+    // approval card) broke with no error anywhere.
+    const executedByJustSet = !row.ExecutedBy && b.ExecutedBy;
+    if (executedByJustSet) {
       const sent = await pool.request().input("id", sql.Int, id).query("SELECT SentToCustomerAt FROM dbo.CrmSalesDeed WHERE Id = @id");
       if (!sent.recordset[0].SentToCustomerAt) {
         await pool.request().input("id", sql.Int, id).query(`

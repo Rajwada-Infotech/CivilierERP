@@ -5,10 +5,13 @@ import { toast } from "sonner";
 import {
   FileText, FileImage, FileSpreadsheet, File as FileIcon, CheckCircle2,
   Eye, AlertTriangle, CalendarCheck2, Landmark, Download, Hash, ScrollText,
-  UploadCloud, Clock, XCircle,
+  UploadCloud, Clock, XCircle, ReceiptIndianRupee, BookMarked, ShieldCheck, Scale, Paperclip,
 } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
-import { API, authHeaders, fetchAgreement, fetchAgreementDocuments, uploadAgreementDoc, proposeAgreementDate, acceptAgreementDate, respondAgreement, respondSalesDeed, fmtMoney, fmtDate, fmtBytes, maskAadhaar } from "./portalApi";
+import {
+  API, authHeaders, fetchAgreement, fetchAgreementDocuments, uploadAgreementDoc, proposeAgreementDate, acceptAgreementDate,
+  respondAgreement, respondSalesDeed, fetchQueryPaymentAttachments, uploadQueryPaymentProof, fmtMoney, fmtDate, fmtBytes, maskAadhaar,
+} from "./portalApi";
 import {
   PageHeader, Card, CardHeader, InfoField, StatusPill, Stepper, StepState,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
@@ -98,6 +101,45 @@ function DocPreviewDialog({ doc, onClose }: { doc: any; onClose: () => void }) {
           <span>{fmtBytes(doc.FileSize)}</span>
           {blobUrl && (
             <a href={blobUrl} download={doc.FileName} style={{ color: GOLD }} className="hover:underline flex items-center gap-1">
+              <Download size={12} /> Download
+            </a>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Same blob-preview pattern as DocPreviewDialog above, pointed at the Query
+// Payment attachment endpoint instead of Agreement documents.
+function QpAttachmentPreviewDialog({ att, applicationId, onClose }: { att: any; applicationId: number; onClose: () => void }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    fetch(`${API}/query-payment/attachment/${att.AttachmentId}/file?applicationId=${applicationId}`, { headers: authHeaders() })
+      .then((r) => r.blob())
+      .then((blob) => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); })
+      .catch(() => setBlobUrl(null));
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [att.AttachmentId, applicationId]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">{mimeIcon(att.MimeType)} {att.FileName}</DialogTitle>
+          <DialogDescription>{att.DocType === "Proof" ? "Your payment proof" : "Sent by our team"}</DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center justify-center min-h-[300px] bg-slate-50 rounded-lg overflow-hidden">
+          {!blobUrl ? <span className="text-sm text-slate-400">Loading preview…</span>
+            : att.MimeType?.startsWith("image/") ? <img src={blobUrl} alt={att.FileName} className="max-w-full max-h-[60vh] object-contain" />
+            : att.MimeType === "application/pdf" ? <iframe src={blobUrl} title={att.FileName} className="w-full h-[60vh] border-0" />
+            : <div className="flex flex-col items-center gap-2 py-8 text-slate-400 text-sm">{mimeIcon(att.MimeType, 28)} Preview not available for this file type.</div>}
+        </div>
+        <div className="flex justify-between items-center text-xs text-slate-400 pt-1">
+          <span>{fmtBytes(att.FileSize)}</span>
+          {blobUrl && (
+            <a href={blobUrl} download={att.FileName} style={{ color: GOLD }} className="hover:underline flex items-center gap-1">
               <Download size={12} /> Download
             </a>
           )}
@@ -296,9 +338,33 @@ const PortalAgreement: React.FC = () => {
   const [uploadDoc, setUploadDoc] = useState<any | null>(null);
   const [respondFor, setRespondFor] = useState<"agreement" | "salesDeed" | null>(null);
   const [proposeDateOpen, setProposeDateOpen] = useState(false);
+  const [qpPreviewAttachment, setQpPreviewAttachment] = useState<any | null>(null);
+  const [qpUploading, setQpUploading] = useState(false);
 
   const { data: agreement } = useQuery({ queryKey: ["portal-agreement", applicationId], queryFn: () => fetchAgreement(applicationId) });
   const { data: documents = [] } = useQuery({ queryKey: ["portal-agreement-documents", applicationId], queryFn: () => fetchAgreementDocuments(applicationId) });
+  const { data: qpAttachments = [] } = useQuery({
+    queryKey: ["portal-qp-attachments", applicationId],
+    queryFn: () => fetchQueryPaymentAttachments(applicationId),
+    enabled: !!timeline.queryPayment,
+  });
+  const qpInfoDocs = (qpAttachments as any[]).filter((a) => a.DocType === "Info");
+  const qpProofDocs = (qpAttachments as any[]).filter((a) => a.DocType === "Proof");
+
+  const handleUploadProof = async (file: File | null) => {
+    if (!file) return;
+    setQpUploading(true);
+    try {
+      await uploadQueryPaymentProof(applicationId, file);
+      toast.success("Proof uploaded — our team will confirm shortly");
+      qc.invalidateQueries({ queryKey: ["portal-qp-attachments", applicationId] });
+      qc.invalidateQueries({ queryKey: ["portal-timeline"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setQpUploading(false);
+    }
+  };
 
   // Two distinct piles: documents still waiting on the customer (requested
   // but never uploaded, or returned for correction) vs. documents that
@@ -361,7 +427,7 @@ const PortalAgreement: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Finance · Legal" title="Agreement" subtitle="Track your agreement's approval journey, review its terms and documents, and record your decision." />
+      <PageHeader eyebrow="Finance · Legal" title="Agreement" subtitle="Track your full legal journey — agreement, sale deed, government payment, and registration — in one place." />
 
       {agreement && (
         <Card className="overflow-hidden">
@@ -556,7 +622,103 @@ const PortalAgreement: React.FC = () => {
         </Card>
       )}
 
+      {timeline.queryPayment && (
+        <Card className="overflow-hidden">
+          <CardHeader icon={ReceiptIndianRupee} title="Government Payment (Stamp Duty & Registration)" action={<StatusPill status={timeline.queryPayment.Status} />} />
+          <div className="p-5 space-y-4">
+            <p className="text-xs" style={{ color: TEXT_MUTED }}>
+              This amount is paid by you directly to the government at registration — it is never paid to us.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+              <InfoField label="Stamp Duty" value={fmtMoney(timeline.queryPayment.StampDuty)} />
+              <InfoField label="Registration Fee" value={fmtMoney(timeline.queryPayment.RegistrationFee)} />
+              <InfoField label="Total Required" value={fmtMoney(timeline.queryPayment.RequiredAmount)} />
+            </div>
+
+            {qpInfoDocs.length > 0 && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wide mb-1.5" style={{ color: TEXT_FAINT }}>Paperwork From Us</p>
+                <div className="space-y-1.5">
+                  {qpInfoDocs.map((a: any) => (
+                    <button key={a.AttachmentId} onClick={() => setQpPreviewAttachment(a)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left"
+                      style={{ border: `1px solid ${HAIRLINE}`, background: SURFACE_ALT }}>
+                      {mimeIcon(a.MimeType, 15)}
+                      <span className="text-sm truncate flex-1" style={{ color: TEXT }}>{a.FileName}</span>
+                      <Eye size={13} style={{ color: TEXT_FAINT }} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {qpProofDocs.length > 0 && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wide mb-1.5" style={{ color: TEXT_FAINT }}>Your Proof of Payment</p>
+                <div className="space-y-1.5">
+                  {qpProofDocs.map((a: any) => (
+                    <button key={a.AttachmentId} onClick={() => setQpPreviewAttachment(a)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left"
+                      style={{ border: `1px solid ${HAIRLINE}`, background: SURFACE_ALT }}>
+                      {mimeIcon(a.MimeType, 15)}
+                      <span className="text-sm truncate flex-1" style={{ color: TEXT }}>{a.FileName}</span>
+                      <Eye size={13} style={{ color: TEXT_FAINT }} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {timeline.queryPayment.Status === "Confirmed" ? (
+              <div className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "#0F7A44" }}>
+                <CheckCircle2 size={16} /> Payment confirmed{timeline.queryPayment.ConfirmedAt ? ` on ${fmtDate(timeline.queryPayment.ConfirmedAt)}` : ""}
+              </div>
+            ) : (
+              <label className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg cursor-pointer text-sm font-semibold text-white"
+                style={{ background: qpUploading ? TEXT_FAINT : INK }}>
+                <Paperclip size={15} />
+                {qpUploading ? "Uploading..." : "Upload Proof of Payment"}
+                <input type="file" className="hidden" accept=".pdf,image/*" disabled={qpUploading}
+                  onChange={(e) => handleUploadProof(e.target.files?.[0] || null)} />
+              </label>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {timeline.registry && (
+        <Card className="overflow-hidden">
+          <CardHeader icon={BookMarked} title="Registry" action={<StatusPill status={timeline.registry.Status} />} />
+          <div className="p-5 grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+            <InfoField label="Registry No." value={timeline.registry.RegNo} mono />
+            <InfoField label="Scheduled Date" value={fmtDate(timeline.registry.ScheduledDate)} />
+            <InfoField label="Completed Date" value={fmtDate(timeline.registry.CompletedDate)} />
+          </div>
+        </Card>
+      )}
+
+      {(timeline.nocStatus?.total > 0 || timeline.legalDocumentation) && (
+        <Card className="overflow-hidden">
+          <CardHeader icon={ShieldCheck} title="NOCs & Legal Status" />
+          <div className="p-5 space-y-4">
+            {timeline.legalDocumentation && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm flex items-center gap-1.5" style={{ color: TEXT }}><Scale size={14} style={{ color: GOLD }} /> Legal Documentation</span>
+                <StatusPill status={timeline.legalDocumentation.status} />
+              </div>
+            )}
+            {timeline.nocStatus?.items?.map((n: any, i: number) => (
+              <div key={i} className="flex items-center justify-between">
+                <span className="text-sm" style={{ color: TEXT }}>{n.type} NOC{n.nocNo ? ` · ${n.nocNo}` : ""}</span>
+                <StatusPill status={n.status} />
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {previewDoc && <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
+      {qpPreviewAttachment && <QpAttachmentPreviewDialog att={qpPreviewAttachment} applicationId={applicationId} onClose={() => setQpPreviewAttachment(null)} />}
       {proposeDateOpen && agreement && (
         <ProposeDateDialog
           currentProposal={agreement.ProposedDate}
