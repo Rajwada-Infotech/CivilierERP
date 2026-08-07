@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "./PickerPrimitives";
 import { fmt } from "./helpers";
+import { getItems, type DbItem } from "@/api/itemMasterApi";
 
 // Types
 
@@ -48,6 +49,8 @@ interface UomOption {
 }
 
 // Pure helpers (exported for use in helpers.ts / tests)
+
+const SERVICE_ITEMS_LIST_ID = "direct-items-service-list";
 
 function makeKey() {
   return `di-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -95,6 +98,21 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
   const [uomOptions, setUomOptions] = useState<UomOption[]>([]);
   const [uomLoading, setUomLoading] = useState(false);
   const lastUom = useRef<string>("");
+
+  // Item picker — DINV/Other Expenses is a service-driven booking (no
+  // goods, since goods always flow through a GRN first), so only Item
+  // Master rows tagged M_Type='Service' are offered here. Posting these
+  // against GL/cost-center per item is a follow-up, not wired yet.
+  const [serviceItems, setServiceItems] = useState<DbItem[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+
+  useEffect(() => {
+    setItemsLoading(true);
+    getItems()
+      .then((rows) => setServiceItems(rows.filter((it) => it.M_Type === "Service")))
+      .catch(() => setServiceItems([]))
+      .finally(() => setItemsLoading(false));
+  }, []);
 
   useEffect(() => {
     setUomLoading(true);
@@ -147,6 +165,11 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
 
   return (
     <div className="space-y-3">
+      <datalist id={SERVICE_ITEMS_LIST_ID}>
+        {serviceItems.map((it) => (
+          <option key={it.M_Id} value={it.M_Name} />
+        ))}
+      </datalist>
       <div className="flex items-center justify-between">
         <SectionHeader label="Invoice Items" />
         {!readOnly && (
@@ -198,12 +221,24 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
                 key={item._key}
                 className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_72px_96px_84px_88px_28px] gap-1.5 items-center px-2 py-2 bg-background hover:bg-muted/5 transition-colors"
               >
-                {/* Description */}
+                {/* Description — suggestions limited to Item Master's
+                    Service-type items (list={SERVICE_ITEMS_LIST_ID}), typed
+                    free text still allowed for ad-hoc entries not in the
+                    master. */}
                 <Input
                   value={item.description}
                   readOnly={readOnly}
-                  onChange={(e) => patch(i, { description: e.target.value })}
-                  placeholder="Item description…"
+                  list={!readOnly ? SERVICE_ITEMS_LIST_ID : undefined}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const matched = serviceItems.find((it) => it.M_Name === val);
+                    patch(i, {
+                      description: val,
+                      ...(matched?.M_UOM ? { uom: matched.M_UOM } : {}),
+                    });
+                    if (matched?.M_UOM) lastUom.current = matched.M_UOM;
+                  }}
+                  placeholder={itemsLoading ? "Loading service items…" : "Item description…"}
                   className="h-8 text-xs border-border/60 bg-transparent px-2"
                 />
 

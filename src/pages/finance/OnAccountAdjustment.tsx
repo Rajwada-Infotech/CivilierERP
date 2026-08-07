@@ -2,17 +2,25 @@ import { useState, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, RefreshCw, Wallet, Loader2, TrendingUp, Users, X, CheckCircle2, ChevronDown, BadgeDollarSign, ArrowUpCircle, ArrowDownCircle } from "lucide-react";
+import {
+  ArrowRight, RefreshCw, Wallet, Loader2, TrendingUp, Users, X, CheckCircle2, ChevronDown,
+  BadgeDollarSign, ArrowUpCircle, ArrowDownCircle,
+} from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { Button } from "@/components/ui/button";
 import { FinanceShell, FinanceGlassCard } from "@/components/finance/FinanceShell";
-import { getInvoicesForParty, applyOAAdjustment } from "@/api/onAccountApi";
+import { getInvoicesForParty, applyOAAdjustment, type OAAdjustmentMode } from "@/api/onAccountApi";
 import type { OAInvoice } from "@/api/onAccountApi";
 import { previewOAAdjustment, excludeOriginatingInvoice } from "@/api/onAccountAdjustment";
 import { toast } from "sonner";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
+
+// Informational label only — an adjustment is always a pure internal
+// transfer (Dr Payable / Cr On Account), never a real bank/cheque movement.
+// See applyOAAdjustment's doc comment.
+const OA_PAYMENT_MODES: OAAdjustmentMode[] = ["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "UPI", "RTGS", "IMPS", "Card"];
 
 interface PartySummary {
   PartyId: number;
@@ -117,6 +125,11 @@ function AdjustDialog({
   const [done, setDone] = useState<{ applied: number; remaining: number } | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
+  // Mode — informational label only (how the original advance arrived).
+  // An adjustment is always a pure internal transfer, no bank/cheque
+  // involved — see applyOAAdjustment's doc comment.
+  const [mode, setMode] = useState<OAAdjustmentMode>("Cash");
+
   useEffect(() => {
     setLoading(true);
     getInvoicesForParty(entry.PartyId)
@@ -157,6 +170,7 @@ function AdjustDialog({
         amount: adjAmount,
         partyId: entry.PartyId,
         paymentDocNo: entry.PaymentDocNo,
+        mode,
       });
       setDone({ applied: result.applied, remaining: result.remainingBalance });
       onSuccess(result.remainingBalance);
@@ -171,11 +185,11 @@ function AdjustDialog({
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
-        className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-card shadow-2xl overflow-hidden"
+        className="relative z-10 w-full max-w-3xl rounded-2xl border border-border bg-card shadow-2xl overflow-hidden max-h-[92dvh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between px-5 py-4 border-b border-border">
+        <div className="shrink-0 flex items-start justify-between px-5 py-4 border-b border-border">
           <div>
             <p className="font-semibold text-sm">Adjust On A/C Balance</p>
             <p className="text-xs text-muted-foreground mt-0.5">{entry.PartyName}</p>
@@ -202,14 +216,17 @@ function AdjustDialog({
             <Button size="sm" variant="outline" onClick={onClose} className="mt-2">Close</Button>
           </div>
         ) : (
-          <div className="px-5 py-4 space-y-4">
+          <div className="px-5 py-4 overflow-y-auto flex-1 min-h-0">
 
-            {/* Current balance strip */}
-            <div className="rounded-xl bg-muted/20 border border-border px-4 py-3 flex items-center justify-between">
+            {/* Current balance strip — spans both columns */}
+            <div className="rounded-xl bg-muted/20 border border-border px-4 py-3 flex items-center justify-between mb-4">
               <span className="text-xs text-muted-foreground">Available On A/C Balance</span>
               <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">{formatINR(currentBalance)}</span>
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            {/* ── Left column: invoice + amount ── */}
+            <div className="space-y-4">
             {/* Invoice selector */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
@@ -301,6 +318,36 @@ function AdjustDialog({
                 <p className="text-xs text-red-500">Exceeds available balance of {formatINR(currentBalance)}</p>
               )}
             </div>
+            </div>
+            {/* ── end left column ── */}
+
+            {/* ── Right column: payment mode + balance preview ── */}
+            <div className="space-y-4">
+            {/* Mode — informational label only, describing how the original
+                advance arrived. This adjustment itself is always a pure
+                internal transfer (Dr Payable / Cr On Account) — no bank or
+                cheque is ever touched. */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Mode <span className="normal-case font-normal text-muted-foreground/70">(label only — no bank involved)</span>
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {OA_PAYMENT_MODES.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${
+                      mode === m
+                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shadow-sm"
+                        : "border-border text-muted-foreground hover:bg-muted/40 hover:border-border/80"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Balance preview */}
             {adjAmount > 0 && adjAmount <= currentBalance && (
@@ -321,22 +368,27 @@ function AdjustDialog({
                 </div>
               </div>
             )}
-
-            {/* Actions */}
-            <div className="flex gap-2 pt-1">
-              <Button variant="outline" size="sm" className="flex-1" onClick={onClose} disabled={submitting}>
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-                onClick={handleSubmit}
-                disabled={!canSubmit}
-              >
-                {submitting ? <Loader2 size={13} className="animate-spin mr-1" /> : null}
-                Confirm Adjust
-              </Button>
             </div>
+            {/* ── end right column ── */}
+            </div>
+            {/* ── end two-column grid ── */}
+          </div>
+        )}
+
+        {!done && (
+          <div className="shrink-0 flex gap-2 px-5 py-4 border-t border-border">
+            <Button variant="outline" size="sm" className="flex-1" onClick={onClose} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+            >
+              {submitting ? <Loader2 size={13} className="animate-spin mr-1" /> : null}
+              Confirm Adjust
+            </Button>
           </div>
         )}
       </div>

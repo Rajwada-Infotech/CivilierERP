@@ -708,6 +708,32 @@ const Payment: React.FC = () => {
   const totalRecords: number = dbData?.total ?? 0;
   const records: PaymentRecord[] = dbItems.map(dbToRecord);
 
+  // Export must cover every matching record, not just the current page —
+  // the list endpoint caps `limit` at 100 server-side, so page through
+  // everything under the SAME filters already applied to the visible table.
+  const fetchAllPaymentsForExport = useCallback(async () => {
+    const pageLimit = 100;
+    let all: DbPayment[] = [];
+    let p = 1;
+    let pages = 1;
+    do {
+      const data = await getPayments(
+        p,
+        pageLimit,
+        supplierFilter,
+        companyNameFilter,
+        projectFilter,
+        finYearFilter,
+        docNumberFilter,
+        docDateFilter,
+      );
+      all = all.concat(Array.isArray(data?.data) ? data.data : []);
+      pages = data?.totalPages ?? 1;
+      p += 1;
+    } while (p <= pages);
+    return all.map(dbToRecord) as unknown as Record<string, unknown>[];
+  }, [supplierFilter, companyNameFilter, projectFilter, finYearFilter, docNumberFilter, docDateFilter]);
+
   // Fetch full detail (name + logo + address) for the selected company — used in PDF export
   const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
     {
@@ -1805,6 +1831,7 @@ const Payment: React.FC = () => {
               )}
               <ExportMenu
                 data={records as unknown as Record<string, unknown>[]}
+                fetchData={fetchAllPaymentsForExport}
                 columns={EXPORT_COLUMNS}
                 title="Payment Management"
                 filename="payments"

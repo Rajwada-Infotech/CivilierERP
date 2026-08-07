@@ -306,6 +306,37 @@ export default function MaterialExpenseBooking() {
     }
   }, []);
 
+  // Export must cover every matching record, not just whatever page happens
+  // to be on screen — the list endpoint caps `limit` at 100 server-side, so
+  // this pages through everything and then applies the same client-side
+  // filters (statusFilter/listSearch) the visible table already uses.
+  const fetchAllRecordsForExport = useCallback(async () => {
+    const pageLimit = 100;
+    let all: ExpenseRecord[] = [];
+    let p = 1;
+    let totalPages = 1;
+    do {
+      const data = await apiFetch(`${API}?page=${p}&limit=${pageLimit}`);
+      all = all.concat((data.data ?? []).map(dbToRecord));
+      totalPages = data.totalPages ?? 1;
+      p += 1;
+    } while (p <= totalPages);
+
+    return all.filter((r) => {
+      if (statusFilter && statusFilter !== "All" && r.status !== statusFilter) return false;
+      if (listSearch) {
+        const q = listSearch.toLowerCase();
+        if (
+          !r.bookingReference?.toLowerCase().includes(q) &&
+          !r.supplier?.toLowerCase().includes(q) &&
+          !r.companyName?.toLowerCase().includes(q)
+        )
+          return false;
+      }
+      return true;
+    }) as unknown as Record<string, unknown>[];
+  }, [statusFilter, listSearch]);
+
   // Deep-link support — Linked Documents panels navigate here as
   // /material/expense-booking?view=<Eid> to open this exact Invoice/booking.
   useEffect(() => {
@@ -1354,6 +1385,7 @@ export default function MaterialExpenseBooking() {
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
               <ExportMenu
                 data={filteredRecords as unknown as Record<string, unknown>[]}
+                fetchData={fetchAllRecordsForExport}
                 columns={INVOICE_EXPORT_COLUMNS}
                 title="Invoice"
                 filename="invoice"

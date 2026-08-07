@@ -846,6 +846,11 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           ${hasPaymentTermId ? "eb.PaymentTermId," : "CAST(NULL AS INT) AS PaymentTermId,"}
           ${hasDirectItemsCol ? "eb.EDirectItemsData," : "CAST(NULL AS NVARCHAR(MAX)) AS EDirectItemsData,"}
           eb.EBillStatus, eb.ETotalPaid, eb.ERemainingAmount,
+          -- Sum of On Account adjustments applied to this invoice (see
+          -- routes/onAccount.js's POST /apply-adjustment) — already folded
+          -- into ETotalPaid, this exposes just the OA-sourced portion so the
+          -- list can badge "Adjusted" distinctly from a real cash payment.
+          ISNULL(oaAdj.AdjustedAmount, 0) AS EOnAccountAdjusted,
           CASE
             WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + N' — ' + t.Description
             WHEN t.Prefix IS NOT NULL THEN t.Prefix
@@ -905,6 +910,12 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = eb.EGLAccountId
         LEFT JOIN dbo.AccountGroup glGroup ON glGroup.AGId = gl.LBelongsTo
         LEFT JOIN dbo.AccountGroup glParentGroup ON glParentGroup.AGId = glGroup.ParentGroupId
+        LEFT JOIN (
+          SELECT RefDocNo, SUM(Amount) AS AdjustedAmount
+          FROM dbo.OnAccountLedger
+          WHERE TxnType = 'DEBIT' AND RefType = 'Invoice'
+          GROUP BY RefDocNo
+        ) oaAdj ON oaAdj.RefDocNo = eb.EDocNo
         ${ebSupplierList.joins}
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
           AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'

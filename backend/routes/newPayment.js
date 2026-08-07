@@ -1003,8 +1003,34 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
     }
 
     const refRow = await pool.request().input("PPaymentID", sql.Int, id)
-      .query("SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID");
+      .query("SELECT PExpenseRef, PLinkedOAId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID");
     const expenseRef = refRow.recordset[0]?.PExpenseRef || null;
+    const linkedOAId = refRow.recordset[0]?.PLinkedOAId || null;
+
+    // This payment is a synthetic "On Account Adjustment" settlement (see
+    // routes/onAccount.js's POST /apply-adjustment) — deleting it already
+    // reverts the INVOICE side below via _syncBillStatus (ETotalPaid/
+    // ERemainingAmount get recomputed without this row), but the PARTY side
+    // needs its own explicit reversal: the OnAccountLedger DEBIT this
+    // created must be removed and the amount added back to
+    // AccountHeadMaster.OnAccountBalance, or that money is permanently lost
+    // from the party's on-account pool.
+    if (linkedOAId) {
+      const ledgerRow = await pool.request().input("OAId", sql.Int, linkedOAId)
+        .query("SELECT PartyId, Amount FROM dbo.OnAccountLedger WHERE OAId = @OAId");
+      if (ledgerRow.recordset.length) {
+        const { PartyId, Amount } = ledgerRow.recordset[0];
+        await pool.request()
+          .input("OAId", sql.Int, linkedOAId)
+          .input("PartyId", sql.Int, PartyId)
+          .input("Amount", sql.Decimal(18, 2), Amount).query(`
+            DELETE FROM dbo.OnAccountLedger WHERE OAId = @OAId;
+            UPDATE dbo.AccountHeadMaster
+              SET OnAccountBalance = ISNULL(OnAccountBalance, 0) + @Amount
+              WHERE LHeadId = @PartyId;
+          `);
+      }
+    }
 
     const result = await pool
       .request()
@@ -1014,6 +1040,7 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
       return res.status(404).json({ error: "Payment not found" });
     }
     if (expenseRef) await _syncBillStatus(pool,expenseRef);
+    if (linkedOAId) await bumpCacheVersion("on-account");
     await bumpCacheVersion("new-payment");
     res.json({ message: "Payment deleted successfully" });
   } catch (err) {

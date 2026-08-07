@@ -38,8 +38,15 @@ import { toast } from "sonner";
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 export interface ExportMenuProps {
-  /** The full dataset to export (not just the current page) */
+  /** The full dataset to export (not just the current page). Ignored when
+   *  `fetchData` is provided — ONLY used as the "N records" count shown in
+   *  the dropdown before the user picks a format. */
   data: Record<string, unknown>[];
+  /** For pages that paginate their fetch server-side: called right before
+   *  exporting to pull the FULL matching dataset (all pages, same filters)
+   *  instead of exporting whatever page happens to be on screen. When
+   *  provided, this — not `data` — is what actually gets exported. */
+  fetchData?: () => Promise<Record<string, unknown>[]>;
   /** Column definitions for export — header + accessor */
   columns: ExportColumn[];
   /** Document / sheet title */
@@ -74,6 +81,7 @@ export interface ExportMenuProps {
 
 export function ExportMenu({
   data,
+  fetchData,
   columns,
   title,
   filename,
@@ -91,13 +99,16 @@ export function ExportMenu({
 
   async function run(
     format: "pdf" | "xlsx" | "csv",
-    fn: () => Promise<void> | void,
+    fn: (rows: Record<string, unknown>[]) => Promise<void> | void,
   ) {
     setLoading(format);
     setOpen(false);
     try {
-      await fn();
-      toast.success(`${title} exported as ${format.toUpperCase()}`);
+      // fetchData pulls every matching row (all pages, same filters) instead
+      // of whatever page is currently on screen — see the prop doc above.
+      const rows = fetchData ? await fetchData() : data;
+      await fn(rows);
+      toast.success(`${title} exported as ${format.toUpperCase()} (${rows.length} record${rows.length !== 1 ? "s" : ""})`);
     } catch (err) {
       console.error(err);
       toast.error(`Export failed: ${(err as Error).message}`);
@@ -113,8 +124,8 @@ export function ExportMenu({
       desc: "A4 landscape, paginated",
       icon: FileText,
       color: "text-rose-500",
-      action: () =>
-        exportToPdf(data, columns, {
+      action: (rows: Record<string, unknown>[]) =>
+        exportToPdf(rows, columns, {
           title,
           filename: base,
           subtitle,
@@ -130,7 +141,7 @@ export function ExportMenu({
       desc: ".xlsx, auto-fitted columns",
       icon: FileSpreadsheet,
       color: "text-emerald-500",
-      action: () => exportToXlsx(data, columns, base),
+      action: (rows: Record<string, unknown>[]) => exportToXlsx(rows, columns, base),
     },
     {
       key: "csv" as const,
@@ -138,7 +149,7 @@ export function ExportMenu({
       desc: "Plain text, universal",
       icon: FileDown,
       color: "text-sky-500",
-      action: () => exportToCsv(data, columns, base),
+      action: (rows: Record<string, unknown>[]) => exportToCsv(rows, columns, base),
     },
   ];
 
@@ -186,7 +197,7 @@ export function ExportMenu({
         >
           <div className="px-3 py-2 border-b border-border">
             <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
-              Export {data.length} record{data.length !== 1 ? "s" : ""}
+              {fetchData ? "Export all matching records" : `Export ${data.length} record${data.length !== 1 ? "s" : ""}`}
             </p>
           </div>
 
