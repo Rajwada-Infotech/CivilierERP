@@ -874,6 +874,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "shortCode",
       header: "Short Code",
+      size: 100,
       cell: ({ row }) => (
         <span className="font-mono font-medium text-primary">
           {row.original.shortCode}
@@ -883,6 +884,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "itemName",
       header: "Item Name",
+      size: 170,
       cell: ({ row }) => (
         <span className="font-medium">{row.original.itemName}</span>
       ),
@@ -890,6 +892,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "description",
       header: "Description",
+      size: 240,
       cell: ({ row }) => (
         <span className="text-muted-foreground text-sm">
           {row.original.description || "-"}
@@ -899,6 +902,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "itemType",
       header: "Type",
+      size: 110,
       cell: ({ row }) => {
         const type = row.original.itemType;
         if (!type) return <span className="text-muted-foreground">-</span>;
@@ -920,6 +924,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "belongsTo",
       header: "Group",
+      size: 150,
       cell: ({ row }) => {
         const group = itemGroups.find((g) => g.id === row.original.belongsTo);
         return (
@@ -932,6 +937,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "uomCode",
       header: "UOM",
+      size: 130,
       cell: ({ row }) => {
         const uomRaw = Array.isArray(dbUoms)
           ? (dbUoms as any[]).find(
@@ -949,6 +955,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "defaultSupplierId",
       header: "Default Supplier",
+      size: 160,
       cell: ({ row }) => {
         const sup = supplierOptions.find(
           (s) => s.value === row.original.defaultSupplierId,
@@ -963,6 +970,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "glHeadId",
       header: "GL Ledger",
+      size: 150,
       cell: ({ row }) => (
         <span className="text-sm text-muted-foreground">
           {dbItems?.find((i) => i.M_Id === row.original._id)?.GLHeadName || "-"}
@@ -972,6 +980,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "costCenterId",
       header: "Cost Centre",
+      size: 150,
       cell: ({ row }) => {
         const cc = costCenterOptions.find(
           (c) => c.value === row.original.costCenterId,
@@ -984,6 +993,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "hsnCode",
       header: "HSN",
+      size: 90,
       cell: ({ row }) => (
         <span className="font-mono text-sm">{row.original.hsnCode || "-"}</span>
       ),
@@ -991,6 +1001,7 @@ const ItemMaster: React.FC = () => {
     {
       id: "tax",
       header: "CGST / SGST / IGST",
+      size: 160,
       cell: ({ row }) => {
         const { cgst, sgst, igst } = row.original;
         const hasRate = cgst > 0 || sgst > 0 || igst > 0;
@@ -1006,6 +1017,7 @@ const ItemMaster: React.FC = () => {
     {
       id: "actions",
       header: "Actions",
+      size: 140,
       cell: ({ row }) => {
         const id = row.original._id;
         const isConfirming = deleteConfirmId === id;

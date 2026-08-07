@@ -178,11 +178,18 @@ export function DataTable<TData extends RowData>({
       <div className="hidden lg:block overflow-x-auto thin-scroll">
         {(() => {
           const allCols = table.getAllLeafColumns();
-          const totalSize = allCols.reduce((s, c) => s + (c.columnDef.size ?? 0), 0);
-          const pctOf = (size: number | undefined) =>
-            totalSize > 0 && size ? `${((size / totalSize) * 100).toFixed(2)}%` : undefined;
+          // Percentage widths always squeezed every column into exactly the
+          // container's width, no matter how many/wide the columns were —
+          // a table with a dozen columns just overlapped its own header
+          // text instead of ever scrolling. Pixel widths (default 150,
+          // matching TanStack's own column default) let the table's natural
+          // width exceed the container so the wrapper's overflow-x-auto can
+          // actually kick in; min-width:100% keeps narrow tables filling
+          // the container exactly as before.
+          const totalSize = allCols.reduce((s, c) => s + (c.columnDef.size ?? 150), 0);
+          const widthOf = (size: number | undefined) => size ?? 150;
           return (
-        <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
+        <table className="text-sm" style={{ tableLayout: "fixed", width: totalSize, minWidth: "100%" }}>
           <thead>
             <tr className="border-b border-border bg-muted/30">
               {table.getHeaderGroups().map((hg) =>
@@ -193,7 +200,7 @@ export function DataTable<TData extends RowData>({
                     <th
                       key={header.id}
                       colSpan={header.colSpan}
-                      style={{ width: pctOf(header.column.columnDef.size) }}
+                      style={{ width: widthOf(header.column.columnDef.size) }}
                       className={`px-5 py-3.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none text-left ${
                         canSort
                           ? "cursor-pointer hover:text-foreground transition-colors"
