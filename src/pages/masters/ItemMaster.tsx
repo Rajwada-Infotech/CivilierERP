@@ -148,7 +148,7 @@ const CSV_HEADERS = {
   uomCode: "UOM",
   hsnCode: "HSN Code",
   defaultSupplier: "Default Supplier",
-  glLedger: "GL Ledger",
+  glLedger: "GL Account",
   costCentre: "Cost Centre",
   description: "Description",
 } as const;
@@ -437,9 +437,9 @@ const ItemMaster: React.FC = () => {
     }),
   );
 
-  // GL Ledger master options — mirrors what GLAccountSelect fetches
+  // GL Account master options — mirrors what GLAccountSelect fetches
   // internally, but this page also needs the raw list itself to resolve a
-  // "GL Ledger" name/code typed in a CSV import row (GLAccountSelect only
+  // "GL Account" name/code typed in a CSV import row (GLAccountSelect only
   // exposes a picker UI, not a lookup API).
   const { data: dbGlAccounts = [] } = useQuery({
     queryKey: ["gl-accounts-for-item-master"],
@@ -759,7 +759,7 @@ const ItemMaster: React.FC = () => {
             defaultSupplierId = matchedSupplier.value;
           }
 
-          // GL Ledger tag is optional — match by label or code.
+          // GL Account tag is optional — match by label or code.
           let glHeadId = "";
           if (glLedgerRaw) {
             const matchedGl = (Array.isArray(dbGlAccounts) ? dbGlAccounts : []).find(
@@ -768,7 +768,7 @@ const ItemMaster: React.FC = () => {
                 (g.code ?? "").toLowerCase() === glLedgerRaw.toLowerCase(),
             );
             if (!matchedGl)
-              throw new Error(`GL Ledger "${glLedgerRaw}" was not found`);
+              throw new Error(`GL Account "${glLedgerRaw}" was not found`);
             glHeadId = String(matchedGl.id);
           }
 
@@ -969,7 +969,7 @@ const ItemMaster: React.FC = () => {
     },
     {
       accessorKey: "glHeadId",
-      header: "GL Ledger",
+      header: "GL Account",
       size: 150,
       cell: ({ row }) => (
         <span className="text-sm text-muted-foreground">
@@ -1312,12 +1312,12 @@ const ItemMaster: React.FC = () => {
                 ))}
               </select>
             </Field>
-            {/* GL Ledger tag — the account this item's spend is booked under */}
-            <Field label="GL Ledger">
+            {/* GL Account tag — the account this item's spend is booked under */}
+            <Field label="GL Account">
               <GLAccountSelect
                 value={form.glHeadId ? parseInt(form.glHeadId, 10) : null}
                 onChange={(id) => set("glHeadId", id ? String(id) : "")}
-                placeholder="— No GL ledger tag —"
+                placeholder="— No GL account tag —"
               />
             </Field>
             {/* Cost Centre tag — auto-fills the Cost Centre when this item is
