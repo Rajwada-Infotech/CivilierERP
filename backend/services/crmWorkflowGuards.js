@@ -907,10 +907,11 @@ function tierBrokeragePercent(totalValue) {
  * Paid, a broker selected at Application/Booking stage automatically gets
  * ONE CrmBrokerageMaster row PER payment milestone — the broker's payout
  * follows the exact same milestone schedule the customer's own payments do,
- * not a fixed one/two-tranche split. Each row's ComputedAmount is that
- * milestone's own share of the total brokerage (milestone.Percent% of the
- * total brokerage amount, mirroring how the milestone itself is that
- * Percent% of the booking's TotalValue). A milestone that's already Paid by
+ * not a fixed one/two-tranche split. Each row's ComputedAmount is calculated
+ * from the milestone's real AmountDue and the broker's actual commission
+ * rate. Do not multiply the deal rate by the milestone percent and store
+ * that as RateValue: a 1% brokerage on a 1% booking milestone is still a
+ * 1% brokerage rate, not 0.01%. A milestone that's already Paid by
  * the time this fires (Milestone #1 itself, the trigger) is created
  * unlocked; every later milestone is created locked until
  * maybeUnlockBrokerageMilestoneTranche fires for it.
@@ -941,9 +942,6 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
 
   const totalValue = Number(bk.TotalValue) || 0;
   const totalPercent = bk.BrokerageRatePercent != null ? Number(bk.BrokerageRatePercent) : tierBrokeragePercent(totalValue);
-  // Mirrors crmBrokerage.js POST /'s own ComputedAmount formula exactly, so
-  // a full-payout manually-created row and the sum of these auto-created
-  // ones compute the same total.
   const totalBrokerageAmount = Math.round(totalValue * totalPercent) / 100;
 
   // %-based schedule steps only — an Extra-Charge/Parking milestone is a
@@ -952,7 +950,7 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   // exclusion recalculateRemainingMilestones already applies for the
   // customer-facing schedule).
   const milestones = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT Id, MilestoneNo, [Percent], Status
+    SELECT Id, MilestoneNo, [Percent], AmountDue, Status
     FROM dbo.CrmPaymentMilestone
     WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
     ORDER BY MilestoneNo
@@ -960,48 +958,58 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   if (!milestones.recordset.length) return null;
 
   const rows = milestones.recordset;
-  const totalPct = rows.reduce((s, m) => s + Number(m.Percent || 0), 0);
-  const share = (pct) => (totalPct > 0 ? pct / totalPct : 1 / rows.length);
+  const totalMilestoneAmount = rows.reduce((s, m) => s + Number(m.AmountDue || 0), 0);
+  const totalTarget = totalMilestoneAmount > 0
+    ? Math.round(totalMilestoneAmount * totalPercent) / 100
+    : totalBrokerageAmount;
 
+  // All-or-nothing: a failure partway through used to leave whatever
+  // milestones had already been inserted sitting in the DB as a permanent,
+  // incomplete (and confusing) partial schedule — exactly the kind of
+  // silent data corruption a broker-payout calculation can never tolerate.
+  // A single transaction makes a mid-loop failure roll back cleanly instead.
   let ids;
+  const tx = new sql.Transaction(pool);
   try {
+    await tx.begin();
     ids = [];
     let allocated = 0;
     for (let i = 0; i < rows.length; i++) {
       const m = rows[i];
       const isLast = i === rows.length - 1;
       // Last row absorbs the rounding remainder so the tranches always sum
-      // exactly to totalBrokerageAmount, same pattern
-      // recalculateRemainingMilestones uses for the customer schedule.
+      // exactly to the commission on the scheduled milestone base.
       const computedAmount = isLast
-        ? Math.round((totalBrokerageAmount - allocated) * 100) / 100
-        : Math.round(totalBrokerageAmount * share(Number(m.Percent || 0)) * 100) / 100;
+        ? Math.round((totalTarget - allocated) * 100) / 100
+        : Math.round(Number(m.AmountDue || 0) * totalPercent) / 100;
       allocated += computedAmount;
-      const ratePercent = Math.round((totalPercent * share(Number(m.Percent || 0))) * 100) / 100;
       const isLocked = m.Status !== "Paid" && m.Status !== "Waived";
 
-      const result = await pool.request()
+      const result = await new sql.Request(tx)
         .input("bid",   sql.Int,           bookingId)
         .input("brid",  sql.Int,           brk.LHeadId)
         .input("name",  sql.NVarChar(200), brk.LHeadName)
         .input("con",   sql.NVarChar(20),  brk.LHeadPhone || null)
         .input("rt",    sql.NVarChar(20),  "Percentage")
-        .input("rv",    sql.Decimal(18,2), ratePercent)
+        .input("rv",    sql.Decimal(18,2), totalPercent)
         .input("camt",  sql.Decimal(18,2), computedAmount)
         .input("mid",   sql.Int,           m.Id)
         .input("mno",   sql.Int,           m.MilestoneNo)
+        .input("tranche", sql.NVarChar(30), `Milestone-${m.MilestoneNo}`)
         .input("lock",  sql.Bit,           isLocked ? 1 : 0)
         .input("notes", sql.NVarChar(sql.MAX), `Auto-created — follows Milestone #${m.MilestoneNo} of the booking's own payment schedule`)
         .input("cb",    sql.Int,           actorUserId || null)
         .query(`
           INSERT INTO dbo.CrmBrokerageMaster
-            (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, MilestoneId, MilestoneNo, IsLocked, Status, Notes, CreatedBy, CreatedAt)
+            (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, MilestoneId, MilestoneNo, TrancheLabel, IsLocked, Status, Notes, CreatedBy, CreatedAt)
           OUTPUT INSERTED.Id
-          VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @mid, @mno, @lock, 'Pending', @notes, @cb, SYSDATETIME())
+          VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @mid, @mno, @tranche, @lock, 'Pending', @notes, @cb, SYSDATETIME())
         `);
       ids.push(result.recordset[0].Id);
     }
+    await tx.commit();
   } catch (e) {
+    try { await tx.rollback(); } catch { /* transaction may already be aborted */ }
     // Race with another milestone-paid trigger reaching here concurrently —
     // same UNIQUE(BookingId)-loses-the-race pattern as maybeAutoCreateAgreement.
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) return null;

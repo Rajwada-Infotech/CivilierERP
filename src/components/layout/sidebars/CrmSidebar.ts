@@ -1,8 +1,20 @@
-import { ClipboardList, FileText, IndianRupee, Wrench, Scale, HardHat, LayoutDashboard, Grid3x3 } from "lucide-react";
+import { ClipboardList, FileText, IndianRupee, Wrench, Scale, HardHat, LayoutDashboard, Grid3x3, Users } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const crmNavItems: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/crm/dashboard", pageKey: "crm-dashboard" },
+
+  // ── CRM Leads (SA handoff pool) ──────────────────────────────────────────────
+  // Converted leads from Sales Automation land here first — they are NOT
+  // CrmApplications yet. Staff pick from this pool when they start a New
+  // Application (see CrmApplication.tsx's lead picker).
+  {
+    label: "Leads",
+    icon: Users,
+    children: [
+      { label: "All Leads", path: "/crm/leads", pageKey: "crm-leads" },
+    ],
+  },
 
   // ── CRM Pipeline ────────────────────────────────────────────────────────────
   {

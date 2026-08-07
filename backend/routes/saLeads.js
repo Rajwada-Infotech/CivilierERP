@@ -4,7 +4,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { promoteLeadToFollowup } = require("../services/saHandoff");
+const { convertLead } = require("../services/saHandoff");
 const { applyLeadScope, actorId, isSaAdmin } = require("../services/saAccess");
 const { getIo } = require("../socket");
 const crypto = require("crypto");
@@ -61,6 +61,9 @@ router.get("/", requirePageRight("sa-leads", "view"), async (req, res) => {
     const pool = getPool();
     const req0 = pool.request();
     const scope = applyLeadScope(req0, req, "l");
+    const conds = [scope];
+    if (req.query.status) { req0.input("st", sql.NVarChar(30), req.query.status); conds.push("l.Status = @st"); }
+    const where = conds.join(" AND ");
     const result = await req0.query(`
       SELECT
         l.Id, l.LeadUid, l.CustomerName, l.Mobile, l.AltMobile, l.Email,
@@ -85,7 +88,7 @@ router.get("/", requirePageRight("sa-leads", "view"), async (req, res) => {
         (
           CASE l.Classification WHEN 'Hot' THEN 30 WHEN 'Warm' THEN 20 WHEN 'Cold' THEN 5 ELSE 0 END +
           CASE l.Status
-            WHEN 'VisitScheduled' THEN 20 WHEN 'Visited' THEN 20 WHEN 'InFollowup' THEN 20
+            WHEN 'VisitScheduled' THEN 20 WHEN 'Visited' THEN 20 WHEN 'Converted' THEN 20
             WHEN 'FollowUp' THEN 20 WHEN 'Booking' THEN 30
             WHEN 'Contacted' THEN 10 WHEN 'Assigned' THEN 5 ELSE 0 END +
           CASE WHEN l.PurchaseTimeline IN ('Immediate','3Months') THEN 15 ELSE 0 END +
@@ -99,7 +102,7 @@ router.get("/", requirePageRight("sa-leads", "view"), async (req, res) => {
       LEFT JOIN dbo.Users tl                 ON l.AssignedTeamLeadId   = tl.id
       LEFT JOIN dbo.Users sp                 ON l.AssignedSalespersonId = sp.id
       LEFT JOIN dbo.SaChannelPartner cp      ON l.ChannelPartnerId = cp.Id
-      WHERE l.IsActive = 1 AND ${scope}
+      WHERE l.IsActive = 1 AND ${where}
       ORDER BY l.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -459,7 +462,28 @@ router.delete("/:id", requirePageRight("sa-leads", "view"), async (req, res) => 
   res.status(403).json({ error: "Leads cannot be deleted — this is a permanent record. Edit its status/classification instead." });
 });
 
-// POST /:id/promote-followup
+// PUT /:id/convert — marks the lead Converted, putting it in the CRM Leads
+// pool. Does NOT create a CrmApplication (see saHandoff.js convertLead) —
+// that only happens when CRM staff explicitly pick this lead in the New
+// Application flow. Route kept at the old /promote-followup path too
+// (below) as a compatibility alias in case anything else still calls it.
+router.put("/:id/convert", requirePageRight("sa-leads", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const scopeReq = pool.request().input("id", sql.Int, id);
+    const scope = applyLeadScope(scopeReq, req, "l");
+    const owned = await scopeReq.query(`SELECT Id FROM dbo.SaLead l WHERE l.Id = @id AND (${scope})`);
+    if (!owned.recordset.length) return res.status(403).json({ error: "This lead is not assigned to you" });
+
+    const result = await convertLead(pool, id, actorId(req));
+    if (result.alreadyConverted) return res.json({ message: "Already converted" });
+    res.json({ success: true, message: "Lead converted — now available in the CRM Leads pool" });
+  } catch (e) {
+    console.error("[sa-leads] convert error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 router.post("/:id/promote-followup", requirePageRight("sa-leads", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -469,11 +493,11 @@ router.post("/:id/promote-followup", requirePageRight("sa-leads", "edit"), async
     const owned = await scopeReq.query(`SELECT Id FROM dbo.SaLead l WHERE l.Id = @id AND (${scope})`);
     if (!owned.recordset.length) return res.status(403).json({ error: "This lead is not assigned to you" });
 
-    const result = await promoteLeadToFollowup(pool, id, actorId(req));
-    if (result.alreadyPromoted) return res.json({ message: "Already promoted", applicantId: result.applicantId });
-    res.json({ success: true, applicantId: result.applicantId });
+    const result = await convertLead(pool, id, actorId(req));
+    if (result.alreadyConverted) return res.json({ message: "Already converted" });
+    res.json({ success: true, message: "Lead converted — now available in the CRM Leads pool" });
   } catch (e) {
-    console.error("[sa-leads] promote-followup error:", e.message);
+    console.error("[sa-leads] convert error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

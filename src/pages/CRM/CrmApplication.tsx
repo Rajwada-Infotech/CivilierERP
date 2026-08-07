@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -109,7 +109,8 @@ async function fetchCustomers(): Promise<any[]> {
 }
 // Used only to auto-fetch a selected customer's original lead interest/
 // source-chain data (property type, source chain) onto this application —
-// Lead selection itself now happens once, on the Customer record.
+// Lead selection itself now happens once, on the Customer record
+// (CrmCustomers.tsx's "Link to Existing Lead" picker on New Customer).
 async function fetchLeadOptions(): Promise<any[]> {
   try {
     const res = await fetchWithAuth(SA_LEADS_API);
@@ -245,6 +246,7 @@ const GstGrandTotalText: React.FC<{ unitValue: number; parkingBase: number }> = 
 const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { currentUser } = useAuth();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -676,6 +678,18 @@ const CrmApplication: React.FC = () => {
     setWizardAppStatus(null);
     setUnitLocked(false);
   };
+
+  // Deep-link from CrmLeads.tsx's "View Application" link (a converted lead
+  // whose linked Customer already has an Application) — opens the read-only
+  // detail dialog directly instead of the list-only page.
+  useEffect(() => {
+    const id = searchParams.get("id");
+    if (id) {
+      setViewingAppId(parseInt(id));
+      setSearchParams((sp) => { sp.delete("id"); return sp; }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const loadApplicationIntoWizard = async (id: number) => {
     setLoadingApplication(true);
@@ -1343,6 +1357,11 @@ const CrmApplication: React.FC = () => {
 
           {step === 1 && (
             <div className="space-y-4">
+              {/* Lead -> Customer linking happens on the Customer page itself
+                  (CrmCustomers.tsx's "Link to Existing Lead" picker on New
+                  Customer) — Applications only ever pick a Customer. If that
+                  Customer carries a LeadId, the effect below auto-fetches its
+                  Source chain (locked, with a "Change" escape hatch). */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className={labelCls}>Customer *</label>

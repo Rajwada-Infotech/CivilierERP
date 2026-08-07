@@ -655,7 +655,7 @@ router.get("/", async (req, res) => {
         FROM dbo.CrmBrokerageMaster br
         JOIN dbo.CrmBooking b     ON b.Id = br.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE br.Status = 'Pending'
+        WHERE br.Status = 'Pending' AND br.IsLocked = 0
       `);
     }
 
@@ -779,7 +779,7 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.CrmBooking         WHERE Status = 'Pending' AND IsActive = 1 AND ReadyForApprovalAt IS NOT NULL) +
         (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE SeniorApprovalStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE DateApprovalStatus = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmBrokerageMaster WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.CrmBrokerageMaster WHERE Status = 'Pending' AND IsLocked = 0) +
         (SELECT COUNT(*) FROM dbo.CrmCancellation    WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmNoc             WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.Contract           WHERE Status = 'Pending')
