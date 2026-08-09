@@ -32,7 +32,6 @@ import {
 import {
   Wallet,
   Landmark,
-  Search,
   X,
   RefreshCw,
   ArrowDownLeft,
@@ -40,12 +39,13 @@ import {
   ArrowLeftRight,
   FileText,
   ChevronDown,
-  CalendarDays,
   TrendingUp,
   TrendingDown,
   Receipt,
   Loader2,
   CreditCard,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 function fmtDate(d: string | null | undefined): string {
@@ -62,6 +62,32 @@ function maskAccountNumber(acc: string | null | undefined): string {
   const clean = acc.replace(/\s+/g, "");
   if (clean.length <= 4) return clean;
   return `•••• •••• ${clean.slice(-4)}`;
+}
+
+function toISODate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+// Quick date-range presets — one tap sets both From/To instead of hand-picking.
+function datePreset(key: "today" | "week" | "month" | "fy" | "all"): { from: string; to: string } {
+  const now = new Date();
+  const to = toISODate(now);
+  if (key === "today") return { from: to, to };
+  if (key === "week") {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 7);
+    return { from: toISODate(d), to };
+  }
+  if (key === "month") {
+    const d = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from: toISODate(d), to };
+  }
+  if (key === "fy") {
+    // Indian financial year: Apr 1 – Mar 31.
+    const fyStartYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    return { from: toISODate(new Date(fyStartYear, 3, 1)), to };
+  }
+  return { from: "", to: "" };
 }
 
 const SOURCE_META: Record<string, { label: string; icon: React.ElementType; color: string; bg: string }> = {
@@ -103,6 +129,15 @@ export default function BalanceEnquiry() {
   const [bankId, setBankId] = useState<number | null>(null);
   const [fromDate, setFromDate] = useState<string>("");
   const [toDate, setToDate] = useState<string>("");
+  const [showBalance, setShowBalance] = useState(true);
+  const [activePreset, setActivePreset] = useState<"today" | "week" | "month" | "fy" | "all" | "custom">("all");
+
+  const applyPreset = (key: "today" | "week" | "month" | "fy" | "all") => {
+    setActivePreset(key);
+    const { from, to } = datePreset(key);
+    setFromDate(from);
+    setToDate(to);
+  };
 
   const { data: companies = [] } = useQuery({
     queryKey: ["company-options-balance-enquiry"],
@@ -177,7 +212,7 @@ export default function BalanceEnquiry() {
         }
       >
         {/* ── Company / Bank selectors ─────────────────────────────────────── */}
-        <div className="glass rounded-xl px-5 py-4 ring-1 ring-border/60">
+        <div className="glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60 space-y-3">
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="flex-1 min-w-0">
               <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">Company</label>
@@ -196,7 +231,7 @@ export default function BalanceEnquiry() {
                 <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
               </div>
             </div>
-            <div className="flex-[2] min-w-0">
+            <div className="flex-1 sm:flex-[2] min-w-0">
               <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">Bank Account</label>
               <div className="relative mt-1">
                 <CreditCard size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -216,34 +251,65 @@ export default function BalanceEnquiry() {
                 <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
               </div>
             </div>
-            <div>
-              <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">From</label>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                max={toDate || undefined}
-                className="mt-1 h-8 px-2.5 rounded-lg border border-border bg-input/70 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
-              />
+          </div>
+
+          {/* Quick date-range presets + custom From/To — horizontally
+              scrollable on narrow screens so nothing wraps awkwardly. */}
+          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+            <div className="flex-1 min-w-0 overflow-x-auto">
+              <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">Range</label>
+              <div className="flex items-center gap-1.5 mt-1.5 pb-0.5">
+                {([
+                  ["today", "Today"],
+                  ["week", "7 Days"],
+                  ["month", "This Month"],
+                  ["fy", "This FY"],
+                  ["all", "All Time"],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => applyPreset(key)}
+                    className={`shrink-0 px-3 py-1.5 rounded-full text-[11px] font-medium border transition-all whitespace-nowrap ${
+                      activePreset === key
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-muted-foreground border-border hover:border-primary/50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div>
-              <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">To</label>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                min={fromDate || undefined}
-                className="mt-1 h-8 px-2.5 rounded-lg border border-border bg-input/70 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
-              />
+            <div className="flex items-end gap-2">
+              <div className="flex-1 sm:flex-none">
+                <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">From</label>
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => { setFromDate(e.target.value); setActivePreset("custom"); }}
+                  max={toDate || undefined}
+                  className="mt-1 w-full sm:w-auto h-8 px-2.5 rounded-lg border border-border bg-input/70 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
+                />
+              </div>
+              <div className="flex-1 sm:flex-none">
+                <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">To</label>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => { setToDate(e.target.value); setActivePreset("custom"); }}
+                  min={fromDate || undefined}
+                  className="mt-1 w-full sm:w-auto h-8 px-2.5 rounded-lg border border-border bg-input/70 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
+                />
+              </div>
+              {(fromDate || toDate) && (
+                <button
+                  onClick={() => { setFromDate(""); setToDate(""); setActivePreset("all"); }}
+                  className="h-8 shrink-0 flex items-center gap-1 px-2.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground transition-all"
+                >
+                  <X size={11} />
+                </button>
+              )}
             </div>
-            {(fromDate || toDate) && (
-              <button
-                onClick={() => { setFromDate(""); setToDate(""); }}
-                className="h-8 self-end flex items-center gap-1 px-2.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground transition-all"
-              >
-                <X size={11} /> Clear range
-              </button>
-            )}
           </div>
         </div>
 
@@ -256,14 +322,25 @@ export default function BalanceEnquiry() {
           <>
             {/* ── Hero: current balance + account card ─────────────────────── */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <div className="lg:col-span-2 glass rounded-2xl ring-1 ring-border/60 p-5 flex flex-col justify-center relative overflow-hidden">
+              <div className="lg:col-span-2 glass rounded-2xl ring-1 ring-border/60 p-4 sm:p-5 flex flex-col justify-center relative overflow-hidden">
                 <div className="absolute -top-16 -right-16 w-56 h-56 rounded-full bg-primary/10 blur-2xl pointer-events-none" />
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading relative">Current Balance</p>
-                <p className="text-4xl font-bold font-heading text-foreground mt-1 tabular-nums relative">
+                <div className="flex items-center justify-between relative">
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">Current Balance</p>
+                  <button
+                    onClick={() => setShowBalance((v) => !v)}
+                    title={showBalance ? "Hide balance" : "Show balance"}
+                    className="p-1.5 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                  >
+                    {showBalance ? <Eye size={13} /> : <EyeOff size={13} />}
+                  </button>
+                </div>
+                <p className="text-3xl sm:text-4xl font-bold font-heading text-foreground mt-1 tabular-nums relative break-all">
                   {summaryQuery.isFetching && !summaryQuery.data ? (
                     <Loader2 size={26} className="animate-spin text-muted-foreground" />
-                  ) : (
+                  ) : showBalance ? (
                     formatINR(summaryQuery.data?.currentBalance ?? 0)
+                  ) : (
+                    "•••••••"
                   )}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1.5 relative">
@@ -273,7 +350,7 @@ export default function BalanceEnquiry() {
               </div>
 
               {/* Account "card" */}
-              <div className="rounded-2xl p-5 relative overflow-hidden text-white flex flex-col justify-between min-h-[128px]"
+              <div className="rounded-2xl p-4 sm:p-5 relative overflow-hidden text-white flex flex-col justify-between min-h-[128px]"
                    style={{ background: "linear-gradient(135deg, #1e1b4b 0%, #4c1d95 55%, #6d28d9 100%)" }}>
                 <div className="absolute -bottom-10 -right-10 w-40 h-40 rounded-full bg-white/10 blur-2xl pointer-events-none" />
                 <div className="flex items-center justify-between relative">
@@ -309,7 +386,7 @@ export default function BalanceEnquiry() {
 
             {/* ── Passbook ───────────────────────────────────────────────────── */}
             <div className="glass rounded-xl ring-1 ring-border/60 overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-border/60">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-4 border-b border-border/60">
                 <p className="text-xs font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
                   <Receipt size={12} /> Transactions
                   <span className="ml-1 text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full normal-case tracking-normal font-normal">
@@ -341,8 +418,8 @@ export default function BalanceEnquiry() {
                     const amount = isCredit ? Number(t.DebitAmount) : Number(t.CreditAmount);
                     const ref = docRefFor(t);
                     return (
-                      <div key={t.EntryId} className="flex items-center gap-3 px-5 py-3 hover:bg-muted/20 transition-colors">
-                        <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${meta.bg} ${meta.color}`}>
+                      <div key={t.EntryId} className="flex items-center gap-2.5 sm:gap-3 px-4 sm:px-5 py-3 hover:bg-muted/20 transition-colors">
+                        <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center shrink-0 ${meta.bg} ${meta.color}`}>
                           <Icon size={15} />
                         </div>
                         <div className="min-w-0 flex-1">
