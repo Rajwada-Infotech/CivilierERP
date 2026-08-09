@@ -131,6 +131,7 @@ const WorkerAttendance = lazy(
 );
 const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
 const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
+const BalanceEnquiry = lazy(() => import("./pages/finance/BalanceEnquiry"));
 const JournalVoucher = lazy(() => import("./pages/finance/JournalVoucher"));
 const FundTransfer = lazy(() => import("./pages/finance/FundTransfer"));
 const FinanceContract = lazy(() => import("./pages/finance/Contract"));
@@ -646,6 +647,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="trial-balance">
             <TrialBalance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/finance/balance-enquiry"
+        element={
+          <ProtectedRoute pageKey="balance-enquiry">
+            <BalanceEnquiry />
           </ProtectedRoute>
         }
       />
