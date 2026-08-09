@@ -7,7 +7,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, checkLoanProcessingCleared } = require("../services/crmWorkflowGuards");
 const { transition: approvalTransition, recordGLPosting } = require("../services/approvalService");
 const { emitNotification } = require("../services/notify");
 const { postCrmSalesDeedStatutoryToGL } = require("../services/crmLedger");
@@ -53,6 +53,51 @@ router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => 
   }
 });
 
+// GET /booking/:bookingId/context — everything the "New Sale Deed" dialog
+// needs the instant a booking is picked: the real Agreement/Executed gate,
+// Loan Processing clearance (the actual parallel-track gate on POST / — see
+// checkLoanProcessingCleared), and the booking's own value to pre-fill Deed
+// Value with. Construction milestone payments (Foundation, Slab Casting,
+// Plastering, etc.) are NOT part of this — they run in parallel with the
+// whole legal/registration track and never gate it; only Loan Processing
+// does, per instruction.
+router.get("/booking/:bookingId/context", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId);
+
+    const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT b.Id, b.BookingNo, b.UnitNo, b.Status AS BookingStatus, b.FinancingType, a.ApplicantName, a.Mobile,
+             ISNULL(b.GrandTotal, b.TotalValue) AS GrandTotal
+      FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE b.Id = @bid
+    `);
+    if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });
+
+    const agreement = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+
+    const loanDetail = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT BankName, LoanAccountNo, LoanAmount, SanctionStatus FROM dbo.CrmLoanDetail WHERE BookingId = @bid");
+
+    const loanBlockReason = await checkLoanProcessingCleared(pool, bookingId);
+
+    const existingDeed = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Id, DeedNo FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
+
+    res.json({
+      booking: booking.recordset[0],
+      agreement: agreement.recordset[0] || null,
+      loanDetail: loanDetail.recordset[0] || null,
+      loanBlockReason,
+      existingDeed: existingDeed.recordset[0] || null,
+    });
+  } catch (e) {
+    console.error("[crm-sales-deed] context error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.post("/", requirePageRight("crm-sales-deed", "create"), async (req, res) => {
   try {
     const pool = getPool();
@@ -73,14 +118,14 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), async (req, res) 
       return res.status(400).json({ error: "Agreement must be executed before a sales deed can be prepared" });
     }
 
-    const pendingMilestones = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT COUNT(*) AS PendingCount
-      FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND Status NOT IN ('Paid', 'Waived')
-    `);
-    if (pendingMilestones.recordset[0]?.PendingCount > 0) {
-      return res.status(400).json({ error: "All payment milestones must be paid or waived before sales deed preparation" });
-    }
+    // Loan Processing runs in parallel with the agreement/legal track, not
+    // after it — but it must be resolved before the Deed, per the pipeline:
+    // AGREEMENT -> PARALLEL LOAN PROCESS -> DEED -> QUERY PAYMENT -> REGISTRY.
+    // Construction milestone payments (Foundation, Slab Casting, etc.) are a
+    // separate, genuinely parallel track and never gate this — only the
+    // loan does.
+    const loanErr = await checkLoanProcessingCleared(pool, bookingId);
+    if (loanErr) return res.status(400).json({ error: loanErr });
 
     const deedNo = await getNextDocNumber(pool, "DEED", "DEED");
 
@@ -268,7 +313,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     const id = parseInt(req.params.id);
 
     const cur = await pool.request().input("id", sql.Int, id).query(`
-      SELECT d.RegistrationNo, d.ExecutedBy, d.DeedDate, d.BookingId, d.DeedNo, b.Status AS BookingStatus
+      SELECT d.RegistrationNo, d.ExecutedBy, d.DeedDate, d.BookingId, d.DeedNo, d.SentToCustomerAt, b.Status AS BookingStatus
       FROM dbo.CrmSalesDeed d JOIN dbo.CrmBooking b ON b.Id = d.BookingId
       WHERE d.Id = @id
     `);
@@ -277,6 +322,32 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
 
     const activeErr = await requireActiveBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+
+    // Deed Value / Stamp Duty / Registration Fee / Sub-Registrar Office /
+    // Deed Date can only be corrected before the deed has been sent to the
+    // customer for approval. Once sent, the customer (and later the
+    // director) is signing off on those exact numbers — and StampDuty /
+    // RegistrationFee also feed Query Payment's live-computed
+    // RequiredAmount, so changing them after the fact would silently
+    // invalidate an approval already in flight or a payment amount already
+    // communicated to the customer.
+    const CORE_FIELDS = ["DeedValue", "StampDuty", "RegistrationFee", "SubRegistrarOffice", "DeedDate"];
+    const editingCoreFields = CORE_FIELDS.some((k) => b[k] !== undefined);
+    if (editingCoreFields && row.SentToCustomerAt) {
+      return res.status(400).json({ error: "Deed Value, Stamp Duty, Registration Fee, Sub-Registrar Office and Deed Date can no longer be edited once the deed has been sent to the customer for approval." });
+    }
+
+    // Registry (a separate tracker — see crmRegistry.js) must be Completed
+    // before RegistrationNo can be filled in here. Registry itself is
+    // gated on Query Payment being Confirmed, which in turn requires the
+    // deed to already exist — the full chain: Deed -> Query Payment -> Registry -> RegistrationNo.
+    if (b.RegistrationNo && !row.RegistrationNo) {
+      const registry = await pool.request().input("bid", sql.Int, row.BookingId)
+        .query("SELECT Status FROM dbo.CrmRegistry WHERE BookingId = @bid");
+      if (!registry.recordset.length || registry.recordset[0].Status !== "Completed") {
+        return res.status(400).json({ error: "Registration number can't be recorded until Registry is marked Completed (Query Payment must be Confirmed first)" });
+      }
+    }
 
     const newStatus = deriveDeedStatus({
       bookingStatus: row.BookingStatus,
@@ -295,12 +366,20 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
       .input("exby",  sql.NVarChar(200), b.ExecutedBy || null)
       .input("st",    sql.NVarChar(30), newStatus)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("dval",  sql.Decimal(18,2), b.DeedValue != null && b.DeedValue !== "" ? parseFloat(b.DeedValue) : null)
+      .input("stamp", sql.Decimal(18,2), b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : null)
+      .input("regfee",sql.Decimal(18,2), b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : null)
+      .input("sro",   sql.NVarChar(255), b.SubRegistrarOffice || null)
+      .input("ddt",   sql.Date, b.DeedDate || null)
       .input("ub",    sql.Int,  actorId(req))
       .query(`
         UPDATE dbo.CrmSalesDeed SET
           RegistrationNo = ISNULL(@regno, RegistrationNo), BookNo = ISNULL(@bookno, BookNo),
           PartNo = ISNULL(@partno, PartNo), RegistrationDate = ISNULL(@regdt, RegistrationDate),
           PossessionDate = ISNULL(@posdt, PossessionDate), ExecutedBy = ISNULL(@exby, ExecutedBy),
+          DeedValue = ISNULL(@dval, DeedValue), StampDuty = ISNULL(@stamp, StampDuty),
+          RegistrationFee = ISNULL(@regfee, RegistrationFee), SubRegistrarOffice = ISNULL(@sro, SubRegistrarOffice),
+          DeedDate = ISNULL(@ddt, DeedDate),
           Status = @st, Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
@@ -309,7 +388,18 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     // moment the deed becomes legally Executed (ExecutedBy just filled in),
     // it's ready to show the customer. No separate manual "send" click
     // needed, same as the agreement's auto-send on senior approval.
-    if (newStatus === "Executed") {
+    //
+    // Keyed off "ExecutedBy was just set" (row.ExecutedBy was empty, b.ExecutedBy
+    // now provided) rather than `newStatus === "Executed"` — a request that
+    // sets ExecutedBy and RegistrationNo together jumps straight to
+    // newStatus === "Registered" and would never pass through "Executed",
+    // silently skipping the customer notification. That's exactly what
+    // happened to a real record: ExecutedBy and Status were both set,
+    // SentToCustomerAt stayed null forever, and everything downstream that
+    // depends on customer approval (Pre-Possession's gate, the portal's
+    // approval card) broke with no error anywhere.
+    const executedByJustSet = !row.ExecutedBy && b.ExecutedBy;
+    if (executedByJustSet) {
       const sent = await pool.request().input("id", sql.Int, id).query("SELECT SentToCustomerAt FROM dbo.CrmSalesDeed WHERE Id = @id");
       if (!sent.recordset[0].SentToCustomerAt) {
         await pool.request().input("id", sql.Int, id).query(`

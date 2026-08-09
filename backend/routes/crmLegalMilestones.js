@@ -5,7 +5,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, recomputeLegalMilestoneCurrentStep } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -23,11 +23,35 @@ const STEPS = [
 // step (scheduling/annotating is still manual for all of them).
 const MANUAL_STEPS = new Set(["DirectorMeeting"]);
 
+// The legal workflow doesn't actually end at step 8 (Final Execution) —
+// Sales Deed, Query Payment, Registry, and Bank NOC all follow it, gated on
+// each other (see crmSalesDeed.js / crmQueryPayment.js / crmRegistry.js /
+// crmNoc.js). This page is the natural home for showing that whole journey
+// in one place, not just the 8-step agreement-signing portion, so the
+// summary list carries enough from each downstream module to render it —
+// without duplicating any of their own create/update logic, which stays on
+// their own dedicated pages (this page only links out to them).
 const LM_SELECT = `
-  SELECT m.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile
+  SELECT m.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile,
+    sd.Id AS SalesDeedId, sd.DeedNo, sd.ExecutedBy AS DeedExecutedBy, sd.RegistrationNo AS DeedRegistrationNo,
+    qp.Id AS QueryPaymentId, qp.QPNo, qp.Status AS QueryPaymentStatus,
+    reg.Id AS RegistryId, reg.RegNo, reg.Status AS RegistryStatus,
+    bankNoc.Id AS BankNocId, bankNoc.NocNo AS BankNocNo, bankNoc.Status AS BankNocStatus,
+    orgNoc.Id AS OrgNocId, orgNoc.NocNo AS OrgNocNo, orgNoc.Status AS OrgNocStatus
   FROM dbo.CrmLegalMilestone m
   JOIN dbo.CrmBooking b ON b.Id = m.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = m.BookingId
+  LEFT JOIN dbo.CrmQueryPayment qp ON qp.BookingId = m.BookingId
+  LEFT JOIN dbo.CrmRegistry reg ON reg.BookingId = m.BookingId
+  OUTER APPLY (
+    SELECT TOP 1 Id, NocNo, Status FROM dbo.CrmNoc
+    WHERE BookingId = m.BookingId AND NocType = 'Bank' ORDER BY CreatedAt DESC
+  ) bankNoc
+  OUTER APPLY (
+    SELECT TOP 1 Id, NocNo, Status FROM dbo.CrmNoc
+    WHERE BookingId = m.BookingId AND NocType = 'Organisation' ORDER BY CreatedAt DESC
+  ) orgNoc
 `;
 
 // GET / — all legal milestone trackers
@@ -128,13 +152,11 @@ router.put("/:id/:step", requirePageRight("crm-legal-milestones", "edit"), async
           ${step}Done   = ISNULL(@done, ${step}Done),
           ${step}Status = ISNULL(@st, ${step}Status),
           ${step}Notes  = @note,
-          CurrentStep = CASE WHEN @st = 'Completed' AND CurrentStep = ${STEPS.indexOf(step) + 1}
-                             THEN ${Math.min(STEPS.indexOf(step) + 2, STEPS.length)} ELSE CurrentStep END,
-          OverallStatus = CASE WHEN @st = 'Completed' AND '${step}' = 'FinalExecution' THEN 'Completed' ELSE OverallStatus END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
     if (!result.rowsAffected[0]) return res.status(404).json({ error: "Legal milestone tracker not found" });
+    await recomputeLegalMilestoneCurrentStep(pool, id);
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-legal-milestones] PUT error:", e.message);

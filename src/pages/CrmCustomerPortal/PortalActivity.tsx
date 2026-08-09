@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, CreditCard, FolderCheck, LifeBuoy, Radio, ArrowRight, AlertTriangle, ChevronRight } from "lucide-react";
+import { FileText, CreditCard, FolderCheck, LifeBuoy, Radio, ArrowRight, AlertTriangle, ChevronRight, Scale } from "lucide-react";
 import { fetchActivity, fetchAgreement, fetchAgreementDocuments, fmtMoney, fmtDate, fmtDateTime } from "./portalApi";
 import { PageHeader, Card, GOLD, GOLD_SOFT, INK, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, SURFACE_ALT, serif } from "./portalTheme";
 
@@ -9,6 +9,7 @@ type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] 
 
 const TYPE_META: Record<string, { icon: any; label: string; to: string }> = {
   agreement: { icon: FileText, label: "Agreement", to: "/crm-client-portal/agreement" },
+  legal: { icon: Scale, label: "Legal & Registration", to: "/crm-client-portal/agreement" },
   payment: { icon: CreditCard, label: "Payment", to: "/crm-client-portal/payments" },
   document: { icon: FolderCheck, label: "Document", to: "/crm-client-portal/agreement" },
   ticket: { icon: LifeBuoy, label: "Support", to: "/crm-client-portal/tickets" },
@@ -17,6 +18,7 @@ const TYPE_META: Record<string, { icon: any; label: string; to: string }> = {
 const FILTERS: { key: string; label: string }[] = [
   { key: "", label: "All" },
   { key: "agreement", label: "Agreement" },
+  { key: "legal", label: "Legal & Registration" },
   { key: "payment", label: "Payments" },
   { key: "document", label: "Documents" },
   { key: "ticket", label: "Support" },
@@ -67,6 +69,9 @@ const PortalActivity: React.FC = () => {
   }
   if (timeline?.salesDeed?.SentToCustomerAt && timeline?.salesDeed?.CustomerApprovalStatus === "Pending") {
     needsAction.push({ icon: FileText, label: "Your sales deed is waiting for your review", sub: "Approve or request a recheck", to: "/crm-client-portal/agreement" });
+  }
+  if (timeline?.queryPayment && timeline?.queryPayment?.Status === "InfoSent") {
+    needsAction.push({ icon: Scale, label: "Government payment proof needed", sub: `${fmtMoney(timeline.queryPayment.RequiredAmount)} — upload your proof once paid`, to: "/crm-client-portal/agreement" });
   }
   const nextDue = (timeline?.paymentMilestones || []).find((m: any) => m.Status === "Pending");
   if (nextDue) {

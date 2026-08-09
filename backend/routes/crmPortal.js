@@ -228,7 +228,7 @@ router.get("/timeline", async (req, res) => {
 
     if (!bk) return res.json({ stage: "Application", steps: [], holds: holds.recordset });
 
-    const [welcomeCall, customerDetails, agreement, milestones, deed, handover, possessionNotice, constructionUpdates, legalMilestone, nocs, prePossession] = await Promise.all([
+    const [welcomeCall, customerDetails, agreement, milestones, deed, handover, possessionNotice, constructionUpdates, legalMilestone, nocs, prePossession, queryPayment, registry] = await Promise.all([
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT TOP 1 * FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT TOP 1
@@ -274,8 +274,19 @@ router.get("/timeline", async (req, res) => {
             .query("SELECT UpdateDate, PercentComplete, Stage, Summary FROM dbo.CrmConstructionUpdate WHERE ProjectId = @pid ORDER BY UpdateDate DESC")
         : Promise.resolve({ recordset: [] }),
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT OverallStatus FROM dbo.CrmLegalMilestone WHERE BookingId = @bid"),
-      pool.request().input("bid", sql.Int, bk.Id).query("SELECT NocType, Status FROM dbo.CrmNoc WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).query("SELECT NocType, Status, NocNo, IssuedDate FROM dbo.CrmNoc WHERE BookingId = @bid"),
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT Status, ScheduledInspectionDate FROM dbo.CrmPrePossession WHERE BookingId = @bid"),
+      // Query Payment: the customer's own government payment (stamp duty +
+      // registration fee) — required amount is read live from the Sales
+      // Deed, same as the staff-side route, never duplicated here.
+      pool.request().input("bid", sql.Int, bk.Id).query(`
+        SELECT qp.Id, qp.QPNo, qp.Status, qp.InfoSentAt, qp.ConfirmedAt, qp.ConfirmedAmount,
+               sd.StampDuty, sd.RegistrationFee, ISNULL(sd.StampDuty,0) + ISNULL(sd.RegistrationFee,0) AS RequiredAmount
+        FROM dbo.CrmQueryPayment qp
+        LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
+        WHERE qp.BookingId = @bid
+      `),
+      pool.request().input("bid", sql.Int, bk.Id).query("SELECT Id, RegNo, Status, ScheduledDate, CompletedDate FROM dbo.CrmRegistry WHERE BookingId = @bid"),
     ]);
 
     res.json({
@@ -298,8 +309,10 @@ router.get("/timeline", async (req, res) => {
       nocStatus: {
         total: nocs.recordset.length,
         issued: nocs.recordset.filter((n) => n.Status === "Issued").length,
-        items: nocs.recordset.map((n) => ({ type: n.NocType, status: n.Status })),
+        items: nocs.recordset.map((n) => ({ type: n.NocType, status: n.Status, nocNo: n.NocNo, issuedDate: n.IssuedDate })),
       },
+      queryPayment: queryPayment.recordset[0] || null,
+      registry: registry.recordset[0] || null,
       prePossession: prePossession.recordset[0]
         ? { status: prePossession.recordset[0].Status, scheduledDate: prePossession.recordset[0].ScheduledInspectionDate }
         : null,
@@ -858,6 +871,120 @@ router.post("/possession-notice/respond", async (req, res) => {
   }
 });
 
+// ─── Query Payment ──────────────────────────────────────────────────────────
+// The customer's own government payment (stamp duty + registration fee, paid
+// directly to the Sub-Registrar Office, never to the company — see
+// crmQueryPayment.js). The customer needs to: see the amount + paperwork
+// staff sent them, and upload their own proof of payment once they've paid.
+// Staff still does the actual "Confirm" step (crmQueryPayment.js POST
+// /:id/confirm) — this only gets the proof in front of them.
+const QP_MAX_FILE_BYTES = 4 * 1024 * 1024;
+
+// GET /query-payment/attachments — requires ?applicationId=
+router.get("/query-payment/attachments", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const result = await pool.request().input("aid", sql.Int, appId).query(`
+      SELECT att.AttachmentId, att.DocType, att.FileName, att.MimeType, att.FileSize, att.UploadedAt
+      FROM dbo.CrmQueryPaymentAttachments att
+      JOIN dbo.CrmQueryPayment qp ON qp.Id = att.QueryPaymentId
+      JOIN dbo.CrmBooking b ON b.Id = qp.BookingId
+      WHERE b.ApplicationId = @aid
+      ORDER BY att.UploadedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-portal] GET /query-payment/attachments error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /query-payment/attachment/:attachId/file — requires ?applicationId=
+router.get("/query-payment/attachment/:attachId/file", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const attachId = parseInt(req.params.attachId, 10);
+    const result = await pool.request().input("aid", sql.Int, appId).input("said", sql.Int, attachId).query(`
+      SELECT att.FileName, att.MimeType, att.FileData
+      FROM dbo.CrmQueryPaymentAttachments att
+      JOIN dbo.CrmQueryPayment qp ON qp.Id = att.QueryPaymentId
+      JOIN dbo.CrmBooking b ON b.Id = qp.BookingId
+      WHERE b.ApplicationId = @aid AND att.AttachmentId = @said
+    `);
+    if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });
+    const att = result.recordset[0];
+    res.setHeader("Content-Type", att.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(att.FileName)}"`);
+    res.send(att.FileData);
+  } catch (e) {
+    console.error("[crm-portal] GET /query-payment/attachment/:id/file error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /query-payment/proof — requires ?applicationId=. Base64 JSON body
+// (same convention as the staff-side route), decoded back into the exact
+// bytes stored in the existing VARBINARY(MAX) column. Never flips Status —
+// only staff confirming (crmQueryPayment.js) does that, since they're the
+// ones who can actually verify the government received the payment.
+router.post("/query-payment/proof", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const { fileName, mimeType, base64 } = req.body || {};
+    if (!fileName || !base64) return res.status(400).json({ error: "fileName and base64 are required" });
+    const buffer = Buffer.from(base64, "base64");
+    if (!buffer.length) return res.status(400).json({ error: "File is empty" });
+    if (buffer.length > QP_MAX_FILE_BYTES) {
+      return res.status(400).json({ error: `File is too large (max ${(QP_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB)` });
+    }
+
+    const qp = await pool.request().input("aid", sql.Int, appId).query(`
+      SELECT qp.Id, qp.QPNo, qp.Status, qp.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
+      FROM dbo.CrmQueryPayment qp
+      JOIN dbo.CrmBooking b ON b.Id = qp.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE b.ApplicationId = @aid
+    `);
+    if (!qp.recordset.length) return res.status(404).json({ error: "No government payment tracker found for this booking" });
+    const row = qp.recordset[0];
+    if (row.Status === "Confirmed") return res.status(400).json({ error: "Already confirmed — no further proof needed" });
+
+    await pool.request()
+      .input("qpid", sql.Int, row.Id)
+      .input("dtype", sql.NVarChar(20), "Proof")
+      .input("fname", sql.NVarChar(255), fileName)
+      .input("mtype", sql.NVarChar(100), mimeType || "application/octet-stream")
+      .input("fsize", sql.Int, buffer.length)
+      .input("fdata", sql.VarBinary(sql.MAX), buffer)
+      .query(`
+        INSERT INTO dbo.CrmQueryPaymentAttachments (QueryPaymentId, DocType, FileName, MimeType, FileSize, FileData)
+        VALUES (@qpid, @dtype, @fname, @mtype, @fsize, @fdata)
+      `);
+
+    if (row.AssignedTo) {
+      await emitNotification(pool, row.AssignedTo, "crm_query_payment_proof_uploaded", "Payment Proof Uploaded by Customer",
+        `${row.ApplicantName} uploaded proof of government payment for ${row.QPNo} (${row.BookingNo}) — review and confirm.`,
+        row.Id, "crm_query_payment");
+    }
+    await logCommunication(pool, {
+      bookingId: row.BookingId, direction: "Inbound",
+      subject: "Customer uploaded government payment proof",
+      summary: `${row.ApplicantName} uploaded proof of payment for ${row.QPNo} — awaiting staff confirmation.`,
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-portal] POST /query-payment/proof error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /tickets — requires ?applicationId=
 router.get("/tickets", async (req, res) => {
   try {
@@ -946,7 +1073,7 @@ router.get("/activity", async (req, res) => {
     const appId = await resolveAndAssertApplication(pool, req, res);
     if (appId === null) return;
 
-    const [agreementLog, payments, documents, tickets] = await Promise.all([
+    const [agreementLog, payments, documents, tickets, salesDeed, queryPayment, qpProofs, registry, nocs] = await Promise.all([
       pool.request().input("aid", sql.Int, appId)
         .query(`
           SELECT l.Action, l.Remarks, l.CreatedAt, ag.AgreementNo
@@ -979,6 +1106,42 @@ router.get("/activity", async (req, res) => {
         JOIN dbo.CrmBooking b ON b.Id = t.BookingId
         WHERE b.ApplicationId = @aid
         ORDER BY t.CreatedAt DESC
+      `),
+      // Sales Deed has no dedicated approval-log table like Agreement does —
+      // its own timestamp columns (SentToCustomerAt/CustomerApprovedAt/
+      // UpdatedAt) are the only record of when each customer-facing event
+      // actually happened, so those are what the feed reads.
+      pool.request().input("aid", sql.Int, appId).query(`
+        SELECT sd.DeedNo, sd.SentToCustomerAt, sd.CustomerApprovalStatus, sd.CustomerApprovedAt, sd.CustomerRecheckRemarks, sd.UpdatedAt
+        FROM dbo.CrmSalesDeed sd
+        JOIN dbo.CrmBooking b ON b.Id = sd.BookingId
+        WHERE b.ApplicationId = @aid
+      `),
+      pool.request().input("aid", sql.Int, appId).query(`
+        SELECT qp.Id, qp.QPNo, qp.InfoSentAt, qp.ConfirmedAt, qp.ConfirmedAmount
+        FROM dbo.CrmQueryPayment qp
+        JOIN dbo.CrmBooking b ON b.Id = qp.BookingId
+        WHERE b.ApplicationId = @aid
+      `),
+      pool.request().input("aid", sql.Int, appId).query(`
+        SELECT att.FileName, att.UploadedAt
+        FROM dbo.CrmQueryPaymentAttachments att
+        JOIN dbo.CrmQueryPayment qp ON qp.Id = att.QueryPaymentId
+        JOIN dbo.CrmBooking b ON b.Id = qp.BookingId
+        WHERE b.ApplicationId = @aid AND att.DocType = 'Proof'
+        ORDER BY att.UploadedAt DESC
+      `),
+      pool.request().input("aid", sql.Int, appId).query(`
+        SELECT reg.RegNo, reg.Status, reg.ScheduledDate, reg.CompletedDate, reg.UpdatedAt
+        FROM dbo.CrmRegistry reg
+        JOIN dbo.CrmBooking b ON b.Id = reg.BookingId
+        WHERE b.ApplicationId = @aid
+      `),
+      pool.request().input("aid", sql.Int, appId).query(`
+        SELECT n.NocType, n.NocNo, n.IssuedDate
+        FROM dbo.CrmNoc n
+        JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+        WHERE b.ApplicationId = @aid AND n.IssuedDate IS NOT NULL
       `),
     ]);
 
@@ -1014,6 +1177,36 @@ router.get("/activity", async (req, res) => {
       if (r.ResolvedAt) {
         feed.push({ type: "ticket", title: `Ticket resolved — ${r.Subject}`, detail: r.TicketNo, at: r.ResolvedAt });
       }
+    }
+
+    // Sales Deed — same "agreement" bucket as the Agreement events above,
+    // since they live on the same portal page and represent the same kind
+    // of customer decision.
+    const sd = salesDeed.recordset[0];
+    if (sd) {
+      if (sd.SentToCustomerAt) feed.push({ type: "agreement", title: "Sales deed shared with you", detail: sd.DeedNo, at: sd.SentToCustomerAt });
+      if (sd.CustomerApprovedAt) feed.push({ type: "agreement", title: "You approved the sales deed", detail: sd.DeedNo, at: sd.CustomerApprovedAt });
+      else if (sd.CustomerApprovalStatus === "RecheckRequested") feed.push({ type: "agreement", title: "You requested a recheck on the sales deed", detail: sd.CustomerRecheckRemarks || sd.DeedNo, at: sd.UpdatedAt });
+    }
+
+    // Query Payment, Registry, NOC — grouped under "legal" (the same journey
+    // shown on the Agreement page's Government Payment/Registry/NOC cards),
+    // distinct from the "agreement" bucket above.
+    const qp = queryPayment.recordset[0];
+    if (qp) {
+      if (qp.InfoSentAt) feed.push({ type: "legal", title: "Government payment details sent to you", detail: qp.QPNo, at: qp.InfoSentAt });
+      if (qp.ConfirmedAt) feed.push({ type: "legal", title: "Government payment confirmed", detail: qp.ConfirmedAmount ? `₹${Number(qp.ConfirmedAmount).toLocaleString("en-IN")}` : qp.QPNo, at: qp.ConfirmedAt });
+    }
+    for (const r of qpProofs.recordset) {
+      feed.push({ type: "legal", title: "You uploaded proof of payment", detail: r.FileName, at: r.UploadedAt });
+    }
+    const reg = registry.recordset[0];
+    if (reg) {
+      if (reg.ScheduledDate) feed.push({ type: "legal", title: "Registry appointment scheduled", detail: `${reg.RegNo} · ${new Date(reg.ScheduledDate).toLocaleDateString("en-IN")}`, at: reg.ScheduledDate });
+      if (reg.CompletedDate) feed.push({ type: "legal", title: "Registry completed", detail: reg.RegNo, at: reg.CompletedDate });
+    }
+    for (const r of nocs.recordset) {
+      feed.push({ type: "legal", title: `${r.NocType} NOC issued`, detail: r.NocNo, at: r.IssuedDate });
     }
 
     feed.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());

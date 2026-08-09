@@ -1,38 +1,32 @@
 import React, { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, IndianRupee } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Search, IndianRupee, ExternalLink } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/brokerage";
 
-const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Other"];
-
-const EMPTY_FORM = { BrokerageId: "", Amount: "", PaidDate: "", PaymentMode: "", TransactionRef: "", Notes: "" };
-
 async function fetchPayments(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/payments`); return r.ok ? r.json() : []; } catch { return []; }
 }
-async function fetchBrokerageRecords(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
-}
 
+// This page is tracking/reporting only. Actually paying a broker happens in
+// Finance, not here: CRM (crmBrokerage.js) hands each approved brokerage
+// record to Finance as a dbo.NewPayment ("PUT /:id/approve" ->
+// createFinancePaymentForBrokerage), Finance completes the payment details
+// and approves it from the Payments module, and that approval writes back
+// into dbo.CrmBrokerPayment / flips the brokerage record to 'Paid'
+// automatically. A "Record Payment" action used to live here that inserted
+// a second, CRM-originated NewPayment directly (bank picked by CRM staff,
+// bypassing Finance's own data entry and approval) — it's removed; this
+// page now only reflects what Finance has already done or has pending.
 const CrmBrokerPayments: React.FC = () => {
-  const qc = useQueryClient();
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ ...EMPTY_FORM });
-  const [saving, setSaving] = useState(false);
 
   const { data: payments = [], isLoading } = useQuery({ queryKey: ["crm-broker-payments"], queryFn: fetchPayments, staleTime: 30_000 });
-  const { data: brokerageRecords = [] } = useQuery({ queryKey: ["crm-brokerage"], queryFn: fetchBrokerageRecords, staleTime: 60_000 });
-
-  // Only Approved (not yet fully paid) brokerage records are eligible — Pending
-  // records must be approved on the Brokerage page first, and Paid ones are done.
-  const payable = useMemo(() => (brokerageRecords as any[]).filter((r: any) => r.Status === "Approved"), [brokerageRecords]);
 
   const filtered = useMemo(() =>
     (payments as any[]).filter((p: any) =>
@@ -41,29 +35,12 @@ const CrmBrokerPayments: React.FC = () => {
         || p.BookingNo?.includes(search)
     ), [payments, search]);
 
-  const totalPaid = filtered.reduce((s: number, p: any) => s + Number(p.Amount || 0), 0);
-
-  const handleRecord = async () => {
-    if (!form.BrokerageId || !form.Amount) { toast.error("Brokerage record and amount are required"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${form.BrokerageId}/payments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, Amount: parseFloat(form.Amount) }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Broker payment recorded");
-      setDialogOpen(false);
-      setForm({ ...EMPTY_FORM });
-      qc.invalidateQueries({ queryKey: ["crm-broker-payments"] });
-      qc.invalidateQueries({ queryKey: ["crm-brokerage"] });
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
+  const totalPaid = filtered
+    .filter((p: any) => p.FinancePaymentStatus === "Paid" || p.FinancePaymentStatus === undefined)
+    .reduce((s: number, p: any) => s + Number(p.Amount || 0), 0);
+  const totalPending = filtered
+    .filter((p: any) => p.FinancePaymentStatus === "Draft" || p.FinancePaymentStatus === "Pending")
+    .reduce((s: number, p: any) => s + Number(p.Amount || 0), 0);
 
   const columns: ColumnDef<any, unknown>[] = [
     { accessorKey: "BrokerName", header: "Broker", size: 150,
@@ -84,19 +61,30 @@ const CrmBrokerPayments: React.FC = () => {
     { accessorKey: "PaidDate", header: "Paid Date", size: 100, cell: (i) => <span className="text-xs">{i.row.original.PaidDate ? String(i.row.original.PaidDate).slice(0, 10) : "—"}</span> },
     { accessorKey: "PaymentMode", header: "Mode", size: 90, cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
     { accessorKey: "TransactionRef", header: "Ref", size: 110, cell: (i) => <span className="text-xs font-mono">{(i.getValue() as string) || "—"}</span> },
+    { id: "financeStatus", header: "Finance Status", size: 110, enableSorting: false,
+      cell: (i) => {
+        const r = i.row.original;
+        const status = r.FinancePaymentStatus || "Paid";
+        const color = status === "Paid" ? "text-green-600 bg-green-50 border-green-200"
+          : status === "Approved" ? "text-blue-600 bg-blue-50 border-blue-200"
+          : "text-orange-600 bg-orange-50 border-orange-200";
+        return (
+          <button
+            onClick={() => r.FinancePaymentId && navigate(`/payments?id=${r.FinancePaymentId}`)}
+            disabled={!r.FinancePaymentId}
+            className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium ${color} disabled:cursor-default`}
+          >
+            {status} {r.FinancePaymentId && <ExternalLink size={10} />}
+          </button>
+        );
+      } },
     { accessorKey: "CreatedByName", header: "Recorded By", size: 110, cell: (i) => <span className="text-xs text-muted-foreground">{(i.getValue() as string) || "—"}</span> },
   ];
 
   return (
     <SalesAutoShell
       title="CRM — Broker Payment"
-      subtitle="Payouts against recorded brokerage — separate from Broker Master and Brokerage assignment"
-      action={
-        <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-          <Plus size={14} /> Record Payment
-        </button>
-      }
+      subtitle="Tracking only — payouts are recorded and approved in Finance, and reflect here automatically"
     >
       <div className="flex gap-3 flex-wrap items-center">
         <div className="relative flex-1 min-w-48">
@@ -107,9 +95,16 @@ const CrmBrokerPayments: React.FC = () => {
         </div>
         <div className="flex items-center gap-1.5 text-sm bg-muted/30 border border-border rounded-lg px-3 py-2">
           <IndianRupee size={14} className="text-muted-foreground" />
-          <span className="text-muted-foreground">Total shown:</span>
+          <span className="text-muted-foreground">Paid:</span>
           <span className="font-semibold">₹{totalPaid.toLocaleString("en-IN")}</span>
         </div>
+        {totalPending > 0 && (
+          <div className="flex items-center gap-1.5 text-sm bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+            <IndianRupee size={14} className="text-orange-600" />
+            <span className="text-orange-600">Awaiting Finance:</span>
+            <span className="font-semibold text-orange-600">₹{totalPending.toLocaleString("en-IN")}</span>
+          </div>
+        )}
       </div>
 
       <DataTable
@@ -120,66 +115,6 @@ const CrmBrokerPayments: React.FC = () => {
         emptyMessage="No broker payments recorded"
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
-
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle className="font-heading">Record Broker Payment</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Brokerage Record *</label>
-              <select value={form.BrokerageId} onChange={(e) => setForm((f) => ({ ...f, BrokerageId: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select brokerage record</option>
-                {(payable as any[]).map((r: any) => (
-                  <option key={r.Id} value={String(r.Id)}>
-                    {r.BrokerName} — {r.BookingNo} — Due ₹{Number(r.ComputedAmount).toLocaleString("en-IN")}
-                  </option>
-                ))}
-              </select>
-              {!payable.length && (
-                <p className="text-xs text-muted-foreground mt-1">No approved brokerage records awaiting payment — approve one on the Brokerage page first.</p>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Amount *</label>
-                <input type="number" value={form.Amount} onChange={(e) => setForm((f) => ({ ...f, Amount: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Paid Date</label>
-                <input type="date" value={form.PaidDate} onChange={(e) => setForm((f) => ({ ...f, PaidDate: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
-                <select value={form.PaymentMode} onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Select</option>
-                  {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
-                <input type="text" value={form.TransactionRef} onChange={(e) => setForm((f) => ({ ...f, TransactionRef: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-              <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleRecord} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Recording..." : "Record Payment"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </SalesAutoShell>
   );
 };

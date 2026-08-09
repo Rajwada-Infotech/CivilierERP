@@ -477,16 +477,16 @@ const SaLeadManagement: React.FC = () => {
             {/* In Follow-up */}
             <div className="rounded-lg border border-border overflow-hidden">
               <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-foreground">In Follow-up Module ({inFollowup.length})</h3>
-                <span className="text-xs text-muted-foreground">Leads promoted to the Follow-up module</span>
+                <h3 className="text-sm font-semibold text-foreground">Picked Into CRM Application ({inFollowup.length})</h3>
+                <span className="text-xs text-muted-foreground">Converted leads a CRM Application has already been started from</span>
               </div>
               {inFollowup.length === 0 ? (
-                <div className="p-6 text-center text-muted-foreground text-sm">No leads in follow-up yet</div>
+                <div className="p-6 text-center text-muted-foreground text-sm">No leads picked into an application yet</div>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-muted/20">
                     <tr>
-                      {["Lead ID", "Customer", "Mobile", "Followup ID", "Status", "Salesperson"].map((h) => (
+                      {["Lead ID", "Customer", "Mobile", "Application ID", "Status", "Salesperson"].map((h) => (
                         <th key={h} className="p-3 text-left text-xs font-medium text-muted-foreground">{h}</th>
                       ))}
                     </tr>
@@ -620,7 +620,16 @@ const SaLeadManagement: React.FC = () => {
           onDataEvent={handleDataEvent}
           exportConfig={{ title: "Lead Management", filename: "lead-management", columns: exportColumns }}
           rowActions={(row) => {
-            const hasFollowup = Boolean(row.FollowupCustomerId);
+            // Three distinct states now that converting a lead no longer
+            // auto-creates a CrmApplication (see saHandoff.js convertLead):
+            //   1. Not yet converted -> "Convert Lead" action.
+            //   2. Converted, sitting in the CRM Leads pool, not yet picked
+            //      into an Application -> static badge (nothing to do here;
+            //      CRM staff pick it up from src/pages/CRM/CrmLeads.tsx).
+            //   3. CrmApplicationId set (picked up by CRM) -> the amber
+            //      "Continue in CRM Application" button, unchanged.
+            const isConverted = row.Status === "Converted";
+            const hasFollowup = Boolean(row.FollowupCustomerId); // CrmApplicationId, aliased in mappedData above
             const hasBooking = Boolean(row.BookingId);
             const auditBtn = (
               <button
@@ -645,16 +654,21 @@ const SaLeadManagement: React.FC = () => {
             return (
               <>
                 {auditBtn}
-                {!hasFollowup && (
+                {!isConverted && !hasFollowup && (
                   <button
                     type="button"
                     onClick={() => promoteToFollowup(row)}
                     disabled={handoffLoading === `followup-${row._id}`}
                     className="p-1.5 rounded-lg text-emerald-500 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
-                    title="Promote to follow-up"
+                    title="Convert Lead — puts it in the CRM Leads pool"
                   >
                     <CheckCircle2 size={13} />
                   </button>
+                )}
+                {isConverted && !hasFollowup && (
+                  <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-sky-500/10 text-sky-600" title="Converted — waiting for CRM staff to start an application from it">
+                    In CRM Leads Pool
+                  </span>
                 )}
                 {hasFollowup && (
                   <button

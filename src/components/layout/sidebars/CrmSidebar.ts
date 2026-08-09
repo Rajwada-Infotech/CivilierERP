@@ -1,8 +1,20 @@
-import { ClipboardList, FileText, IndianRupee, Wrench, Scale, HardHat, LayoutDashboard, Grid3x3 } from "lucide-react";
+import { ClipboardList, FileText, IndianRupee, Wrench, Scale, HardHat, LayoutDashboard, Grid3x3, Users } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const crmNavItems: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/crm/dashboard", pageKey: "crm-dashboard" },
+
+  // ── CRM Leads (SA handoff pool) ──────────────────────────────────────────────
+  // Converted leads from Sales Automation land here first — they are NOT
+  // CrmApplications yet. Staff pick from this pool when they start a New
+  // Application (see CrmApplication.tsx's lead picker).
+  {
+    label: "Leads",
+    icon: Users,
+    children: [
+      { label: "All Leads", path: "/crm/leads", pageKey: "crm-leads" },
+    ],
+  },
 
   // ── CRM Pipeline ────────────────────────────────────────────────────────────
   {
@@ -44,8 +56,13 @@ export const crmNavItems: NavItem[] = [
     icon: Scale,
     children: [
       { label: "Legal Milestones", path: "/crm/legal-milestones", pageKey: "crm-legal-milestones" },
-      { label: "NOC (Org & Bank)", path: "/crm/noc",              pageKey: "crm-noc"              },
+      // Order follows the real post-agreement sequence: the Sale Deed must
+      // exist before Query Payment (which reads its stamp duty/reg fee) or
+      // Bank NOC (which releases the bank's charge against the unit).
       { label: "Sale Deed",        path: "/crm/sales-deed",       pageKey: "crm-sales-deed"       },
+      { label: "Query Payment",    path: "/crm/query-payment",    pageKey: "crm-query-payment"    },
+      { label: "Registry",         path: "/crm/registry",         pageKey: "crm-registry"         },
+      { label: "NOC (Org & Bank)", path: "/crm/noc",              pageKey: "crm-noc"              },
     ],
   },
 

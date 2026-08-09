@@ -1,10 +1,8 @@
 import React from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
-import { Clock, Building2, CreditCard, FileText, LifeBuoy, ArrowRight, AlertTriangle, TrendingUp, Landmark } from "lucide-react";
+import { Clock, Building2, CreditCard, FileText, LifeBuoy, ArrowRight, AlertTriangle, TrendingUp, Landmark, ReceiptIndianRupee, BookMarked } from "lucide-react";
 import { fmtMoney, fmtDate } from "./portalApi";
 import { PageHeader, Card, Stepper, StepState, GOLD, GOLD_SOFT, SURFACE, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, serif } from "./portalTheme";
-
-const STAGES = ["Application", "Booking", "Welcome Call", "Customer Details", "Agreement", "Payments", "Sales Deed", "Handover"];
 
 type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
 
@@ -30,14 +28,6 @@ const PortalOverview: React.FC = () => {
 
   const agreement = timeline.agreement;
   const customerDetailsComplete = !!timeline.customerDetails?.IsComplete;
-  const currentStageIdx = !timeline.booking ? 0
-    : !timeline.welcomeCall ? 1
-    : !customerDetailsComplete ? 2
-    : !agreement ? 3
-    : agreement.CustomerApprovalStatus !== "Approved" ? 4
-    : timeline.paymentMilestones?.some((m: any) => m.Status === "Pending") ? 5
-    : !timeline.salesDeed ? 6
-    : !timeline.handover ? 7 : 7;
 
   const milestones = timeline.paymentMilestones || [];
   const totalDue = milestones.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
@@ -45,12 +35,52 @@ const PortalOverview: React.FC = () => {
   const pctPaid = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
   const nextDue = milestones.find((m: any) => m.Status === "Pending");
 
+  // Payments (construction milestones) and the Legal chain (Sales Deed ->
+  // Govt. Payment -> Registry -> Handover) are genuinely parallel tracks,
+  // not one sequential chain — a still-pending construction milestone must
+  // never freeze the stepper's legal stages at "upcoming" when Registry is
+  // already Completed. Each stage's done/current state is evaluated off its
+  // own data, branching independently off Agreement being approved.
+  const agreementApproved = !!agreement && agreement.CustomerApprovalStatus === "Approved";
+  const paymentsDone = milestones.length > 0 && !milestones.some((m: any) => m.Status === "Pending");
+  const salesDeedDone = !!timeline.salesDeed;
+  const qpDone = timeline.queryPayment?.Status === "Confirmed";
+  const registryDone = timeline.registry?.Status === "Completed";
+  const handoverDone = !!timeline.handover;
+
+  const journeySteps: { label: string; state: StepState }[] = [
+    { label: "Application", state: "done" },
+    { label: "Booking", state: timeline.booking ? "done" : "current" },
+    { label: "Welcome Call", state: timeline.welcomeCall ? "done" : timeline.booking ? "current" : "upcoming" },
+    { label: "Customer Details", state: customerDetailsComplete ? "done" : timeline.welcomeCall ? "current" : "upcoming" },
+    { label: "Agreement", state: agreementApproved ? "done" : customerDetailsComplete ? "current" : "upcoming" },
+    { label: "Payments", state: paymentsDone ? "done" : agreementApproved ? "current" : "upcoming" },
+    { label: "Sales Deed", state: salesDeedDone ? "done" : agreementApproved ? "current" : "upcoming" },
+    { label: "Govt. Payment", state: qpDone ? "done" : salesDeedDone ? "current" : "upcoming" },
+    { label: "Registry", state: registryDone ? "done" : qpDone ? "current" : "upcoming" },
+    { label: "Handover", state: handoverDone ? "done" : registryDone ? "current" : "upcoming" },
+  ];
+
+  // The last stat card tracks whichever legal stage is furthest along —
+  // Registry, then Query Payment, then Sales Deed, then Agreement — instead
+  // of freezing on "Sales Deed" once the customer has actually moved past it.
+  const legalStage = timeline.registry
+    ? { icon: BookMarked, label: "Registry", value: timeline.registry.Status, sub: timeline.registry.RegNo }
+    : timeline.queryPayment
+    ? { icon: ReceiptIndianRupee, label: "Govt. Payment", value: timeline.queryPayment.Status, sub: timeline.queryPayment.QPNo }
+    : timeline.salesDeed
+    ? { icon: Landmark, label: "Sales Deed", value: timeline.salesDeed.CustomerApprovalStatus || timeline.salesDeed.Status, sub: timeline.salesDeed.DeedNo }
+    : { icon: FileText, label: "Agreement", value: agreement?.CustomerApprovalStatus || "Not sent", sub: agreement?.AgreementNo };
+
   const actionItems: { label: string; sub: string; to: string }[] = [];
   if (agreement?.SentToCustomerAt && agreement?.CustomerApprovalStatus === "Pending") {
     actionItems.push({ label: "Your agreement is waiting for your review", sub: `${agreement.AgreementNo} — approve or request a recheck`, to: "/crm-client-portal/agreement" });
   }
   if (timeline.salesDeed?.SentToCustomerAt && timeline.salesDeed?.CustomerApprovalStatus === "Pending") {
     actionItems.push({ label: "Your sales deed is waiting for your review", sub: "Approve or request a recheck", to: "/crm-client-portal/agreement" });
+  }
+  if (timeline.queryPayment?.Status === "InfoSent") {
+    actionItems.push({ label: "Government payment proof needed", sub: `${fmtMoney(timeline.queryPayment.RequiredAmount)} — upload your proof once paid`, to: "/crm-client-portal/agreement" });
   }
   if (nextDue) {
     actionItems.push({ label: `${nextDue.MilestoneName} payment is due`, sub: `${fmtMoney(nextDue.AmountDue)} · ${nextDue.DueDate ? `Due ${fmtDate(nextDue.DueDate)}` : "No due date set yet"}`, to: "/crm-client-portal/payments" });
@@ -98,12 +128,7 @@ const PortalOverview: React.FC = () => {
       {/* Journey */}
       <Card className="p-5">
         <h2 className="text-sm font-semibold mb-4" style={{ ...serif, color: TEXT }}>Your Journey</h2>
-        <Stepper
-          steps={STAGES.map((s, idx): { label: string; state: StepState } => ({
-            label: s,
-            state: idx < currentStageIdx ? "done" : idx === currentStageIdx ? "current" : "upcoming",
-          }))}
-        />
+        <Stepper steps={journeySteps} />
       </Card>
 
       {/* Stat cards */}
@@ -111,10 +136,7 @@ const PortalOverview: React.FC = () => {
         <StatCard icon={Building2} label="Unit" value={timeline.booking?.UnitNo || "—"} sub={timeline.booking?.ProjectName} />
         <StatCard icon={TrendingUp} label="Payment Progress" value={`${pctPaid}%`} sub={`${fmtMoney(totalPaid)} of ${fmtMoney(totalDue)}`} />
         <StatCard icon={CreditCard} label="Next Payment" value={nextDue ? fmtMoney(nextDue.AmountDue) : "None due"} sub={nextDue?.MilestoneName} />
-        <StatCard icon={timeline.salesDeed ? Landmark : FileText}
-          label={timeline.salesDeed ? "Sales Deed" : "Agreement"}
-          value={(timeline.salesDeed ? timeline.salesDeed.CustomerApprovalStatus : agreement?.CustomerApprovalStatus) || "Not sent"}
-          sub={timeline.salesDeed ? timeline.salesDeed.DeedNo : agreement?.AgreementNo} />
+        <StatCard icon={legalStage.icon} label={legalStage.label} value={legalStage.value || "Not sent"} sub={legalStage.sub} />
       </div>
 
       {/* Quick links */}

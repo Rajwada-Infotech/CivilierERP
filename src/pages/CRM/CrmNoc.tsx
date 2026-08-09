@@ -3,10 +3,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, AlertTriangle, CheckCircle2, Landmark, Pencil, Lock } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+import { formatINR } from "@/utils/formatCurrency";
+import { Plus, AlertTriangle, CheckCircle2, Landmark, Pencil, Lock, ShieldCheck } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -14,12 +18,44 @@ const API = "/api/crm/noc";
 const BKG_API = "/api/crm/bookings";
 
 const NOC_TYPES = ["Organisation", "Bank"];
-const statusColor: Record<string, string> = {
-  Pending:  "text-orange-600 bg-orange-50 border-orange-200",
-  Approved: "text-blue-600 bg-blue-50 border-blue-200",
-  Issued:   "text-green-600 bg-green-50 border-green-200",
-  Rejected: "text-red-600 bg-red-50 border-red-200",
+
+// Pending -> Approved -> Issued is the only forward path; Rejected can be
+// resubmitted back to Pending. Issued is genuinely terminal — there is no
+// backend route that moves a NOC off Issued (see crmNoc.js PUT /:id/submit,
+// which only ever transitions Rejected -> Pending). A shared ApprovalActions
+// component elsewhere treats "Issued" as resubmittable for other modules'
+// vocabulary; that doesn't apply here, so this page never renders it once a
+// NOC reaches Issued — the real bug behind "Cannot submit from status Issued".
+const STATUS_CFG: Record<string, { text: string; bar: string }> = {
+  Pending:  { text: "text-amber-700",   bar: "bg-amber-500" },
+  Approved: { text: "text-blue-700",    bar: "bg-blue-500" },
+  Issued:   { text: "text-emerald-700", bar: "bg-emerald-500" },
+  Rejected: { text: "text-rose-700",    bar: "bg-rose-500" },
 };
+
+function StatusBadge({ status }: { status: string }) {
+  const c = STATUS_CFG[status] ?? STATUS_CFG.Pending;
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 rounded-sm border border-border bg-card font-mono text-[10px] font-semibold uppercase tracking-wider", c.text)}>
+      <span className={cn("w-[3px] h-3 rounded-[1px]", c.bar)} />
+      {status}
+    </span>
+  );
+}
+
+function DetailRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2 border-b border-border/60 last:border-0">
+      <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading shrink-0">{label}</span>
+      <span className={cn("text-sm text-foreground text-right", mono && "font-mono")}>{value}</span>
+    </div>
+  );
+}
+
+function fmtDate(d?: string | null) {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
 
 const EMPTY_FORM = { BookingId: "", NocType: "Organisation", NocDate: "", Reason: "", BankName: "", LoanAccountNo: "", LoanAmount: "" };
 
@@ -40,9 +76,13 @@ async function fetchBookingContext(bookingId: string): Promise<any> {
 const CrmNoc: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [sp] = useSearchParams();
+  const deepLinkBookingId = sp.get("bookingId");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const [markingIssued, setMarkingIssued] = useState(false);
   // Auto-fetched bank fields are locked (read-only) by default — they come
   // from a trusted source (KYC + real payment ledger), not free-typed, so
   // locking prevents an accidental edit that silently drifts from the
@@ -59,6 +99,21 @@ const CrmNoc: React.FC = () => {
   });
   const hasAgreement = !!context?.agreement;
   const canRequest = !!form.BookingId && hasAgreement && !contextLoading;
+
+  const detail = detailId != null ? (nocs as any[]).find((n: any) => n.Id === detailId) : null;
+
+  // Deep-link from Legal Milestones: pre-fill Request NOC with this booking
+  // if it doesn't have a Bank NOC yet.
+  useEffect(() => {
+    if (!deepLinkBookingId || dialogOpen) return;
+    const hasBankNoc = (nocs as any[]).some((n: any) => String(n.BookingId) === deepLinkBookingId && n.NocType === "Bank");
+    if (hasBankNoc) return;
+    if ((bookings as any[]).some((b: any) => String(b.Id) === deepLinkBookingId)) {
+      setForm((f) => ({ ...f, BookingId: deepLinkBookingId, NocType: "Bank" }));
+      setDialogOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkBookingId, nocs.length, bookings.length]);
 
   // Auto-fill Bank NOC fields from the actual lender record (Home Loan
   // Tracking / CrmLoanDetail) — a Bank NOC exists for the bank that issued
@@ -101,15 +156,17 @@ const CrmNoc: React.FC = () => {
     }
   };
 
-  const handleMarkIssued = async (id: number) => {
+  const handleMarkIssued = async () => {
+    if (!detailId) return;
+    setMarkingIssued(true);
     try {
-      const res = await fetchWithAuth(`${API}/${id}/mark-issued`, { method: "PUT" });
+      const res = await fetchWithAuth(`${API}/${detailId}/mark-issued`, { method: "PUT" });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("NOC marked as issued");
 
-      const current = (nocs as any[]).find((n) => n.Id === id);
+      const current = (nocs as any[]).find((n) => n.Id === detailId);
       const siblingsIssued = current && (nocs as any[])
-        .filter((n) => n.BookingId === current.BookingId && n.Id !== id)
+        .filter((n) => n.BookingId === current.BookingId && n.Id !== detailId)
         .every((n) => n.Status === "Issued");
       if (current && siblingsIssued) {
         promptNextStep(navigate, "All NOCs for this booking are issued — handover can now proceed.", "/crm/handover", "Go to Handover");
@@ -118,50 +175,39 @@ const CrmNoc: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-noc"] });
     } catch (e: any) {
       toast.error(e.message);
+    } finally {
+      setMarkingIssued(false);
     }
   };
 
   const nocColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "NocNo", header: "NOC No", size: 110,
-      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
+      cell: (i) => (
+        <button onClick={() => setDetailId(i.row.original.Id)} className="font-mono text-xs font-semibold text-primary hover:underline">
+          {i.getValue() as string}
+        </button>
+      ) },
     { accessorKey: "ApplicantName", header: "Customer", size: 160,
       cell: (i) => (
-        <div>
+        <button onClick={() => setDetailId(i.row.original.Id)} className="text-left hover:underline">
           <div className="font-medium">{i.row.original.ApplicantName}</div>
           <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
-        </div>
+        </button>
       ) },
     { accessorKey: "NocType", header: "Type", size: 100, cell: (i) => <span className="text-xs">{i.getValue() as string}</span> },
     { id: "bankLoan", header: "Bank / Loan", size: 140, enableSorting: false,
       cell: (i) => {
         const n = i.row.original;
-        return <span className="text-xs">{n.NocType === "Bank" ? `${n.BankName || "—"} · ₹${n.LoanAmount?.toLocaleString("en-IN") || "—"}` : "—"}</span>;
+        return <span className="text-xs">{n.NocType === "Bank" ? `${n.BankName || "—"} · ${n.LoanAmount ? formatINR(n.LoanAmount) : "—"}` : "—"}</span>;
       } },
-    { accessorKey: "Status", header: "Status", size: 100,
-      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+    { accessorKey: "Status", header: "Status", size: 110,
+      cell: (i) => <StatusBadge status={i.row.original.Status} /> },
     { accessorKey: "IssuedDate", header: "Issued", size: 100,
       cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.IssuedDate ? String(i.row.original.IssuedDate).slice(0, 10) : "—"}</span> },
-    { id: "actions", header: "Actions", size: 180, enableSorting: false,
-      cell: (i) => {
-        const n = i.row.original;
-        return (
-          <>
-            {/* submitOnly: Approve/Reject only ever happen from the Admin
-                Approval Inbox (admin/super_admin/marketing_head) */}
-            <ApprovalActions
-              status={n.Status}
-              recordId={n.Id}
-              endpoint={API}
-              submitOnly
-              onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-noc"] })}
-            />
-            {n.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
-            {n.Status === "Approved" && (
-              <button onClick={() => handleMarkIssued(n.Id)} className="text-xs text-primary hover:underline">Mark Issued</button>
-            )}
-          </>
-        );
-      } },
+    { id: "actions", header: "", size: 80, enableSorting: false,
+      cell: (i) => (
+        <button onClick={() => setDetailId(i.row.original.Id)} className="text-xs text-primary hover:underline">Open</button>
+      ) },
   ];
 
   return (
@@ -183,6 +229,7 @@ const CrmNoc: React.FC = () => {
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
 
+      {/* Request dialog */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Request NOC</DialogTitle></DialogHeader>
@@ -263,6 +310,81 @@ const CrmNoc: React.FC = () => {
               {saving ? "Requesting..." : "Request"}
             </button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Detail dialog — click a NOC to open its card, with a single
+          status-appropriate action area instead of the flat table's inline
+          buttons (which is what let a "Submit" button render on an already
+          Issued NOC — a genuinely terminal state with no backend route back
+          off it). */}
+      <Dialog open={!!detailId} onOpenChange={(o) => { if (!o) setDetailId(null); }}>
+        <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
+          {detail && (
+            <>
+              <DialogHeader className="px-6 py-4 border-b border-border">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                    <ShieldCheck size={15} className="text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <DialogTitle className="text-sm font-semibold font-heading font-mono">{detail.NocNo}</DialogTitle>
+                    <DialogDescription className="text-[11px] mt-0.5">{detail.NocType} NOC</DialogDescription>
+                  </div>
+                  <div className="ml-auto">
+                    <StatusBadge status={detail.Status} />
+                  </div>
+                </div>
+              </DialogHeader>
+
+              <div className="px-6 py-5 space-y-5">
+                <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
+                  <p className="text-sm font-semibold text-foreground">{detail.ApplicantName}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{detail.BookingNo} · {detail.UnitNo} · {detail.Mobile}</p>
+                </div>
+
+                <div>
+                  <DetailRow label="NOC Date" value={fmtDate(detail.NocDate)} />
+                  {detail.NocType === "Bank" && (
+                    <>
+                      <DetailRow label="Bank Name" value={detail.BankName || "—"} />
+                      <DetailRow label="Loan Account No." value={detail.LoanAccountNo || "—"} mono />
+                      <DetailRow label="Loan Amount" value={detail.LoanAmount ? formatINR(detail.LoanAmount) : "—"} mono />
+                    </>
+                  )}
+                  <DetailRow label="Reason" value={detail.Reason || "—"} />
+                  {detail.IssuedDate && <DetailRow label="Issued Date" value={fmtDate(detail.IssuedDate)} />}
+                </div>
+
+                <div>
+                  {detail.Status === "Issued" ? (
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+                      <CheckCircle2 size={16} /> Issued on {fmtDate(detail.IssuedDate)} — no further action needed
+                    </div>
+                  ) : detail.Status === "Pending" ? (
+                    <div className="text-xs text-muted-foreground">Pending admin approval</div>
+                  ) : detail.Status === "Approved" ? (
+                    <button onClick={handleMarkIssued} disabled={markingIssued}
+                      className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                      {markingIssued ? "Marking..." : "Mark Issued"}
+                    </button>
+                  ) : detail.Status === "Rejected" ? (
+                    <ApprovalActions
+                      status={detail.Status}
+                      recordId={detail.Id}
+                      endpoint={API}
+                      submitOnly
+                      onSuccess={() => { qc.invalidateQueries({ queryKey: ["crm-noc"] }); setDetailId(null); }}
+                    />
+                  ) : null}
+                </div>
+              </div>
+
+              <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20">
+                <button onClick={() => setDetailId(null)} className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors">Close</button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </SalesAutoShell>

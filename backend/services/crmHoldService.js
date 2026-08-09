@@ -33,7 +33,7 @@ async function findActiveHold(pool, entityType, entityId) {
   return r.recordset[0] || null;
 }
 
-async function placeHold(pool, { entityType, entityId, applicationId, holdDays, reason, userId }) {
+async function placeHold(pool, { entityType, entityId, applicationId, holdDays, reason, userId, applicationProjectId }) {
   if (!ENTITY_TYPES.includes(entityType)) { const e = new Error("Invalid EntityType"); e.status = 400; throw e; }
   if (!entityId) { const e = new Error("EntityId is required"); e.status = 400; throw e; }
   if (!applicationId) { const e = new Error("ApplicationId is required"); e.status = 400; throw e; }
@@ -56,7 +56,18 @@ async function placeHold(pool, { entityType, entityId, applicationId, holdDays, 
     ? await pool.request().input("eid", sql.Int, entityId).query("SELECT ProjectId FROM dbo.UnitMaster WHERE Id = @eid")
     : await pool.request().input("eid", sql.Int, entityId).query("SELECT ProjectId FROM dbo.ParkingSlot WHERE Id = @eid");
   if (!entityProject.recordset.length) { const e = new Error(`${entityType} not found`); e.status = 404; throw e; }
-  if (entityProject.recordset[0].ProjectId !== app.recordset[0].ProjectId) {
+
+  // Callers that are placing this hold as PART OF the same request that's
+  // also changing the Application's ProjectId (e.g. crmApplications.js's
+  // PUT /:id, saving Project+Unit together) must pass that new ProjectId
+  // in explicitly — the SELECT above runs before their own UPDATE commits,
+  // so app.recordset[0].ProjectId here is still the OLD value and would
+  // false-positive this check against the very project the caller is about
+  // to save. applicationProjectId is that caller-supplied effective value;
+  // falls back to the DB row for callers not also touching ProjectId (e.g.
+  // Booking/Parking creation, submit-time re-hold).
+  const effectiveAppProjectId = applicationProjectId !== undefined ? applicationProjectId : app.recordset[0].ProjectId;
+  if (entityProject.recordset[0].ProjectId !== effectiveAppProjectId) {
     const e = new Error(`This Application is for a different project than the ${entityType.toLowerCase()} being held`);
     e.status = 400;
     throw e;
