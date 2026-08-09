@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car, AlertTriangle, Download } from "lucide-react";
+import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car, AlertTriangle, Download, ShieldCheck, ShieldAlert, RotateCcw, ClipboardList, Send, Unlock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -16,6 +16,7 @@ const DOC_API = "/api/crm/booking-documents";
 const BKG_API = "/api/crm/bookings";
 const SA_LEADS_API = "/api/sa/leads";
 const BANK_DETAIL_API = "/api/crm/customer-bank-details";
+const VC_API = "/api/crm/welcome-checklist"; // per-item verification checklist: checkbox + remarks + recheck + submit
 
 const EMPTY_BANK = {
   BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
@@ -112,6 +113,25 @@ async function fetchBookingMilestones(bookingId: number): Promise<any[]> {
 async function fetchBookingInvoices(bookingId: number): Promise<any[]> {
   try { const r = await fetchWithAuth(`${BKG_API}/${bookingId}/invoices`); return r.ok ? r.json() : []; } catch { return []; }
 }
+// ─── Verification checklist (per-item checkbox + remarks + recheck) ────────
+type VcItem = {
+  Section: string; SectionLabel: string; ItemKey: string; Label: string;
+  IsChecked: boolean; Remarks: string;
+  RecheckStatus: "Open" | "Resolved" | null; RecheckReason: string | null;
+  RecheckRequestedAt: string | null; ResolvedAt: string | null;
+};
+type VcSection = { section: string; label: string; items: VcItem[]; complete: boolean; hasOpenRecheck: boolean };
+type VcState = {
+  items: VcItem[]; sections: VcSection[]; totalCount: number; checkedCount: number; openRecheckCount: number; canSubmit: boolean;
+  submission: { IsLocked: boolean; SubmittedBy: number | null; SubmittedAt: string | null } | null;
+};
+async function fetchVerificationChecklist(bookingId: number): Promise<VcState | null> {
+  try { const r = await fetchWithAuth(`${VC_API}/${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
+}
+async function fetchRecheckQueue(): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${VC_API}/recheck/queue`); return r.ok ? r.json() : []; } catch { return []; }
+}
+
 function mimeIcon(mime: string | null | undefined) {
   if (!mime) return <FileIcon size={16} className="text-muted-foreground shrink-0" />;
   if (mime.startsWith("image/")) return <FileImage size={16} className="text-blue-500 shrink-0" />;
@@ -216,6 +236,246 @@ const InvoicePdfDialog: React.FC<{ bookingId: number; invoice: any; onClose: () 
         </div>
       </DialogContent>
     </Dialog>
+  );
+};
+
+// ─── Verification Checklist — every mandatory item across every section,
+// ticked and saved one at a time, with a remarks field and a "Send for
+// Recheck" escape hatch for anything that doesn't match what the customer
+// says. This is the actual substance of the rebuilt page: nothing here is
+// derived/computed, it's explicit staff sign-off per fact. ──────────────────
+const ChecklistItemRow: React.FC<{
+  item: VcItem; bookingId: number; locked: boolean; onChanged: () => void;
+}> = ({ item, bookingId, locked, onChanged }) => {
+  const [checked, setChecked] = useState(item.IsChecked);
+  const [remarks, setRemarks] = useState(item.Remarks || "");
+  const [saving, setSaving] = useState(false);
+  const [flagging, setFlagging] = useState(false);
+  const [recheckReason, setRecheckReason] = useState("");
+  const [showRecheckBox, setShowRecheckBox] = useState(false);
+  const dirty = checked !== item.IsChecked || remarks !== (item.Remarks || "");
+  const isOpenRecheck = item.RecheckStatus === "Open";
+
+  useEffect(() => { setChecked(item.IsChecked); setRemarks(item.Remarks || ""); }, [item.IsChecked, item.Remarks]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(`${VC_API}/${bookingId}/items/${item.ItemKey}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ IsChecked: checked, Remarks: remarks }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Save failed");
+      toast.success(`Saved — ${item.Label}`);
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSendRecheck = async () => {
+    if (!recheckReason.trim()) { toast.error("Describe the mismatch or conflict before sending for recheck"); return; }
+    setFlagging(true);
+    try {
+      const res = await fetchWithAuth(`${VC_API}/${bookingId}/items/${item.ItemKey}/recheck`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Reason: recheckReason.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to flag for recheck");
+      toast.success("Sent for recheck — assigned salesperson notified");
+      setRecheckReason("");
+      setShowRecheckBox(false);
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setFlagging(false);
+    }
+  };
+
+  const handleResolve = async () => {
+    try {
+      const res = await fetchWithAuth(`${VC_API}/${bookingId}/items/${item.ItemKey}/resolve`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to resolve");
+      toast.success("Recheck resolved — please re-verify and tick the item");
+      onChanged();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  return (
+    <div className={`rounded-lg border p-2.5 space-y-1.5 ${
+      isOpenRecheck ? "border-red-200 bg-red-50/50" : item.IsChecked ? "border-emerald-200 bg-emerald-50/30" : "border-border"
+    }`}>
+      <div className="flex items-start gap-2">
+        <input type="checkbox" checked={checked} disabled={locked || isOpenRecheck}
+          onChange={(e) => setChecked(e.target.checked)}
+          className="mt-0.5 shrink-0 w-4 h-4 accent-primary disabled:opacity-50" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <span className={`text-sm ${item.IsChecked ? "text-foreground" : "text-foreground/90"}`}>{item.Label}</span>
+            {isOpenRecheck ? (
+              <span className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+                <ShieldAlert size={10} /> Recheck Open
+              </span>
+            ) : item.IsChecked ? (
+              <span className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                <ShieldCheck size={10} /> Verified
+              </span>
+            ) : null}
+          </div>
+
+          {isOpenRecheck ? (
+            <div className="mt-1 text-[11px] text-red-700 space-y-1">
+              <div><span className="font-medium">Flagged:</span> {item.RecheckReason}</div>
+              {!locked && (
+                <button type="button" onClick={handleResolve}
+                  className="flex items-center gap-1 text-[11px] font-medium text-red-700 hover:underline">
+                  <RotateCcw size={11} /> Mark resolved (issue fixed)
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              <textarea value={remarks} readOnly={locked} onChange={(e) => setRemarks(e.target.value)}
+                placeholder="Remarks (optional) — anything noted while confirming this with the customer"
+                rows={1} className="mt-1 w-full text-xs border border-border rounded px-2 py-1 bg-background resize-none disabled:opacity-60" />
+
+              {!locked && (
+                <div className="flex items-center gap-3 mt-1.5">
+                  <button type="button" onClick={handleSave} disabled={saving || !dirty}
+                    className="text-[11px] font-medium px-2 py-1 rounded bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90">
+                    {saving ? "Saving..." : "Save"}
+                  </button>
+                  <button type="button" onClick={() => setShowRecheckBox((v) => !v)}
+                    className="text-[11px] font-medium text-red-600 hover:underline flex items-center gap-1">
+                    <Send size={11} /> Send for Recheck
+                  </button>
+                </div>
+              )}
+
+              {showRecheckBox && !locked && (
+                <div className="mt-1.5 space-y-1">
+                  <textarea value={recheckReason} onChange={(e) => setRecheckReason(e.target.value)}
+                    placeholder="What doesn't match / what's the conflict with the customer's data..."
+                    rows={2} className="w-full text-xs border border-red-300 rounded px-2 py-1.5 bg-background resize-none" />
+                  <button type="button" onClick={handleSendRecheck} disabled={flagging || !recheckReason.trim()}
+                    className="text-[11px] font-medium px-2 py-1 rounded bg-red-500 text-white disabled:opacity-40 hover:bg-red-600">
+                    {flagging ? "Sending..." : "Confirm — flag for recheck"}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const VerificationChecklist: React.FC<{ bookingId: number }> = ({ bookingId }) => {
+  const { data: vc, refetch } = useQuery({
+    queryKey: ["crm-welcome-verification-checklist", bookingId],
+    queryFn: () => fetchVerificationChecklist(bookingId),
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [reopening, setReopening] = useState(false);
+  const locked = !!vc?.submission?.IsLocked;
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    try {
+      const res = await fetchWithAuth(`${VC_API}/${bookingId}/submit`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to submit");
+      toast.success("Welcome call verification submitted and locked");
+      refetch();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReopen = async () => {
+    setReopening(true);
+    try {
+      const res = await fetchWithAuth(`${VC_API}/${bookingId}/reopen`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to reopen");
+      toast.success("Checklist reopened for edits");
+      refetch();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setReopening(false);
+    }
+  };
+
+  if (!vc) return (
+    <div className="rounded-xl border border-border p-4 text-sm text-muted-foreground">Loading verification checklist…</div>
+  );
+
+  return (
+    <div className="rounded-xl border border-border p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardList size={14} className="text-primary" /> Verification Checklist</h3>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">{vc.checkedCount}/{vc.totalCount} verified</span>
+          {vc.openRecheckCount > 0 && (
+            <span className="flex items-center gap-1 font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+              <ShieldAlert size={11} /> {vc.openRecheckCount} in recheck
+            </span>
+          )}
+        </div>
+      </div>
+
+      {locked && (
+        <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+          <span className="flex items-center gap-1.5 font-medium"><Lock size={12} /> Submitted and locked{vc.submission?.SubmittedAt ? ` — ${String(vc.submission.SubmittedAt).slice(0, 16).replace("T", " ")}` : ""}</span>
+          <button type="button" onClick={handleReopen} disabled={reopening}
+            className="flex items-center gap-1 font-medium text-emerald-700 hover:underline disabled:opacity-40">
+            <Unlock size={12} /> {reopening ? "Reopening..." : "Reopen"}
+          </button>
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {vc.sections.map((s) => (
+          <div key={s.section} className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{s.label}</h4>
+              {s.complete && <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-700"><ShieldCheck size={11} /> Complete</span>}
+            </div>
+            <div className="space-y-1.5">
+              {s.items.map((item) => (
+                <ChecklistItemRow key={item.ItemKey} item={item} bookingId={bookingId} locked={locked} onChanged={refetch} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="pt-2 border-t border-border flex items-center justify-between">
+        <p className="text-[11px] text-muted-foreground">
+          {vc.canSubmit ? "All items verified — ready to submit." : "Every item must be checked, with no open rechecks, before this can be submitted."}
+        </p>
+        {!locked && (
+          <button type="button" onClick={handleSubmit} disabled={!vc.canSubmit || submitting}
+            className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 shrink-0">
+            {submitting ? "Submitting..." : "Submit Verification"}
+          </button>
+        )}
+      </div>
+    </div>
   );
 };
 
@@ -902,6 +1162,8 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
               </button>
             </div>
 
+            <VerificationChecklist bookingId={booking.BookingId} />
+
             {/* ── Document Verification ── */}
             <div className="rounded-xl border border-border p-4 space-y-2">
               <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileCheck size={14} /> Document & Attachment Verification</h3>
@@ -1349,7 +1611,7 @@ const CrmWelcomeCall: React.FC = () => {
   const [sp] = useSearchParams();
   const bkgFilter = sp.get("bookingId");
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"queue" | "history">("queue");
+  const [view, setView] = useState<"queue" | "recheck" | "history">("queue");
   const [activeBooking, setActiveBooking] = useState<any | null>(null);
   const [editingCall, setEditingCall] = useState<any | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
@@ -1379,6 +1641,11 @@ const CrmWelcomeCall: React.FC = () => {
     queryFn: fetchCalls,
     staleTime: 60_000,
   });
+  const { data: recheckQueue = [], isLoading: recheckLoading } = useQuery({
+    queryKey: ["crm-welcome-recheck-queue"],
+    queryFn: fetchRecheckQueue,
+    staleTime: 30_000,
+  });
 
   const filteredQueue = useMemo(() =>
     (queue as any[]).filter((c: any) =>
@@ -1394,6 +1661,36 @@ const CrmWelcomeCall: React.FC = () => {
     (queue as any[]).filter((c: any) => c.NextCallDate && new Date(c.NextCallDate) <= new Date()).length,
     [queue]
   );
+
+  const filteredRecheckQueue = useMemo(() =>
+    (recheckQueue as any[]).filter((c: any) =>
+      !search || c.ApplicantName?.toLowerCase().includes(search.toLowerCase()) || c.BookingNo?.includes(search)
+    ), [recheckQueue, search]);
+
+  const recheckColumns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "BookingNo", header: "Booking No", size: 110,
+      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">{i.getValue() as string}</span> },
+    { accessorKey: "ApplicantName", header: "Customer", size: 140,
+      cell: (i) => (
+        <div onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer">
+          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
+        </div>
+      ) },
+    { id: "projectUnit", header: "Project / Unit", size: 130, enableSorting: false,
+      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer text-xs">{i.row.original.ProjectName || "—"} · {i.row.original.UnitNo}</span> },
+    { accessorKey: "OpenRecheckCount", header: "Flagged Items", size: 110,
+      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">{i.row.original.OpenRecheckCount}</span> },
+    { accessorKey: "OldestFlaggedAt", header: "Flagged Since", size: 110,
+      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer text-xs text-muted-foreground">{i.row.original.OldestFlaggedAt ? String(i.row.original.OldestFlaggedAt).slice(0, 10) : "—"}</span> },
+    { id: "actions", header: "Action", size: 100, enableSorting: false,
+      cell: (i) => (
+        <button onClick={() => setActiveBooking(i.row.original)}
+          className="flex items-center gap-1 text-xs px-2.5 py-1 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600">
+          <ShieldAlert size={12} /> Resolve
+        </button>
+      ) },
+  ];
 
   const queueColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "BookingNo", header: "Booking No", size: 110,
@@ -1450,6 +1747,10 @@ const CrmWelcomeCall: React.FC = () => {
             className={`px-3 py-2 text-xs font-medium ${view === "queue" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>
             Queue ({queue.length})
           </button>
+          <button onClick={() => setView("recheck")}
+            className={`px-3 py-2 text-xs font-medium flex items-center gap-1 ${view === "recheck" ? "bg-red-500 text-white" : "bg-background hover:bg-muted text-red-600"}`}>
+            <ShieldAlert size={12} /> Recheck ({recheckQueue.length})
+          </button>
           <button onClick={() => setView("history")}
             className={`px-3 py-2 text-xs font-medium ${view === "history" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>
             Call History
@@ -1464,6 +1765,15 @@ const CrmWelcomeCall: React.FC = () => {
           searchable={false}
           loading={queueLoading}
           emptyMessage="Queue is clear — no calls pending"
+          className="rounded-xl border border-border overflow-hidden bg-card"
+        />
+      ) : view === "recheck" ? (
+        <DataTable
+          data={filteredRecheckQueue}
+          columns={recheckColumns}
+          searchable={false}
+          loading={recheckLoading}
+          emptyMessage="No open recheck flags — everything is clean"
           className="rounded-xl border border-border overflow-hidden bg-card"
         />
       ) : (

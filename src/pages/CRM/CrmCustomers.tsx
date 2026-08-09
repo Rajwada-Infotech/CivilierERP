@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useMemo, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
@@ -32,9 +32,14 @@ async function fetchCustomers(search: string): Promise<any[]> {
     return res.json();
   } catch { return []; }
 }
+// Only converted leads are offered here — this dropdown IS the real "only a
+// converted lead may enter the CRM module" gate now (Leads -> Customer ->
+// Application; see the matching check in crmCustomers.js POST /). Further
+// narrowed client-side (below, availableLeads) to ones not already linked to
+// another customer.
 async function fetchLeadOptions(): Promise<any[]> {
   try {
-    const res = await fetchWithAuth(SA_LEADS_API);
+    const res = await fetchWithAuth(`${SA_LEADS_API}?status=Converted`);
     if (!res.ok) return [];
     return res.json();
   } catch { return []; }
@@ -290,6 +295,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
 const CrmCustomers: React.FC = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -302,6 +308,40 @@ const CrmCustomers: React.FC = () => {
     staleTime: 30_000,
   });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-dropdown"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
+
+  // Deep-link from CrmLeads.tsx's "Create Customer" action
+  // (/crm/customers?leadId=X) — opens the New Customer dialog with that
+  // converted lead pre-selected, same as picking it by hand from "Link to
+  // Existing Lead" below. Waits for the leads list to load so
+  // handleLeadChange can actually find the row to prefill from.
+  useEffect(() => {
+    const leadId = searchParams.get("leadId");
+    if (!leadId || !(leads as any[]).length) return;
+    setForm({ ...EMPTY_FORM });
+    handleLeadChange(leadId);
+    setDialogOpen(true);
+    setSearchParams((sp) => { sp.delete("leadId"); return sp; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, leads]);
+
+  // Deep-link from CrmLeads.tsx's "View Customer" action (a converted lead
+  // already linked to a customer) — opens that customer's detail dialog
+  // directly instead of the list-only page.
+  useEffect(() => {
+    const customerId = searchParams.get("customerId");
+    if (!customerId) return;
+    setEditingId(parseInt(customerId));
+    setSearchParams((sp) => { sp.delete("customerId"); return sp; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Converted leads not yet linked to another (active) customer — the
+  // "already used" half of the gate, mirroring the LeadId uniqueness check
+  // in crmCustomers.js POST /.
+  const availableLeads = useMemo(() => {
+    const usedLeadIds = new Set((customers as any[]).map((c: any) => c.LeadId).filter(Boolean));
+    return (leads as any[]).filter((l: any) => !usedLeadIds.has(l.Id));
+  }, [leads, customers]);
 
   const { data: editingCustomer } = useQuery({
     queryKey: ["crm-customer-detail", editingId],
@@ -465,11 +505,11 @@ const CrmCustomers: React.FC = () => {
               <select value={form.LeadId} onChange={(e) => handleLeadChange(e.target.value)}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">— Walk-in / New Customer —</option>
-                {(leads as any[]).map((l: any) => (
+                {availableLeads.map((l: any) => (
                   <option key={l.Id} value={String(l.Id)}>{l.CustomerName} · {l.Mobile} · {l.LeadUid}</option>
                 ))}
               </select>
-              {form.LeadId && <p className="text-xs text-green-600 mt-1">Name, mobile and email prefilled from lead</p>}
+              {form.LeadId && <p className="text-xs text-green-600 mt-1">Name, mobile and email prefilled from lead — only converted leads are listed</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">

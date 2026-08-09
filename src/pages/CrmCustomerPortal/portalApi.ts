@@ -124,6 +124,34 @@ export async function respondSalesDeed(applicationId: number, decision: "Approve
   return res.json();
 }
 
+export const fetchQueryPaymentAttachments = (applicationId: number) => get(withAppId("/query-payment/attachments", applicationId)).catch(() => []);
+
+// Files travel as base64 JSON, decoded server-side into the same
+// VARBINARY(MAX) column staff uploads use — see crmPortal.js POST
+// /query-payment/proof.
+export function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const dataUri = reader.result as string;
+      resolve(dataUri.slice(dataUri.indexOf(",") + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function uploadQueryPaymentProof(applicationId: number, file: File) {
+  const base64 = await fileToBase64(file);
+  const res = await fetch(`${API}/query-payment/proof?applicationId=${applicationId}`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ fileName: file.name, mimeType: file.type, base64 }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to upload proof of payment");
+  return res.json();
+}
+
 export const TICKET_CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Legal", "Modification", "Other"];
 
 export function fmtMoney(n: number | null | undefined) {

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -30,8 +30,6 @@ const BANK_MASTER_API = "/api/bank-master";
 const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
 
 const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled", "Expired"];
-// Mirrors SaLead.SourceType so lead source values stay consistent across the whole system
-const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "Website", "EventLead", "Other"];
 const DOC_TYPES = ["IdentityProof", "AddressProof", "PhotoID", "IncomeProof", "Other"];
 
 const statusColor: Record<string, string> = {
@@ -109,7 +107,8 @@ async function fetchCustomers(): Promise<any[]> {
 }
 // Used only to auto-fetch a selected customer's original lead interest/
 // source-chain data (property type, source chain) onto this application —
-// Lead selection itself now happens once, on the Customer record.
+// Lead selection itself now happens once, on the Customer record
+// (CrmCustomers.tsx's "Link to Existing Lead" picker on New Customer).
 async function fetchLeadOptions(): Promise<any[]> {
   try {
     const res = await fetchWithAuth(SA_LEADS_API);
@@ -130,18 +129,6 @@ async function fetchProjects(): Promise<any[]> {
 }
 async function fetchUnits(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${UNIT_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchPlatforms(): Promise<any[]> {
-  try { const r = await fetchWithAuth("/api/sa/social-media"); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchCampaigns(): Promise<any[]> {
-  try { const r = await fetchWithAuth("/api/sa/campaigns/dropdown"); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchAds(): Promise<any[]> {
-  try { const r = await fetchWithAuth("/api/sa/ads/dropdown"); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchChannelPartners(): Promise<any[]> {
-  try { const r = await fetchWithAuth("/api/sa/channel-partners"); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchBrokers(): Promise<any[]> {
   try { const r = await fetchWithAuth("/api/account-head?type=BR"); return r.ok ? r.json() : []; } catch { return []; }
@@ -245,6 +232,7 @@ const GstGrandTotalText: React.FC<{ unitValue: number; parkingBase: number }> = 
 const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { currentUser } = useAuth();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -268,18 +256,13 @@ const CrmApplication: React.FC = () => {
   // itself an editable field.
   const [wizardAppStatus, setWizardAppStatus] = useState<string | null>(null);
   // Company/Project/Block/Floor/Unit/Payment Plan start locked (read-only)
-  // once an already-saved application is resumed, same as sourceLocked
-  // below — "Edit" unlocks them for the (normal, expected) case of
-  // adjusting the pick before approval. Once Approved, canEditUnitSelection
-  // goes false and no Edit control is ever shown, so this can't be
-  // unlocked at all past that point (see the Project/Unit tree JSX).
+  // once an already-saved application is resumed — "Edit" unlocks them for
+  // the (normal, expected) case of adjusting the pick before approval. Once
+  // Approved, canEditUnitSelection goes false and no Edit control is ever
+  // shown, so this can't be unlocked at all past that point (see the
+  // Project/Unit tree JSX).
   const [unitLocked, setUnitLocked] = useState(false);
-  // Locked once a source chain is auto-fetched from the customer's linked
-  // lead — "Change" lets staff override it for the (rarer) case the
-  // customer's actual source for THIS application differs from their
-  // original lead's source. Unlocked by default for customers with no
-  // linked lead, since there is nothing to auto-fetch.
-  const [sourceLocked, setSourceLocked] = useState(false);
+
   // (No more planLocked/auto-fetch state — Unit Master no longer has a
   // single "default" plan to silently apply; Payment Plan is always an
   // explicit, mandatory pick once a unit is on the application.)
@@ -339,10 +322,6 @@ const CrmApplication: React.FC = () => {
   // of just not seeing it. 30s keeps the common dropdown-render case cheap
   // (no refetch storm) while closing most of that window.
   const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 30_000 });
-  const { data: platforms = [] } = useQuery({ queryKey: ["sa-platforms"], queryFn: fetchPlatforms, staleTime: 5 * 60_000 });
-  const { data: campaigns = [] } = useQuery({ queryKey: ["sa-campaigns-dropdown"], queryFn: fetchCampaigns, staleTime: 5 * 60_000 });
-  const { data: ads = [] } = useQuery({ queryKey: ["sa-ads-dropdown"], queryFn: fetchAds, staleTime: 5 * 60_000 });
-  const { data: channelPartners = [] } = useQuery({ queryKey: ["sa-channel-partners"], queryFn: fetchChannelPartners, staleTime: 5 * 60_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["crm-brokers-dropdown"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
   const { data: blockPlanTags = [] } = useQuery({ queryKey: ["crm-app-block-plan-tags"], queryFn: fetchBlockPlanTags, staleTime: 5 * 60_000 });
@@ -526,17 +505,6 @@ const CrmApplication: React.FC = () => {
     [brokers, form.BrokerId]
   );
 
-  // Campaigns narrow to the selected platform; ads narrow to the selected campaign —
-  // the same cascading source chain SaLead already enforces server-side.
-  const campaignsForPlatform = useMemo(() => {
-    if (!form.PlatformId) return campaigns as any[];
-    return (campaigns as any[]).filter((c: any) => String(c.PlatformId) === form.PlatformId);
-  }, [campaigns, form.PlatformId]);
-  const adsForCampaign = useMemo(() => {
-    if (!form.CampaignId) return [];
-    return (ads as any[]).filter((a: any) => String(a.CampaignId) === form.CampaignId);
-  }, [ads, form.CampaignId]);
-
   const stageCounts = useMemo(() => {
     const counts: Record<Stage, number> = { InProcess: 0, Converted: 0, NotConverted: 0 };
     for (const a of apps as any[]) if (a.Stage in counts) counts[a.Stage as Stage]++;
@@ -558,29 +526,19 @@ const CrmApplication: React.FC = () => {
     });
   }, [apps, search, statusFilter, activeStage]);
 
-  // Which customer's Source the user has explicitly clicked "Change" on —
-  // the auto-fetch effect below must never re-lock for that same customer
-  // again, or a background refetch of the customers/leads list (new array/
-  // object identity, same data) would silently undo the override the
-  // moment it re-runs.
-  const sourceUnlockedForCustomerRef = useRef<number | null>(null);
-
-  // The moment a customer with a linked lead is picked, auto-fetch that
-  // lead's source chain onto the application and lock it (display-only,
-  // with a "Change" escape hatch) — this is the customer's real, already-
-  // known acquisition source, not something staff should have to re-pick.
+  // Source field is no longer editable in the wizard (see CrmApplication
+  // task history), but Source is still submitted and still shown in the
+  // applications table/review page — so still silently carry it over from
+  // the customer's linked lead, just without the old lock/"Change" UI.
   // Only fills fields still blank, so re-selecting a different customer
   // never clobbers something staff already typed. Depends on primitive
   // ids, not the selectedCustomer/leads object references, so a background
-  // query refetch (same data, new array identity) doesn't re-fire this and
-  // clobber a manual "Change".
+  // query refetch (same data, new array identity) doesn't re-fire this.
   useEffect(() => {
-    const custId = selectedCustomer?.Id ?? null;
     const leadId = selectedCustomer?.LeadId ?? null;
-    if (!leadId) { setSourceLocked(false); return; }
-    if (sourceUnlockedForCustomerRef.current === custId) return;
+    if (!leadId) return;
     const lead = (leads as any[]).find((l: any) => l.Id === leadId);
-    if (!lead?.SourceType) { setSourceLocked(false); return; }
+    if (!lead?.SourceType) return;
     setForm((f) => ({
       ...f,
       Source: f.Source || lead.SourceType || "",
@@ -589,7 +547,6 @@ const CrmApplication: React.FC = () => {
       AdId: f.AdId || (lead.AdId ? String(lead.AdId) : ""),
       ChannelPartnerId: f.ChannelPartnerId || (lead.ChannelPartnerId ? String(lead.ChannelPartnerId) : ""),
     }));
-    setSourceLocked(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCustomer?.Id, selectedCustomer?.LeadId]);
 
@@ -665,17 +622,22 @@ const CrmApplication: React.FC = () => {
     setMaxStepReached(1);
     setApplicationId(null);
     setApplicationNo(null);
-    // Lock flag/unlock-guard is gated on the form that's about to be blown
-    // away — leaving it set would leak into the next customer picked in a
-    // freshly-opened wizard (e.g. a stale "unlocked" guard suppressing the
-    // auto-fetch for a customer who never actually clicked "Change").
-    setSourceLocked(false);
-    sourceUnlockedForCustomerRef.current = null;
-    // Same reasoning — a brand-new application starts fully unlocked (no
-    // saved pick to protect yet) and with no status of its own.
+    // A brand-new application starts with no status of its own.
     setWizardAppStatus(null);
     setUnitLocked(false);
   };
+
+  // Deep-link from CrmLeads.tsx's "View Application" link (a converted lead
+  // whose linked Customer already has an Application) — opens the read-only
+  // detail dialog directly instead of the list-only page.
+  useEffect(() => {
+    const id = searchParams.get("id");
+    if (id) {
+      setViewingAppId(parseInt(id));
+      setSearchParams((sp) => { sp.delete("id"); return sp; }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const loadApplicationIntoWizard = async (id: number) => {
     setLoadingApplication(true);
@@ -729,7 +691,6 @@ const CrmApplication: React.FC = () => {
         ChequeDate: bankDetail?.ChequeDate ? String(bankDetail.ChequeDate).slice(0, 10) : "",
         TransactionRef: bankDetail?.TransactionRef || "",
       }));
-      setSourceLocked(!!app.Source && !!app.PlatformId);
       setWizardAppStatus(app.Status || null);
 
       const hasProject = !!app.CompanyId && !!app.ProjectId && !!app.PreferredUnitId;
@@ -1343,6 +1304,11 @@ const CrmApplication: React.FC = () => {
 
           {step === 1 && (
             <div className="space-y-4">
+              {/* Lead -> Customer linking happens on the Customer page itself
+                  (CrmCustomers.tsx's "Link to Existing Lead" picker on New
+                  Customer) — Applications only ever pick a Customer. If that
+                  Customer carries a LeadId, the effect below auto-fetches its
+                  Source chain (locked, with a "Change" escape hatch). */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className={labelCls}>Customer *</label>
@@ -1563,70 +1529,6 @@ const CrmApplication: React.FC = () => {
                 </div>
               </div>
 
-
-              {/* Source — deep chain, not a flat label. Auto-fetched and
-                  locked when the selected customer has a linked lead with a
-                  known source; "Change" unlocks it for the rarer case this
-                  application's real source differs from that lead's. */}
-              <div className="rounded-lg border border-border p-3 space-y-3">
-                <label className="text-xs font-semibold text-foreground block">Source</label>
-                {sourceLocked ? (
-                  <div className="flex items-center justify-between gap-2 bg-muted/30 rounded px-2 py-1.5">
-                    <span className="text-sm text-foreground">{form.Source || "—"} <span className="text-xs text-muted-foreground">(auto-fetched from lead)</span></span>
-                    <button type="button" onClick={() => { sourceUnlockedForCustomerRef.current = selectedCustomer?.Id ?? null; setSourceLocked(false); }}
-                      className="text-xs text-primary hover:underline shrink-0">
-                      Change
-                    </button>
-                  </div>
-                ) : (
-                  <select value={form.Source}
-                    onChange={(e) => setForm((f) => ({ ...f, Source: e.target.value, PlatformId: "", CampaignId: "", AdId: "", ChannelPartnerId: "" }))}
-                    className={inputCls}>
-                    <option value="">Select source</option>
-                    {SOURCE_TYPES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                )}
-
-                {form.Source === "Ad" && (
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className={labelCls}>Platform</label>
-                      <select value={form.PlatformId}
-                        onChange={(e) => setForm((f) => ({ ...f, PlatformId: e.target.value, CampaignId: "", AdId: "" }))}
-                        className={inputCls}>
-                        <option value="">Select</option>
-                        {(platforms as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className={labelCls}>Campaign</label>
-                      <select value={form.CampaignId}
-                        onChange={(e) => setForm((f) => ({ ...f, CampaignId: e.target.value, AdId: "" }))}
-                        className={inputCls}>
-                        <option value="">Select</option>
-                        {(campaignsForPlatform as any[]).map((c: any) => <option key={c.Id} value={String(c.Id)}>{c.Name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className={labelCls}>Ad</label>
-                      <select value={form.AdId} onChange={(e) => setForm((f) => ({ ...f, AdId: e.target.value }))} className={inputCls}>
-                        <option value="">Select</option>
-                        {(adsForCampaign as any[]).map((a: any) => <option key={a.Id} value={String(a.Id)}>{a.Name}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                )}
-
-                {form.Source === "Referral" && (
-                  <div>
-                    <label className={labelCls}>Channel Partner</label>
-                    <select value={form.ChannelPartnerId} onChange={(e) => setForm((f) => ({ ...f, ChannelPartnerId: e.target.value }))} className={inputCls}>
-                      <option value="">Select channel partner</option>
-                      {(channelPartners as any[]).map((cp: any) => <option key={cp.Id} value={String(cp.Id)}>{cp.Name}</option>)}
-                    </select>
-                  </div>
-                )}
-              </div>
 
               {/* Broker — separate from Source/Channel Partner. A deal can
                   come from a Referral source AND still be brokered; the two

@@ -187,6 +187,7 @@ const PortalLayout: React.FC = () => {
     const b: Record<string, number> = {};
     if (timeline?.agreement?.CustomerApprovalStatus === "Pending" && timeline?.agreement?.SentToCustomerAt) b.agreement = (b.agreement || 0) + 1;
     if (timeline?.salesDeed?.CustomerApprovalStatus === "Pending" && timeline?.salesDeed?.SentToCustomerAt) b.agreement = (b.agreement || 0) + 1;
+    if (timeline?.queryPayment?.Status === "InfoSent") b.agreement = (b.agreement || 0) + 1;
     const pendingMilestones = (timeline?.paymentMilestones || []).filter((m: any) => m.Status === "Pending").length;
     if (pendingMilestones) b.payments = pendingMilestones;
     return b;

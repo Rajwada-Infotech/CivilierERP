@@ -12,7 +12,7 @@ const { sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
 const { getNextDocNumber } = require("./docNumber");
 const { validateSourceChain } = require("./sourceChain");
-const { logStatusChange, advanceApplicationStatus } = require("./crmApplicationWorkflow");
+const { logStatusChange } = require("./crmApplicationWorkflow");
 const { guardAndConvertHold, assertEntityNotTaken, findActiveHold, placeHoldIfNeeded } = require("./crmHoldService");
 const { rollupBookingTotals, applyAddParking } = require("../routes/crmParking");
 const { createReceiptForMilestone } = require("../routes/crmPayments");
@@ -89,9 +89,58 @@ async function findOrCreateCustomer(pool, { name, mobile, altMobile, email, lead
   }
 }
 
+// Compiles a lead's call history + site visits into the new Application's
+// Notes — moved here from saHandoff.js now that Application creation from a
+// lead happens whenever staff pick one from the CRM Leads pool, not only at
+// the moment of conversion, so this has to run at creation time to reflect
+// whatever history has accumulated since. Prepends to any Notes text staff
+// already typed on the New Application form, rather than overwriting it.
+async function appendLeadHandoffNotes(pool, leadId, lead, existingNotes) {
+  const callsResult = await pool.request()
+    .input("lid", sql.Int, leadId)
+    .query(`
+      SELECT Outcome, Remarks, Classification, CallTime, DurationSeconds
+      FROM dbo.SaInquiryCall
+      WHERE LeadId = @lid
+      ORDER BY CallTime ASC
+    `);
+  const callNotes = callsResult.recordset.map((c, i) =>
+    `[Call ${i + 1}] ${c.CallTime ? String(c.CallTime).slice(0, 16) : ""} | ${c.Outcome || ""} | ${c.Classification || ""} | ${c.DurationSeconds || 0}s\n${c.Remarks || ""}`
+  ).join("\n---\n");
+
+  const visitResult = await pool.request()
+    .input("lid", sql.Int, leadId)
+    .query(`
+      SELECT ProjectName, PreferredDate, Status, CustomerNotes
+      FROM dbo.SaSiteVisit
+      WHERE LeadId = @lid AND IsActive = 1
+      ORDER BY CreatedAt DESC
+    `);
+  const visitNotes = visitResult.recordset.map((v) =>
+    `[Visit] ${v.ProjectName || ""} | ${v.PreferredDate ? String(v.PreferredDate).slice(0, 10) : ""} | ${v.Status}\n${v.CustomerNotes || ""}`
+  ).join("\n");
+
+  const leadHistory = [
+    lead.CustomerRemarks ? `Customer Remarks: ${lead.CustomerRemarks}` : "",
+    callNotes ? `\n--- Call History ---\n${callNotes}` : "",
+    visitNotes ? `\n--- Site Visits ---\n${visitNotes}` : "",
+  ].filter(Boolean).join("\n");
+
+  return [existingNotes?.trim(), leadHistory].filter(Boolean).join("\n\n") || null;
+}
+
+// Sales Automation leads never flow straight into a CrmApplication anymore —
+// converting a lead (SaLead.Status -> 'Converted', see saHandoff.js) only
+// puts it in the CRM Leads pool (src/pages/CRM/CrmLeads.tsx). An Application
+// is only ever created from a lead when staff explicitly pick one here, and
+// only a lead that's actually Converted and not already used by another
+// Application is eligible — the real gate the "no direct flow" instruction
+// asked for. Enforced here rather than only in the frontend dropdown's
+// filtering, since this is the single shared creation path both the human-
+// filed form and any future caller go through.
 async function createCrmApplicationRecord(pool, b, actorUserId) {
-  if (!b.CustomerId && (!b.ApplicantName?.trim() || !b.Mobile?.trim()))
-    throw new CrmCreationError("Either CustomerId or ApplicantName and Mobile are required");
+  if (!b.CustomerId && !b.LeadId && (!b.ApplicantName?.trim() || !b.Mobile?.trim()))
+    throw new CrmCreationError("Either CustomerId, LeadId, or ApplicantName and Mobile are required");
   if (b.Source && !SOURCE_TYPES.includes(b.Source))
     throw new CrmCreationError(`Invalid Source. Must be one of: ${SOURCE_TYPES.join(", ")}`);
 
@@ -102,10 +151,17 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .query(`
         SELECT CustomerName, Mobile, AltMobile, Email,
                PropertyType, BhkPreference, PreferredLocation,
-               SourceType, PlatformId, CampaignId, AdId, ChannelPartnerId
+               SourceType, PlatformId, CampaignId, AdId, ChannelPartnerId,
+               Status, CrmApplicationId
         FROM dbo.SaLead WHERE Id = @lid
       `);
     prefill = lr.recordset[0] || {};
+    if (!lr.recordset.length) throw new CrmCreationError("Selected lead does not exist");
+    if (prefill.CrmApplicationId) throw new CrmCreationError("This lead has already been used for another application", 409);
+    if (prefill.Status !== "Converted") {
+      throw new CrmCreationError(`This lead isn't converted yet (status: ${prefill.Status}) — only converted leads can be used to start an application`);
+    }
+    b.Notes = await appendLeadHandoffNotes(pool, parseInt(b.LeadId), prefill, b.Notes);
   }
 
   // Resolve the Customer this application belongs to: an explicit selection
@@ -255,6 +311,16 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   }
   const applicationId = result.recordset[0].Id;
   await logStatusChange(pool, applicationId, null, "Pending", "Manual", "Application created", actorUserId);
+
+  // Stamp the reverse FK so this lead drops out of the "available" pool —
+  // CrmApplicationId being set is the sole "already used" signal (Status
+  // stays 'Converted' permanently, it doesn't change again here).
+  if (b.LeadId) {
+    await pool.request()
+      .input("lid", sql.Int, parseInt(b.LeadId))
+      .input("aid", sql.Int, applicationId)
+      .query("UPDATE dbo.SaLead SET CrmApplicationId = @aid, UpdatedAt = SYSDATETIME() WHERE Id = @lid");
+  }
 
   // Place the actual hold now that the Application (and its Id) exists —
   // placeHold() itself re-does the availability + same-project checks
@@ -490,21 +556,21 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     throw new CrmCreationError(`This application already has a booking (${existingForApp.recordset[0].BookingNo}) — an application can only have one`, 409);
   }
 
-  // There is no separate Application-approval gate anymore — a Booking can
-  // be created straight from a submitted (Pending) Application, no admin
-  // approval step in between (Booking Approval and Broker Approval are what
-  // actually go through review now, both triggered off the Booking itself —
-  // see crmBookings.js's ready-for-approval and crmWorkflowGuards.js's
-  // maybeAutoCreateBrokerage). This still blocks the genuinely dead states —
-  // an Application that was Rejected (legacy data; nothing sets this
-  // anymore), Cancelled, or Expired has no business getting a Booking.
+  // The Application must have actually cleared its own verification gate
+  // (Status='Approved', set only via approvalService's crm-applications
+  // transition — see crmApplications.js PUT /:id/approve) before a Booking
+  // can exist for it. This used to just exclude the dead states (Rejected/
+  // Cancelled/Expired) and let a still-Pending, unverified Application
+  // through, back when Booking creation itself was what force-advanced the
+  // Application to Approved. Now that Approved is a real human decision made
+  // earlier in the flow, "not dead" isn't enough — this must require the
+  // real thing.
   const appRow = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
     .query("SELECT Status, IsActive, PaymentPlanId FROM dbo.CrmApplication WHERE Id = @aid");
   if (!appRow.recordset.length) throw new CrmCreationError("Application not found");
-  const deadStatuses = ["Rejected", "Cancelled", "Expired"];
-  if (appRow.recordset[0].IsActive === false || deadStatuses.includes(appRow.recordset[0].Status)) {
+  if (appRow.recordset[0].IsActive === false || appRow.recordset[0].Status !== "Approved") {
     throw new CrmCreationError(
-      `A Booking can't be created for an application that is ${appRow.recordset[0].Status} — only a Rejected/Cancelled/Expired application is blocked`, 400);
+      `A Booking can only be created for a registered (Approved) application — current status: ${appRow.recordset[0].Status}`, 400);
   }
 
   const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`
@@ -778,8 +844,10 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     }
   }
 
-  await advanceApplicationStatus(pool, parseInt(b.ApplicationId), "Approved", "AutoBooking",
-    `Auto-approved: booking ${bookingNo} created`, actorUserId, { force: true });
+  // No status force-advance here anymore — the Application was already
+  // Approved (registered) before this function would even let it through
+  // the gate above. Booking creation is now a downstream consequence of
+  // that approval, not the thing that causes it.
 
   const tokenWarning = await checkTokenVsFirstMilestone(pool, bookingId, bookingAmount);
 

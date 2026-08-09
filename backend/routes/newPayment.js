@@ -33,6 +33,11 @@ function normalizeBankId(value) {
   return Number.isFinite(bankId) && bankId > 0 ? bankId : null;
 }
 
+function paymentReferenceForBrokerage(row) {
+  return row.PNeftNumber || row.PUpiTransactionId || row.PRtgsReference ||
+    row.PImpsReference || row.PCardReference || row.PChequeNo || row.DocNo || null;
+}
+
 // Resolves the dbo.FinYear row a payment date falls into — the year in the
 // payment's own PDate IS the financial year it belongs to, independent of
 // DocYear (which only reflects the calendar year the doc number was issued
@@ -1082,6 +1087,36 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
     if (!userEmail) return;
 
     const pool = getPool();
+    const brokerageGate = await pool.request().input("PPaymentID", sql.Int, id).query(`
+      SELECT np.PPaymentID, np.PAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmBrokerageId,
+             br.ComputedAmount,
+             (SELECT ISNULL(SUM(Amount),0)
+              FROM dbo.CrmBrokerPayment
+              WHERE BrokerageId = np.SourceCrmBrokerageId) AS TotalPaid,
+             (SELECT ISNULL(SUM(PAmount),0)
+              FROM dbo.NewPayment np2
+              WHERE np2.SourceCrmBrokerageId = np.SourceCrmBrokerageId
+                AND np2.PPaymentID <> np.PPaymentID
+                AND np2.Status IN ('Draft','Pending','Approved')) AS OtherSubmitted
+      FROM dbo.NewPayment np
+      LEFT JOIN dbo.CrmBrokerageMaster br ON br.Id = np.SourceCrmBrokerageId
+      WHERE np.PPaymentID = @PPaymentID
+    `);
+    const gateRow = brokerageGate.recordset[0];
+    if (gateRow?.SourceCrmBrokerageId) {
+      if (!gateRow.PDate || !String(gateRow.PMode || "").trim() || !normalizeBankId(gateRow.PBankID)) {
+        return res.status(400).json({
+          error: "Complete brokerage payment date, payment mode, and bank before approval.",
+        });
+      }
+      const remaining = Number(gateRow.ComputedAmount || 0) - Number(gateRow.TotalPaid || 0) - Number(gateRow.OtherSubmitted || 0);
+      if (Number(gateRow.PAmount || 0) > remaining + 0.01) {
+        return res.status(400).json({
+          error: `Brokerage payment exceeds the remaining approved brokerage balance of ₹${remaining.toLocaleString("en-IN")}`,
+        });
+      }
+    }
+
     const result = await transition(
       "payments",
       id,
@@ -1162,7 +1197,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
         .request()
         .input("PPaymentID", sql.Int, id)
         .query(
-          "SELECT PExpenseRef, PAmount, PDate, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
+          "SELECT PExpenseRef, PAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
         );
       const approvedRow = approvedPayRec.recordset[0];
       const approvedRef = approvedRow?.PExpenseRef;
@@ -1172,6 +1207,46 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
 
       if (effectiveRef) {
         await _syncBillStatus(pool, effectiveRef);
+      }
+
+      if (approvedRow?.SourceCrmBrokerageId) {
+        try {
+          const existingBrokerPay = await pool.request()
+            .input("pid", sql.Int, id)
+            .query("SELECT Id FROM dbo.CrmBrokerPayment WHERE SourceNewPaymentId = @pid");
+          if (!existingBrokerPay.recordset.length) {
+            await pool.request()
+              .input("bid", sql.Int, approvedRow.SourceCrmBrokerageId)
+              .input("amt", sql.Decimal(18,2), Number(approvedRow.PAmount || 0))
+              .input("dt", sql.Date, approvedRow.PDate ? new Date(approvedRow.PDate) : new Date())
+              .input("mode", sql.NVarChar(50), approvedRow.PMode || null)
+              .input("ref", sql.NVarChar(200), paymentReferenceForBrokerage(approvedRow))
+              .input("notes", sql.NVarChar(sql.MAX), `Finance payment ${approvedRow.DocNo || id} approved`)
+              .input("pid", sql.Int, id)
+              .input("cb", sql.Int, req.user?.id || null)
+              .query(`
+                INSERT INTO dbo.CrmBrokerPayment
+                  (BrokerageId, Amount, PaidDate, PaymentMode, TransactionRef, Notes, SourceNewPaymentId, CreatedBy, CreatedAt)
+                VALUES
+                  (@bid, @amt, @dt, @mode, @ref, @notes, @pid, @cb, SYSDATETIME())
+              `);
+          }
+
+          await pool.request()
+            .input("bid", sql.Int, approvedRow.SourceCrmBrokerageId)
+            .query(`
+              UPDATE br SET
+                Status = CASE
+                  WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id) >= ISNULL(br.ComputedAmount,0)
+                  THEN 'Paid' ELSE br.Status END,
+                UpdatedAt = SYSDATETIME()
+              FROM dbo.CrmBrokerageMaster br
+              WHERE br.Id = @bid
+            `);
+          await bumpCacheVersion("crm-brokerage");
+        } catch (brokerErr) {
+          console.warn("[new-payment] Brokerage tracking sync failed (non-fatal):", brokerErr.message);
+        }
       }
 
       // ── On Account hooks: fire on APPROVE (funds have actually moved) ──────

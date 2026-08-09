@@ -185,6 +185,27 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
       });
     }
 
+    // This is the actual "only a converted lead may enter the CRM module"
+    // gate — Leads -> Customer is now the real entry point (Applications
+    // only ever pick an existing Customer, see CrmApplication.tsx), so the
+    // check belongs here, not on Application creation. Blocks a lead that
+    // hasn't been converted yet, and blocks reusing a lead that's already
+    // linked to another live customer (mirrors the LeadId gate
+    // createCrmApplicationRecord used to enforce directly).
+    if (b.LeadId) {
+      const lr = await pool.request().input("lid", sql.Int, parseInt(b.LeadId))
+        .query("SELECT Status FROM dbo.SaLead WHERE Id = @lid");
+      if (!lr.recordset.length) return res.status(400).json({ error: "Selected lead does not exist" });
+      if (lr.recordset[0].Status !== "Converted") {
+        return res.status(400).json({ error: `This lead isn't converted yet (status: ${lr.recordset[0].Status}) — only converted leads can be linked to a customer` });
+      }
+      const already = await pool.request().input("lid", sql.Int, parseInt(b.LeadId))
+        .query("SELECT Id, CustomerNo, CustomerName FROM dbo.CrmCustomer WHERE LeadId = @lid AND IsActive = 1");
+      if (already.recordset.length) {
+        return res.status(409).json({ error: `This lead is already linked to another customer — ${already.recordset[0].CustomerNo} (${already.recordset[0].CustomerName})` });
+      }
+    }
+
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email);
 

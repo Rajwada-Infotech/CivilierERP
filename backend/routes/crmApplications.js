@@ -32,6 +32,12 @@ const APP_SELECT = `
     a.RatePerSqFt, a.DateOfApply, a.PaymentPlanId, a.TokenType, a.TokenValue, a.BookingAmount, a.PaymentMode,
     a.ReferredByApplicationId, a.IsActive, a.CreatedAt, a.UpdatedAt,
     a.BrokerId, a.BrokerageRatePercent, a.BrokerageSplitEnabled, brk.LHeadName AS BrokerName,
+    (
+      SELECT TOP 1 CAST(Note AS NVARCHAR(MAX))
+      FROM dbo.ApprovalAuditLog
+      WHERE TableName = 'CrmApplication' AND RecordId = a.Id AND ActionStatus = 'Rejected'
+      ORDER BY ActionAt DESC
+    ) AS RejectionNote,
     u.name  AS AssigneeName,
     ab.name AS AssignedByName,
     cu.name AS CreatedByName,
@@ -252,7 +258,13 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const changingUnitSelection =
       b.CompanyId !== undefined || b.ProjectId !== undefined ||
       b.PreferredUnitId !== undefined || b.PaymentPlanId !== undefined;
-    if (changingUnitSelection && !["Draft", "Pending"].includes(existingStatus)) {
+    // Rejected included deliberately: PUT /:id/reject is now a real
+    // "revert to fill/re-check" verification action (see approvalService's
+    // crm-applications module + crmApplications.js PUT /:id/reject), and
+    // the whole point of a revert is that the preparer can fix what the
+    // verifier flagged — including the unit/plan selection itself — before
+    // resubmitting. Locked again once Approved, same as before.
+    if (changingUnitSelection && !["Draft", "Pending", "Rejected"].includes(existingStatus)) {
       return res.status(400).json({
         error: `Cannot change the Company/Project/Unit/Payment Plan selection once the application is ${existingStatus} — this is locked after approval.`,
       });
@@ -316,6 +328,10 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
         await placeHoldIfNeeded(pool, {
           entityType: "Unit", entityId: newUnitId, applicationId: id, holdDays: 3,
           reason: "Application unit changed — auto-hold", userId: actor,
+          // Same effectiveProjectId pattern as the deposit-bank check below —
+          // b.ProjectId is what's about to be saved by the UPDATE further
+          // down, not yet what's in the DB row placeHold would otherwise read.
+          applicationProjectId: b.ProjectId ? parseInt(b.ProjectId) : existing.recordset[0].ProjectId,
         });
       } catch (holdErr) {
         return res.status(holdErr.status || 400).json({ error: holdErr.message });
@@ -469,6 +485,12 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
 // booking creation fails (e.g. the unit got taken by someone else in the
 // interim); staff can retry via the "Create Booking" button on the
 // Applications list, the same fallback path this always had.
+// PUT /:id/submit — sends the Application into verification. This is now
+// ONLY a submit — it no longer auto-creates a Booking (see PUT /:id/approve
+// and POST /:id/create-booking below). Draft/Rejected -> Pending, handled
+// generically by approvalTransition; Rejected -> Pending is this route's
+// resubmit-after-revert path (see PUT /:id/reject), and is exactly how the
+// verification loop closes.
 router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
@@ -526,91 +548,101 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
       console.error("[crm-applications] auto-hold on submit failed:", holdErr.message);
     }
 
-    // Auto-create the Booking the moment the Application is submitted — the
-    // Application now captures everything a Booking needs (unit, rate,
-    // payment plan, token), so there's no separate approval step or manual
-    // "convert to booking" step left. Never blocks the submit itself if this
-    // fails (e.g. unit got booked by someone else in the interim) — the
-    // submit stands either way, and staff can create the booking by hand as
-    // a fallback (the "Create Booking" retry button on the Applications
-    // list), same tolerance-of-partial-failure pattern used for GL posting.
-    let booking = null;
-    let bookingError = null;
-    const already = await pool.request().input("id", sql.Int, id)
-      .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1");
-    if (!already.recordset.length) {
-      const app = await pool.request().input("id", sql.Int, id).query(`
-        SELECT PreferredUnitId, RatePerSqFt, PaymentPlanId, DateOfApply, TokenType, TokenValue,
-               BookingAmount, PaymentMode, AssignedTo, Notes, DepositBankId,
-               BrokerId, BrokerageRatePercent, BrokerageSplitEnabled
-        FROM dbo.CrmApplication WHERE Id = @id
-      `);
-      const a = app.recordset[0];
-      if (a?.PreferredUnitId) {
-        try {
-          const created = await createCrmBookingRecord(pool, {
-            ApplicationId: id, UnitId: a.PreferredUnitId, RatePerSqFt: a.RatePerSqFt,
-            PaymentPlanId: a.PaymentPlanId, BookingDate: a.DateOfApply, TokenType: a.TokenType,
-            TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
-            DepositBankId: a.DepositBankId,
-            AssignedTo: a.AssignedTo, Notes: a.Notes,
-            BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokerageSplitEnabled: a.BrokerageSplitEnabled,
-          }, actor);
-          booking = created;
-          // Backfilling Application-linked records (parking/bank/documents)
-          // onto the new booking, and recomputing ParkingTotal/GrandTotal,
-          // now happens inside createCrmBookingRecord itself (see
-          // crmEntityCreation.js) — that's the single shared place every
-          // caller of it goes through, so it can't be missed by a future
-          // second caller the way a route-local backfill here would be.
-
-          // createCrmBookingRecord always inserts Status='Pending' and it
-          // STAYS Pending here — Booking Approval is a real, separate
-          // workflow (the staff review checklist, "Confirm & Book",
-          // ReadyForApprovalAt gating the Admin Approval Inbox — see
-          // crmBookings.js), never a byproduct of submitting the
-          // Application. Broker Approval (crmWorkflowGuards.js's
-          // maybeAutoCreateBrokerage) fires independently too, the moment
-          // Milestone #1 clears — which createCrmBookingRecord's own
-          // auto-receipt sync above already does synchronously whenever the
-          // Application captured a real token payment.
-
-          // If this Application originated from a Sales Automation lead
-          // (promoteLeadToFollowup in saHandoff.js stamps LeadId at
-          // creation time), reflect the real downstream outcome back onto
-          // that lead — otherwise the SA pipeline shows it permanently
-          // stuck "InFollowup" even after the deal is fully booked in CRM.
-          // This is the one place a booking now gets created from
-          // (Application submission), so it's the one place responsible for
-          // this sync, regardless of whether the application was filed
-          // directly in CRM or handed off from a lead.
-          await pool.request().input("bid", sql.Int, created.id).input("id", sql.Int, id)
-            .query(`
-              UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = 'Booked', UpdatedAt = SYSDATETIME()
-              WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @id)
-            `);
-        } catch (bookingErr) {
-          if (bookingErr.status) {
-            // The submit above has already committed and must stay
-            // committed (same reasoning as the existing comment on this
-            // block) — so this stays a 200, not a 409. But the response can
-            // no longer pretend booking creation succeeded: bookingError
-            // surfaces the real conflict (e.g. unit taken by another
-            // application's booking in the interim) so the frontend can
-            // show it and fall back to the manual retry button instead of a
-            // silently null booking that looks like "nothing to create yet."
-            console.error("[crm-applications] auto-booking blocked:", bookingErr.message);
-            bookingError = bookingErr.message;
-          } else {
-            console.error("[crm-applications] auto-booking failed:", bookingErr.message);
-          }
-        }
-      }
-    }
-
-    res.json({ success: true, status: result.newStatus, booking, bookingError });
+    res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-applications] submit error:", e.message);
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// PUT /:id/approve — the level-1 (and beyond, if LevelsData grows) human
+// verification gate. Reaching full "Approved" here means the Application is
+// registered — real, checked data — but still has no Booking (see
+// POST /:id/create-booking). admin/super_admin/marketing_head only, enforced
+// inside approvalTransition.
+router.put("/:id/approve", requirePageRight("crm-applications", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const result = await approvalTransition("crm-applications", id, "Approved", userEmail, req.user?.role);
+    res.json({ success: true, status: result.newStatus, level: result.level, totalLevels: result.totalLevels });
+  } catch (e) {
+    console.error("[crm-applications] approve error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// PUT /:id/reject — this IS "revert to fill/re-check" from the verifier's
+// side, not a dead end: approvalTransition's generic engine already allows
+// Rejected -> Pending (see PUT /:id/submit above), so the applicant edits
+// (PUT /:id, still open — Rejected isn't in the changingUnitSelection lock
+// list) and resubmits, and the loop repeats until level 1 clears. A reason
+// is mandatory — the whole point of this gate is the verifier telling the
+// preparer exactly what to fix, not a silent bounce.
+router.put("/:id/reject", requirePageRight("crm-applications", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    if (!req.body?.note?.trim()) {
+      return res.status(400).json({ error: "A reason is required so the preparer knows what to fix" });
+    }
+    const result = await approvalTransition("crm-applications", id, "Rejected", userEmail, req.user?.role, req.body.note);
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-applications] reject error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// POST /:id/create-booking — staff-facing, manual, only once the Application
+// is registered (Status='Approved'). This is the ONLY path that creates a
+// Booking now — see createCrmBookingRecord's own Status==='Approved' gate in
+// crmEntityCreation.js. Deliberately not automatic: registration and booking
+// are two different people's work (verification vs. the booking-page
+// checklist), and stapling them together hid exactly that boundary before.
+router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const actor = actorId(req);
+
+    const app = await pool.request().input("id", sql.Int, id).query(`
+      SELECT Status, PreferredUnitId, RatePerSqFt, PaymentPlanId, DateOfApply, TokenType, TokenValue,
+             BookingAmount, PaymentMode, AssignedTo, Notes, DepositBankId,
+             BrokerId, BrokerageRatePercent, BrokerageSplitEnabled
+      FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1
+    `);
+    if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
+    const a = app.recordset[0];
+    if (a.Status !== "Approved") {
+      return res.status(400).json({ error: `Application must be registered (Approved) before a Booking can be created — current status: ${a.Status}` });
+    }
+    if (!a.PreferredUnitId) {
+      return res.status(400).json({ error: "This application has no preferred unit selected" });
+    }
+
+    const created = await createCrmBookingRecord(pool, {
+      ApplicationId: id, UnitId: a.PreferredUnitId, RatePerSqFt: a.RatePerSqFt,
+      PaymentPlanId: a.PaymentPlanId, BookingDate: a.DateOfApply, TokenType: a.TokenType,
+      TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
+      DepositBankId: a.DepositBankId,
+      AssignedTo: a.AssignedTo, Notes: a.Notes,
+      BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokerageSplitEnabled: a.BrokerageSplitEnabled,
+    }, actor);
+
+    // Same SA-lead sync that used to live inside submit — still the one
+    // place a Booking gets created from, just moved here.
+    await pool.request().input("bid", sql.Int, created.id).input("id", sql.Int, id)
+      .query(`
+        UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = 'Booked', UpdatedAt = SYSDATETIME()
+        WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @id)
+      `);
+
+    res.json({ success: true, booking: created });
+  } catch (e) {
+    console.error("[crm-applications] create-booking error:", e.message);
     res.status(e.status || 400).json({ error: e.message });
   }
 });

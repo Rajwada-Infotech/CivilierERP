@@ -665,7 +665,6 @@ async function syncLegalMilestoneStep(pool, bookingId, step, actorUserId) {
   const row = lm.recordset[0];
   if (row[`${step}Status`] === "Completed") return;
 
-  const idx = LEGAL_MILESTONE_STEPS.indexOf(step);
   await pool.request()
     .input("id", sql.Int, row.Id)
     .input("ub", sql.Int, actorUserId || null)
@@ -674,11 +673,43 @@ async function syncLegalMilestoneStep(pool, bookingId, step, actorUserId) {
         ${step}Done   = ISNULL(${step}Done, CAST(SYSDATETIME() AS DATE)),
         ${step}Status = 'Completed',
         ${step}Notes  = ISNULL(${step}Notes, 'Auto-synced from Agreement workflow'),
-        CurrentStep = CASE WHEN CurrentStep = ${idx + 1} THEN ${Math.min(idx + 2, LEGAL_MILESTONE_STEPS.length)} ELSE CurrentStep END,
-        OverallStatus = CASE WHEN '${step}' = 'FinalExecution' THEN 'Completed' ELSE OverallStatus END,
         UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
       WHERE Id = @id
     `);
+  await recomputeLegalMilestoneCurrentStep(pool, row.Id);
+}
+
+/**
+ * CurrentStep used to be advanced incrementally — "if CurrentStep equals
+ * this step's own position, bump it by one" — which silently assumed every
+ * step completes strictly in LEGAL_MILESTONE_STEPS order. In reality each
+ * step is triggered by its own independent real-world event (Legal
+ * Executive assignment, document upload, senior approval, customer
+ * approval, execution...), and DocCollection specifically depends on the
+ * customer's Identity Proof being verified — a non-mandatory document that
+ * often never happens. The result: steps 2-8 could all show Completed while
+ * CurrentStep stayed stuck at 1 forever, because the increment logic only
+ * ever fires relative to whatever CurrentStep already was, and out-of-order
+ * completion breaks that chain permanently.
+ *
+ * Recomputing CurrentStep from scratch — the position of the first
+ * still-incomplete step — is correct regardless of completion order, and
+ * is idempotent/safe to call after every single step update (manual or
+ * auto-synced).
+ */
+async function recomputeLegalMilestoneCurrentStep(pool, legalMilestoneId) {
+  const caseWhens = LEGAL_MILESTONE_STEPS
+    .map((step, i) => `WHEN ${step}Status <> 'Completed' THEN ${i + 1}`)
+    .join("\n        ");
+  await pool.request().input("id", sql.Int, legalMilestoneId).query(`
+    UPDATE dbo.CrmLegalMilestone SET
+      CurrentStep = CASE
+        ${caseWhens}
+        ELSE ${LEGAL_MILESTONE_STEPS.length + 1}
+      END,
+      OverallStatus = CASE WHEN FinalExecutionStatus = 'Completed' THEN 'Completed' ELSE OverallStatus END
+    WHERE Id = @id
+  `);
 }
 
 /**
@@ -876,10 +907,11 @@ function tierBrokeragePercent(totalValue) {
  * Paid, a broker selected at Application/Booking stage automatically gets
  * ONE CrmBrokerageMaster row PER payment milestone — the broker's payout
  * follows the exact same milestone schedule the customer's own payments do,
- * not a fixed one/two-tranche split. Each row's ComputedAmount is that
- * milestone's own share of the total brokerage (milestone.Percent% of the
- * total brokerage amount, mirroring how the milestone itself is that
- * Percent% of the booking's TotalValue). A milestone that's already Paid by
+ * not a fixed one/two-tranche split. Each row's ComputedAmount is calculated
+ * from the milestone's real AmountDue and the broker's actual commission
+ * rate. Do not multiply the deal rate by the milestone percent and store
+ * that as RateValue: a 1% brokerage on a 1% booking milestone is still a
+ * 1% brokerage rate, not 0.01%. A milestone that's already Paid by
  * the time this fires (Milestone #1 itself, the trigger) is created
  * unlocked; every later milestone is created locked until
  * maybeUnlockBrokerageMilestoneTranche fires for it.
@@ -910,9 +942,6 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
 
   const totalValue = Number(bk.TotalValue) || 0;
   const totalPercent = bk.BrokerageRatePercent != null ? Number(bk.BrokerageRatePercent) : tierBrokeragePercent(totalValue);
-  // Mirrors crmBrokerage.js POST /'s own ComputedAmount formula exactly, so
-  // a full-payout manually-created row and the sum of these auto-created
-  // ones compute the same total.
   const totalBrokerageAmount = Math.round(totalValue * totalPercent) / 100;
 
   // %-based schedule steps only — an Extra-Charge/Parking milestone is a
@@ -921,7 +950,7 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   // exclusion recalculateRemainingMilestones already applies for the
   // customer-facing schedule).
   const milestones = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT Id, MilestoneNo, [Percent], Status
+    SELECT Id, MilestoneNo, [Percent], AmountDue, Status
     FROM dbo.CrmPaymentMilestone
     WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
     ORDER BY MilestoneNo
@@ -929,48 +958,58 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   if (!milestones.recordset.length) return null;
 
   const rows = milestones.recordset;
-  const totalPct = rows.reduce((s, m) => s + Number(m.Percent || 0), 0);
-  const share = (pct) => (totalPct > 0 ? pct / totalPct : 1 / rows.length);
+  const totalMilestoneAmount = rows.reduce((s, m) => s + Number(m.AmountDue || 0), 0);
+  const totalTarget = totalMilestoneAmount > 0
+    ? Math.round(totalMilestoneAmount * totalPercent) / 100
+    : totalBrokerageAmount;
 
+  // All-or-nothing: a failure partway through used to leave whatever
+  // milestones had already been inserted sitting in the DB as a permanent,
+  // incomplete (and confusing) partial schedule — exactly the kind of
+  // silent data corruption a broker-payout calculation can never tolerate.
+  // A single transaction makes a mid-loop failure roll back cleanly instead.
   let ids;
+  const tx = new sql.Transaction(pool);
   try {
+    await tx.begin();
     ids = [];
     let allocated = 0;
     for (let i = 0; i < rows.length; i++) {
       const m = rows[i];
       const isLast = i === rows.length - 1;
       // Last row absorbs the rounding remainder so the tranches always sum
-      // exactly to totalBrokerageAmount, same pattern
-      // recalculateRemainingMilestones uses for the customer schedule.
+      // exactly to the commission on the scheduled milestone base.
       const computedAmount = isLast
-        ? Math.round((totalBrokerageAmount - allocated) * 100) / 100
-        : Math.round(totalBrokerageAmount * share(Number(m.Percent || 0)) * 100) / 100;
+        ? Math.round((totalTarget - allocated) * 100) / 100
+        : Math.round(Number(m.AmountDue || 0) * totalPercent) / 100;
       allocated += computedAmount;
-      const ratePercent = Math.round((totalPercent * share(Number(m.Percent || 0))) * 100) / 100;
       const isLocked = m.Status !== "Paid" && m.Status !== "Waived";
 
-      const result = await pool.request()
+      const result = await new sql.Request(tx)
         .input("bid",   sql.Int,           bookingId)
         .input("brid",  sql.Int,           brk.LHeadId)
         .input("name",  sql.NVarChar(200), brk.LHeadName)
         .input("con",   sql.NVarChar(20),  brk.LHeadPhone || null)
         .input("rt",    sql.NVarChar(20),  "Percentage")
-        .input("rv",    sql.Decimal(18,2), ratePercent)
+        .input("rv",    sql.Decimal(18,2), totalPercent)
         .input("camt",  sql.Decimal(18,2), computedAmount)
         .input("mid",   sql.Int,           m.Id)
         .input("mno",   sql.Int,           m.MilestoneNo)
+        .input("tranche", sql.NVarChar(30), `Milestone-${m.MilestoneNo}`)
         .input("lock",  sql.Bit,           isLocked ? 1 : 0)
         .input("notes", sql.NVarChar(sql.MAX), `Auto-created — follows Milestone #${m.MilestoneNo} of the booking's own payment schedule`)
         .input("cb",    sql.Int,           actorUserId || null)
         .query(`
           INSERT INTO dbo.CrmBrokerageMaster
-            (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, MilestoneId, MilestoneNo, IsLocked, Status, Notes, CreatedBy, CreatedAt)
+            (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, MilestoneId, MilestoneNo, TrancheLabel, IsLocked, Status, Notes, CreatedBy, CreatedAt)
           OUTPUT INSERTED.Id
-          VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @mid, @mno, @lock, 'Pending', @notes, @cb, SYSDATETIME())
+          VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @mid, @mno, @tranche, @lock, 'Pending', @notes, @cb, SYSDATETIME())
         `);
       ids.push(result.recordset[0].Id);
     }
+    await tx.commit();
   } catch (e) {
+    try { await tx.rollback(); } catch { /* transaction may already be aborted */ }
     // Race with another milestone-paid trigger reaching here concurrently —
     // same UNIQUE(BookingId)-loses-the-race pattern as maybeAutoCreateAgreement.
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) return null;
@@ -1069,6 +1108,33 @@ async function maybeAutoGenerateBookingInvoice(pool, bookingId, actorUserId) {
   return { id: invoiceId, InvoiceNo: invoiceNo };
 }
 
+/**
+ * Loan Processing gate — this stage only exists at all for a booking that
+ * has actually been marked Loan-Financed. Self-funded bookings, and
+ * bookings where financing type hasn't been declared yet, never had a loan
+ * to process in the first place, so they clear immediately — declaring
+ * financing type is not itself a prerequisite for the Deed. Only once a
+ * booking is explicitly Loan-Financed does it need the loan to actually be
+ * Sanctioned or Disbursed before the Deed (and everything after it: Query
+ * Payment, Registry) can proceed. Returns null when cleared, or a
+ * human-readable reason string when not.
+ */
+async function checkLoanProcessingCleared(pool, bookingId) {
+  const result = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT b.FinancingType, l.SanctionStatus
+    FROM dbo.CrmBooking b
+    LEFT JOIN dbo.CrmLoanDetail l ON l.BookingId = b.Id
+    WHERE b.Id = @bid
+  `);
+  const row = result.recordset[0];
+  if (!row) return "Booking not found";
+  if (row.FinancingType !== "LoanFinanced") return null;
+  if (!["Sanctioned", "Disbursed"].includes(row.SanctionStatus)) {
+    return `Loan must be Sanctioned or Disbursed before this stage can proceed (currently '${row.SanctionStatus || "Not Applied"}') — update it on the Loan Tracking page.`;
+  }
+  return null;
+}
+
 module.exports = {
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
@@ -1085,6 +1151,8 @@ module.exports = {
   resetAgreementDateNegotiation,
   syncLegalMilestoneStep,
   syncLegalMilestoneFromDocument,
+  recomputeLegalMilestoneCurrentStep,
+  checkLoanProcessingCleared,
   requireActiveBooking,
   recalculateRemainingMilestones,
   isLegalWorkStarted,
