@@ -35,7 +35,7 @@ const APP_SELECT = `
     a.AssignedTo, a.AssignedBy, a.Status, a.Notes, a.CurrentStep,
     a.RatePerSqFt, a.DateOfApply, a.PaymentPlanId, a.TokenType, a.TokenValue, a.BookingAmount, a.PaymentMode, a.DepositBankId,
     a.ReferredByApplicationId, a.IsActive, a.CreatedAt, a.UpdatedAt,
-    a.BrokerId, a.BrokerageRatePercent, a.BrokerageSplitEnabled, brk.LHeadName AS BrokerName,
+    a.BrokerId, a.BrokerageRatePercent, a.BrokeragePaymentPlan, brk.LHeadName AS BrokerName,
     (
       SELECT TOP 1 CAST(Note AS NVARCHAR(MAX))
       FROM dbo.ApprovalAuditLog
@@ -380,6 +380,11 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       }
     }
 
+    const BROKERAGE_PLANS = ["OneTime", "TwoPart", "AgreementOnly"];
+    if (b.BrokeragePaymentPlan !== undefined && b.BrokeragePaymentPlan !== null && !BROKERAGE_PLANS.includes(b.BrokeragePaymentPlan)) {
+      return res.status(400).json({ error: `BrokeragePaymentPlan must be one of ${BROKERAGE_PLANS.join(", ")}` });
+    }
+
     await pool.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.ApplicantName || null)
@@ -411,7 +416,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("ub",   sql.Int,           actor)
       .input("brkid", sql.Int,          b.BrokerId ? parseInt(b.BrokerId) : null)
       .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
-      .input("brksplit", sql.Bit,       b.BrokerageSplitEnabled !== undefined ? (b.BrokerageSplitEnabled ? 1 : 0) : null)
+      .input("brkplan", sql.NVarChar(20), b.BrokeragePaymentPlan || null)
       // Wizard resume progress. Clamped to the 1-6 step range the frontend
       // stepper actually has; CurrentStep only ever moves forward (see the
       // CASE below) — it tracks the furthest point reached, not merely the
@@ -436,7 +441,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           PaymentMode = ISNULL(@pmode, PaymentMode),
           DepositBankId = ISNULL(@dbid, DepositBankId),
           BrokerId = ISNULL(@brkid, BrokerId), BrokerageRatePercent = ISNULL(@brkpct, BrokerageRatePercent),
-          BrokerageSplitEnabled = ISNULL(@brksplit, BrokerageSplitEnabled),
+          BrokeragePaymentPlan = ISNULL(@brkplan, BrokeragePaymentPlan),
           -- AssignedTo/AssignedBy are intentionally never accepted here — set
           -- once at creation (the filer becomes the assignee) and locked;
           -- reassignment goes through the existing lead-transfer flow instead.
@@ -835,7 +840,7 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
     const app = await pool.request().input("id", sql.Int, id).query(`
       SELECT Status, PreferredUnitId, RatePerSqFt, PaymentPlanId, DateOfApply, TokenType, TokenValue,
              BookingAmount, PaymentMode, AssignedTo, Notes, DepositBankId,
-             BrokerId, BrokerageRatePercent, BrokerageSplitEnabled
+             BrokerId, BrokerageRatePercent, BrokeragePaymentPlan
       FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1
     `);
     if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
@@ -853,7 +858,7 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
       TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
       DepositBankId: a.DepositBankId,
       AssignedTo: a.AssignedTo, Notes: a.Notes,
-      BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokerageSplitEnabled: a.BrokerageSplitEnabled,
+      BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokeragePaymentPlan: a.BrokeragePaymentPlan,
     }, actor);
 
     // Same SA-lead sync that used to live inside submit — still the one

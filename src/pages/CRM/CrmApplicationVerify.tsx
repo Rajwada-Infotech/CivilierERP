@@ -580,7 +580,11 @@ export default function CrmApplicationVerify() {
               <>
                 <Field label="Broker" value={a.BrokerName} />
                 <Field label="Brokerage Rate" value={a.BrokerageRatePercent != null && a.BrokerageRatePercent !== "" ? `${a.BrokerageRatePercent}%` : "—"} />
-                <Field label="Split Enabled" value={a.BrokerageSplitEnabled ? "Yes" : "No"} />
+                <Field label="Payout Plan" value={
+                  a.BrokeragePaymentPlan === "TwoPart" ? "Two-part payout"
+                  : a.BrokeragePaymentPlan === "AgreementOnly" ? "Agreement-only payout"
+                  : "One-time — full commission once Booking Amount is paid"
+                } />
                 <Field label="Channel Partner" value={a.ChannelPartnerName} />
               </>
             ) : (

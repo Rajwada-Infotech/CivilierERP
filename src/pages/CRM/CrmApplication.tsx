@@ -52,7 +52,7 @@ const EMPTY_FORM = {
   Source: "", PlatformId: "", CampaignId: "", AdId: "", ChannelPartnerId: "",
   // ViaBroker is UI-only (never sent to the backend) — it just toggles the
   // broker sub-block; BrokerId being set is what actually matters server-side.
-  ViaBroker: false, BrokerId: "", BrokerageRatePercent: "", BrokerageSplitEnabled: false,
+  ViaBroker: false, BrokerId: "", BrokerageRatePercent: "", BrokeragePaymentPlan: "OneTime",
   Notes: "",
   // Payment Details (Step 6/Details) — these columns already existed on
   // CrmApplication and were already read by handleCreateBooking's retry
@@ -712,7 +712,7 @@ const CrmApplication: React.FC = () => {
         ViaBroker: !!app.BrokerId,
         BrokerId: app.BrokerId ? String(app.BrokerId) : "",
         BrokerageRatePercent: app.BrokerageRatePercent != null ? String(app.BrokerageRatePercent) : "",
-        BrokerageSplitEnabled: !!app.BrokerageSplitEnabled,
+        BrokeragePaymentPlan: ["OneTime", "TwoPart", "AgreementOnly"].includes(app.BrokeragePaymentPlan) ? app.BrokeragePaymentPlan : "OneTime",
         Notes: app.Notes || "",
         TokenType: app.TokenType || "Percentage",
         TokenValue: app.TokenValue != null ? String(app.TokenValue) : "",
@@ -792,7 +792,7 @@ const CrmApplication: React.FC = () => {
         ChannelPartnerId: form.ChannelPartnerId || null,
         BrokerId: form.ViaBroker && form.BrokerId ? parseInt(form.BrokerId) : null,
         BrokerageRatePercent: form.ViaBroker && form.BrokerageRatePercent !== "" ? form.BrokerageRatePercent : null,
-        BrokerageSplitEnabled: form.ViaBroker ? !!form.BrokerageSplitEnabled : false,
+        BrokeragePaymentPlan: form.ViaBroker ? form.BrokeragePaymentPlan : "OneTime",
       };
 
       if (applicationId) {
@@ -1017,7 +1017,7 @@ const CrmApplication: React.FC = () => {
           TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
           DepositBankId: a.DepositBankId,
           AssignedTo: a.AssignedTo, Notes: a.Notes,
-          BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokerageSplitEnabled: a.BrokerageSplitEnabled,
+          BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokeragePaymentPlan: a.BrokeragePaymentPlan,
         }),
       });
       const data = await res.json();
@@ -1574,18 +1574,17 @@ const CrmApplication: React.FC = () => {
                   picked from Broker Master (AccountHeadMaster, LHeadType=BR),
                   never a fresh Customer-level concept. His own identity
                   (name/phone/PAN/RERA) is never re-typed, only ever selected
-                  and shown read-only. The ONLY editable field on this whole
-                  block is the per-deal commission override % — everything
-                  else is fetched, not entered. The rate here is captured now
-                  but only becomes a real commission schedule once Milestone
-                  #1 is paid (maybeAutoCreateBrokerage), at which point it's
-                  split into one tranche per payment milestone, each
-                  unlocking as that milestone is paid — not a manual toggle
-                  here. */}
+                  and shown read-only. The only editable fields on this whole
+                  block are the per-deal commission override % and the
+                  payout plan — everything else is fetched, not entered. The
+                  rate/plan here are captured now but only become a real
+                  commission schedule once Milestone #1 is paid
+                  (maybeAutoCreateBrokerage) — see BrokeragePaymentPlan for
+                  how the payout is actually staged. */}
               <div className="rounded-lg border border-border p-3 space-y-3">
                 <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
                   <input type="checkbox" checked={form.ViaBroker}
-                    onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "" }) }))} />
+                    onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "", BrokeragePaymentPlan: "OneTime" }) }))} />
                   Via Broker
                 </label>
                 {form.ViaBroker && (
@@ -1644,8 +1643,24 @@ const CrmApplication: React.FC = () => {
                           placeholder={String(brokerageTierDefault)} className={inputCls} />
                       </div>
                     </div>
+
+                    <div>
+                      <label className={labelCls}>Payout Plan</label>
+                      <select value={form.BrokeragePaymentPlan}
+                        onChange={(e) => setForm((f) => ({ ...f, BrokeragePaymentPlan: e.target.value }))}
+                        className={inputCls}>
+                        <option value="OneTime">One-time — full commission once Booking Amount is paid</option>
+                        <option value="TwoPart">Two-part — half on Booking Amount, half on Agreement Executed</option>
+                        <option value="AgreementOnly">Agreement-only — full commission on Agreement Executed</option>
+                      </select>
+                    </div>
+
                     <p className="text-[11px] text-muted-foreground">
-                      Commission is paid out one milestone at a time, following the same schedule as the customer's own payments — unlocking as each milestone is paid.
+                      {form.BrokeragePaymentPlan === "TwoPart"
+                        ? "Half the commission is released as soon as the Booking Amount is paid; the other half is held until the Agreement is Executed."
+                        : form.BrokeragePaymentPlan === "AgreementOnly"
+                        ? "The full commission is held until the Agreement is Executed — nothing is released at booking."
+                        : "The full commission is released as soon as the Booking Amount is paid — no further tranches."}
                     </p>
                   </div>
                 )}
@@ -2128,6 +2143,9 @@ const CrmApplication: React.FC = () => {
                   {a.BrokerName && (
                     <div className="pt-2 border-t border-border text-xs">
                       <span className="text-muted-foreground">Broker:</span> {a.BrokerName} {a.BrokerageRatePercent != null && `(${a.BrokerageRatePercent}%)`}
+                      {a.BrokeragePaymentPlan && a.BrokeragePaymentPlan !== "OneTime" && (
+                        <span className="text-muted-foreground"> · {a.BrokeragePaymentPlan === "TwoPart" ? "Two-part payout" : "Agreement-only payout"}</span>
+                      )}
                     </div>
                   )}
                 </div>

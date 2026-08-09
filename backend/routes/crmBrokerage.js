@@ -389,9 +389,13 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
     // extension, paid) before then.
     const pool = getPool();
     const locked = await pool.request().input("id", sql.Int, id)
-      .query("SELECT IsLocked, MilestoneNo FROM dbo.CrmBrokerageMaster WHERE Id = @id");
+      .query("SELECT IsLocked, UnlockGate, MilestoneNo FROM dbo.CrmBrokerageMaster WHERE Id = @id");
     if (locked.recordset[0]?.IsLocked) {
-      return res.status(400).json({ error: `This tranche unlocks once Milestone #${locked.recordset[0].MilestoneNo ?? "?"} is paid` });
+      const gate = locked.recordset[0].UnlockGate;
+      const msg = gate === "Agreement"
+        ? "This tranche unlocks once the Agreement is Executed"
+        : `This tranche unlocks once Milestone #${locked.recordset[0].MilestoneNo ?? "?"} is paid`;
+      return res.status(400).json({ error: msg });
     }
 
     const result = await approvalTransition("crm-brokerage", id, "Approved", userEmail, req.user?.role);

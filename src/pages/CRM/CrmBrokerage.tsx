@@ -107,13 +107,26 @@ const CrmBrokerage: React.FC = () => {
       ) },
     { id: "rate", header: "Rate", size: 90, enableSorting: false,
       cell: (i) => <span className="text-xs">{i.row.original.RateType === "Percentage" ? `${i.row.original.RateValue}%` : `₹${i.row.original.RateValue}`}</span> },
-    { accessorKey: "MilestoneNo", header: "Tranche", size: 150, enableSorting: false,
+    { id: "tranche", header: "Tranche", size: 150, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
-        if (r.MilestoneNo == null) return <span className="text-xs text-muted-foreground">Full payout</span>;
+        // TrancheLabel/UnlockGate cover all three payment plans now:
+        // OneTime -> single "Full" row, gate "Booking".
+        // TwoPart -> "Booking" (unlocked immediately) + "Agreement" tranches.
+        // AgreementOnly -> single "Agreement"-gated tranche.
+        // Older milestone-tranche records (pre-plan rework) still carry
+        // MilestoneNo/MilestoneId and fall through to that rendering.
+        if (r.TrancheLabel === "Full" || (r.UnlockGate == null && r.MilestoneNo == null)) {
+          return <span className="text-xs text-muted-foreground">Full payout</span>;
+        }
+        const label = r.UnlockGate === "Agreement"
+          ? `${r.TrancheLabel || "Agreement"} — unlocks on Agreement Executed`
+          : r.UnlockGate === "Booking"
+          ? `${r.TrancheLabel || "Booking"} — unlocks on booking amount paid`
+          : `Milestone ${r.MilestoneNo}${r.MilestoneName ? ` — ${r.MilestoneName}` : ""}`;
         return (
           <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium ${r.IsLocked ? "text-red-600 bg-red-50 border-red-200" : "text-green-600 bg-green-50 border-green-200"}`}>
-            {r.IsLocked ? <Lock size={11} /> : <Unlock size={11} />} Milestone {r.MilestoneNo}{r.MilestoneName ? ` — ${r.MilestoneName}` : ""}
+            {r.IsLocked ? <Lock size={11} /> : <Unlock size={11} />} {label}
           </span>
         );
       } },
@@ -125,7 +138,10 @@ const CrmBrokerage: React.FC = () => {
       cell: (i) => {
         const r = i.row.original;
         if (r.IsLocked) {
-          return <span className="flex items-center gap-1 text-xs text-red-600"><Lock size={11} /> Unlocks once Milestone {r.MilestoneNo ?? "?"} is paid</span>;
+          const waitMsg = r.UnlockGate === "Agreement"
+            ? "Unlocks once the Agreement is Executed"
+            : `Unlocks once Milestone ${r.MilestoneNo ?? "?"} is paid`;
+          return <span className="flex items-center gap-1 text-xs text-red-600"><Lock size={11} /> {waitMsg}</span>;
         }
         return (
           <>

@@ -52,7 +52,7 @@ const EMPTY_FORM = {
   UnitType: "", AreaSqFt: "", RatePerSqFt: "", TotalValue: "",
   TokenType: "Percentage", TokenValue: "", PaymentPlanId: "",
   BookingDate: "", PaymentMode: "", AssignedTo: "", Notes: "",
-  BookingAmount: "", BrokerId: "", BrokerageRatePercent: "", BrokerageSplitEnabled: false,
+  BookingAmount: "", BrokerId: "", BrokerageRatePercent: "", BrokeragePaymentPlan: "OneTime",
   DepositBankId: "",
 };
 
@@ -317,6 +317,7 @@ const CrmBooking: React.FC = () => {
           BookingAmount: form.BookingAmount || null,
           BrokerId:      form.BrokerId || null,
           BrokerageRatePercent: form.BrokerageRatePercent || null,
+          BrokeragePaymentPlan: form.BrokerId ? (form.BrokeragePaymentPlan || "OneTime") : "OneTime",
           DepositBankId: form.DepositBankId || null,
           DepositBankName: bankName || null,
         }),
@@ -603,7 +604,7 @@ const CrmBooking: React.FC = () => {
                   Notes: app?.Notes || "",
                   BrokerId: app?.BrokerId != null ? String(app.BrokerId) : "",
                   BrokerageRatePercent: app?.BrokerageRatePercent != null ? String(app.BrokerageRatePercent) : "",
-                  BrokerageSplitEnabled: !!app?.BrokerageSplitEnabled,
+                  BrokeragePaymentPlan: ["OneTime", "TwoPart", "AgreementOnly"].includes(app?.BrokeragePaymentPlan) ? app.BrokeragePaymentPlan : "OneTime",
                 }));
               }}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
@@ -694,6 +695,18 @@ const CrmBooking: React.FC = () => {
                     || "Default 7-stage split"}
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
               </div>
+              {form.BrokerId && (
+                <div className="col-span-2">
+                  <label className="text-xs text-muted-foreground block mb-1">Brokerage Payout Plan (from the Application — not editable here)</label>
+                  <input type="text" readOnly disabled
+                    value={
+                      form.BrokeragePaymentPlan === "TwoPart" ? "Two-part payout"
+                      : form.BrokeragePaymentPlan === "AgreementOnly" ? "Agreement-only payout"
+                      : "One-time — full commission once Booking Amount is paid"
+                    }
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
+                </div>
+              )}
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">
                   Payment Mode {form.ApplicationId && form.PaymentMode ? "(from Application)" : ""}

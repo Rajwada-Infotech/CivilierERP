@@ -284,7 +284,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("cb",   sql.Int,           actorUserId)
       .input("brkid", sql.Int,          b.BrokerId ? parseInt(b.BrokerId) : null)
       .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
-      .input("brksplit", sql.Bit,       b.BrokerageSplitEnabled ? 1 : 0)
+      .input("brkplan", sql.NVarChar(20), ["OneTime", "TwoPart", "AgreementOnly"].includes(b.BrokeragePaymentPlan) ? b.BrokeragePaymentPlan : "OneTime")
       .query(`
         INSERT INTO dbo.CrmApplication
           (ApplicationNo, LeadId, CustomerId, ApplicantName, Mobile, AltMobile, Email,
@@ -293,7 +293,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
            Source, PlatformId, CampaignId, AdId, ChannelPartnerId,
            RatePerSqFt, DateOfApply, PaymentPlanId, TokenType, TokenValue, BookingAmount, PaymentMode,
            AssignedTo, AssignedBy, Status, Notes, ReferredByApplicationId, IsActive, CreatedBy, CreatedAt,
-           BrokerId, BrokerageRatePercent, BrokerageSplitEnabled)
+           BrokerId, BrokerageRatePercent, BrokeragePaymentPlan)
         OUTPUT INSERTED.Id
         VALUES
           (@no, @lid, @custid, @name, @mob, @alt, @em,
@@ -302,7 +302,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
            @src, @platid, @campid, @adid, @cpid,
            @rate, @doa, @ppid, @ttype, @tval, @bamt, @pmode,
            @asgn, @asgnby, 'Pending', @note, @refApp, 1, @cb, SYSDATETIME(),
-           @brkid, @brkpct, @brksplit)
+           @brkid, @brkpct, @brkplan)
       `);
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
@@ -666,7 +666,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     .input("cb",    sql.Int,           actorUserId)
     .input("brkid", sql.Int,           b.BrokerId ? parseInt(b.BrokerId) : null)
     .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
-    .input("brksplit", sql.Bit,        b.BrokerageSplitEnabled ? 1 : 0)
+    .input("brkplan", sql.NVarChar(20), ["OneTime", "TwoPart", "AgreementOnly"].includes(b.BrokeragePaymentPlan) ? b.BrokeragePaymentPlan : "OneTime")
     .input("cdl",   sql.DateTime2(3),  confirmDeadline)
     .query(`
       INSERT INTO dbo.CrmBooking
@@ -674,7 +674,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
          AreaSqFt, RatePerSqFt, TotalValue, BookingAmount, TokenType, TokenValue, PaymentPlanId,
          BookingDate, PaymentMode, AssignedTo, Status, Notes, IsActive,
          ParkingTotal, ExtraChargesTotal, GrandTotal, CreatedBy, CreatedAt,
-         BrokerId, BrokerageRatePercent, BrokerageSplitEnabled, ConfirmDeadline)
+         BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ConfirmDeadline)
       OUTPUT INSERTED.Id
       VALUES
         (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @flr, @utype,
@@ -682,7 +682,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
          ISNULL(@bdate, CAST(SYSDATETIME() AS DATE)), @pmode,
          @asgn, 'Pending', @note, 1,
          0, 0, ISNULL(@tot, 0), @cb, SYSDATETIME(),
-         @brkid, @brkpct, @brksplit, @cdl)
+         @brkid, @brkpct, @brkplan, @cdl)
     `);
 
   const bookingId = result.recordset[0].Id;

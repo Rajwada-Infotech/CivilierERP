@@ -923,9 +923,38 @@ function tierBrokeragePercent(totalValue) {
  * this file react to "all milestones settled", not milestone 1 alone, so
  * this can't reuse their trigger condition.
  */
+// BrokeragePaymentPlan on CrmBooking decides how the commission is split
+// into payable tranches — replaces the old always-one-tranche-per-milestone
+// behavior, which both mis-scoped the total (see totalBrokerageAmount
+// below) and paid brokers on a schedule nobody actually asked for.
+//   'OneTime'       - single tranche, unlocked immediately (same trigger
+//                      point as always: Milestone #1 / booking amount paid).
+//   'TwoPart'       - half unlocked immediately (booking amount paid),
+//                      other half locked until the Agreement is Executed.
+//   'AgreementOnly' - single tranche, locked until the Agreement is
+//                      Executed (created now so it's visible/tracked, but
+//                      not payable until then).
+function buildBrokerageTranches(plan, totalAmount, agreementExecuted) {
+  const round2 = (n) => Math.round(n * 100) / 100;
+  if (plan === "TwoPart") {
+    const first = round2(totalAmount / 2);
+    const second = round2(totalAmount - first);
+    return [
+      { label: "Booking", amount: first, gate: "Booking", locked: false },
+      { label: "Agreement", amount: second, gate: "Agreement", locked: !agreementExecuted },
+    ];
+  }
+  if (plan === "AgreementOnly") {
+    return [{ label: "Agreement", amount: round2(totalAmount), gate: "Agreement", locked: !agreementExecuted }];
+  }
+  // OneTime (default, and fallback for any unrecognized value)
+  return [{ label: "Full", amount: round2(totalAmount), gate: "Booking", locked: false }];
+}
+
 async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT BrokerId, BrokerageRatePercent, TotalValue, AssignedTo, BookingNo
+    SELECT BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, TotalValue,
+           ParkingTotal, ExtraChargesTotal, AssignedTo, BookingNo
     FROM dbo.CrmBooking WHERE Id = @bid
   `);
   const bk = booking.recordset[0];
@@ -940,31 +969,33 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   if (!broker.recordset.length) return null;
   const brk = broker.recordset[0];
 
-  const totalValue = Number(bk.TotalValue) || 0;
-  const totalPercent = bk.BrokerageRatePercent != null ? Number(bk.BrokerageRatePercent) : tierBrokeragePercent(totalValue);
-  const totalBrokerageAmount = Math.round(totalValue * totalPercent) / 100;
+  // Commission is rate% of the whole deal the broker actually closed —
+  // unit price + parking + extras — but NOT GrandTotal, because GrandTotal
+  // also folds in GST, and GST is a statutory pass-through the seller
+  // collects on the government's behalf, not revenue the broker should be
+  // cut in on. (TotalValue alone previously under-counted the deal by
+  // leaving parking/extras out entirely — see booking 41, where the old
+  // per-milestone schedule's real total was TotalValue + ParkingTotal,
+  // confirmed against CrmPaymentMilestone.AmountDue sums.)
+  const dealValue = Number(bk.TotalValue || 0) + Number(bk.ParkingTotal || 0) + Number(bk.ExtraChargesTotal || 0);
+  const totalPercent = bk.BrokerageRatePercent != null ? Number(bk.BrokerageRatePercent) : tierBrokeragePercent(dealValue);
+  const totalBrokerageAmount = Math.round(dealValue * totalPercent) / 100;
+  if (totalBrokerageAmount <= 0) return null;
 
-  // %-based schedule steps only — an Extra-Charge/Parking milestone is a
-  // fixed line item the customer negotiated directly, not part of the deal
-  // value the broker actually sold, so it earns no brokerage share (same
-  // exclusion recalculateRemainingMilestones already applies for the
-  // customer-facing schedule).
-  const milestones = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT Id, MilestoneNo, [Percent], AmountDue, Status
-    FROM dbo.CrmPaymentMilestone
-    WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
-    ORDER BY MilestoneNo
-  `);
-  if (!milestones.recordset.length) return null;
+  const plan = ["OneTime", "TwoPart", "AgreementOnly"].includes(bk.BrokeragePaymentPlan)
+    ? bk.BrokeragePaymentPlan : "OneTime";
 
-  const rows = milestones.recordset;
-  const totalMilestoneAmount = rows.reduce((s, m) => s + Number(m.AmountDue || 0), 0);
-  const totalTarget = totalMilestoneAmount > 0
-    ? Math.round(totalMilestoneAmount * totalPercent) / 100
-    : totalBrokerageAmount;
+  // Only relevant for TwoPart's second half / AgreementOnly — a booking
+  // that's fast-tracked and already has an Executed/Registered agreement by
+  // the time Milestone #1 clears shouldn't sit needlessly locked.
+  const agr = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
+  const agreementExecuted = ["Executed", "Registered"].includes(agr.recordset[0]?.Status);
+
+  const tranches = buildBrokerageTranches(plan, totalBrokerageAmount, agreementExecuted);
 
   // All-or-nothing: a failure partway through used to leave whatever
-  // milestones had already been inserted sitting in the DB as a permanent,
+  // tranches had already been inserted sitting in the DB as a permanent,
   // incomplete (and confusing) partial schedule — exactly the kind of
   // silent data corruption a broker-payout calculation can never tolerate.
   // A single transaction makes a mid-loop failure roll back cleanly instead.
@@ -973,18 +1004,7 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   try {
     await tx.begin();
     ids = [];
-    let allocated = 0;
-    for (let i = 0; i < rows.length; i++) {
-      const m = rows[i];
-      const isLast = i === rows.length - 1;
-      // Last row absorbs the rounding remainder so the tranches always sum
-      // exactly to the commission on the scheduled milestone base.
-      const computedAmount = isLast
-        ? Math.round((totalTarget - allocated) * 100) / 100
-        : Math.round(Number(m.AmountDue || 0) * totalPercent) / 100;
-      allocated += computedAmount;
-      const isLocked = m.Status !== "Paid" && m.Status !== "Waived";
-
+    for (const t of tranches) {
       const result = await new sql.Request(tx)
         .input("bid",   sql.Int,           bookingId)
         .input("brid",  sql.Int,           brk.LHeadId)
@@ -992,18 +1012,17 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
         .input("con",   sql.NVarChar(20),  brk.LHeadPhone || null)
         .input("rt",    sql.NVarChar(20),  "Percentage")
         .input("rv",    sql.Decimal(18,2), totalPercent)
-        .input("camt",  sql.Decimal(18,2), computedAmount)
-        .input("mid",   sql.Int,           m.Id)
-        .input("mno",   sql.Int,           m.MilestoneNo)
-        .input("tranche", sql.NVarChar(30), `Milestone-${m.MilestoneNo}`)
-        .input("lock",  sql.Bit,           isLocked ? 1 : 0)
-        .input("notes", sql.NVarChar(sql.MAX), `Auto-created — follows Milestone #${m.MilestoneNo} of the booking's own payment schedule`)
+        .input("camt",  sql.Decimal(18,2), t.amount)
+        .input("tranche", sql.NVarChar(30), t.label)
+        .input("gate",  sql.NVarChar(20),  t.gate)
+        .input("lock",  sql.Bit,           t.locked ? 1 : 0)
+        .input("notes", sql.NVarChar(sql.MAX), `Auto-created — ${plan} plan, ${t.label} tranche`)
         .input("cb",    sql.Int,           actorUserId || null)
         .query(`
           INSERT INTO dbo.CrmBrokerageMaster
-            (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, MilestoneId, MilestoneNo, TrancheLabel, IsLocked, Status, Notes, CreatedBy, CreatedAt)
+            (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, TrancheLabel, UnlockGate, IsLocked, Status, Notes, CreatedBy, CreatedAt)
           OUTPUT INSERTED.Id
-          VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @mid, @mno, @tranche, @lock, 'Pending', @notes, @cb, SYSDATETIME())
+          VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @tranche, @gate, @lock, 'Pending', @notes, @cb, SYSDATETIME())
         `);
       ids.push(result.recordset[0].Id);
     }
@@ -1019,7 +1038,7 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   if (bk.AssignedTo) {
     await emitNotification(pool, bk.AssignedTo, "crm_brokerage_ready",
       "Brokerage Schedule Created",
-      `Brokerage schedule auto-created for booking ${bk.BookingNo} — ${ids.length} milestone-tranche(s) for broker ${brk.LHeadName}.`,
+      `Brokerage (${plan}) auto-created for booking ${bk.BookingNo} — ${ids.length} tranche(s) for broker ${brk.LHeadName}.`,
       ids[0], "crm_brokerage");
   }
 
@@ -1042,6 +1061,21 @@ async function maybeUnlockBrokerageMilestoneTranche(pool, bookingId, milestoneId
   await pool.request().input("bid", sql.Int, bookingId).input("mid", sql.Int, milestoneId).query(`
     UPDATE dbo.CrmBrokerageMaster SET IsLocked = 0
     WHERE BookingId = @bid AND MilestoneId = @mid AND IsLocked = 1
+  `);
+}
+
+/**
+ * Unlocks the Agreement-gated brokerage tranche(s) — TwoPart's second half,
+ * or AgreementOnly's single tranche — the moment a booking's Agreement is
+ * marked Executed. No-op if there's no such row (OneTime plan, no broker,
+ * or the tranche is already unlocked).
+ * Call site: wherever CrmAgreement.Status transitions to 'Executed'
+ * (mark-executed route in crmAgreement.js).
+ */
+async function maybeUnlockBrokerageOnAgreementExecuted(pool, bookingId) {
+  await pool.request().input("bid", sql.Int, bookingId).query(`
+    UPDATE dbo.CrmBrokerageMaster SET IsLocked = 0
+    WHERE BookingId = @bid AND UnlockGate = 'Agreement' AND IsLocked = 1
   `);
 }
 
@@ -1145,6 +1179,7 @@ module.exports = {
   maybeAutoGenerateAgreementInvoice,
   maybeAutoCreateBrokerage,
   maybeUnlockBrokerageMilestoneTranche,
+  maybeUnlockBrokerageOnAgreementExecuted,
   proposeAgreementDate,
   acceptAgreementDate,
   finalizeAgreementDate,
