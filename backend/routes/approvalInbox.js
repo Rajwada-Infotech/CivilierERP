@@ -523,12 +523,47 @@ router.get("/", async (req, res) => {
       `);
     }
 
-    // crm-applications was removed here — Applications no longer go through
-    // an admin approval step (a Booking is auto-attempted straight off
-    // submission, see crmApplications.js PUT /:id/submit). Booking Approval
-    // and Broker Approval (below, crm-bookings / crm-brokerage) are what
-    // actually surface in this inbox now, both triggered off the Booking
-    // itself rather than the Application.
+    // Application verification — reinstated. The verifier here is checking
+    // the full data entry itself (not a downstream Booking), so this reads
+    // straight off CrmApplication, before any Booking exists. Reject (with
+    // a mandatory note — see crmApplications.js PUT /:id/reject) is the
+    // "revert to fill/re-check" action; the applicant edits and resubmits
+    // via PUT /:id/submit, which loops back here until level 1 clears.
+    if (!module || module === "crm-applications") {
+      queries.push(`
+        SELECT
+          'crm-applications'                    AS Module,
+          'CRM Application'                     AS ModuleLabel,
+          CAST(a.Id AS NVARCHAR)                AS RecordId,
+          a.ApplicationNo                       AS Reference,
+          a.CreatedAt                           AS RecordDate,
+          a.Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          a.BookingAmount                       AS Amount,
+          ${NULL_EXTRA}
+          CAST(a.CreatedBy AS NVARCHAR(255))    AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ISNULL((
+            SELECT TOP 1 CAST(ApproverEmail AS NVARCHAR(255))
+            FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'CrmApplication' AND RecordId = a.Id
+              AND ActionStatus = 'Rejected'
+            ORDER BY ActionAt DESC
+          ), '')                                AS RejectedBy,
+          ISNULL((
+            SELECT TOP 1 CAST(Note AS NVARCHAR(MAX))
+            FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'CrmApplication' AND RecordId = a.Id
+              AND ActionStatus = 'Rejected'
+            ORDER BY ActionAt DESC
+          ), '')                                AS RejectionNote,
+          ISNULL(a.UpdatedAt, a.CreatedAt)      AS LastModified
+        FROM dbo.CrmApplication a
+        WHERE a.Status = 'Pending' AND a.IsActive = 1
+      `);
+    }
 
     if (!module || module === "crm-bookings") {
       queries.push(`
@@ -798,3 +833,4 @@ router.get("/count", async (req, res) => {
 });
 
 module.exports = router;
+
