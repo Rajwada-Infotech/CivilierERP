@@ -1276,14 +1276,14 @@ export default function EngineeringAmendmentMenu() {
             key={id}
             type="button"
             onClick={() => switchTab(id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all border ${
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold transition-all border ${
               activeTab === id
-                ? "bg-orange-500 text-white shadow-sm border-transparent"
+                ? "gradient-engineering text-white shadow-sm border-transparent"
                 : "border-border bg-card text-muted-foreground hover:bg-muted"
             }`}
           >
             <Icon
-              size={14}
+              size={13}
               className={activeTab === id ? "text-white" : color}
             />
             {label}
@@ -1305,15 +1305,13 @@ export default function EngineeringAmendmentMenu() {
             }}
           />
         </div>
-        <Button
-          variant="outline"
-          size="sm"
+        <button
           onClick={invalidate}
-          className="shrink-0"
+          className="group shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-all duration-200 active:scale-90 font-heading font-medium"
         >
-          <RefreshCw size={13} className="mr-1.5" />
+          <RefreshCw size={13} className="transition-transform duration-500 group-hover:rotate-180" />
           Refresh
-        </Button>
+        </button>
       </div>
 
       {/* ── Document Table ───────────────────────────────────────────────────── */}
