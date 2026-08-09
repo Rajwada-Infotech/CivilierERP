@@ -1449,7 +1449,7 @@ const FormModal: React.FC<FormModalProps> = ({
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto"
+              className="gradient-engineering inline-flex items-center gap-1.5 font-heading font-semibold text-white text-xs px-4 py-1.5 rounded-lg h-auto"
             >
               {saving ? (
                 <RefreshCw className="animate-spin" size={14} />
@@ -2553,15 +2553,15 @@ export default function BOQ() {
                 Refresh
               </button>
               {rights.canCreate && (
-                <Button
+                <button
                   onClick={() => {
                     setEditRecord(null);
                     setShowForm(true);
                   }}
-                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                  className="gradient-engineering inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white text-xs px-4 py-1.5 rounded-lg transition-all"
                 >
-                  <Plus size={15} /> New BOQ
-                </Button>
+                  <Plus size={13} /> New BOQ
+                </button>
               )}
             </div>
           }
@@ -2626,7 +2626,7 @@ export default function BOQ() {
                     key={s}
                     variant={filterStatus === s ? "default" : "outline"}
                     size="sm"
-                    className={`h-8 rounded-full text-xs font-semibold${filterStatus === s ? " gradient-accent text-white border-0" : ""}`}
+                    className={`h-8 rounded-full text-xs font-semibold${filterStatus === s ? " gradient-engineering text-white border-0" : ""}`}
                     onClick={() => {
                       setFilterStatus(s);
                       setPage(1);

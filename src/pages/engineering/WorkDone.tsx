@@ -986,7 +986,7 @@ function WorkDoneForm({
         <button
           onClick={handleSave}
           disabled={saveMutation.isPending}
-          className="gradient-accent flex items-center gap-1.5 font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-60 transition-opacity"
+          className="gradient-engineering inline-flex items-center gap-1.5 font-heading font-semibold text-white text-xs px-4 py-1.5 rounded-lg disabled:opacity-60 transition-all"
         >
           <Save size={13} />
           {saveMutation.isPending
@@ -1394,13 +1394,12 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                 Refresh
               </button>
               {rights.canCreate && (
-                <Button
-                  size="sm"
+                <button
                   onClick={openNew}
-                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                  className="gradient-engineering inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white text-xs px-4 py-1.5 rounded-lg transition-all"
                 >
-                  <Plus size={14} /> New Entry
-                </Button>
+                  <Plus size={13} /> New Entry
+                </button>
               )}
             </div>
           )
@@ -1440,7 +1439,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                   onClick={() => setStatusFilter(s)}
                   className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
                     statusFilter === s
-                      ? "gradient-accent text-white border-transparent font-semibold"
+                      ? "gradient-engineering text-white border-transparent font-semibold"
                       : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
                   }`}
                 >
