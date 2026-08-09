@@ -6,11 +6,15 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail, isSuperAdminOnly } = require("../services/saAccess");
 const { validateSourceChain } = require("../services/sourceChain");
-const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
+const { advanceApplicationStatus, logStatusChange } = require("../services/crmApplicationWorkflow");
 // The generic multi-module approval engine — Submit/Approve/Reject go through
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
-const { transition: approvalTransition } = require("../services/approvalService");
+const { transition: approvalTransition, CRM_APPROVER_ROLES } = require("../services/approvalService");
+// Level-1 per-field verification checklist — see crmApplicationChecklist.js
+// for why this exists (the old PUT /:id/approve was a single click with no
+// requirement to actually look at any individual field).
+const { CHECKLIST_ITEMS, ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem } = require("../services/crmApplicationChecklist");
 const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
 const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releaseHold } = require("../services/crmHoldService");
 const { releaseAllParkingForApplication } = require("../routes/crmParking");
@@ -29,7 +33,7 @@ const APP_SELECT = `
     a.InterestedProject, a.InterestedUnit, a.PropertyType, a.BhkPreference,
     a.Source, a.PlatformId, a.CampaignId, a.AdId, a.ChannelPartnerId,
     a.AssignedTo, a.AssignedBy, a.Status, a.Notes, a.CurrentStep,
-    a.RatePerSqFt, a.DateOfApply, a.PaymentPlanId, a.TokenType, a.TokenValue, a.BookingAmount, a.PaymentMode,
+    a.RatePerSqFt, a.DateOfApply, a.PaymentPlanId, a.TokenType, a.TokenValue, a.BookingAmount, a.PaymentMode, a.DepositBankId,
     a.ReferredByApplicationId, a.IsActive, a.CreatedAt, a.UpdatedAt,
     a.BrokerId, a.BrokerageRatePercent, a.BrokerageSplitEnabled, brk.LHeadName AS BrokerName,
     (
@@ -560,16 +564,236 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
 // registered — real, checked data — but still has no Booking (see
 // POST /:id/create-booking). admin/super_admin/marketing_head only, enforced
 // inside approvalTransition.
+//
+// This route is the actual choke point every path to Approved runs through
+// — including the generic cross-module Approval Inbox (Approvals > Inbox),
+// which calls this exact route for every module and has no idea the Level-1
+// checklist exists. PUT /:id/checklist/:itemKey/check (below) only ever
+// calls approvalTransition once it has already confirmed every item is
+// Checked, but that's not enough on its own: without the check here, the
+// Inbox's own one-click Approve button would call this route directly and
+// sail straight past the checklist. So the checklist-completeness check has
+// to live here too, not just there.
 router.put("/:id/approve", requirePageRight("crm-applications", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
+
+    const pool = getPool();
+    const app = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+    if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
+    if (app.recordset[0].Status === "Pending") {
+      const items = await ensureChecklistRows(pool, id, 1);
+      const allChecked = items.length > 0 && items.every((it) => it.CheckStatus === "Checked");
+      if (!allChecked) {
+        const unchecked = items.filter((it) => it.CheckStatus !== "Checked").length;
+        return res.status(400).json({
+          error: `Complete the Level-1 verification checklist before approving — ${unchecked} item(s) still not checked. Open the application and use the checklist there.`,
+        });
+      }
+    }
+
     const result = await approvalTransition("crm-applications", id, "Approved", userEmail, req.user?.role);
     res.json({ success: true, status: result.newStatus, level: result.level, totalLevels: result.totalLevels });
   } catch (e) {
     console.error("[crm-applications] approve error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// ── Level-1 verification checklist ──────────────────────────────────────
+// Replaces the single-click "Approve" as the real Level-1 gate: a verifier
+// (admin/super_admin/marketing_head — same CRM_APPROVER_ROLES the generic
+// approve/reject gate already uses) has to explicitly tick every item in
+// CHECKLIST_ITEMS (crmApplicationChecklist.js) before the Application can
+// reach Approved at all. The last tick fires approvalTransition(...,
+// "Approved", ...) automatically — see PUT /:id/checklist/:itemKey/check
+// below — so the generic engine (audit log, GL posting, multi-level
+// LevelsData) is untouched, this only gates when it gets called.
+//
+// A flagged item (verifier finds something wrong) never moves
+// CrmApplication.Status — PUT /:id above already allows editing while
+// Pending, so the preparer fixes the field(s) in place and calls
+// PUT /:id/checklist/:itemKey/resubmit on that one item to send it back to
+// the verifier, instead of the whole Application bouncing to Rejected and
+// losing every other already-checked item's state.
+
+// GET /:id/checklist — current Level-1 checklist state, seeding any rows
+// missing (see ensureChecklistRows) so this always reflects the live
+// CHECKLIST_ITEMS list even for an application that predates an item being
+// added.
+router.get("/:id/checklist", requirePageRight("crm-applications", "view"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const app = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+    if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
+
+    const items = await ensureChecklistRows(pool, id, 1);
+    const allChecked = items.length > 0 && items.every((it) => it.CheckStatus === "Checked");
+    const hasOpenRecheck = items.some((it) => it.CheckStatus === "NeedsRecheck");
+    res.json({ items, allChecked, hasOpenRecheck, applicationStatus: app.recordset[0].Status });
+  } catch (e) {
+    console.error("[crm-applications] GET checklist error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/checklist/:itemKey/check — verifier ticks one item. Only valid
+// while Status is Pending (that's the window the checklist review happens
+// in). remarks is an optional confirming note here (unlike /flag, where
+// it's mandatory). The moment this tick makes every item Checked, the
+// Application is auto-advanced to Approved through the normal
+// approvalTransition engine — no separate manual "Approve" click needed.
+router.put("/:id/checklist/:itemKey/check", requirePageRight("crm-applications", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { itemKey } = req.params;
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    if (!CRM_APPROVER_ROLES.includes((req.user?.role || "").toLowerCase())) {
+      return res.status(403).json({ error: "You are not authorized to verify this application's checklist." });
+    }
+
+    const pool = getPool();
+    const actor = actorId(req);
+    const app = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+    if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
+    if (app.recordset[0].Status !== "Pending") {
+      return res.status(400).json({ error: `Checklist can only be verified while the application is Pending — current status: ${app.recordset[0].Status}` });
+    }
+
+    await ensureChecklistRows(pool, id, 1);
+    const item = await checkItem(pool, id, itemKey, { actor, remarks: req.body?.remarks });
+
+    const items = await ensureChecklistRows(pool, id, 1);
+    const allChecked = items.every((it) => it.CheckStatus === "Checked");
+
+    let approvalResult = null;
+    if (allChecked) {
+      approvalResult = await approvalTransition("crm-applications", id, "Approved", userEmail, req.user?.role);
+    }
+
+    res.json({ success: true, item, allChecked, status: approvalResult?.newStatus, level: approvalResult?.level, totalLevels: approvalResult?.totalLevels });
+  } catch (e) {
+    console.error("[crm-applications] checklist check error:", e.message);
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// PUT /:id/checklist/:itemKey/uncheck — verifier retracts their own check
+// (plain toggle-off, e.g. a mis-click) — never touches Remarks and never
+// requires one. Distinct from /flag below, which is the deliberate
+// "send this back to the preparer with a reason" action. Approval can only
+// ever fire once every item is Checked (see /check above), so unchecking
+// one item here has no separate un-approve step to worry about — the
+// Application can't have reached Approved while this item was unchecked.
+router.put("/:id/checklist/:itemKey/uncheck", requirePageRight("crm-applications", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { itemKey } = req.params;
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    if (!CRM_APPROVER_ROLES.includes((req.user?.role || "").toLowerCase())) {
+      return res.status(403).json({ error: "You are not authorized to verify this application's checklist." });
+    }
+
+    const pool = getPool();
+    const actor = actorId(req);
+    const app = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+    if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
+    if (app.recordset[0].Status !== "Pending") {
+      return res.status(400).json({ error: `Checklist can only be verified while the application is Pending — current status: ${app.recordset[0].Status}` });
+    }
+
+    await ensureChecklistRows(pool, id, 1);
+    const item = await uncheckItem(pool, id, itemKey, { actor });
+
+    res.json({ success: true, item });
+  } catch (e) {
+    console.error("[crm-applications] checklist uncheck error:", e.message);
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// PUT /:id/checklist/:itemKey/flag — verifier flags one item as wrong. A
+// remark is mandatory (enforced in flagItem) — same "tell the preparer
+// exactly what to fix, not a silent bounce" reasoning as the old whole-
+// Application PUT /:id/reject below. Logged into CrmApplicationStatusLog
+// (same table/UI as real status transitions — see viewingAppDetail.statusLog
+// in CrmApplication.tsx) as a Pending->Pending entry so it's visible in the
+// same Status History panel even though the Application's own Status never
+// moves.
+router.put("/:id/checklist/:itemKey/flag", requirePageRight("crm-applications", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { itemKey } = req.params;
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    if (!CRM_APPROVER_ROLES.includes((req.user?.role || "").toLowerCase())) {
+      return res.status(403).json({ error: "You are not authorized to verify this application's checklist." });
+    }
+    if (!req.body?.remarks?.trim()) {
+      return res.status(400).json({ error: "A remark is required so the preparer knows what to fix on this item" });
+    }
+
+    const pool = getPool();
+    const actor = actorId(req);
+    const app = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+    if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
+    if (app.recordset[0].Status !== "Pending") {
+      return res.status(400).json({ error: `Checklist can only be verified while the application is Pending — current status: ${app.recordset[0].Status}` });
+    }
+
+    await ensureChecklistRows(pool, id, 1);
+    const remark = req.body.remarks.trim();
+    const item = await flagItem(pool, id, itemKey, { actor, remarks: remark });
+
+    const itemDef = CHECKLIST_ITEMS.find((c) => c.key === itemKey);
+    await logStatusChange(pool, id, "Pending", "Pending", "ChecklistRecheck", `${itemDef?.label || itemKey}: ${remark}`, actor);
+
+    res.json({ success: true, item });
+  } catch (e) {
+    console.error("[crm-applications] checklist flag error:", e.message);
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// PUT /:id/checklist/:itemKey/resubmit — preparer-side action: "I've fixed
+// what was flagged." Any editor (not approver-gated — this is the
+// preparer's own action), only valid on an item currently NeedsRecheck
+// (enforced in resubmitItem), only while the Application is still Pending.
+// Sends the item back to 'Pending' (unchecked) so the verifier sees it in
+// the queue again — the remark from the flag stays visible for context
+// until the verifier checks or re-flags it.
+router.put("/:id/checklist/:itemKey/resubmit", requirePageRight("crm-applications", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { itemKey } = req.params;
+  try {
+    const pool = getPool();
+    const actor = actorId(req);
+    const app = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+    if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
+    if (app.recordset[0].Status !== "Pending") {
+      return res.status(400).json({ error: `Checklist can only be revised while the application is Pending — current status: ${app.recordset[0].Status}` });
+    }
+
+    const item = await resubmitItem(pool, id, itemKey, { actor });
+
+    const itemDef = CHECKLIST_ITEMS.find((c) => c.key === itemKey);
+    await logStatusChange(pool, id, "Pending", "Pending", "ChecklistRevised", `${itemDef?.label || itemKey}: marked as revised, awaiting recheck`, actor);
+
+    res.json({ success: true, item });
+  } catch (e) {
+    console.error("[crm-applications] checklist resubmit error:", e.message);
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 

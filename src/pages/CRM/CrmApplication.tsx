@@ -31,6 +31,10 @@ const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"
 
 const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled", "Expired"];
 const DOC_TYPES = ["IdentityProof", "AddressProof", "PhotoID", "IncomeProof", "Other"];
+// NOTE: this file used to have its own CRM_APPROVER_ROLES + getUserRoleFromToken()
+// here for the inline Level-1 checklist that used to live in this dialog. That
+// checklist now lives on its own screen (CrmApplicationVerify.tsx), which has
+// its own copy of the same two — nothing here needs them anymore.
 
 const statusColor: Record<string, string> = {
   Draft:     "text-muted-foreground bg-muted/50 border-border",
@@ -262,6 +266,16 @@ const CrmApplication: React.FC = () => {
   // shown, so this can't be unlocked at all past that point (see the
   // Project/Unit tree JSX).
   const [unitLocked, setUnitLocked] = useState(false);
+  // Same lock/Edit pattern as the Project/Unit tree above, applied to the
+  // Payment Details block (Token Amount, Payment Mode, Cheque/Transaction
+  // Ref, Deposited-To bank). Without this, resuming an already-submitted
+  // (Pending) application left every one of those fields sitting wide open
+  // and re-editable with zero friction — an easy way to accidentally
+  // overwrite a figure the customer already confirmed and create a
+  // mismatch between what Finance approved and what's actually on file.
+  // Gated by the same canEditUnitSelection (Draft/Pending only) — once
+  // Approved, no Edit control renders and this can't be unlocked at all.
+  const [paymentLocked, setPaymentLocked] = useState(false);
 
   // (No more planLocked/auto-fetch state — Unit Master no longer has a
   // single "default" plan to silently apply; Payment Plan is always an
@@ -305,6 +319,22 @@ const CrmApplication: React.FC = () => {
     queryFn: async () => {
       const r = await fetchWithAuth(`${EXTRA_CHARGE_API}/application/${viewingAppId}`);
       return r.ok ? r.json() : [];
+    },
+    enabled: !!viewingAppId,
+  });
+  // Level-1 verification checklist — read-only summary only. Actually
+  // ticking/flagging items now happens on its own dedicated screen
+  // (CrmApplicationVerify.tsx, at /crm/applications/verify/:id) instead of
+  // inline in this dialog — this query only powers the compact progress
+  // badge + "Open Verification" launcher below (see the "Level 1
+  // Verification" card further down). Still fetched whenever the detail
+  // dialog is open (not just while Pending) so the badge stays visible as a
+  // record even after the application moves on to Approved.
+  const { data: viewingAppChecklist } = useQuery({
+    queryKey: ["crm-app-checklist", viewingAppId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/${viewingAppId}/checklist`);
+      return r.ok ? r.json() : null;
     },
     enabled: !!viewingAppId,
   });
@@ -625,6 +655,7 @@ const CrmApplication: React.FC = () => {
     // A brand-new application starts with no status of its own.
     setWizardAppStatus(null);
     setUnitLocked(false);
+    setPaymentLocked(false);
   };
 
   // Deep-link from CrmLeads.tsx's "View Application" link (a converted lead
@@ -702,6 +733,13 @@ const CrmApplication: React.FC = () => {
       // Edit is always available here in practice; canEditUnitSelection
       // below still gates it defensively in case that ever changes.
       setUnitLocked(hasProject);
+      // Same idea as the Project/Unit lock just above: if a token
+      // amount/payment mode was already captured on a previous visit to
+      // this step, default to showing it read-only — Edit unlocks it for a
+      // genuine correction. A brand-new application that's never reached
+      // Details yet has nothing to protect, so it opens unlocked.
+      const hasPaymentData = !!app.TokenValue || !!app.PaymentMode;
+      setPaymentLocked(hasPaymentData);
       // CurrentStep is the furthest step this application actually reached
       // (persisted by saveApplicationFields on every "Next" — see
       // handleCreateAndNext/handleBankDetailsNext/handleCoApplicantNext/
@@ -993,7 +1031,6 @@ const CrmApplication: React.FC = () => {
       setCreatingBookingId(null);
     }
   };
-
   const convertedColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "App No", size: 110,
       cell: (i) => (
@@ -1177,7 +1214,7 @@ const CrmApplication: React.FC = () => {
                 210px cell) was what made this column look broken. */}
             {activeStage === "InProcess" && a.Status === "Pending" && (
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <Clock size={10} /> Pending admin approval
+                <Clock size={10} /> Submitted — booking not yet created
               </span>
             )}
             {activeStage !== "InProcess" && !canCancelApplication(a) && (
@@ -1734,9 +1771,35 @@ const CrmApplication: React.FC = () => {
                   wrote them until now. Kept here on Details (not a new step,
                   not folded into Bank/KYC) since it belongs with the final
                   review right before Submit, once Project/Unit is known and
-                  the bank picker can be project-scoped. */}
+                  the bank picker can be project-scoped.
+
+                  Locked (read-only-styled, disabled) once a figure is
+                  already saved here — same Edit-to-unlock pattern as the
+                  Project/Unit tree above, and for the same reason: this is
+                  money already confirmed with the customer, not something
+                  that should be one stray click away from being silently
+                  overwritten every time the wizard is reopened. Stays
+                  editable (Edit always available) through Draft/Pending;
+                  once Approved, canEditUnitSelection goes false and the
+                  Edit control disappears for good. */}
               <div className="rounded-lg border border-border p-3 space-y-2.5">
-                <label className="text-xs font-semibold text-foreground block">Payment Details</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-foreground block">Payment Details</label>
+                  {!!applicationId && (
+                    canEditUnitSelection ? (
+                      paymentLocked && (
+                        <button type="button" onClick={() => setPaymentLocked(false)}
+                          className="text-xs text-primary hover:underline shrink-0">
+                          Edit
+                        </button>
+                      )
+                    ) : (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
+                        <Lock size={11} /> Locked ({wizardAppStatus})
+                      </span>
+                    )
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>Token Type</label>
@@ -1746,7 +1809,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Token (Booking) Amount (₹)</label>
-                    <input type="number" value={form.TokenValue}
+                    <input type="number" value={form.TokenValue} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                       onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))}
                       placeholder={selectedPlanBookingAmount ? String(selectedPlanBookingAmount) : undefined}
                       className={inputCls} />
@@ -1761,7 +1824,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Payment Mode</label>
-                    <select value={form.PaymentMode}
+                    <select value={form.PaymentMode} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                       onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value, ChequeNo: "", ChequeDate: "", TransactionRef: "" }))}
                       className={inputCls}>
                       <option value="">Select</option>
@@ -1778,13 +1841,13 @@ const CrmApplication: React.FC = () => {
                     <>
                       <div>
                         <label className={labelCls}>Cheque Number</label>
-                        <input type="text" value={form.ChequeNo}
+                        <input type="text" value={form.ChequeNo} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                           onChange={(e) => setForm((f) => ({ ...f, ChequeNo: e.target.value }))}
                           className={inputCls} />
                       </div>
                       <div>
                         <label className={labelCls}>Cheque Date</label>
-                        <input type="date" value={form.ChequeDate}
+                        <input type="date" value={form.ChequeDate} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                           onChange={(e) => setForm((f) => ({ ...f, ChequeDate: e.target.value }))}
                           className={inputCls} />
                       </div>
@@ -1795,7 +1858,7 @@ const CrmApplication: React.FC = () => {
                       <label className={labelCls}>
                         {form.PaymentMode === "Home Loan" ? "Loan Disbursement Ref" : form.PaymentMode === "Other" ? "Reference / Details" : "Transaction Ref / UTR"}
                       </label>
-                      <input type="text" value={form.TransactionRef}
+                      <input type="text" value={form.TransactionRef} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                         onChange={(e) => setForm((f) => ({ ...f, TransactionRef: e.target.value }))}
                         className={inputCls} />
                     </div>
@@ -1804,7 +1867,8 @@ const CrmApplication: React.FC = () => {
                     <label className={labelCls}>
                       Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}{bankOptions.length > 0 ? " *" : ""}
                     </label>
-                    <select value={form.DepositBankId} onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
+                    <select value={form.DepositBankId} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
+                      onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
                       className={inputCls}>
                       <option value="">— Select company bank —</option>
                       {(bankOptions as any[]).map((b: any) => (
@@ -1821,9 +1885,10 @@ const CrmApplication: React.FC = () => {
                   rows={4} className={`${inputCls} resize-none`} />
               </div>
               <p className="text-xs text-muted-foreground">
-                This application is <span className="font-medium text-foreground">Pending</span> admin approval.
-                Only an admin/super admin can approve or reject it. Approval creates the Booking as Pending — the
+                Submitting creates the Booking immediately — there's no separate admin approval step. The
                 payment plan, booking amount and payment itself are all handled on the Booking page from there.
+                If the unit is unavailable at the moment of submit, the Application still saves as Pending and
+                you can retry booking creation from the list.
               </p>
             </div>
           )}
@@ -2077,6 +2142,31 @@ const CrmApplication: React.FC = () => {
                     </div>
                   </div>
                 </div>
+
+                {/* Level 1 Verification — actual ticking/flagging now happens on its
+                    own dedicated screen (CrmApplicationVerify.tsx), not inline in
+                    this dialog. This card is just a compact progress readout +
+                    launcher, so opening a big application to verify one field
+                    doesn't mean scrolling through the entire wizard. */}
+                {viewingAppChecklist?.items && (
+                  <div className="rounded-xl border border-border p-4 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                        <CheckCircle2 size={14} className="text-primary" /> Level 1 Verification
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {viewingAppChecklist.items.filter((it: any) => it.CheckStatus === "Checked").length}/{viewingAppChecklist.items.length} checked
+                        {viewingAppChecklist.hasOpenRecheck ? " · has item(s) flagged for recheck" : ""}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => { setViewingAppId(null); navigate(`/crm/applications/verify/${a.Id}`); }}
+                      className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                    >
+                      Open Verification
+                    </button>
+                  </div>
+                )}
 
                 {booking && (
                   <div className="rounded-xl border border-border p-4 space-y-2">

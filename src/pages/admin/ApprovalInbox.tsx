@@ -34,6 +34,7 @@ import {
   Eye,
   FileText,
   Landmark,
+  UserCheck,
 } from "lucide-react";
 import {
   Dialog,
@@ -188,6 +189,33 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/fund-transfer",
     label: "Fund Transfers",
   },
+  // Was missing entirely — same class of bug as the "contracts" fix above.
+  // Without this entry, cfg was undefined for every crm-applications row, so:
+  //   1. endpoint fell back to `/api/${item.Module}` = "/api/crm-applications"
+  //      (hyphenated, no mount there) instead of the real "/api/crm/applications"
+  //      route — every Approve/Reject/Submit click from this inbox 404'd.
+  //   2. approverRoles fell back to undefined (CRM_MODULES.has() was false),
+  //      so ApprovalActions used its own default ["admin","super_admin","dba"]
+  //      instead of CRM_APPROVER_ROLES ["admin","super_admin","marketing_head"]
+  //      that the backend actually enforces — dba saw a button that always
+  //      403'd, marketing_head didn't see a button they were allowed to use.
+  //   3. navPath was undefined, so there was no way to jump from the inbox
+  //      into the actual Application to work the Level-1 checklist at all.
+  //
+  // navPath points at the dedicated Level-1 verification screen
+  // (/crm/applications/verify/:id — see CrmApplicationVerify.tsx), NOT the
+  // main Applications list/detail page. This IS the moment someone's doing
+  // L1 verification — the inbox's whole job is to hand them straight to the
+  // focused checklist screen instead of the full edit wizard. See
+  // openInModulePath() below for how this navPath gets combined with the
+  // RecordId (a path segment here, unlike crm-agreements' "?id=" query param).
+  "crm-applications": {
+    icon: UserCheck,
+    color: "text-cyan-600 bg-cyan-600/10",
+    navPath: "/crm/applications/verify",
+    apiEndpoint: "/api/crm/applications",
+    label: "CRM Applications",
+  },
   "crm-bookings": {
     icon: Home,
     color: "text-orange-500 bg-orange-500/10",
@@ -272,7 +300,7 @@ const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
 
 // Every CRM approval module is gated to admin/super_admin/marketing_head —
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
-const CRM_MODULES = new Set(["crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
+const CRM_MODULES = new Set(["crm-applications", "crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
 const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 // Agreement Date and Sales Deed Director approval are narrower, separate
 // gates — super_admin only, "for now" per instruction, unlike the rest of
@@ -302,6 +330,15 @@ const VIEW_PARAM_MODULES = new Set([
 // preview mode, instead of dumping the user on a blank list page to hunt
 // for the record themselves.
 function openInModulePath(item: InboxItem, navPath: string): string {
+  // crm-applications' navPath already points straight at the dedicated
+  // verification screen (/crm/applications/verify), which takes the record
+  // id as a path segment (/verify/:id), not a query param — see
+  // CrmApplicationVerify.tsx's useParams<{ id: string }>().
+  if (item.Module === "crm-applications") {
+    return `${navPath}/${item.RecordId}`;
+  }
+  // crm-agreements/crm-agreement-date use "?id=" (opens the read-only detail
+  // dialog directly via CrmApplication.tsx-style searchParams.get("id") effects).
   if (item.Module === "crm-agreements" || item.Module === "crm-agreement-date") {
     return `${navPath}?id=${item.RecordId}`;
   }
@@ -564,7 +601,19 @@ const RecordPreviewModal: React.FC<{
     fetchWithAuth(`${cfg.apiEndpoint}/${item.RecordId}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((data) => {
-        if (!cancelled) setDetail(data && typeof data === "object" ? data : null);
+        // crm-applications' GET /:id (crmApplications.js) is the one endpoint
+        // in this preview that returns a wrapped shape —
+        // { application: {...}, bookings: [...], statusLog: [...] } — instead
+        // of a flat record. Every other module's GET /:id returns the record
+        // itself at the top level, which is what extractLineItems/extraFields
+        // below expect. Without unwrapping here, `typeof v !== "object"` would
+        // filter out application/bookings/statusLog wholesale and this modal
+        // would render as an empty shell for every CRM Application.
+        const record =
+          item.Module === "crm-applications" && data && typeof data === "object" && "application" in data
+            ? (data as Record<string, unknown>).application
+            : data;
+        if (!cancelled) setDetail(record && typeof record === "object" ? (record as Record<string, unknown>) : null);
       })
       .catch(() => {
         if (!cancelled) setFetchFailed(true);
@@ -777,6 +826,21 @@ const InboxRow: React.FC<{
           : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
           : undefined
         }
+        // crm-applications' own PUT /:id/approve (crmApplications.js) 400s
+        // until every Level-1 checklist item is ticked — a one-click Approve
+        // here can never succeed on its own, it can only ever produce the
+        // "Complete the Level-1 verification checklist..." error toast. So
+        // for this module only, swap that button for a direct hand-off to
+        // the checklist screen instead of offering a button that's
+        // guaranteed to fail. Reject is untouched — it has no checklist
+        // gate and stays a normal, direct action from this row. Scoped to
+        // crm-applications specifically (not all of CRM_MODULES) — no other
+        // CRM module has this per-field verification step.
+        reviewInstead={
+          item.Module === "crm-applications" && cfg?.navPath
+            ? { label: "Review & Verify", onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
+            : undefined
+        }
         onSuccess={(action) => {
           if (action === "approve" || action === "reject") {
             onOptimisticUpdate(item.RecordId, item.Module);
@@ -784,7 +848,12 @@ const InboxRow: React.FC<{
           onActionDone();
         }}
       />
-      {cfg?.navPath && (
+      {/* The separate "open in preview" arrow is redundant for crm-applications
+          while Pending — Review & Verify above already does the exact same
+          navigation. Once it leaves Pending (Approved/Rejected/Cancelled),
+          there's no Review & Verify button rendered above, so the arrow comes
+          back as the only way to open the record from this row. */}
+      {cfg?.navPath && !(item.Module === "crm-applications" && item.Status === "Pending") && (
         <button
           onClick={() => navigate(openInModulePath(item, cfg.navPath))}
           className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"

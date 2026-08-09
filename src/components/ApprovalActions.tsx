@@ -9,7 +9,7 @@ import {
 } from "./ui/dialog";
 import { Textarea } from "./ui/textarea";
 import { toast } from "sonner";
-import { CheckCircle2, SendHorizonal, XCircle, Loader2 } from "lucide-react";
+import { CheckCircle2, SendHorizonal, XCircle, Loader2, ClipboardCheck } from "lucide-react";
 
 // ─── Role check ───────────────────────────────────────────────────────────────
 // Reads role from JWT stored in localStorage under "token".
@@ -78,6 +78,16 @@ interface ApprovalActionsProps {
    *  Senior Approval vs. its separate Date Approval) and each needs its own
    *  route. Omit for the default `${endpoint}/${recordId}/${action}`. */
   actionPathSuffix?: string;
+  /** When set, replaces the normal one-click Approve button with this
+   *  instead — for a record whose /approve route is gated behind a review
+   *  step a single inbox click can never satisfy on its own (e.g. CRM
+   *  Application's Level-1 verification checklist: the backend rejects
+   *  /approve with a 400 until every checklist item is ticked, so offering
+   *  a plain Approve button here just produces a guaranteed-failing click).
+   *  Reject is unaffected by this — it stays a normal, direct action since
+   *  it has no such gate. Only ever affects rendering here; the backend is
+   *  still the real authority on whether /approve succeeds. */
+  reviewInstead?: { label: string; onClick: () => void };
 }
 
 export function ApprovalActions({
@@ -89,6 +99,7 @@ export function ApprovalActions({
   submitOnly = false,
   approverRoles = APPROVER_ROLES,
   actionPathSuffix,
+  reviewInstead,
 }: ApprovalActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -197,19 +208,30 @@ export function ApprovalActions({
       {/* Approve/Reject — visible only to approver roles when Pending */}
       {showApproveReject && (
         <>
-          <Button
-            size="sm"
-            className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-            disabled={loading !== null}
-            onClick={() => handleAction("approve")}
-          >
-            {loading === "approve" ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <CheckCircle2 className="w-3.5 h-3.5" />
-            )}
-            Approve
-          </Button>
+          {reviewInstead ? (
+            <Button
+              size="sm"
+              className="gap-1.5 bg-cyan-600 hover:bg-cyan-700 text-white"
+              onClick={reviewInstead.onClick}
+            >
+              <ClipboardCheck className="w-3.5 h-3.5" />
+              {reviewInstead.label}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+              disabled={loading !== null}
+              onClick={() => handleAction("approve")}
+            >
+              {loading === "approve" ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-3.5 h-3.5" />
+              )}
+              Approve
+            </Button>
+          )}
 
           <Button
             size="sm"
