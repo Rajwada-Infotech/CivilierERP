@@ -4325,7 +4325,7 @@ const WorkOrderMaster: React.FC = () => {
                 <button
                   onClick={handleSave}
                   disabled={saving || loadingDropdowns}
-                  className="gradient-accent flex items-center gap-1.5 font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-60 transition-opacity"
+                  className="gradient-engineering inline-flex items-center gap-1.5 font-heading font-semibold text-white text-xs px-4 py-1.5 rounded-lg disabled:opacity-60 transition-all"
                 >
                   {saving ? (
                     <>
@@ -5028,7 +5028,7 @@ const WorkOrderMaster: React.FC = () => {
               <button
                 onClick={handleSave}
                 disabled={saving || loadingDropdowns}
-                className="gradient-accent flex items-center gap-1.5 font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-60 transition-opacity"
+                className="gradient-engineering inline-flex items-center gap-1.5 font-heading font-semibold text-white text-xs px-4 py-1.5 rounded-lg disabled:opacity-60 transition-all"
               >
                 {saving ? (
                   <>

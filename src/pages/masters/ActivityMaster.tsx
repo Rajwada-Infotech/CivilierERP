@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { useModule } from "@/contexts/ModuleContext";
 import {
   MasterPage,
@@ -379,7 +379,7 @@ const ActivityMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", moduleBreadcrumb, "Activity Master"]} />
-      <AdminShell
+      <EngineeringShell
         title="Activity Master"
         subtitle="Manage activity groups and their individual activities across Engineering and Civil Work DPR modules"
         icon={Activity}
@@ -589,7 +589,7 @@ const ActivityMaster: React.FC = () => {
           )}
         </div>
       </div>
-      </AdminShell>
+      </EngineeringShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
@@ -779,7 +779,7 @@ const ActivityMaster: React.FC = () => {
             <button
               onClick={handleAddItem}
               disabled={!pickedItemId}
-              className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold bg-primary text-primary-foreground disabled:opacity-40"
+              className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-engineering text-white disabled:opacity-40 transition-all"
             >
               Add
             </button>

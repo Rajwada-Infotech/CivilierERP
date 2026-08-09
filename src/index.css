@@ -267,6 +267,13 @@
             hsl(var(--accent-2))
         );
     }
+    .gradient-engineering {
+        background: linear-gradient(135deg, #f97316, #fb923c);
+    }
+    .gradient-engineering:hover {
+        background: linear-gradient(135deg, #ea6c0a, #f97316);
+        box-shadow: 0 4px 14px rgba(249,115,22,0.35);
+    }
     .gradient-accent-hover {
         background: linear-gradient(
             135deg,
