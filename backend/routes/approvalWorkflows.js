@@ -261,6 +261,21 @@ router.get("/trail", authMiddleware, async (req, res) => {
         ORDER BY Level ASC, ActionAt ASC
       `);
 
+    // 2b. Level 0 rows separately — submission ('Pending') and rejection
+    // ('Rejected') markers. transition() (services/approvalService.js)
+    // always writes a rejection at Level 0, never at the level it actually
+    // happened, so without these a rejected record's trail would show no
+    // rejection at all — every step above would just read "Pending".
+    const level0Result = await pool
+      .request()
+      .input("TableName", sql.NVarChar(100), module)
+      .input("RecordId", sql.Int, recordId).query(`
+        SELECT Level, Role, ApproverEmail, ActionStatus, Note, ActionAt
+        FROM dbo.ApprovalAuditLog
+        WHERE TableName = @TableName AND RecordId = @RecordId AND Level = 0
+        ORDER BY ActionAt ASC
+      `);
+
     const allAuditRows = auditResult.recordset;
     const workflowType = wfRow?.type || "sequential";
 
@@ -378,16 +393,57 @@ router.get("/trail", authMiddleware, async (req, res) => {
       });
     }
 
+    // Splice in the Level 0 markers: "Submitted" origin node(s) prepended,
+    // "Rejected" terminal node(s) appended — a rejection always ends the
+    // flow at whatever level it happened, so it reads naturally as the
+    // last entry rather than fighting for a slot among the numbered levels.
+    const submittedMarkers = level0Result.recordset
+      .filter((r) => r.ActionStatus !== "Rejected")
+      .map((r) => ({
+        level: 0,
+        label: "Submitted",
+        userIds: [],
+        status: "Submitted",
+        approverEmail: r.ApproverEmail,
+        approverName: r.ApproverEmail?.split("@")[0] || null,
+        role: r.Role,
+        actionAt: r.ActionAt,
+        note: r.Note,
+        workflowType,
+        isOrigin: true,
+      }));
+    const rejectedMarkers = level0Result.recordset
+      .filter((r) => r.ActionStatus === "Rejected")
+      .map((r) => ({
+        level: 0,
+        label: "Rejected",
+        userIds: [],
+        status: "Rejected",
+        approverEmail: r.ApproverEmail,
+        approverName: r.ApproverEmail?.split("@")[0] || null,
+        role: r.Role,
+        actionAt: r.ActionAt,
+        note: r.Note,
+        workflowType,
+        isTerminal: true,
+      }));
+
+    const fullSteps = [...submittedMarkers, ...steps, ...rejectedMarkers];
+
     const currentLevel =
       steps.findIndex((s) => s.status !== "Approved") + 1 || steps.length;
     const fullyApproved =
       steps.length > 0 && steps.every((s) => s.status === "Approved");
-    const hasRejection = steps.some((s) => s.status === "Rejected");
+    const hasRejection = rejectedMarkers.length > 0 || steps.some((s) => s.status === "Rejected");
 
     res.json({
       workflowName: wfRow?.Name || null,
       workflowType: wfRow?.type || "sequential",
-      steps,
+      // Includes the Level 0 Submitted/Rejected markers alongside the
+      // numbered workflow levels — existing consumers that only care about
+      // the numbered levels (e.g. ApprovalStatusChain's compact badge)
+      // already filter to level > 0 client-side, so this is safe to widen.
+      steps: fullSteps,
       currentLevel,
       fullyApproved,
       hasRejection,

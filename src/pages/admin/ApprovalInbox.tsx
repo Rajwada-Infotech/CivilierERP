@@ -35,17 +35,12 @@ import {
   FileText,
   Landmark,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { ApprovalStatusChain, type ApprovalTable } from "@/components/ApprovalStatusChain";
+import type { ApprovalTable } from "@/components/ApprovalStatusChain";
+import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface InboxItem {
+export interface InboxItem {
   Module: string;
   ModuleLabel: string;
   RecordId: string;
@@ -73,7 +68,7 @@ interface InboxItem {
 
 // ─── Module config ────────────────────────────────────────────────────────────
 
-const MODULE_CONFIG: Record<
+export const MODULE_CONFIG: Record<
   string,
   {
     icon: React.ElementType;
@@ -255,7 +250,7 @@ const MODULE_CONFIG: Record<
 // MODULE_TABLE_MAP in backend/routes/approvalWorkflows.js). Modules not
 // listed here (journal-voucher, inter-company-transfer, received-payment,
 // crm-*) simply don't render the chain badge in the preview modal.
-const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
+export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
   "goods-receipt": "GoodsReceiptNotes",
   "purchase-orders": "PurchaseOrders",
   "work-orders": "WorkOrderHeader",
@@ -272,21 +267,21 @@ const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
 
 // Every CRM approval module is gated to admin/super_admin/marketing_head —
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
-const CRM_MODULES = new Set(["crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
-const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
+export const CRM_MODULES = new Set(["crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
+export const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 // Agreement Date and Sales Deed Director approval are narrower, separate
 // gates — super_admin only, "for now" per instruction, unlike the rest of
 // the CRM modules above. The backend enforces this independently via
 // approvalService's MODULE_APPROVER_ROLE_OVERRIDES; this only controls
 // button visibility (and which /:id/<suffix>/approve path gets hit) here.
-const DATE_APPROVER_ROLES = ["super_admin"];
-const SUB_GATE_SUFFIX: Record<string, string> = { "crm-agreement-date": "date", "crm-sales-deed-director": "director" };
-const SUB_GATE_MODULES = new Set(Object.keys(SUB_GATE_SUFFIX));
+export const DATE_APPROVER_ROLES = ["super_admin"];
+export const SUB_GATE_SUFFIX: Record<string, string> = { "crm-agreement-date": "date", "crm-sales-deed-director": "director" };
+export const SUB_GATE_MODULES = new Set(Object.keys(SUB_GATE_SUFFIX));
 
 // Modules the backend keeps deliberately role-locked (see
 // MODULE_APPROVER_ROLE_OVERRIDES in approvalService.js) — the
 // "approval-inbox" page-right fallback must not open these.
-const RESTRICTED_MODULES = new Set([
+export const RESTRICTED_MODULES = new Set([
   "journal-voucher",
   "inter-company-transfer",
   "fund-transfer",
@@ -311,7 +306,7 @@ const VIEW_PARAM_MODULES = new Set([
 // Builds the URL to open a given inbox item directly in its module's own
 // preview mode, instead of dumping the user on a blank list page to hunt
 // for the record themselves.
-function openInModulePath(item: InboxItem, navPath: string): string {
+export function openInModulePath(item: InboxItem, navPath: string): string {
   if (item.Module === "crm-agreements" || item.Module === "crm-agreement-date") {
     return `${navPath}?id=${item.RecordId}`;
   }
@@ -332,7 +327,7 @@ const fetchInbox = async (): Promise<InboxItem[]> => {
   return res.json().catch(() => []);
 };
 
-const fmtDate = (d: string | null) => {
+export const fmtDate = (d: string | null) => {
   if (!d) return "—";
   try {
     return new Date(d).toLocaleDateString("en-IN", {
@@ -345,7 +340,7 @@ const fmtDate = (d: string | null) => {
   }
 };
 
-const fmtAmount = (n: number | null) => {
+export const fmtAmount = (n: number | null) => {
   if (n == null) return "—";
   return formatINR(n, { decimals: 2 });
 };
@@ -356,7 +351,7 @@ const fmtAmount = (n: number | null) => {
  * Expense Booking list page and preview modal.  Falls back to stored Amount for
  * all other modules or non-GRN expense bookings.
  */
-function getEffectiveAmount(item: InboxItem): number | null {
+export function getEffectiveAmount(item: InboxItem): number | null {
   if (
     item.Module === "expense-booking" &&
     item.GrnTotalAmount != null &&
@@ -456,7 +451,7 @@ const ModuleTab: React.FC<{
 // header/summary grid above it, or too internal/raw to be worth a row.
 // Matched after stripDbPrefix() strips each module's column-prefix
 // convention, so "companyid" here also catches "ECompanyId".
-const PREVIEW_HIDDEN_KEYS = new Set([
+export const PREVIEW_HIDDEN_KEYS = new Set([
   "id", "_id", "attachments", "parties", "lineitems", "items", "poitems",
   "billingtermsdata", "termsandconditions", "createdat", "updatedat",
   "approvedat", "rejectedat", "docnumber", "belongsto",
@@ -475,7 +470,7 @@ const PREVIEW_HIDDEN_KEYS = new Set([
 // which defeats both the hidden-key match above and plain-English labels.
 // Strip a single leading capital letter when it's immediately followed by
 // another capital letter (i.e. it's a prefix, not the start of a real word).
-function stripDbPrefix(key: string): string {
+export function stripDbPrefix(key: string): string {
   return key.replace(/^[A-Z](?=[A-Z])/, "");
 }
 
@@ -485,7 +480,7 @@ function stripDbPrefix(key: string): string {
 // reference, not something a reviewer can read — hide it here and let its
 // resolved sibling (CompanyName, SupplierName, ProjectName, ...), which the
 // record's own GET /:id endpoint already returns, show through instead.
-function isIdField(key: string): boolean {
+export function isIdField(key: string): boolean {
   return /id$/i.test(key);
 }
 
@@ -498,7 +493,7 @@ function isIdField(key: string): boolean {
 // misses it and the escaped raw text leaks into the preview. Try parsing
 // instead: valid JSON that parses to an object/array is a blob regardless
 // of how many times it was encoded.
-function isJsonBlob(value: unknown): boolean {
+export function isJsonBlob(value: unknown): boolean {
   if (typeof value !== "string") return false;
   const s = value.trim();
   if (!s) return false;
@@ -511,7 +506,7 @@ function isJsonBlob(value: unknown): boolean {
   }
 }
 
-function labelizeKey(key: string): string {
+export function labelizeKey(key: string): string {
   return stripDbPrefix(key)
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/^./, (c) => c.toUpperCase())
@@ -524,7 +519,7 @@ function labelizeKey(key: string): string {
 // older/other modules' naming). Rendered as a real per-item table below
 // instead of the generic "N items" collapse formatPreviewValue gives any
 // other array, so a reviewer approving a PO actually sees what's on it.
-function extractLineItems(detail: Record<string, unknown> | null): Record<string, unknown>[] {
+export function extractLineItems(detail: Record<string, unknown> | null): Record<string, unknown>[] {
   if (!detail) return [];
   for (const key of ["LineItems", "POItems", "Items"]) {
     const v = detail[key];
@@ -533,7 +528,7 @@ function extractLineItems(detail: Record<string, unknown> | null): Record<string
   return [];
 }
 
-function formatPreviewValue(value: unknown): string {
+export function formatPreviewValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number") return value.toLocaleString("en-IN");
@@ -549,206 +544,6 @@ function formatPreviewValue(value: unknown): string {
   }
   return str;
 }
-
-const RecordPreviewModal: React.FC<{
-  item: InboxItem;
-  open: boolean;
-  onClose: () => void;
-}> = ({ item, open, onClose }) => {
-  const navigate = useNavigate();
-  const cfg = MODULE_CONFIG[item.Module];
-  const Icon = cfg?.icon ?? ClipboardCheck;
-  const approvalTable = MODULE_APPROVAL_TABLE[item.Module];
-
-  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [fetchFailed, setFetchFailed] = useState(false);
-
-  React.useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setDetail(null);
-    setFetchFailed(false);
-    if (!cfg?.apiEndpoint) return;
-    setLoading(true);
-    fetchWithAuth(`${cfg.apiEndpoint}/${item.RecordId}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((data) => {
-        if (!cancelled) setDetail(data && typeof data === "object" ? data : null);
-      })
-      .catch(() => {
-        if (!cancelled) setFetchFailed(true);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, item.Module, item.RecordId, cfg?.apiEndpoint]);
-
-  const effectiveAmount = getEffectiveAmount(item);
-  const party = item.SupplierName || item.ContractorName || item.CreatedBy || "—";
-
-  const lineItems = extractLineItems(detail);
-
-  const extraFields = detail
-    ? Object.entries(detail).filter(
-        ([k, v]) =>
-          !PREVIEW_HIDDEN_KEYS.has(stripDbPrefix(k).toLowerCase()) &&
-          !isIdField(k) &&
-          !isJsonBlob(v) &&
-          !(Array.isArray(v) && v.length === 0) &&
-          typeof v !== "object",
-      )
-    : [];
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-[calc(100vw-2rem)] sm:w-full sm:max-w-lg max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <div className="flex items-start sm:items-center gap-3 flex-wrap pr-6">
-            <div className={`p-2 rounded-lg shrink-0 ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
-              <Icon size={16} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <DialogTitle className="text-sm font-semibold break-words">
-                {item.ModuleLabel}
-              </DialogTitle>
-              <p className="text-[11px] text-muted-foreground font-mono truncate">
-                {item.Reference || `#${item.RecordId}`}
-              </p>
-            </div>
-            <StatusBadge status={item.Status} />
-          </div>
-        </DialogHeader>
-
-        {approvalTable && (
-          <div className="flex items-center gap-2 -mt-1">
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-              Approval chain
-            </span>
-            <ApprovalStatusChain table={approvalTable} recordId={item.RecordId} />
-          </div>
-        )}
-
-        {/* Summary grid — always available from the inbox item itself */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 rounded-xl border border-border bg-muted/20 p-3">
-          {[
-            ["Date", fmtDate(item.RecordDate)],
-            ["Party", party],
-            ["Amount", fmtAmount(effectiveAmount)],
-            ["Created By", item.CreatedBy || "—"],
-            ["Approved By", item.ApprovedBy || "—"],
-            ["Rejected By", item.RejectedBy || "—"],
-          ].map(([label, value]) => (
-            <div key={label} className="min-w-0">
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/70">
-                {label}
-              </p>
-              <p className="text-xs text-foreground break-words">{value}</p>
-            </div>
-          ))}
-        </div>
-
-        {item.RejectionNote && (
-          <div className="rounded-lg border border-red-400/20 bg-red-500/5 px-3 py-2">
-            <p className="text-[9px] font-semibold uppercase tracking-widest text-red-500/80 mb-0.5">
-              Rejection Note
-            </p>
-            <p className="text-xs text-foreground">{item.RejectionNote}</p>
-          </div>
-        )}
-
-        {/* Line items — shown as separate rows (qty/rate/amount per item),
-            not folded into the single cumulative Amount above, so a
-            reviewer can actually check what's being approved. */}
-        {lineItems.length > 0 && (
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-              <Package size={10} className="text-emerald-500" /> Items ({lineItems.length})
-            </p>
-            <div className="rounded-xl border border-border overflow-x-auto">
-              <table className="w-full text-xs" style={{ tableLayout: "auto" }}>
-                <thead className="bg-muted/40 border-b border-border">
-                  <tr>
-                    <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">Item</th>
-                    <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
-                    <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left hidden sm:table-cell">Unit</th>
-                    <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">Rate</th>
-                    <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {lineItems.map((li, i) => {
-                    const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
-                    const qty = Number(li.Quantity ?? li.quantity ?? 0);
-                    const unit = (li.UomName ?? li.UOMSymbol ?? li.unit ?? "—") as string;
-                    const rate = Number(li.Rate ?? li.rate ?? 0);
-                    const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
-                    return (
-                      <tr key={i} className="hover:bg-muted/20 transition-colors">
-                        <td className="px-3 py-2 font-medium">{name}</td>
-                        <td className="px-3 py-2 text-right">{qty.toLocaleString("en-IN")}</td>
-                        <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">{unit}</td>
-                        <td className="px-3 py-2 text-right hidden sm:table-cell">{formatINR(rate)}</td>
-                        <td className="px-3 py-2 text-right font-medium">{formatINR(amount)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Full record — everything the record's own detail endpoint returns */}
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
-            Full Record
-          </p>
-          {loading ? (
-            <div className="space-y-1.5">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-3 w-full rounded bg-muted animate-pulse" />
-              ))}
-            </div>
-          ) : fetchFailed || extraFields.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              {fetchFailed
-                ? "Couldn't load the full record — showing summary only."
-                : "No additional fields."}
-            </p>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 rounded-xl border border-border p-3">
-              {extraFields.map(([k, v]) => (
-                <div key={k} className="min-w-0">
-                  <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/70 truncate">
-                    {labelizeKey(k)}
-                  </p>
-                  <p className="text-xs text-foreground break-words">{formatPreviewValue(v)}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {cfg?.navPath && (
-          <button
-            onClick={() => {
-              onClose();
-              navigate(openInModulePath(item, cfg.navPath));
-            }}
-            className="flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors text-center"
-          >
-            <ArrowUpRight size={13} className="shrink-0" />
-            <span className="break-words">Open in {item.ModuleLabel}</span>
-          </button>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-};
 
 // ─── Inbox row ────────────────────────────────────────────────────────────────
 
@@ -766,14 +561,14 @@ const InboxRow: React.FC<{
   const party =
     item.SupplierName || item.ContractorName || item.CreatedBy || "—";
   const effectiveAmount = getEffectiveAmount(item);
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const actions = (
     <div className="flex items-center gap-2 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
       <button
-        onClick={() => setPreviewOpen(true)}
+        onClick={() => setReviewOpen(true)}
         className="p-1.5 rounded-md text-sky-500 hover:bg-sky-500/10 transition-colors"
-        title="Preview details"
+        title="Review & Approve"
       >
         <Eye size={14} />
       </button>
@@ -809,11 +604,15 @@ const InboxRow: React.FC<{
 
   return (
     <div>
-      {previewOpen && (
-        <RecordPreviewModal
+      {reviewOpen && (
+        <ApprovalReviewPanel
           item={item}
-          open={previewOpen}
-          onClose={() => setPreviewOpen(false)}
+          open={reviewOpen}
+          onClose={() => setReviewOpen(false)}
+          onActionDone={() => {
+            onOptimisticUpdate(item.RecordId, item.Module);
+            onActionDone();
+          }}
         />
       )}
       {/* ── Mobile card (< md) ─────────────────────────────────────────── */}
