@@ -60,12 +60,14 @@ import {
   SlidersHorizontal,
   ShoppingCart,
   AlertTriangle,
+  TrendingUp,
+  Landmark,
 } from "lucide-react";
 import { toast } from "sonner";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { ExportMenu } from "@/components/ExportMenu";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { Field } from "./ExpenseBooking/FormPrimitives";
+import { Field, PriceBreakdownPanel } from "./ExpenseBooking/FormPrimitives";
 import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
 import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
@@ -1439,6 +1441,43 @@ export default function MaterialExpenseBooking() {
     }
   }, [filterPOId, filteredAllPOs]);
 
+  // ── Live summary sidebar (form view) ────────────────────────────────────────
+  // Mirrors the exact rate-resolution AmountGstSection uses internally for its
+  // (now hidden — see showBreakdown={false} below) inline breakdown, so the
+  // sidebar's PriceBreakdownPanel always agrees with what Amount & GST computed.
+  const sidebarCgstRate = isGRN
+    ? gstBreakdown?.totals.totalBase
+      ? Math.round((gstBreakdown.totals.totalCGST / gstBreakdown.totals.totalBase) * 100 * 100) / 100
+      : 0
+    : form.cgstRate;
+  const sidebarSgstRate = isGRN
+    ? gstBreakdown?.totals.totalBase
+      ? Math.round((gstBreakdown.totals.totalSGST / gstBreakdown.totals.totalBase) * 100 * 100) / 100
+      : 0
+    : form.sgstRate;
+  const sidebarIgstRate = isGRN ? 0 : isDirect ? (gstMode === "igst" ? (form.igstRate ?? 0) : 0) : (form.igstRate ?? 0);
+  const sidebarHasDiscount =
+    form.billingTerms && form.billingTerms.length > 0
+      ? form.billingTerms.some((d) => d.applicable)
+      : form.discount.applicable;
+
+  // Save-row eligibility — computed once so both the sticky sidebar's quick
+  // Save button and the full footer bar below stay in lockstep.
+  const ebCanSave = !!(
+    form.bookingReference.trim() &&
+    form.bookingDate &&
+    form.companyId &&
+    (selectedDoc?.kind === "GRN" || (form.basicAmount && form.basicAmount > 0))
+  );
+  const ebIsDirty = !!(
+    form.companyId ||
+    form.supplier ||
+    form.invoiceReference ||
+    form.basicAmount ||
+    form.poId ||
+    form.bookingReference.trim()
+  );
+
   // ── Import/Export handlers ────────────────────────────────────────────────────
   const handleDownloadTemplate = () => {
     exportToCsv([], INVOICE_TEMPLATE_COLUMNS, "invoice-template");
@@ -1541,7 +1580,10 @@ export default function MaterialExpenseBooking() {
               </div>
             </div>
 
-            <CardContent className="pt-7 space-y-8 px-5 sm:px-7">
+            <CardContent className="p-0">
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-7 p-5 sm:p-7">
+            {/* ── Left column: form fields ── */}
+            <div className="min-w-0 space-y-8">
               {/* ── 0. Booking Information ─────────────────────────────── */}
               <div className="space-y-5">
                 <SectionHeader label="Booking Information" />
@@ -1967,7 +2009,12 @@ export default function MaterialExpenseBooking() {
 
                 {/* ── Sub-section: Dates & Payment ── */}
                 <div className="rounded-xl border border-border/60 bg-muted/[0.06] p-5 space-y-4">
-                  <p className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground/70">Dates &amp; Payment</p>
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-md bg-violet-500/10 flex items-center justify-center shrink-0">
+                      <CalendarDays size={12} className="text-violet-500" />
+                    </div>
+                    <p className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Dates &amp; Payment</p>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <Field label="Booking Date" required>
                       <DateField value={form.bookingDate} onChange={(val) => set("bookingDate", val)} />
@@ -2009,7 +2056,12 @@ export default function MaterialExpenseBooking() {
 
                 {/* ── Sub-section: Vendor Invoice ── */}
                 <div className="rounded-xl border border-border/60 bg-muted/[0.06] p-5 space-y-4">
-                  <p className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground/70">Vendor Invoice</p>
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-md bg-amber-500/10 flex items-center justify-center shrink-0">
+                      <Receipt size={12} className="text-amber-500" />
+                    </div>
+                    <p className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Vendor Invoice</p>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Field label="Vendor Invoice No">
                       <Input value={form.vendorInvoiceNo ?? ""} onChange={(e) => set("vendorInvoiceNo", e.target.value)} placeholder="Supplier invoice number" />
@@ -2022,7 +2074,12 @@ export default function MaterialExpenseBooking() {
 
                 {/* ── Sub-section: Accounting ── */}
                 <div className="rounded-xl border border-border/60 bg-muted/[0.06] p-5 space-y-4">
-                  <p className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground/70">Accounting</p>
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-md bg-teal-500/10 flex items-center justify-center shrink-0">
+                      <Landmark size={12} className="text-teal-500" />
+                    </div>
+                    <p className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">Accounting</p>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Field
                       label="Cost Center"
@@ -2146,6 +2203,7 @@ export default function MaterialExpenseBooking() {
                     set("igstRate", 0);
                   }
                 }}
+                showBreakdown={false}
               />
 
               {/* ── GRN Items Summary ──────────────────────────────────── */}
@@ -2311,72 +2369,147 @@ export default function MaterialExpenseBooking() {
                   className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 resize-none text-foreground placeholder:text-muted-foreground"
                 />
               </div>
+            </div>{/* end left column */}
 
-              {/* Save row */}
-              {(() => {
-                const ebCanSave = !!(
-                  form.bookingReference.trim() &&
-                  form.bookingDate &&
-                  form.companyId &&
-                  (selectedDoc?.kind === "GRN" ||
-                    (form.basicAmount && form.basicAmount > 0))
-                );
-                const ebIsDirty = !!(
-                  form.companyId ||
-                  form.supplier ||
-                  form.invoiceReference ||
-                  form.basicAmount ||
-                  form.poId ||
-                  form.bookingReference.trim()
-                );
-                return (
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-                    <p className="text-[11px] text-muted-foreground hidden sm:block">
-                      {saved ? (
-                        <span className="text-emerald-500 font-medium">
-                          Saved!
-                        </span>
-                      ) : ebCanSave ? (
-                        <span className="text-emerald-500 font-medium">
-                          Ready to save
-                        </span>
-                      ) : (
-                        "Fill in the required fields to save"
-                      )}
-                    </p>
-                    <div className="flex items-center gap-2 sm:ml-auto">
-                      <button
-                        type="button"
-                        onClick={resetForm}
-                        disabled={saving || saved || !ebIsDirty}
-                        className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                      >
-                        <RotateCcw size={12} /> Reset
-                      </button>
-                      <button
-                        onClick={handleSave}
-                        disabled={saving || saved || !ebCanSave}
-                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
-                      >
-                        {saved ? (
-                          <Check size={14} />
-                        ) : saving ? (
-                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        ) : (
-                          <Save size={14} />
-                        )}
-                        {saved
-                          ? "Saved!"
-                          : saving
-                            ? "Saving…"
-                            : isEditing
-                              ? "Update Booking"
-                              : "Save Invoice"}
-                      </button>
+            {/* ── Right column: sticky live summary ── */}
+            <aside className="lg:sticky lg:top-4 lg:self-start space-y-4">
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
+                {/* Identity strip */}
+                <div className="relative overflow-hidden px-4 py-3.5 bg-indigo-500/[0.06] border-b border-indigo-500/20">
+                  <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-indigo-500 to-transparent" />
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-indigo-500/[0.18] border border-indigo-500/30 shrink-0">
+                      <Receipt size={13} className="text-indigo-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground">Booking Ref</p>
+                      <p className="font-mono text-xs font-semibold text-foreground truncate">
+                        {form.bookingReference || "Not yet assigned"}
+                      </p>
                     </div>
                   </div>
-                );
-              })()}
+                  {form.supplier && (
+                    <p className="text-[11px] text-muted-foreground mt-2 truncate" title={form.supplier}>
+                      {vendorLabel}: <span className="text-foreground font-medium">{form.supplier}</span>
+                    </p>
+                  )}
+                </div>
+
+                {/* Live totals */}
+                <div className="p-4 space-y-3">
+                  <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                    <TrendingUp size={11} className="text-emerald-500" /> Live Summary
+                  </p>
+                  {form.basicAmount > 0 ? (
+                    <>
+                      <PriceBreakdownPanel
+                        bd={bd}
+                        cgstRate={sidebarCgstRate}
+                        sgstRate={sidebarSgstRate}
+                        igstRate={sidebarIgstRate}
+                        hasDiscount={sidebarHasDiscount}
+                      />
+                      <div className="flex items-center justify-between rounded-xl bg-emerald-500/[0.08] border border-emerald-500/20 px-4 py-3">
+                        <span className="text-xs font-heading font-semibold text-foreground">
+                          Net Payable
+                        </span>
+                        <span className="font-mono text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                          ₹{fmt(bd.netAmount)}
+                        </span>
+                      </div>
+                      {form.paymentType === "partial" && (form.partialAmount ?? 0) > 0 && (
+                        <div className="flex items-center justify-between rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px]">
+                          <span className="text-muted-foreground">EMI balance</span>
+                          <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
+                            ₹{fmt(emiBaseAmount)}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground py-4 text-center">
+                      Enter a Basic Amount to see the live total.
+                    </p>
+                  )}
+                </div>
+
+                {/* Quick actions — desktop convenience; the full footer bar
+                    below still carries the same controls for mobile, where
+                    this sidebar stacks below the form instead of beside it. */}
+                <div className="hidden lg:flex items-center gap-2 px-4 py-3 border-t border-border bg-muted/20">
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    disabled={saving || saved || !ebIsDirty}
+                    className="flex-1 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Reset
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    disabled={saving || saved || !ebCanSave}
+                    className="flex-1 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                  >
+                    {saved ? (
+                      <Check size={13} />
+                    ) : saving ? (
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <Save size={13} />
+                    )}
+                    {saved ? "Saved!" : saving ? "Saving…" : isEditing ? "Update" : "Save"}
+                  </button>
+                </div>
+              </div>
+            </aside>
+            </div>{/* end grid */}
+
+            {/* Save row */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
+              <p className="text-[11px] text-muted-foreground hidden sm:block">
+                {saved ? (
+                  <span className="text-emerald-500 font-medium">
+                    Saved!
+                  </span>
+                ) : ebCanSave ? (
+                  <span className="text-emerald-500 font-medium">
+                    Ready to save
+                  </span>
+                ) : (
+                  "Fill in the required fields to save"
+                )}
+              </p>
+              <div className="flex items-center gap-2 sm:ml-auto">
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  disabled={saving || saved || !ebIsDirty}
+                  className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <RotateCcw size={12} /> Reset
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || saved || !ebCanSave}
+                  className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                >
+                  {saved ? (
+                    <Check size={14} />
+                  ) : saving ? (
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Save size={14} />
+                  )}
+                  {saved
+                    ? "Saved!"
+                    : saving
+                      ? "Saving…"
+                      : isEditing
+                        ? "Update Booking"
+                        : "Save Invoice"}
+                </button>
+              </div>
+            </div>
             </CardContent>
           </Card>
         )}
