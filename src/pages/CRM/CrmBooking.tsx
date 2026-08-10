@@ -41,6 +41,13 @@ const statusColor: Record<string, string> = {
   Cancelled: "text-muted-foreground bg-muted/50 border-border",
 };
 
+const workflowStageLabel: Record<string, string> = {
+  Review: "Application Review",
+  MarketingHeadApproval: "Marketing Head Approval",
+  DirectorApproval: "Director Approval",
+  Confirmed: "Confirmed",
+};
+
 // Manual/direct Booking creation — brought back at the user's explicit
 // request after the auto-create-only design proved too rigid in practice
 // (e.g. an Application approved with no PreferredUnitId never gets a
@@ -145,6 +152,7 @@ const CrmBooking: React.FC = () => {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
   const appFilter = sp.get("applicationId") || "";
+  const viewFilter = sp.get("view") || "";
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -168,10 +176,15 @@ const CrmBooking: React.FC = () => {
   // carries applicationId (same class of bug already fixed on the Bank &
   // Nominee page's own deep link).
   React.useEffect(() => {
+    if (viewFilter && !deepLinkOpened) {
+      setViewingBookingId(parseInt(viewFilter, 10));
+      setDeepLinkOpened(true);
+      return;
+    }
     if (!appFilter || deepLinkOpened) return;
     const row = (bookings as any[]).find((b: any) => String(b.ApplicationId) === appFilter);
     if (row) { setViewingBookingId(row.Id); setDeepLinkOpened(true); }
-  }, [appFilter, bookings, deepLinkOpened]);
+  }, [appFilter, viewFilter, bookings, deepLinkOpened]);
   const { data: apps = [] } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 5 * 60_000 });
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
@@ -445,8 +458,10 @@ const CrmBooking: React.FC = () => {
               onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })}
             />
             {b.Status === "Pending" && (
-              b.UnitReviewConfirmed && b.PlanReviewConfirmed ? (
-                <span className="text-xs text-muted-foreground">Pending admin approval</span>
+              b.WorkflowStage && b.WorkflowStage !== "Review" ? (
+                <span className="text-xs text-muted-foreground">Pending {workflowStageLabel[b.WorkflowStage] || "Approval"}</span>
+              ) : b.UnitReviewConfirmed && b.PlanReviewConfirmed ? (
+                <span className="text-xs text-muted-foreground">Ready for Marketing Head Approval</span>
               ) : (
                 <button onClick={() => setViewingBookingId(b.Id)}
                   className="text-xs px-2 py-1 rounded-md border text-amber-600 border-amber-200 bg-amber-50 font-medium flex items-center gap-1">
@@ -524,7 +539,7 @@ const CrmBooking: React.FC = () => {
   return (
     <SalesAutoShell
       title="CRM — Applications and Bookings"
-      subtitle="Bookings auto-create on Application approval but stay Pending until staff confirm the review checklist and an admin approves"
+      subtitle="Applications become pending bookings, then move through review, Marketing Head approval, and Director approval"
       action={
         canEdit ? (
           <button onClick={() => { setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); setDialogOpen(true); }}

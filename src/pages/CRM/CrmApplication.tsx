@@ -31,10 +31,9 @@ const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"
 
 const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled", "Expired"];
 const DOC_TYPES = ["IdentityProof", "AddressProof", "PhotoID", "IncomeProof", "Other"];
-// NOTE: this file used to have its own CRM_APPROVER_ROLES + getUserRoleFromToken()
-// here for the inline Level-1 checklist that used to live in this dialog. That
-// checklist now lives on its own screen (CrmApplicationVerify.tsx), which has
-// its own copy of the same two — nothing here needs them anymore.
+// Applications no longer have their own verification checklist or approval
+// cycle at all — that logic merged into the Booking's own "Review" workflow
+// stage (see CrmBookingDetail.tsx / crmBookingStageService.js).
 
 const statusColor: Record<string, string> = {
   Draft:     "text-muted-foreground bg-muted/50 border-border",
@@ -329,22 +328,6 @@ const CrmApplication: React.FC = () => {
     queryFn: async () => {
       const r = await fetchWithAuth(`${EXTRA_CHARGE_API}/application/${viewingAppId}`);
       return r.ok ? r.json() : [];
-    },
-    enabled: !!viewingAppId,
-  });
-  // Level-1 verification checklist — read-only summary only. Actually
-  // ticking/flagging items now happens on its own dedicated screen
-  // (CrmApplicationVerify.tsx, at /crm/applications/verify/:id) instead of
-  // inline in this dialog — this query only powers the compact progress
-  // badge + "Open Verification" launcher below (see the "Level 1
-  // Verification" card further down). Still fetched whenever the detail
-  // dialog is open (not just while Pending) so the badge stays visible as a
-  // record even after the application moves on to Approved.
-  const { data: viewingAppChecklist } = useQuery({
-    queryKey: ["crm-app-checklist", viewingAppId],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${API}/${viewingAppId}/checklist`);
-      return r.ok ? r.json() : null;
     },
     enabled: !!viewingAppId,
   });
@@ -2196,30 +2179,10 @@ const CrmApplication: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Level 1 Verification — actual ticking/flagging now happens on its
-                    own dedicated screen (CrmApplicationVerify.tsx), not inline in
-                    this dialog. This card is just a compact progress readout +
-                    launcher, so opening a big application to verify one field
-                    doesn't mean scrolling through the entire wizard. */}
-                {viewingAppChecklist?.items && (
-                  <div className="rounded-xl border border-border p-4 flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                        <CheckCircle2 size={14} className="text-primary" /> Level 1 Verification
-                      </h3>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {viewingAppChecklist.items.filter((it: any) => it.CheckStatus === "Checked").length}/{viewingAppChecklist.items.length} checked
-                        {viewingAppChecklist.hasOpenRecheck ? " · has item(s) flagged for recheck" : ""}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => { setViewingAppId(null); navigate(`/crm/applications/verify/${a.Id}`); }}
-                      className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                    >
-                      Open Verification
-                    </button>
-                  </div>
-                )}
+                {/* No separate Application-level verification anymore — the
+                    Application's own checklist merged into its Booking's
+                    "Review" workflow stage (see CrmBookingDetail.tsx). The
+                    "Linked Booking" card below is where that now lives. */}
 
                 {booking && (
                   <div className="rounded-xl border border-border p-4 space-y-2">

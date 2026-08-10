@@ -189,41 +189,19 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/fund-transfer",
     label: "Fund Transfers",
   },
-  // Was missing entirely — same class of bug as the "contracts" fix above.
-  // Without this entry, cfg was undefined for every crm-applications row, so:
-  //   1. endpoint fell back to `/api/${item.Module}` = "/api/crm-applications"
-  //      (hyphenated, no mount there) instead of the real "/api/crm/applications"
-  //      route — every Approve/Reject/Submit click from this inbox 404'd.
-  //   2. approverRoles fell back to undefined (CRM_MODULES.has() was false),
-  //      so ApprovalActions used its own default ["admin","super_admin","dba"]
-  //      instead of CRM_APPROVER_ROLES ["admin","super_admin","marketing_head"]
-  //      that the backend actually enforces — dba saw a button that always
-  //      403'd, marketing_head didn't see a button they were allowed to use.
-  //   3. navPath was undefined, so there was no way to jump from the inbox
-  //      into the actual Application to work the Level-1 checklist at all.
+  // crm-applications deliberately has no entry here anymore — Applications
+  // no longer have their own approve/reject cycle (see approvalInbox.js's
+  // aggregator query, and crmApplications.js), so the backend never emits a
+  // crm-applications row for this inbox to render in the first place.
   //
-  // navPath points at the dedicated Level-1 verification screen
-  // (/crm/applications/verify/:id — see CrmApplicationVerify.tsx), NOT the
-  // main Applications list/detail page. This IS the moment someone's doing
-  // L1 verification — the inbox's whole job is to hand them straight to the
-  // focused checklist screen instead of the full edit wizard. See
-  // openInModulePath() below for how this navPath gets combined with the
-  // RecordId (a path segment here, unlike crm-agreements' "?id=" query param).
-  "crm-applications": {
-    icon: UserCheck,
-    color: "text-cyan-600 bg-cyan-600/10",
-    navPath: "/crm/applications/verify",
-    apiEndpoint: "/api/crm/applications",
-    label: "CRM Applications",
-  },
-  // navPath points at the dedicated Level-2 verification screen
-  // (/crm/bookings/verify/:id — see CrmBookingVerify.tsx), same reasoning
-  // as crm-applications above: this IS the moment someone's doing L2
-  // verification, so hand them straight to the focused checklist screen.
+  // crm-bookings' navPath opens the real Booking detail dialog (CrmBooking.tsx
+  // /CrmBookingDetail.tsx) via its existing "?view=" deep link — the merged
+  // Data Review checklist + Marketing Head/Director approve-reject UI all
+  // live there now, not on a separate dedicated screen.
   "crm-bookings": {
     icon: Home,
     color: "text-orange-500 bg-orange-500/10",
-    navPath: "/crm/bookings/verify",
+    navPath: "/crm/bookings",
     apiEndpoint: "/api/crm/bookings",
     label: "CRM Bookings",
   },
@@ -304,8 +282,9 @@ const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
 
 // Every CRM approval module is gated to admin/super_admin/marketing_head —
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
-const CRM_MODULES = new Set(["crm-applications", "crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
+const CRM_MODULES = new Set(["crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
 const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
+const CRM_BOOKING_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "director"];
 // Agreement Date and Sales Deed Director approval are narrower, separate
 // gates — super_admin only, "for now" per instruction, unlike the rest of
 // the CRM modules above. The backend enforces this independently via
@@ -318,14 +297,11 @@ const SUB_GATE_MODULES = new Set(Object.keys(SUB_GATE_SUFFIX));
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
 
 // Modules whose one-click Approve is either guaranteed to fail without a
-// review step first (crm-applications/crm-bookings' checklist gates) or
-// whose approved amount is only ever editable before approval
-// (crm-brokerage) — see the reviewInstead comment below for the full
-// reasoning per module. Label differs because "verify" fits a checklist,
-// "approve" fits reviewing/adjusting an amount before the same click.
+// review step first (crm-bookings' Data Review checklist gate) or whose
+// approved amount is only ever editable before approval (crm-brokerage) —
+// see the reviewInstead comment below for the full reasoning per module.
 const REVIEW_INSTEAD_LABEL: Record<string, string> = {
-  "crm-applications": "Review & Verify",
-  "crm-bookings": "Review & Verify",
+  "crm-bookings": "Open Booking",
   "crm-brokerage": "Review & Approve",
 };
 
@@ -347,13 +323,12 @@ const VIEW_PARAM_MODULES = new Set([
 // preview mode, instead of dumping the user on a blank list page to hunt
 // for the record themselves.
 function openInModulePath(item: InboxItem, navPath: string): string {
-  // crm-applications/crm-bookings' navPath already points straight at their
-  // own dedicated verification screens (/crm/applications/verify,
-  // /crm/bookings/verify), which take the record id as a path segment
-  // (/verify/:id), not a query param — see CrmApplicationVerify.tsx /
-  // CrmBookingVerify.tsx's useParams<{ id: string }>().
-  if (item.Module === "crm-applications" || item.Module === "crm-bookings") {
-    return `${navPath}/${item.RecordId}`;
+  // crm-bookings' navPath (/crm/bookings) opens the real Booking detail
+  // dialog via its existing "?view=" deep link — same convention
+  // VIEW_PARAM_MODULES below uses, just listed explicitly here since it's
+  // CRM-specific rather than shared with the generic modules.
+  if (item.Module === "crm-bookings") {
+    return `${navPath}?view=${item.RecordId}`;
   }
   // crm-agreements/crm-agreement-date use "?id=" (opens the read-only detail
   // dialog directly via CrmApplication.tsx-style searchParams.get("id") effects).
@@ -841,6 +816,7 @@ const InboxRow: React.FC<{
         actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
         approverRoles={
           SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
+          : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
           : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
           : undefined
         }

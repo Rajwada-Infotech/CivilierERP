@@ -350,8 +350,6 @@ const CrmApplication       = lazy(() => import("./pages/CRM/CrmApplication"));
 // Dedicated Level-1 verification screen — see ApprovalInbox.tsx's
 // "crm-applications" navPath and CrmApplication.tsx's "Open Verification"
 // button, both of which now link here instead of the old inline checklist.
-const CrmApplicationVerify = lazy(() => import("./pages/CRM/CrmApplicationVerify"));
-const CrmBookingVerify = lazy(() => import("./pages/CRM/CrmBookingVerify"));
 const CrmBooking           = lazy(() => import("./pages/CRM/CrmBooking"));
 const CrmWelcomeCall       = lazy(() => import("./pages/CRM/CrmWelcomeCall"));
 const CrmAgreement         = lazy(() => import("./pages/CRM/CrmAgreement"));
@@ -1874,8 +1872,6 @@ function AppRoutes() {
       {/* ── CRM Module ─────────────────────────────────────────────────────────── */}
       <Route path="/crm/customers"       element={<ProtectedRoute pageKey="crm-customers"><CrmCustomers /></ProtectedRoute>} />
       <Route path="/crm/applications"    element={<ProtectedRoute pageKey="crm-applications"><CrmApplication /></ProtectedRoute>} />
-      <Route path="/crm/applications/verify/:id" element={<ProtectedRoute pageKey="crm-applications"><CrmApplicationVerify /></ProtectedRoute>} />
-      <Route path="/crm/bookings/verify/:id" element={<ProtectedRoute pageKey="crm-bookings"><CrmBookingVerify /></ProtectedRoute>} />
       <Route path="/crm/bookings"        element={<ProtectedRoute pageKey="crm-bookings"><CrmBooking /></ProtectedRoute>} />
       <Route path="/crm/welcome-calls"   element={<ProtectedRoute pageKey="crm-welcome-calls"><CrmWelcomeCall /></ProtectedRoute>} />
       <Route path="/crm/agreements"      element={<ProtectedRoute pageKey="crm-agreements"><CrmAgreement /></ProtectedRoute>} />

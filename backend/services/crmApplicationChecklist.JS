@@ -46,28 +46,12 @@ const CHECKLIST_ITEMS = [
   { key: "Documents", label: "Required KYC / ID / Address / Income-proof documents are uploaded and legible" },
 ];
 
-// CHECKLIST_ITEMS_L2 is the Level-2 checklist — a second, independent
-// verifier re-checks the BOOKING this application produced: is it a
-// genuine sale, did the money actually land, does the payment schedule and
-// everything else meet company policy. Stored in the exact same table as
-// Level 1 (dbo.CrmApplicationVerificationChecklist, keyed by ApplicationId
-// + Level — see migration 302's own comment anticipating this), since a
-// Booking is always 1:1 with the Application it came from
-// (createCrmBookingRecord enforces this). Call site: crmBookings.js's own
-// GET/PUT /:id/checklist/* routes, gating PUT /:id/approve the same way
-// Level 1 gates crmApplications.js's PUT /:id/approve.
-const CHECKLIST_ITEMS_L2 = [
-  { key: "BookingGenuine", label: "Booking's unit, rate and total/grand value genuinely match the approved Application — no unexplained change" },
-  { key: "BookingAmountReceived", label: "Booking Amount / Milestone #1 payment is actually received and reconciled, not just marked paid" },
-  { key: "PaymentScheduleCompliance", label: "Payment plan and milestone schedule are correctly generated and comply with company norms" },
-  { key: "ParkingExtraCharges", label: "Parking and Extra Charges (if any) are correctly recorded and priced" },
-  { key: "KycDocumentsComplete", label: "Customer KYC and required documents are complete and consistent, ready for the Welcome Call stage" },
-  { key: "BrokerageTerms", label: "Broker / commission terms are correctly recorded and within policy (if applicable)" },
-  { key: "CompanyRequirements", label: "Booking fulfills all other company requirements (minimum token %, discount/approval limits, etc.)" },
-];
-
-function itemsForLevel(level) {
-  return level === 2 ? CHECKLIST_ITEMS_L2 : CHECKLIST_ITEMS;
+// There is no longer a separate Level-2 checklist — the two-level
+// Marketing Head -> Director approval (crmBookingStageService.js) replaced
+// it. CHECKLIST_ITEMS above is the only checklist now, applied at Level=1
+// as the content of the Booking's own "Review" stage (see crmBookings.js).
+function itemsForLevel() {
+  return CHECKLIST_ITEMS;
 }
 
 const { sql } = require("../db");
@@ -227,4 +211,4 @@ async function resubmitItem(pool, applicationId, itemKey, { actor, level = 1 } =
   return result.recordset[0];
 }
 
-module.exports = { CHECKLIST_ITEMS, CHECKLIST_ITEMS_L2, itemsForLevel, ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem };
+module.exports = { CHECKLIST_ITEMS, itemsForLevel, ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem };

@@ -556,21 +556,21 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     throw new CrmCreationError(`This application already has a booking (${existingForApp.recordset[0].BookingNo}) — an application can only have one`, 409);
   }
 
-  // The Application must have actually cleared its own verification gate
-  // (Status='Approved', set only via approvalService's crm-applications
-  // transition — see crmApplications.js PUT /:id/approve) before a Booking
-  // can exist for it. This used to just exclude the dead states (Rejected/
-  // Cancelled/Expired) and let a still-Pending, unverified Application
-  // through, back when Booking creation itself was what force-advanced the
-  // Application to Approved. Now that Approved is a real human decision made
-  // earlier in the flow, "not dead" isn't enough — this must require the
-  // real thing.
+  // Applications no longer have their own separate approval cycle — the
+  // moment one is Submitted (Status='Pending'), a Booking is created
+  // straight away (see crmApplications.js PUT /:id/submit), and all real
+  // review/approval (Level-1 data review, then Marketing Head, then
+  // Director) happens on the Booking itself from there
+  // (crmBookingStageService.js). So the only Applications a Booking can
+  // never exist for are the genuinely dead ones — the same "not dead"
+  // exclusion this used before Approved briefly became a real gate.
   const appRow = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
     .query("SELECT Status, IsActive, PaymentPlanId FROM dbo.CrmApplication WHERE Id = @aid");
   if (!appRow.recordset.length) throw new CrmCreationError("Application not found");
-  if (appRow.recordset[0].IsActive === false || appRow.recordset[0].Status !== "Approved") {
+  const deadApplicationStatuses = ["Rejected", "Cancelled", "Expired"];
+  if (appRow.recordset[0].IsActive === false || deadApplicationStatuses.includes(appRow.recordset[0].Status)) {
     throw new CrmCreationError(
-      `A Booking can only be created for a registered (Approved) application — current status: ${appRow.recordset[0].Status}`, 400);
+      `A Booking can't be created for an application that is ${appRow.recordset[0].Status}`, 400);
   }
 
   const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`

@@ -41,6 +41,14 @@ async function fetchDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
   return r.ok ? r.json() : null;
 }
+// The merged Data Review checklist — the former Application-level Level-1
+// checklist (KYC, Project/Unit/Rate, Payment Plan, Bank/Deposit, Broker,
+// Source, Documents), now the actual content of this booking's own "Review"
+// workflow stage. See crmBookings.js GET/PUT /:id/checklist/*.
+async function fetchChecklist(id: number): Promise<any> {
+  const r = await fetchWithAuth(`${API}/${id}/checklist`);
+  return r.ok ? r.json() : null;
+}
 async function fetchInvoices(id: number): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/${id}/invoices`);
   return r.ok ? r.json() : [];
@@ -191,6 +199,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchDetail(bookingId),
   });
   const booking = data?.booking;
+  const stageState = data?.stageState;
+  const { data: checklistData, refetch: refetchChecklist } = useQuery({
+    queryKey: ["crm-booking-checklist", bookingId],
+    queryFn: () => fetchChecklist(bookingId),
+  });
+  const checklistItems: any[] = checklistData?.items || [];
+  const checklistAllChecked = !!checklistData?.allChecked;
+  const [checklistBusyKey, setChecklistBusyKey] = useState<string | null>(null);
+  const [checklistFlaggingKey, setChecklistFlaggingKey] = useState<string | null>(null);
+  const [checklistFlagRemark, setChecklistFlagRemark] = useState("");
   // customer is available via data?.customer if needed in future tabs
   const agreement = data?.agreement;
   // Once the booking's Agreement has at least one uploaded document, Unit/
@@ -636,7 +654,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // completed — replaces the old generic "complete the checklist" message
   // with the actual step name and where to go do it, since the 3 gates live
   // on 3 different tabs (Booking, Payment Plan, Payment & Invoice).
-  const pendingStepMessage = !booking?.UnitReviewConfirmed
+  const pendingStepMessage = !checklistAllChecked && checklistItems.length > 0
+    ? { tab: "Booking" as Tab, text: "The Data Review checklist above still has unchecked items." }
+    : !booking?.UnitReviewConfirmed
     ? { tab: "Booking" as Tab, text: "Step 1 (Unit & Value) is pending — confirm \"Unit, Rate & Total Value are correct\" on the Booking tab." }
     : !booking?.PlanReviewConfirmed
     ? { tab: "Payment Plan" as Tab, text: "Step 2 (Payment Plan) is pending — review and confirm the Payment Plan tab." }
@@ -651,7 +671,96 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const isLastTab = activeTabIndex === TABS.length - 1;
 
   const [bookingRequesting, setBookingRequesting] = useState(false);
+  const [stageActioning, setStageActioning] = useState<"approve" | "reject" | null>(null);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectRemark, setRejectRemark] = useState("");
+  const currentStage = booking?.WorkflowStage || stageState?.WorkflowStage || "Review";
+  const stageLabels: Record<string, string> = {
+    Review: "Application Review",
+    MarketingHeadApproval: "Marketing Head Approval",
+    DirectorApproval: "Director Approval",
+    Confirmed: "Confirmed",
+  };
+  const userRole = String(currentUser?.role || "").toLowerCase();
+  const stageRoles: Record<string, string[]> = {
+    MarketingHeadApproval: ["admin", "super_admin", "marketing_head"],
+    DirectorApproval: ["admin", "super_admin", "director"],
+  };
+  const canActOnStage = booking?.Status === "Pending"
+    && Array.isArray(stageRoles[currentStage])
+    && stageRoles[currentStage].includes(userRole);
+
+  const handleStageApprove = async () => {
+    setStageActioning("approve");
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/approve`, { method: "PUT" });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || "Approval failed");
+      toast.success(resData.confirmed ? "Booking confirmed" : `Approved - moved to ${resData.label || "next stage"}`);
+      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+      qc.invalidateQueries({ queryKey: ["approval-inbox"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setStageActioning(null);
+    }
+  };
+
+  const handleStageReject = async () => {
+    if (!rejectRemark.trim()) {
+      toast.error("Remarks are required when sending a booking back for correction");
+      return;
+    }
+    setStageActioning("reject");
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/reject`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: rejectRemark.trim() }),
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || "Reject failed");
+      toast.success(`Sent back to ${resData.label || "previous stage"}`);
+      setRejectOpen(false);
+      setRejectRemark("");
+      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+      qc.invalidateQueries({ queryKey: ["approval-inbox"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setStageActioning(null);
+    }
+  };
+
+  // Data Review checklist actions — check/uncheck/flag/resubmit, one item at
+  // a time, same shape as the Welcome Call and old Application-verify
+  // checklists elsewhere in this app.
+  const fireChecklistAction = async (itemKey: string, action: "check" | "uncheck" | "flag" | "resubmit", remarks?: string) => {
+    setChecklistBusyKey(itemKey);
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/checklist/${itemKey}/${action}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: action === "check" || action === "flag" ? JSON.stringify({ remarks }) : undefined,
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || "Action failed");
+      if (action === "flag") { setChecklistFlaggingKey(null); setChecklistFlagRemark(""); }
+      await refetchChecklist();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setChecklistBusyKey(null);
+    }
+  };
+
   const handleFinalBook = async () => {
+    if (!checklistAllChecked) {
+      toast.error("Complete the data review checklist before booking approval.");
+      return;
+    }
     if (!mandatoryReady) {
       toast.error("Complete unit review, payment plan review, and booking amount payment before booking approval.");
       setTab("Payment & Invoice");
@@ -666,7 +775,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const res = await fetchWithAuth(`${API}/${bookingId}/ready-for-approval`, { method: "PUT" });
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Failed to mark ready for approval");
-      toast.success(`Booking confirmed — invoice generated, ${resData.notified || 0} admin(s) notified for final approval`);
+      toast.success(`Application review completed - sent to ${resData.label || "Marketing Head Approval"}`);
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
     } catch (e: any) {
@@ -891,6 +1000,83 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
+  // Renders ONE Data Review checklist item — tick box, status, remarks, Flag
+  // for Recheck / resend-for-recheck controls — placed directly inside the
+  // tab/card whose data it actually verifies, instead of one disconnected
+  // "Data Review Checklist" block dumped above the tabs. Same tick/flag/
+  // remarks logic as before (fireChecklistAction et al.), just rendered per
+  // item, in place, card by card. Only interactive while the booking is at
+  // the Review stage; still visible read-only afterward so the verified
+  // state/remarks stay visible in context.
+  const renderChecklistItem = (itemKey: string) => {
+    const it = checklistItems.find((c: any) => c.ItemKey === itemKey);
+    if (!it) return null;
+    const interactive = currentStage === "Review";
+    return (
+      <div className="rounded-lg border border-border/70 px-3 py-2 bg-muted/10">
+        <div className="flex items-start gap-2">
+          <button
+            type="button"
+            disabled={!interactive || !canEdit || checklistBusyKey === it.ItemKey}
+            onClick={() => fireChecklistAction(it.ItemKey, it.CheckStatus === "Checked" ? "uncheck" : "check")}
+            className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
+              it.CheckStatus === "Checked" ? "bg-emerald-600 border-emerald-600"
+              : it.CheckStatus === "NeedsRecheck" ? "border-red-400 bg-red-50" : "border-border"
+            }`}
+          >
+            {it.CheckStatus === "Checked" && <Check size={10} className="text-white" />}
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium">{it.ItemLabel}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${
+                it.CheckStatus === "Checked" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                : it.CheckStatus === "NeedsRecheck" ? "text-red-600 bg-red-50 border-red-200"
+                : "text-muted-foreground bg-muted/50 border-border"
+              }`}>
+                {it.CheckStatus}
+              </span>
+            </div>
+            {it.Remarks && (
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {it.CheckStatus === "NeedsRecheck" ? "Flagged: " : "Remark: "}{it.Remarks}
+              </p>
+            )}
+            {interactive && canEdit && it.CheckStatus !== "NeedsRecheck" && (
+              checklistFlaggingKey === it.ItemKey ? (
+                <div className="mt-1.5 space-y-1">
+                  <textarea value={checklistFlagRemark} onChange={(e) => setChecklistFlagRemark(e.target.value)}
+                    placeholder="What needs to be fixed? (required)" rows={2}
+                    className="w-full text-[11px] rounded border border-border px-2 py-1 bg-background" />
+                  <div className="flex gap-1.5">
+                    <button disabled={checklistBusyKey === it.ItemKey || !checklistFlagRemark.trim()}
+                      onClick={() => fireChecklistAction(it.ItemKey, "flag", checklistFlagRemark)}
+                      className="text-[11px] px-2 py-0.5 rounded bg-red-600 text-white disabled:opacity-40">
+                      Send for Recheck
+                    </button>
+                    <button onClick={() => setChecklistFlaggingKey(null)} className="text-[11px] px-2 py-0.5 rounded border border-border">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setChecklistFlaggingKey(it.ItemKey)} className="mt-1 text-[10px] text-red-600 hover:underline">
+                  Flag for Recheck
+                </button>
+              )
+            )}
+            {interactive && it.CheckStatus === "NeedsRecheck" && (
+              <button onClick={() => fireChecklistAction(it.ItemKey, "resubmit")} disabled={checklistBusyKey === it.ItemKey}
+                className="mt-1 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 disabled:opacity-40">
+                I've revised this — resend for recheck
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto thin-scroll">
@@ -905,6 +1091,51 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           <div className="py-16 text-center text-muted-foreground text-sm">Loading...</div>
         ) : (
           <>
+            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Current Stage</div>
+                <div className="text-sm font-semibold">{stageLabels[currentStage] || currentStage}</div>
+                {booking.StageRemarks && (
+                  <div className="mt-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                    <span className="font-semibold">Correction remarks: </span>{booking.StageRemarks}
+                  </div>
+                )}
+              </div>
+              {canActOnStage && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={handleStageApprove} disabled={stageActioning !== null}
+                    className="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40">
+                    {stageActioning === "approve" ? "Approving..." : "Approve"}
+                  </button>
+                  <button onClick={() => setRejectOpen(true)} disabled={stageActioning !== null}
+                    className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">
+                    Reject
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {rejectOpen && (
+              <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60" onClick={() => !stageActioning && setRejectOpen(false)}>
+                <div className="bg-background border border-border rounded-xl p-5 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
+                  <h3 className="text-sm font-semibold">Send Back for Correction</h3>
+                  <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)}
+                    placeholder="Required remarks"
+                    className="w-full min-h-[110px] text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setRejectOpen(false)} disabled={stageActioning !== null}
+                      className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-40">
+                      Cancel
+                    </button>
+                    <button onClick={handleStageReject} disabled={stageActioning !== null || !rejectRemark.trim()}
+                      className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">
+                      {stageActioning === "reject" ? "Sending..." : "Send Back"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* 3-step required flow, always visible regardless of which tab
                 is open — the flat tab bar alone doesn't show that Booking,
                 Payment Plan, and Payment are the only 3 gating steps for
@@ -930,6 +1161,20 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 ))}
                 <span className="ml-4 shrink-0 whitespace-nowrap text-muted-foreground">
                   {mandatoryReady ? "All 3 steps complete — ready to Confirm & Book" : "Complete all 3 to unlock Confirm & Book"}
+                </span>
+              </div>
+            )}
+
+            {/* Overall Data Review progress — a small at-a-glance readout;
+                each item's actual tick/flag/remarks controls now live in
+                the specific tab/card whose data they verify (see
+                renderChecklistItem calls below), not dumped here as one
+                block. */}
+            {currentStage === "Review" && checklistItems.length > 0 && (
+              <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-xs">
+                <span className="font-medium flex items-center gap-1.5"><ClipboardCheck size={13} className="text-primary" /> Data Review Checklist</span>
+                <span className="text-muted-foreground">
+                  {checklistItems.filter((it: any) => it.CheckStatus === "Checked").length}/{checklistItems.length} verified — tick each item on its own tab below
                 </span>
               </div>
             )}
@@ -1068,6 +1313,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     )}
                   </div>
                 )}
+
+                {renderChecklistItem("ProjectUnitRate")}
+                {renderChecklistItem("BrokerDetails")}
+                {renderChecklistItem("SourceAssignment")}
               </div>
             )}
 
@@ -1265,6 +1514,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     )}
                   </div>
                 )}
+
+                {renderChecklistItem("PaymentPlanAmounts")}
               </div>
             )}
 
@@ -1401,6 +1652,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </button>
                   </div>
                 )}
+
+                {renderChecklistItem("BankDepositMode")}
               </div>
             )}
 
@@ -1695,6 +1948,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     )}
                   </>
                 )}
+
+                {renderChecklistItem("ApplicantKyc")}
               </div>
             )}
 
@@ -1752,6 +2007,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </div>
                   </div>
                 )}
+
+                {renderChecklistItem("Documents")}
               </div>
             )}
 
@@ -1951,17 +2208,17 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     className="px-4 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted flex items-center gap-1">
                     Save &amp; Next <ArrowRight size={14} />
                   </button>
-                ) : canEdit && booking.Status !== "Approved" && !booking.ReadyForApprovalAt ? (
-                  <button onClick={handleFinalBook} disabled={bookingRequesting || !mandatoryReady}
-                    title={!mandatoryReady ? pendingStepMessage?.text : undefined}
+                ) : canEdit && booking.Status !== "Approved" && currentStage === "Review" ? (
+                  <button onClick={handleFinalBook} disabled={bookingRequesting || !mandatoryReady || !checklistAllChecked}
+                    title={!mandatoryReady || !checklistAllChecked ? pendingStepMessage?.text : undefined}
                     className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">
                     {bookingRequesting ? "Submitting..." : "Confirm & Book"}
                     {!bookingRequesting && <Check size={14} />}
                   </button>
-                ) : canEdit && booking.Status !== "Approved" && booking.ReadyForApprovalAt ? (
+                ) : canEdit && booking.Status !== "Approved" && currentStage !== "Review" ? (
                   <button disabled
                     className="px-4 py-1.5 text-sm bg-emerald-100 text-emerald-700 rounded-lg font-medium cursor-default flex items-center gap-1">
-                    <Check size={14} /> Booked — Sent for Approval
+                    <Check size={14} /> Sent to {stageLabels[currentStage] || "Approval"}
                   </button>
                 ) : null}
               </div>

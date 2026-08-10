@@ -8,9 +8,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail, isSaAdmin } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
-const { guardAndConvertHold, findActiveHold, releaseHold } = require("../services/crmHoldService");
-const { releaseAllParkingForBooking } = require("./crmParking");
-const { syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
+const { guardAndConvertHold } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones, maybeAutoGenerateBookingInvoice } = require("../services/crmWorkflowGuards");
 const { generateInvoicePdf, getInvoicePdfBuffer } = require("../services/invoicePdf");
@@ -18,15 +16,20 @@ const { recalculateBookingGst } = require("../services/crmGst");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
-const { transition: approvalTransition, CRM_APPROVER_ROLES } = require("../services/approvalService");
+const { transition: approvalTransition } = require("../services/approvalService");
 const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
 const { logStatusChange } = require("../services/crmApplicationWorkflow");
-// Level-2 verification checklist — a second, independent admin re-verifies
-// the Booking itself (genuine sale, money actually landed, schedule/company
-// policy compliance) before it can reach Approved. Shares the exact same
-// table/service Level-1 (Application) uses, keyed by the booking's own
-// ApplicationId + Level=2 — see crmApplicationChecklist.js's header comment.
-const { ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem, CHECKLIST_ITEMS_L2 } = require("../services/crmApplicationChecklist");
+const {
+  getStageState,
+  submitForApproval,
+  approveStageRequest,
+  rejectStageRequest,
+  stageLabel,
+} = require("../services/crmBookingStageService");
+// The merged Data Review checklist (formerly the Application's own Level-1
+// gate) — see the "Data Review checklist" comment block below for why this
+// now lives here instead.
+const { ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem, CHECKLIST_ITEMS } = require("../services/crmApplicationChecklist");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -60,7 +63,9 @@ const BOOKING_SELECT = `
     b.UnitParkingGstRate, b.UnitGstAmount, b.ParkingGstAmount, b.UnitParkingGstAmount, b.ExtraWorkGstAmount, b.TotalGstAmount,
     b.UnitReviewConfirmed, b.UnitReviewConfirmedBy, b.UnitReviewConfirmedAt,
     b.PlanReviewConfirmed, b.PlanReviewConfirmedBy, b.PlanReviewConfirmedAt,
-    b.ReadyForApprovalAt,
+    b.ReadyForApprovalAt, b.WorkflowStage, b.StageRemarks, b.RejectedFromStage,
+    b.RejectedBy, b.RejectedAt, b.MarketingHeadApprovedAt, b.MarketingHeadApprovedBy,
+    b.DirectorApprovedAt, b.DirectorApprovedBy, b.ConfirmedAt, b.ConfirmedBy,
     b.CreatedAt, b.UpdatedAt,
     a.ApplicationNo, a.ApplicantName, a.Mobile, a.Email, a.LeadId,
     u.name  AS AssigneeName,
@@ -168,6 +173,7 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
     const milestones = milRes.recordset;
     const totalDue = milestones.reduce((s, m) => s + (m.AmountDue || 0), 0);
     const totalPaid = milestones.reduce((s, m) => s + (m.AmountPaid || 0), 0);
+    const stageState = await getStageState(pool, id);
     res.json({
       booking: bkRes.recordset[0],
       milestones,
@@ -176,6 +182,7 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
       customer: custRes.recordset[0] || null,
       coApplicants: coAppRes.recordset,
       paymentSummary: { totalDue, totalPaid, balance: totalDue - totalPaid },
+      stageState,
     });
   } catch (e) {
     console.error("[crm-bookings] GET /:id error:", e.message);
@@ -638,9 +645,9 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
     }
 
     const actor = actorId(req);
-    await pool.request().input("id", sql.Int, id).query(`
-      UPDATE dbo.CrmBooking SET ReadyForApprovalAt = SYSDATETIME() WHERE Id = @id
-    `);
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const stageResult = await submitForApproval(pool, id, userEmail, req.user?.role, actor);
 
     await maybeAutoGenerateBookingInvoice(pool, id, actor);
 
@@ -667,7 +674,7 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
         id, "crm_booking");
     }
 
-    res.json({ success: true });
+    res.json({ success: true, ...stageResult });
   } catch (e) {
     console.error("[crm-bookings] ready-for-approval error:", e.message);
     res.status(500).json({ error: e.message });
@@ -680,15 +687,21 @@ async function getBookingApplicationId(pool, bookingId) {
   return r.recordset[0] || null;
 }
 
-// ── Level-2 verification checklist ──────────────────────────────────────
-// A second, independent verifier re-checks the Booking itself — is it a
-// genuine sale, did the money actually land, does the schedule/parking/KYC/
-// brokerage comply with company policy — before PUT /:id/approve (below)
-// will let it reach Approved. Mirrors crmApplications.js's own Level-1
-// routes exactly (same check/uncheck/flag/resubmit shape), just scoped to
-// the booking's own ApplicationId + Level=2 in the shared checklist table.
+// ── Data Review checklist (the merged, former Level-1 Application check) ──
+// The same 7 items that used to gate the Application's own separate
+// Approve now live here instead, on the Booking, as the actual content of
+// the "Review" workflow stage — a different-department reviewer confirms
+// KYC/Project-Unit-Rate/Payment-Plan/Bank-Deposit/Broker/Source/Documents
+// against the real data, item by item, before the booking can be Submitted
+// for Approval (see submitForApproval in crmBookingStageService.js, which
+// also requires this checklist fully checked). Stored at Level=1 in the
+// shared table (dbo.CrmApplicationVerificationChecklist), keyed by the
+// booking's own ApplicationId. Gated on WorkflowStage='Review' rather than
+// Status='Pending' — Status stays 'Pending' for the entire Review ->
+// MarketingHeadApproval -> DirectorApproval pipeline now, only WorkflowStage
+// actually tracks where a booking is.
 
-// GET /:id/checklist — current Level-2 checklist state for this booking.
+// GET /:id/checklist — current Data Review checklist state for this booking.
 router.get("/:id/checklist", requirePageRight("crm-bookings", "view"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
@@ -696,7 +709,7 @@ router.get("/:id/checklist", requirePageRight("crm-bookings", "view"), async (re
     const bk = await getBookingApplicationId(pool, id);
     if (!bk) return res.status(404).json({ error: "Booking not found" });
 
-    const items = await ensureChecklistRows(pool, bk.ApplicationId, 2);
+    const items = await ensureChecklistRows(pool, bk.ApplicationId, 1);
     const allChecked = items.length > 0 && items.every((it) => it.CheckStatus === "Checked");
     const hasOpenRecheck = items.some((it) => it.CheckStatus === "NeedsRecheck");
     res.json({ items, allChecked, hasOpenRecheck, bookingStatus: bk.BookingStatus });
@@ -706,27 +719,25 @@ router.get("/:id/checklist", requirePageRight("crm-bookings", "view"), async (re
   }
 });
 
-// PUT /:id/checklist/:itemKey/check — verifier ticks one item. Only valid
-// while the Booking is Pending. remarks optional (confirming note).
+// PUT /:id/checklist/:itemKey/check — reviewer ticks one item. Only valid
+// while the Booking is at the Review stage. remarks optional (confirming note).
 router.put("/:id/checklist/:itemKey/check", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { itemKey } = req.params;
   try {
-    if (!CRM_APPROVER_ROLES.includes((req.user?.role || "").toLowerCase())) {
-      return res.status(403).json({ error: "You are not authorized to verify this booking's checklist." });
-    }
     const pool = getPool();
     const actor = actorId(req);
     const bk = await getBookingApplicationId(pool, id);
     if (!bk) return res.status(404).json({ error: "Booking not found" });
-    if (bk.BookingStatus !== "Pending") {
-      return res.status(400).json({ error: `Checklist can only be verified while the booking is Pending — current status: ${bk.BookingStatus}` });
+    const stage = await getStageState(pool, id);
+    if (stage?.WorkflowStage !== "Review") {
+      return res.status(400).json({ error: `Checklist can only be verified while the booking is at the Review stage — current stage: ${stageLabel(stage?.WorkflowStage)}` });
     }
 
-    await ensureChecklistRows(pool, bk.ApplicationId, 2);
-    const item = await checkItem(pool, bk.ApplicationId, itemKey, { actor, remarks: req.body?.remarks, level: 2 });
+    await ensureChecklistRows(pool, bk.ApplicationId, 1);
+    const item = await checkItem(pool, bk.ApplicationId, itemKey, { actor, remarks: req.body?.remarks, level: 1 });
 
-    const items = await ensureChecklistRows(pool, bk.ApplicationId, 2);
+    const items = await ensureChecklistRows(pool, bk.ApplicationId, 1);
     const allChecked = items.every((it) => it.CheckStatus === "Checked");
 
     res.json({ success: true, item, allChecked });
@@ -736,24 +747,22 @@ router.put("/:id/checklist/:itemKey/check", requirePageRight("crm-bookings", "ed
   }
 });
 
-// PUT /:id/checklist/:itemKey/uncheck — verifier retracts their own check.
+// PUT /:id/checklist/:itemKey/uncheck — reviewer retracts their own check.
 router.put("/:id/checklist/:itemKey/uncheck", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { itemKey } = req.params;
   try {
-    if (!CRM_APPROVER_ROLES.includes((req.user?.role || "").toLowerCase())) {
-      return res.status(403).json({ error: "You are not authorized to verify this booking's checklist." });
-    }
     const pool = getPool();
     const actor = actorId(req);
     const bk = await getBookingApplicationId(pool, id);
     if (!bk) return res.status(404).json({ error: "Booking not found" });
-    if (bk.BookingStatus !== "Pending") {
-      return res.status(400).json({ error: `Checklist can only be verified while the booking is Pending — current status: ${bk.BookingStatus}` });
+    const stage = await getStageState(pool, id);
+    if (stage?.WorkflowStage !== "Review") {
+      return res.status(400).json({ error: `Checklist can only be verified while the booking is at the Review stage — current stage: ${stageLabel(stage?.WorkflowStage)}` });
     }
 
-    await ensureChecklistRows(pool, bk.ApplicationId, 2);
-    const item = await uncheckItem(pool, bk.ApplicationId, itemKey, { actor, level: 2 });
+    await ensureChecklistRows(pool, bk.ApplicationId, 1);
+    const item = await uncheckItem(pool, bk.ApplicationId, itemKey, { actor, level: 1 });
     res.json({ success: true, item });
   } catch (e) {
     console.error("[crm-bookings] checklist uncheck error:", e.message);
@@ -761,17 +770,14 @@ router.put("/:id/checklist/:itemKey/uncheck", requirePageRight("crm-bookings", "
   }
 });
 
-// PUT /:id/checklist/:itemKey/flag — verifier flags one item as wrong.
+// PUT /:id/checklist/:itemKey/flag — reviewer flags one item as wrong.
 // Remark mandatory. Logged to CrmApplicationStatusLog (against the
 // booking's own ApplicationId) so it's visible in the same Status History
-// panel L1 flags already show up in.
+// panel other flags already show up in.
 router.put("/:id/checklist/:itemKey/flag", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { itemKey } = req.params;
   try {
-    if (!CRM_APPROVER_ROLES.includes((req.user?.role || "").toLowerCase())) {
-      return res.status(403).json({ error: "You are not authorized to verify this booking's checklist." });
-    }
     if (!req.body?.remarks?.trim()) {
       return res.status(400).json({ error: "A remark is required so the preparer knows what to fix on this item" });
     }
@@ -779,16 +785,17 @@ router.put("/:id/checklist/:itemKey/flag", requirePageRight("crm-bookings", "edi
     const actor = actorId(req);
     const bk = await getBookingApplicationId(pool, id);
     if (!bk) return res.status(404).json({ error: "Booking not found" });
-    if (bk.BookingStatus !== "Pending") {
-      return res.status(400).json({ error: `Checklist can only be verified while the booking is Pending — current status: ${bk.BookingStatus}` });
+    const stage = await getStageState(pool, id);
+    if (stage?.WorkflowStage !== "Review") {
+      return res.status(400).json({ error: `Checklist can only be verified while the booking is at the Review stage — current stage: ${stageLabel(stage?.WorkflowStage)}` });
     }
 
-    await ensureChecklistRows(pool, bk.ApplicationId, 2);
+    await ensureChecklistRows(pool, bk.ApplicationId, 1);
     const remark = req.body.remarks.trim();
-    const item = await flagItem(pool, bk.ApplicationId, itemKey, { actor, remarks: remark, level: 2 });
+    const item = await flagItem(pool, bk.ApplicationId, itemKey, { actor, remarks: remark, level: 1 });
 
-    const itemDef = CHECKLIST_ITEMS_L2.find((c) => c.key === itemKey);
-    await logStatusChange(pool, bk.ApplicationId, "Pending", "Pending", "L2ChecklistRecheck", `${itemDef?.label || itemKey}: ${remark}`, actor);
+    const itemDef = CHECKLIST_ITEMS.find((c) => c.key === itemKey);
+    await logStatusChange(pool, bk.ApplicationId, "Pending", "Pending", "DataReviewRecheck", `${itemDef?.label || itemKey}: ${remark}`, actor);
 
     res.json({ success: true, item });
   } catch (e) {
@@ -799,7 +806,7 @@ router.put("/:id/checklist/:itemKey/flag", requirePageRight("crm-bookings", "edi
 
 // PUT /:id/checklist/:itemKey/resubmit — preparer-side: "I've fixed what
 // was flagged." Only valid on an item currently NeedsRecheck, only while
-// the Booking is still Pending.
+// the Booking is still at the Review stage.
 router.put("/:id/checklist/:itemKey/resubmit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { itemKey } = req.params;
@@ -808,14 +815,15 @@ router.put("/:id/checklist/:itemKey/resubmit", requirePageRight("crm-bookings", 
     const actor = actorId(req);
     const bk = await getBookingApplicationId(pool, id);
     if (!bk) return res.status(404).json({ error: "Booking not found" });
-    if (bk.BookingStatus !== "Pending") {
-      return res.status(400).json({ error: `Checklist can only be revised while the booking is Pending — current status: ${bk.BookingStatus}` });
+    const stage = await getStageState(pool, id);
+    if (stage?.WorkflowStage !== "Review") {
+      return res.status(400).json({ error: `Checklist can only be revised while the booking is at the Review stage — current stage: ${stageLabel(stage?.WorkflowStage)}` });
     }
 
-    const item = await resubmitItem(pool, bk.ApplicationId, itemKey, { actor, level: 2 });
+    const item = await resubmitItem(pool, bk.ApplicationId, itemKey, { actor, level: 1 });
 
-    const itemDef = CHECKLIST_ITEMS_L2.find((c) => c.key === itemKey);
-    await logStatusChange(pool, bk.ApplicationId, "Pending", "Pending", "L2ChecklistRevised", `${itemDef?.label || itemKey}: marked as revised, awaiting recheck`, actor);
+    const itemDef = CHECKLIST_ITEMS.find((c) => c.key === itemKey);
+    await logStatusChange(pool, bk.ApplicationId, "Pending", "Pending", "DataReviewRevised", `${itemDef?.label || itemKey}: marked as revised, awaiting recheck`, actor);
 
     res.json({ success: true, item });
   } catch (e) {
@@ -824,15 +832,9 @@ router.put("/:id/checklist/:itemKey/resubmit", requirePageRight("crm-bookings", 
   }
 });
 
-// PUT /:id/approve — admin/super_admin/marketing_head only, enforced inside
-// approvalTransition(). Approve/reject only ever happen from the Admin
-// Approval Inbox, not self-service on this page. Also re-checks the exact
-// same readiness gate ready-for-approval already enforced — belt-and-
-// suspenders in case a booking is approved directly without ever going
-// through the staff "Book" step. Now additionally gated on the Level-2
-// checklist being fully checked — same choke-point pattern
-// crmApplications.js's own PUT /:id/approve uses for Level-1, so the
-// generic cross-module Approval Inbox's one-click Approve can't skip it.
+// PUT /:id/approve — staged Booking approval. Review -> Marketing Head ->
+// Director -> Confirmed. The old separate Level-2 checklist approval is no
+// longer a gate; its review logic now lives in the booking page checklist.
 router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
@@ -840,31 +842,15 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
     if (!userEmail) return;
 
     const pool0 = getPool();
-    const readiness = await checkBookingApprovalReadiness(pool0, id);
-    if (readiness.notFound) return res.status(404).json({ error: "Booking not found" });
-    if (readiness.missing.length) {
-      return res.status(400).json({ error: `Cannot approve — confirm ${readiness.missing.join(" and ")} first` });
-    }
-
-    const bk = await getBookingApplicationId(pool0, id);
-    if (bk.BookingStatus === "Pending") {
-      const l2Items = await ensureChecklistRows(pool0, bk.ApplicationId, 2);
-      const l2AllChecked = l2Items.length > 0 && l2Items.every((it) => it.CheckStatus === "Checked");
-      if (!l2AllChecked) {
-        const unchecked = l2Items.filter((it) => it.CheckStatus !== "Checked").length;
-        return res.status(400).json({
-          error: `Complete the Level-2 verification checklist before approving — ${unchecked} item(s) still not checked.`,
-        });
-      }
-    }
-
-    const result = await approvalTransition("crm-bookings", id, "Approved", userEmail, req.user?.role);
+    const stageRow = await getStageState(pool0, id);
+    const stage = stageRow?.WorkflowStage;
+    const result = await approveStageRequest(pool0, id, stage, userEmail, req.user?.role, actorId(req));
 
     // Auto-flow: an approved booking's very next step is the welcome call —
     // push that to the assigned salesperson instead of waiting for them to
     // notice the booking list changed.
-    if (result.newStatus === "Approved") {
-      const pool = getPool();
+    if (result.confirmed) {
+      const pool = pool0;
       const row = await pool.request().input("id", sql.Int, id)
         .query("SELECT BookingNo, AssignedTo FROM dbo.CrmBooking WHERE Id = @id");
       const booking = row.recordset[0];
@@ -876,51 +862,23 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
       }
     }
 
-    res.json({ success: true, status: result.newStatus });
+    res.json({ success: true, status: result.confirmed ? "Approved" : "Pending", ...result });
   } catch (e) {
     console.error("[crm-bookings] approve error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
   }
 });
 
-// PUT /:id/reject — admin/super_admin/marketing_head only (Remarks recommended)
+// PUT /:id/reject — mandatory remarks; bounces back one stage, never cancels.
 router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-bookings", id, "Rejected", userEmail, req.user?.role, req.body?.note || null);
-
-    // Only reachable from Pending (approvalTransition enforces this), so
-    // there's never a real sale to protect here — same cascade
-    // crmCancellations.js runs for an approved-then-cancelled Booking,
-    // just triggered earlier in the lifecycle. Without this, a rejected
-    // Booking's parking allotment rows stay IsActive=1 with BookingId still
-    // set — parkingMatrix.js's Status derivation would then show the slot
-    // stuck OnHold forever, since the CrmBooking join simply excludes
-    // Rejected rows rather than anything actively clearing the allotment.
-    if (result.newStatus === "Rejected") {
-      const pool = getPool();
-      try { await releaseAllParkingForBooking(pool, id); }
-      catch (parkErr) { console.error("[crm-bookings] parking release on reject failed:", parkErr.message); }
-      try {
-        const bk = await pool.request().input("id", sql.Int, id).query("SELECT UnitId FROM dbo.CrmBooking WHERE Id = @id");
-        const unitId = bk.recordset[0]?.UnitId;
-        if (unitId) {
-          const stuckHold = await findActiveHold(pool, "Unit", unitId);
-          if (stuckHold) await releaseHold(pool, stuckHold.Id, actorId(req));
-        }
-      } catch (holdErr) { console.error("[crm-bookings] hold release on reject failed:", holdErr.message); }
-
-      // Same reasoning as crmCancellations.js's cascade — the Application
-      // was force-advanced to 'Approved' the instant this Booking was
-      // created and nothing has touched it since. Without this it would sit
-      // at 'Approved' forever with a Rejected Booking underneath.
-      await syncApplicationOnBookingTerminal(pool, id, "Cancelled", "BookingRejected",
-        "Application cancelled — its booking was rejected", actorId(req));
-    }
-
-    res.json({ success: true, status: result.newStatus });
+    const pool = getPool();
+    const stageRow = await getStageState(pool, id);
+    const result = await rejectStageRequest(pool, id, stageRow?.WorkflowStage, userEmail, req.user?.role, actorId(req), req.body?.note || req.body?.remarks);
+    res.json({ success: true, status: "Pending", ...result });
   } catch (e) {
     console.error("[crm-bookings] reject error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });

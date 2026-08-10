@@ -146,7 +146,7 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   // Voucher / Inter-Company (Stock) Transfer, per explicit instruction.
   "fund-transfer": ["super_admin"],
   "crm-applications": CRM_APPROVER_ROLES,
-  "crm-bookings": CRM_APPROVER_ROLES,
+  "crm-bookings": [...CRM_APPROVER_ROLES, "director"],
   // legal_head added specifically here (not to CRM_APPROVER_ROLES generally) —
   // this is the "SENIOR LOGIN IN LEGAL TEAM" approval gate from the workflow
   // spec. legal_head can approve an Agreement's legal paperwork but has no
