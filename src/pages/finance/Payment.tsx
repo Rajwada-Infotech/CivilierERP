@@ -131,7 +131,10 @@ const Payment: React.FC = () => {
   const [projectFilter, setProjectFilter] = useState("");
   const [finYearFilter, setFinYearFilter] = useState("");
   const [docNumberFilter, setDocNumberFilter] = useState("");
-  const [docDateFilter, setDocDateFilter] = useState("");
+  // Payment Date range (np.PDate) — was a single exact-match date filter,
+  // now a From/To range for a more useful list-view search.
+  const [dateFromFilter, setDateFromFilter] = useState("");
+  const [dateToFilter, setDateToFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const PAGE_SIZE = 20;
 
@@ -648,7 +651,8 @@ const Payment: React.FC = () => {
       projectFilter,
       finYearFilter,
       docNumberFilter,
-      docDateFilter,
+      dateFromFilter,
+      dateToFilter,
     ],
     queryFn: () =>
       getPayments(
@@ -659,7 +663,12 @@ const Payment: React.FC = () => {
         projectFilter,
         finYearFilter,
         docNumberFilter,
-        docDateFilter,
+        "",
+        "",
+        "",
+        "",
+        dateFromFilter,
+        dateToFilter,
       ),
     staleTime: 0,
   });
@@ -725,14 +734,19 @@ const Payment: React.FC = () => {
         projectFilter,
         finYearFilter,
         docNumberFilter,
-        docDateFilter,
+        "",
+        "",
+        "",
+        "",
+        dateFromFilter,
+        dateToFilter,
       );
       all = all.concat(Array.isArray(data?.data) ? data.data : []);
       pages = data?.totalPages ?? 1;
       p += 1;
     } while (p <= pages);
     return all.map(dbToRecord) as unknown as Record<string, unknown>[];
-  }, [supplierFilter, companyNameFilter, projectFilter, finYearFilter, docNumberFilter, docDateFilter]);
+  }, [supplierFilter, companyNameFilter, projectFilter, finYearFilter, docNumberFilter, dateFromFilter, dateToFilter]);
 
   // Fetch full detail (name + logo + address) for the selected company — used in PDF export
   const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
@@ -3632,7 +3646,8 @@ const Payment: React.FC = () => {
                 projectFilter ||
                 finYearFilter ||
                 docNumberFilter ||
-                docDateFilter ||
+                dateFromFilter ||
+                dateToFilter ||
                 supplierFilter
               );
               const clearAll = () => {
@@ -3641,7 +3656,8 @@ const Payment: React.FC = () => {
                 setProjectFilter("");
                 setFinYearFilter("");
                 setDocNumberFilter("");
-                setDocDateFilter("");
+                setDateFromFilter("");
+                setDateToFilter("");
                 setSupplierFilter("");
                 setPage(1);
               };
@@ -3668,7 +3684,8 @@ const Payment: React.FC = () => {
                               projectFilter,
                               finYearFilter,
                               docNumberFilter,
-                              docDateFilter,
+                              dateFromFilter,
+                              dateToFilter,
                               supplierFilter,
                             ].filter(Boolean).length
                           }{" "}
@@ -3838,25 +3855,56 @@ const Payment: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* 5. Document Date */}
+                        {/* 5. Payment Date range */}
                         <div className="space-y-1.5">
                           <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                            <FileText size={10} /> Document Date
+                            <FileText size={10} /> Date From
                           </label>
                           <div className="relative">
                             <input
                               type="date"
-                              value={docDateFilter}
+                              value={dateFromFilter}
+                              max={dateToFilter || undefined}
                               onChange={(e) => {
-                                setDocDateFilter(e.target.value);
+                                setDateFromFilter(e.target.value);
                                 setPage(1);
                               }}
                               className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                             />
-                            {docDateFilter && (
+                            {dateFromFilter && (
                               <button
                                 onClick={() => {
-                                  setDocDateFilter("");
+                                  setDateFromFilter("");
+                                  setPage(1);
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              >
+                                <X size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 5b. Payment Date range — To */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <FileText size={10} /> Date To
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="date"
+                              value={dateToFilter}
+                              min={dateFromFilter || undefined}
+                              onChange={(e) => {
+                                setDateToFilter(e.target.value);
+                                setPage(1);
+                              }}
+                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                            />
+                            {dateToFilter && (
+                              <button
+                                onClick={() => {
+                                  setDateToFilter("");
                                   setPage(1);
                                 }}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
@@ -3970,13 +4018,14 @@ const Payment: React.FC = () => {
                           </button>
                         </span>
                       )}
-                      {docDateFilter && (
+                      {(dateFromFilter || dateToFilter) && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-cyan-500/10 text-cyan-600 border border-cyan-500/20">
                           <FileText size={9} />
-                          Date: {docDateFilter}
+                          Date: {dateFromFilter || "…"} – {dateToFilter || "…"}
                           <button
                             onClick={() => {
-                              setDocDateFilter("");
+                              setDateFromFilter("");
+                              setDateToFilter("");
                               setPage(1);
                             }}
                             className="ml-0.5 hover:text-destructive"
@@ -5147,6 +5196,21 @@ const Payment: React.FC = () => {
                   undone.
                 </p>
               </div>
+            </div>
+            {/* Doc numbers are never reused after a delete — the sequence
+                simply continues from its current max, so removing a
+                record permanently leaves a gap. */}
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+              <span>
+                {(() => {
+                  const rec = records.find((r) => r.id === deleteId);
+                  const docNo = rec?.docNo;
+                  return docNo
+                    ? `${docNo}'s number will not be reused — it leaves a permanent gap in the document sequence.`
+                    : "This document's number will not be reused — it leaves a permanent gap in the document sequence.";
+                })()}
+              </span>
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button

@@ -79,6 +79,9 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const dueDate = req.query.dueDate ? String(req.query.dueDate).trim() : "";
     const remarks = req.query.remarks ? String(req.query.remarks).trim() : "";
     const idFilter = req.query.id ? parseInt(req.query.id, 10) : null;
+    // Payment Date (np.PDate) range — list view's Date filter.
+    const dateFrom = req.query.from ? String(req.query.from).trim() : "";
+    const dateTo = req.query.to ? String(req.query.to).trim() : "";
 
     // Every column here is qualified with np. — the data query joins
     // dbo.GoodsReceiptNotes and dbo.PurchaseOrders, both of which also have a
@@ -108,6 +111,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (docDate) conditions.push(`CAST(np.PCreatedAt AS DATE) = @docDate`);
     if (dateParam) conditions.push(`np.PDate = @dateParam`);
     if (dueDate) conditions.push(`np.PChequeDate = @dueDate`);
+    if (dateFrom) conditions.push(`np.PDate >= @dateFrom`);
+    if (dateTo) conditions.push(`np.PDate <= @dateTo`);
     if (remarks)
       conditions.push(
         `(np.PPaymentName LIKE @remarks OR np.PExpenseRef LIKE @remarks)`,
@@ -128,6 +133,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (docDate) request.input("docDate", sql.Date, docDate);
     if (dateParam) request.input("dateParam", sql.Date, dateParam);
     if (dueDate) request.input("dueDate", sql.Date, dueDate);
+    if (dateFrom) request.input("dateFrom", sql.Date, dateFrom);
+    if (dateTo) request.input("dateTo", sql.Date, dateTo);
     if (remarks) request.input("remarks", sql.NVarChar(200), `%${remarks}%`);
 
     const countResult = await request.query(
@@ -150,6 +157,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (docDate) dataRequest.input("docDate", sql.Date, docDate);
     if (dateParam) dataRequest.input("dateParam", sql.Date, dateParam);
     if (dueDate) dataRequest.input("dueDate", sql.Date, dueDate);
+    if (dateFrom) dataRequest.input("dateFrom", sql.Date, dateFrom);
+    if (dateTo) dataRequest.input("dateTo", sql.Date, dateTo);
     if (remarks)
       dataRequest.input("remarks", sql.NVarChar(200), `%${remarks}%`);
 

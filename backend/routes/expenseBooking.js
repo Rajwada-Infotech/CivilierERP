@@ -806,6 +806,12 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
     const offset = (page - 1) * limit;
+    // List-view filters — Fin Year and a Document Date range. Status counts
+    // (below) intentionally stay unfiltered (global) since they feed the
+    // top status chips, not the table.
+    const finYear = (req.query.finYear || "").toString().trim() || null;
+    const dateFrom = (req.query.from || "").toString().trim() || null;
+    const dateTo = (req.query.to || "").toString().trim() || null;
 
     const hasPaymentTermId = await ebHasPaymentTermId(pool);
     const hasDirectItemsCol = await ebHasDirectItemsData(pool);
@@ -826,7 +832,10 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
       pool
         .request()
         .input("offset", sql.Int, offset)
-        .input("limit", sql.Int, limit).query(`
+        .input("limit", sql.Int, limit)
+        .input("FinYear", sql.NVarChar(20), finYear)
+        .input("DateFrom", sql.Date, dateFrom)
+        .input("DateTo", sql.Date, dateTo).query(`
         SELECT
           eb.Eid, eb.Eid AS id,
           eb.EProjectName, eb.EDocumentType, eb.EDocDate,
@@ -920,6 +929,9 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         ${ebSupplierList.joins}
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
           AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
+          AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
+          AND (@DateFrom IS NULL OR eb.EDocDate >= @DateFrom)
+          AND (@DateTo IS NULL OR eb.EDocDate <= @DateTo)
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `),

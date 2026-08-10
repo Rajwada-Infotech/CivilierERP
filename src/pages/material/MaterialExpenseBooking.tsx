@@ -59,6 +59,7 @@ import {
   SlidersHorizontal,
   Clock,
   ShoppingCart,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
@@ -256,6 +257,12 @@ export default function MaterialExpenseBooking() {
   const saveInFlight = useRef(false);
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [listSearch, setListSearch] = useState("");
+  // List-view filters — Fin Year + Document Date range. Applied server-side
+  // (see fetchRecords below) since the list is paginated, unlike
+  // statusFilter/listSearch which only ever narrow the current page.
+  const [finYearFilter, setFinYearFilter] = useState("");
+  const [dateFromFilter, setDateFromFilter] = useState("");
+  const [dateToFilter, setDateToFilter] = useState("");
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
   const [liveEmiSchedule, setLiveEmiSchedule] = useState<
@@ -293,7 +300,11 @@ export default function MaterialExpenseBooking() {
   const fetchRecords = useCallback(async (p = 1) => {
     try {
       setLoading(true);
-      const data = await apiFetch(`${API}?page=${p}&limit=${PAGE_SIZE}`);
+      const qs = new URLSearchParams({ page: String(p), limit: String(PAGE_SIZE) });
+      if (finYearFilter) qs.set("finYear", finYearFilter);
+      if (dateFromFilter) qs.set("from", dateFromFilter);
+      if (dateToFilter) qs.set("to", dateToFilter);
+      const data = await apiFetch(`${API}?${qs.toString()}`);
       setRecords((data.data ?? []).map(dbToRecord));
       setTotalPages(data.totalPages ?? 1);
       setTotalRecords(data.total ?? 0);
@@ -305,19 +316,26 @@ export default function MaterialExpenseBooking() {
     } finally {
       setLoading(false);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finYearFilter, dateFromFilter, dateToFilter]);
 
   // Export must cover every matching record, not just whatever page happens
   // to be on screen — the list endpoint caps `limit` at 100 server-side, so
-  // this pages through everything and then applies the same client-side
-  // filters (statusFilter/listSearch) the visible table already uses.
+  // this pages through everything (honoring the Fin Year / date filters
+  // server-side, same as the table) and then applies the client-only
+  // filters (statusFilter/listSearch) on top.
   const fetchAllRecordsForExport = useCallback(async () => {
     const pageLimit = 100;
     let all: ExpenseRecord[] = [];
     let p = 1;
     let totalPages = 1;
+    const qs = new URLSearchParams({ limit: String(pageLimit) });
+    if (finYearFilter) qs.set("finYear", finYearFilter);
+    if (dateFromFilter) qs.set("from", dateFromFilter);
+    if (dateToFilter) qs.set("to", dateToFilter);
     do {
-      const data = await apiFetch(`${API}?page=${p}&limit=${pageLimit}`);
+      qs.set("page", String(p));
+      const data = await apiFetch(`${API}?${qs.toString()}`);
       all = all.concat((data.data ?? []).map(dbToRecord));
       totalPages = data.totalPages ?? 1;
       p += 1;
@@ -336,7 +354,7 @@ export default function MaterialExpenseBooking() {
       }
       return true;
     }) as unknown as Record<string, unknown>[];
-  }, [statusFilter, listSearch]);
+  }, [statusFilter, listSearch, finYearFilter, dateFromFilter, dateToFilter]);
 
   // Deep-link support — Linked Documents panels navigate here as
   // /material/expense-booking?view=<Eid> to open this exact Invoice/booking.
@@ -486,6 +504,17 @@ export default function MaterialExpenseBooking() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.financialYear, selectedTod]);
+
+  // Re-fetch page 1 whenever a list filter changes — skips the very first
+  // render since the mount effect right below already fetches once.
+  const skipFirstFilterFetch = useRef(true);
+  useEffect(() => {
+    if (skipFirstFilterFetch.current) {
+      skipFirstFilterFetch.current = false;
+      return;
+    }
+    fetchRecords(1);
+  }, [finYearFilter, dateFromFilter, dateToFilter, fetchRecords]);
 
   useEffect(() => {
     fetchRecords(1);
@@ -2269,6 +2298,13 @@ export default function MaterialExpenseBooking() {
                       onSearchChange={setListSearch}
                       statusFilter={statusFilter}
                       onStatusFilterChange={setStatusFilter}
+                      finYearOptions={finYears.map((fy) => fy.year)}
+                      finYearFilter={finYearFilter}
+                      onFinYearFilterChange={setFinYearFilter}
+                      dateFrom={dateFromFilter}
+                      dateTo={dateToFilter}
+                      onDateFromChange={setDateFromFilter}
+                      onDateToChange={setDateToFilter}
                     />
                   </CardHeader>
                   <CardContent className="p-0">
@@ -2593,6 +2629,22 @@ export default function MaterialExpenseBooking() {
                 cannot be undone.
               </DialogDescription>
             </DialogHeader>
+            {/* Doc numbers are never reused after a delete — the sequence
+                simply continues from its current max, so removing a
+                document permanently leaves a gap (e.g. deleting #6 and #7
+                out of #1-#10 means the next new invoice is #11, not #6). */}
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+              <span>
+                {(() => {
+                  const rec = records.find((r) => r.id === deleteId);
+                  const docNo = rec?.bookingReference;
+                  return docNo
+                    ? `${docNo}'s number will not be reused — it leaves a permanent gap in the document sequence.`
+                    : "This document's number will not be reused — it leaves a permanent gap in the document sequence.";
+                })()}
+              </span>
+            </div>
             <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
               <Button variant="outline" onClick={() => setDeleteId(null)}>
                 Cancel
