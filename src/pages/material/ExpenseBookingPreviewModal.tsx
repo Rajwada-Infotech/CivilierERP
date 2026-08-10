@@ -431,9 +431,18 @@ export function ExpenseBookingPreviewModal({
   const displayNetAmount =
     grnNetPayable !== null ? grnNetPayable : rbd.netAmount;
 
+  // TDS is deducted at source — the Breakdown's own "Net Payable" figure
+  // was showing the pre-TDS amount with no deduction line at all, so the
+  // TDS Details section below looked disconnected from what's actually
+  // payable. Surface it here too.
+  const displayTdsAmount = previewRecord.tdsId
+    ? Number(previewRecord.tdsAmount) || 0
+    : 0;
+  const displayPayableAfterTds = Math.max(0, displayNetAmount - displayTdsAmount);
+
   const displayRemainingAmount = Math.max(
     0,
-    displayNetAmount - (previewRecord.totalPaid ?? 0),
+    displayPayableAfterTds - (previewRecord.totalPaid ?? 0),
   );
 
   return createPortal(
@@ -595,25 +604,49 @@ export function ExpenseBookingPreviewModal({
                       date: null,
                       rows: [
                         ...(hasAllocations
-                          ? postingAllocations.map((a: any) => ({
-                              key: `head-${a.allocationId}`,
-                              label: a.lHeadName,
-                              code: a.lHeadCode,
-                              side: "debit" as const,
-                              amount: Number(a.amount) || 0,
-                            }))
-                          : hasDirectItems
-                            ? directItems.map((it: any, idx: number) => ({
-                                key: `item-${it._key ?? idx}`,
-                                label: `${purchaseLabel} — ${it.description || "Item"}`,
-                                code: purchaseCode,
+                          ? // Mirrors backend/routes/expenseBooking.js's post-to-gl
+                            // split EXACTLY: each row's amount is GST-inclusive, so
+                            // scale by the invoice's own base/total ratio to get its
+                            // base-only debit, with the remainder posted as ONE
+                            // combined GST Credit Available row below — never the
+                            // full inclusive amount straight to the Expense Head.
+                            (() => {
+                              const baseRatio = totalAmount > 0 ? baseAmount / totalAmount : 1;
+                              const headRows = postingAllocations.map((a: any) => ({
+                                key: `head-${a.allocationId}`,
+                                label: a.lHeadName,
+                                code: a.lHeadCode,
                                 side: "debit" as const,
-                                amount: Number(it.amount) || 0,
-                              }))
-                            : [{ key: "purchase", label: purchaseLabel, code: purchaseCode, side: "debit" as const, amount: baseAmount }]),
-                        ...(!hasAllocations && taxAmount > 0
-                          ? [{ key: "gst", label: `${purchaseLabel} — GST`, code: purchaseCode, side: "debit" as const, amount: taxAmount }]
-                          : []),
+                                amount: Math.round((Number(a.amount) || 0) * baseRatio * 100) / 100,
+                              }));
+                              const headBaseSum = headRows.reduce((s, r) => s + r.amount, 0);
+                              const gstLegAmount = Math.round((totalAmount - headBaseSum) * 100) / 100;
+                              return [
+                                ...headRows,
+                                ...(gstLegAmount > 0
+                                  ? [{ key: "gst", label: accounts?.gstCredit?.label ?? "GST Credit Available", code: accounts?.gstCredit?.code ?? null, side: "debit" as const, amount: gstLegAmount }]
+                                  : []),
+                              ];
+                            })()
+                          : hasDirectItems
+                            ? [
+                                ...directItems.map((it: any, idx: number) => ({
+                                  key: `item-${it._key ?? idx}`,
+                                  label: `${purchaseLabel} — ${it.description || "Item"}`,
+                                  code: purchaseCode,
+                                  side: "debit" as const,
+                                  amount: Number(it.amount) || 0,
+                                })),
+                                ...(taxAmount > 0
+                                  ? [{ key: "gst", label: accounts?.gstCredit?.label ?? "GST Credit Available", code: accounts?.gstCredit?.code ?? null, side: "debit" as const, amount: taxAmount }]
+                                  : []),
+                              ]
+                            : [
+                                { key: "purchase", label: purchaseLabel, code: purchaseCode, side: "debit" as const, amount: baseAmount },
+                                ...(taxAmount > 0
+                                  ? [{ key: "gst", label: accounts?.gstCredit?.label ?? "GST Credit Available", code: accounts?.gstCredit?.code ?? null, side: "debit" as const, amount: taxAmount }]
+                                  : []),
+                              ]),
                         { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: totalAmount },
                       ],
                     },
@@ -1133,6 +1166,32 @@ export function ExpenseBookingPreviewModal({
                     ₹{fmt(displayNetAmount)}
                   </p>
                 </div>
+                {displayTdsAmount > 0 && (
+                  <>
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-amber-500/5 border border-amber-500/20 rounded-xl">
+                      <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                        <TrendingUp size={10} />
+                        TDS Deducted
+                        {previewRecord.tdsPercentage != null && (
+                          <span className="font-mono text-[10px] bg-amber-500/10 px-1.5 py-0.5 rounded">
+                            {previewRecord.tdsPercentage}%
+                          </span>
+                        )}
+                      </p>
+                      <p className="font-mono text-sm font-semibold text-amber-600 dark:text-amber-400">
+                        − ₹{fmt(displayTdsAmount)}
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border border-primary/20 rounded-xl">
+                      <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
+                        Amount Payable (After TDS)
+                      </p>
+                      <p className="font-mono text-base font-bold text-primary">
+                        ₹{fmt(displayPayableAfterTds)}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
               /* ── Standard breakdown (non-GRN) ── */
@@ -1250,6 +1309,32 @@ export function ExpenseBookingPreviewModal({
                     ₹{fmt(displayNetAmount)}
                   </p>
                 </div>
+                {displayTdsAmount > 0 && (
+                  <>
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-amber-500/5 border-t border-amber-500/20">
+                      <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                        <TrendingUp size={10} />
+                        TDS Deducted
+                        {previewRecord.tdsPercentage != null && (
+                          <span className="font-mono text-[10px] bg-amber-500/10 px-1.5 py-0.5 rounded">
+                            {previewRecord.tdsPercentage}%
+                          </span>
+                        )}
+                      </p>
+                      <p className="font-mono text-sm font-semibold text-amber-600 dark:text-amber-400">
+                        − ₹{fmt(displayTdsAmount)}
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border-t border-primary/20">
+                      <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
+                        Amount Payable (After TDS)
+                      </p>
+                      <p className="font-mono text-base font-bold text-primary">
+                        ₹{fmt(displayPayableAfterTds)}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>

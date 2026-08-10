@@ -1,7 +1,10 @@
 import React from "react";
-import { Eye, Edit, Trash2, CreditCard } from "lucide-react";
+import { Eye, Trash2, CreditCard } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { AmendedBadge } from "@/components/AmendedBadge";
+import { useAmendmentStatus } from "@/hooks/useAmendmentStatus";
+import { EditOrAmendButton } from "@/components/EditOrAmendButton";
 import { computeBreakdown, computeGrnNetWithTerms, fmt } from "./helpers";
 import type { ExpenseRecord } from "./types";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -25,6 +28,7 @@ export function RecordCard({
   canEdit = true,
   canDelete = true,
 }: Props) {
+  const amendmentStatus = useAmendmentStatus("ExpenseBooking", rec.id, rec.status);
   const effectiveNet = (() => {
     if (rec.eSourceType === "GRN" && rec.grnTotalAmount != null) {
       const terms =
@@ -66,7 +70,10 @@ export function RecordCard({
             </p>
           )}
         </div>
-        <StatusBadge status={rec.status} />
+        <div className="flex items-center gap-1.5 shrink-0">
+          {amendmentStatus.isAmended && <AmendedBadge />}
+          <StatusBadge status={rec.status} />
+        </div>
       </div>
 
       {adjustedAmount > 0 && (
@@ -143,16 +150,19 @@ export function RecordCard({
             >
               <Eye size={14} />
             </button>
-            {canEdit && (
-              <button
-                type="button"
-                onClick={onEdit}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted border border-transparent hover:border-border transition-colors"
-                title="Edit / Amend"
-              >
-                <Edit size={14} />
-              </button>
-            )}
+            <EditOrAmendButton
+              refDocType="ExpenseBooking"
+              refDocId={rec.id}
+              docStatus={rec.status}
+              docNo={rec.bookingReference}
+              projectName={rec.projectName}
+              companyName={rec.companyName}
+              totalAmount={rec.netAmount ?? undefined}
+              amendTab="EB"
+              amendMenuPath="/material/amendment-menu"
+              canEdit={canEdit}
+              onEdit={onEdit}
+            />
             {canDelete && (
               <button
                 type="button"

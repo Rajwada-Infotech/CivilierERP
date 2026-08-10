@@ -3856,6 +3856,7 @@ router.get("/:id/posting", async (req, res) => {
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
       SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
              eb.ELinkedGrnIds, eb.EGLAccountId,
+             eb.ECgstRate, eb.ESgstRate, eb.EIgstRate,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
              eb.EName AS SupplierName,
              ${ebSupplierPost.idExpr} AS ResolvedSupplierId,
@@ -3876,12 +3877,15 @@ router.get("/:id/posting", async (req, res) => {
     if (isGrnLinked) {
       ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, resolveGrnIds(eb)));
     } else {
-      // Direct (non-GRN) booking: EAmount is the taxable base, ENetAmount
-      // the GST-inclusive total — split them properly instead of the old
-      // baseAmount = totalAmount (which silently swallowed the GST portion
-      // into an untracked lump, showing no tax line at all in the preview).
+      // Direct (non-GRN) booking: back-derive base/tax from the invoice's
+      // own GST rates against the GST-inclusive ENetAmount — MUST exactly
+      // match the same formula in POST /:id/post-to-gl below, otherwise
+      // this preview shows a different split than what actually gets
+      // posted. (Previously used EAmount directly, which could drift from
+      // the rate-derived base after billing-term adjustments.)
       totalAmount = parseFloat(eb.ENetAmount || eb.EAmount || 0);
-      baseAmount = parseFloat(eb.EAmount || totalAmount || 0);
+      const directRatePct = (parseFloat(eb.ECgstRate) || 0) + (parseFloat(eb.ESgstRate) || 0) + (parseFloat(eb.EIgstRate) || 0);
+      baseAmount = directRatePct > 0 ? totalAmount / (1 + directRatePct / 100) : totalAmount;
       taxAmount = Math.max(0, Math.round((totalAmount - baseAmount) * 100) / 100);
     }
 
@@ -3903,7 +3907,9 @@ router.get("/:id/posting", async (req, res) => {
         ? { id: eb.EGLAccountId, label: eb.EGLAccountName || "GL Account" }
         : find((l)=>l.LHeadName.toLowerCase().includes("purchase")),
       pgrn:      find((l)=>l.LHeadName.toLowerCase().includes("pending")),
-      supplier:  eb.ResolvedSupplierId ? { id: eb.ResolvedSupplierId, label: "Supplier / Creditor A/c" } : null,
+      supplier:  eb.ResolvedSupplierId
+        ? { id: eb.ResolvedSupplierId, label: eb.ResolvedSupplierName ? `Supplier/Creditor Payable — ${eb.ResolvedSupplierName}` : "Supplier/Creditor Payable" }
+        : null,
       // Confirmed input tax credit, recognized once the invoice matches the
       // GRN — distinct from Provisional Credit Available (the GRN-stage
       // provisional estimate, left untouched at invoice time).
@@ -3957,7 +3963,8 @@ router.post("/:id/post-to-gl", async (req, res) => {
              eb.ELinkedGrnIds, eb.EGLAccountId,
              eb.ECgstRate, eb.ESgstRate, eb.EIgstRate,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
-             ${ebSupplierPost2.idExpr} AS ResolvedSupplierId
+             ${ebSupplierPost2.idExpr} AS ResolvedSupplierId,
+             ${ebSupplierPost2.nameExpr} AS ResolvedSupplierName
       FROM dbo.ExpenseBooking eb
       ${ebSupplierPost2.joins}
       WHERE eb.Eid = @Eid
@@ -4023,6 +4030,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // ledger), which is why searching IsSystemGenerated=1 rows for it
     // always failed with "Supplier/Creditor system ledger not configured."
     const supplierId = eb.ResolvedSupplierId;
+    const supplierLabel = eb.ResolvedSupplierName ? `Supplier/Creditor Payable — ${eb.ResolvedSupplierName}` : "Supplier/Creditor Payable";
     // Multi Expense Head tagging (migration 303) — a direct booking's
     // amount can now be split across several heads instead of one. When
     // present, these ARE the debit legs; debitLedgerId (the old single
@@ -4035,6 +4043,15 @@ router.post("/:id/post-to-gl", async (req, res) => {
     if (isGrnLinked && !pgrnId) return res.status(422).json({ error: "Provision for Pending GRN system ledger not configured." });
     if (isGrnLinked && taxAmount > 0 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
     if (!isGrnLinked && taxAmount > 0.5 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
+    // A direct (TOD) booking must always debit a real Expense Head — the
+    // Purchase A/C fallback below is reserved for PO/WO/WO_PO-sourced
+    // invoices (where there's no per-invoice head to pick from). The
+    // frontend already requires at least one Expense Head row before save,
+    // this is the server-side backstop against posting an older/legacy
+    // booking that predates that requirement straight to Purchase A/C.
+    if (!isGrnLinked && eb.ESourceType === "TOD" && expenseHeadAllocations.length === 0) {
+      return res.status(422).json({ error: "This invoice has no Expense Head tagged — edit it and add at least one before posting." });
+    }
     if (!isGrnLinked && expenseHeadAllocations.length === 0 && !debitLedgerId) return res.status(422).json({ error: "Purchase system ledger not configured." });
     if (!isGrnLinked && expenseHeadAllocations.length > 0) {
       const allocSum = Math.round(expenseHeadAllocations.reduce((s, a) => s + a.amount, 0) * 100) / 100;
@@ -4060,7 +4077,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
             ...(g.taxAmount > 0
               ? [{ LHeadId: gstCreditId, DebitAmount: g.taxAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` }]
               : []),
-            { LHeadId: supplierId, DebitAmount: 0, CreditAmount: g.totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
+            { LHeadId: supplierId, DebitAmount: 0, CreditAmount: g.totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — ${supplierLabel} — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
           ])
       : expenseHeadAllocations.length > 0
         ? (() => {
@@ -4088,7 +4105,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
               ...(gstLegAmount > 0
                 ? [{ LHeadId: gstCreditId, DebitAmount: gstLegAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available` }]
                 : []),
-              { LHeadId: supplierId, DebitAmount: 0, CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
+              { LHeadId: supplierId, DebitAmount: 0, CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — ${supplierLabel}` },
             ];
           })()
         : [

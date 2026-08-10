@@ -1156,10 +1156,17 @@ export default function MaterialExpenseBooking() {
             form.igstRate ?? 0,
           );
 
-    // Expense Head allocations (direct/TOD bookings only) must add up to
-    // the invoice's net amount — the same check the backend re-runs, but
-    // catching it here avoids a round trip.
-    if (isDirect && selectedDoc?.kind === "TOD" && (form.expenseHeadAllocations?.length ?? 0) > 0) {
+    // Expense Head allocations (direct/TOD bookings only) — at least one
+    // row is now mandatory (a DINV must always debit a real Expense Head,
+    // never fall back to the generic Purchase A/C, which is reserved for
+    // the PO/GRN flow — see the backend post-to-gl fallback branch) and
+    // rows must add up to the invoice's net amount, same check the backend
+    // re-runs, but catching it here avoids a round trip.
+    if (isDirect && selectedDoc?.kind === "TOD") {
+      if ((form.expenseHeadAllocations?.length ?? 0) === 0) {
+        toast.error("At least one Expense Head is required for this invoice.");
+        return;
+      }
       const allocSum = Math.round(
         (form.expenseHeadAllocations ?? []).reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100,
       ) / 100;
@@ -1374,6 +1381,19 @@ export default function MaterialExpenseBooking() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDirect, selectedDoc?.kind, tdsSupplierId, form.companyId, form.basicAmount, form.bookingDate]);
+
+  // Keep form.tdsAmount live — it used to only be set once, inside the TDS
+  // <select>'s onChange, so editing the basic amount (or anything else that
+  // moves bd.netAmount) AFTER a TDS record was already picked left the
+  // shown TDS amount frozen at its old value instead of tracking the
+  // invoice in real time.
+  useEffect(() => {
+    if (!form.tdsId || form.tdsPercentage == null) return;
+    const recalculated = calculateTdsPreview(form.basicAmount, form.tdsPercentage);
+    if (recalculated !== form.tdsAmount) set("tdsAmount", recalculated);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.tdsId, form.tdsPercentage, form.basicAmount]);
+
   const { bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds } =
     useMemo(() => {
       const editingIdNum = editingId ? parseInt(editingId, 10) : null;
@@ -2172,7 +2192,8 @@ export default function MaterialExpenseBooking() {
                   <SectionHeader label="Expense Head" />
                   <Field
                     label="Allocation"
-                    hint="Split this invoice's debit side across one or more ledger heads — must add up to the net amount above"
+                    required
+                    hint="At least one Expense Head is required — split this invoice's debit side across one or more ledger heads, must add up to the net amount above"
                   >
                     <ExpenseHeadAllocationEditor
                       rows={form.expenseHeadAllocations ?? []}
