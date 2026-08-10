@@ -7,6 +7,7 @@ import {
   Folder,
   Layers,
 } from "lucide-react";
+import { useTheme } from "@/contexts/ThemeContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -173,6 +174,8 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
 
   const recalcPosition = useCallback(() => {
     if (!triggerRef.current) return;
@@ -196,6 +199,16 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
       top: above ? rect.top - maxH - 4 : rect.bottom + 4,
       left: rect.left,
       width: Math.max(rect.width, 260),
+      // Both maxHeight AND height: without an explicit height, the panel
+      // shrinks to its content and maxHeight never actually binds, which is
+      // harmless — except the "content" here is the inner scroll region's
+      // own max-h-72, an independent, usually-smaller cap. That mismatch
+      // left a dead gap between the last visible row and the panel's
+      // rounded bottom edge. Pinning height too — paired with the inner
+      // region switching to flex-1 (below) instead of max-h-72 — makes the
+      // inner region fill exactly this box, so it either scrolls flush to
+      // the edge or (short lists) simply doesn't need to.
+      height: maxH,
       maxHeight: maxH,
       zIndex: 9999,
     });
@@ -311,15 +324,31 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
         />
       </button>
 
-      {/* ── Dropdown panel (portal — escapes overflow:hidden parents) ── */}
+      {/* ── Dropdown panel (portal — escapes overflow:hidden parents; renders
+          on document.body outside any module-scoped ancestor, so it uses
+          explicit colors rather than bg-card/border-border — the same
+          reasoning as the ModuleStrip tooltip fix — to avoid the theme
+          tokens resolving unreliably and falling back to the browser's
+          native (unstyled, thick-scrollbar) list rendering). ── */}
       {open && createPortal(
-        <div ref={panelRef} style={panelStyle} className="rounded-lg border border-border bg-card shadow-xl overflow-hidden">
+        <div
+          ref={panelRef}
+          style={{
+            ...panelStyle,
+            background: isDark ? "rgba(30,32,48,0.98)" : "rgba(255,255,255,0.98)",
+            border: isDark ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(15,17,26,0.10)",
+            boxShadow: isDark
+              ? "0 12px 32px rgba(0,0,0,0.5)"
+              : "0 12px 32px rgba(15,17,26,0.16)",
+          }}
+          className="rounded-lg overflow-hidden flex flex-col"
+        >
           {variant === "tree" ? (
             /* ── Tree panel ── */
             <>
               {/* Top-level option */}
               <div
-                className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors text-sm font-medium ${
+                className={`shrink-0 flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors text-sm font-medium ${
                   !value
                     ? "bg-primary/10 text-primary"
                     : "text-muted-foreground hover:bg-muted/60"
@@ -332,10 +361,13 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
                 <Layers size={13} className="shrink-0" />
                 <span>{placeholder}</span>
               </div>
-              <div className="border-t border-border/60" />
+              <div className="shrink-0 border-t border-border/60" />
 
-              {/* Tree nodes */}
-              <div className="max-h-72 overflow-y-auto py-1 px-1">
+              {/* Tree nodes — flex-1 (not a fixed max-h) so this fills
+                  exactly the height the outer panel already computed,
+                  instead of an independent, usually-smaller hardcoded cap
+                  that left dead space below the last row. */}
+              <div className="flex-1 min-h-0 overflow-y-auto py-1 px-1 thin-scroll">
                 {items.map((node) => (
                   <TreeNodeRow
                     key={node._id}
@@ -354,8 +386,9 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
               </div>
             </>
           ) : (
-            /* ── Flat panel ── */
-            <div className="max-h-72 overflow-y-auto py-1">
+            /* ── Flat panel — sole child, so flex-1 makes it consume the
+                whole outer box exactly (see tree-panel comment above). ── */
+            <div className="flex-1 min-h-0 overflow-y-auto py-1 thin-scroll">
               {/* Placeholder / clear option */}
               <div
                 className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
