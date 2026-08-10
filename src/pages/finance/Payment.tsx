@@ -497,6 +497,15 @@ const Payment: React.FC = () => {
         ].join("")
       : "";
 
+    // Direct Expense Payment (migration 303) — paid straight against one
+    // or more Expense Heads, no Party involved.
+    const expenseHeadRows =
+      rec.expenseHeadAllocations && rec.expenseHeadAllocations.length > 0
+        ? rec.expenseHeadAllocations
+            .map((a) => field(a.label ?? "Expense Head", formatINR(a.amount)))
+            .join("")
+        : "";
+
     const printedAt = new Date().toLocaleString("en-IN", {
       day: "2-digit",
       month: "short",
@@ -573,6 +582,9 @@ const Payment: React.FC = () => {
 
   ${taxRows ? sectionTitle("Tax Details") : ""}
   ${taxRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${taxRows}</tbody></table></div>` : ""}
+
+  ${expenseHeadRows ? sectionTitle(rec.expenseHeadAllocations!.length > 1 ? "Expense Heads" : "Expense Head") : ""}
+  ${expenseHeadRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${expenseHeadRows}</tbody></table></div>` : ""}
 
   <!-- Signatories -->
   <div style="display:flex;gap:8px;margin-top:48px;">
@@ -5053,6 +5065,27 @@ const Payment: React.FC = () => {
                   </div>
                 ))}
               </div>
+
+              {/* Direct Expense Payment (migration 303) — paid straight
+                  against one or more Expense Heads, no Party involved. */}
+              {viewingRec.expenseHeadAllocations && viewingRec.expenseHeadAllocations.length > 0 && (
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                    Expense Head{viewingRec.expenseHeadAllocations.length > 1 ? "s" : ""}
+                  </p>
+                  {viewingRec.expenseHeadAllocations.map((a) => (
+                    <div key={a._key} className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/50 last:border-b-0">
+                      <span className="text-xs text-foreground truncate">
+                        {a.label}
+                        {a.code ? <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">({a.code})</span> : null}
+                      </span>
+                      <span className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                        {formatINR(a.amount)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               </>
               )}
 
