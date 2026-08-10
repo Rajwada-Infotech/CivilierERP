@@ -123,7 +123,11 @@ const EMPTY_FORM: ContractorForm = {
   LHeadAddress: "",
   LBelongsTo: "",
   LHeadStatus: true,
-  isTdsApplicable: false,
+  // Contractor payments almost always fall under Section 194C — default a
+  // new contractor to TDS-applicable rather than making every contractor
+  // opt in by hand. Still a normal toggle, so it can be switched off for
+  // the rare contractor this doesn't apply to.
+  isTdsApplicable: true,
   tdsLimitApplicable: true,
 };
 
@@ -612,7 +616,7 @@ const ContractorMaster: React.FC = () => {
             LHeadAddress: address,
             LBelongsTo: groupId,
             LHeadStatus: isActive,
-            isTdsApplicable: false,
+            isTdsApplicable: true,
             tdsLimitApplicable: true,
           };
 
