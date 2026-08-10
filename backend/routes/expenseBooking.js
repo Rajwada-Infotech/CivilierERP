@@ -3955,6 +3955,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
       SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
              eb.ELinkedGrnIds, eb.EGLAccountId,
+             eb.ECgstRate, eb.ESgstRate, eb.EIgstRate,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
              ${ebSupplierPost2.idExpr} AS ResolvedSupplierId
       FROM dbo.ExpenseBooking eb
@@ -3977,6 +3978,16 @@ router.post("/:id/post-to-gl", async (req, res) => {
       ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, resolveGrnIds(eb)));
     } else {
       totalAmount = parseFloat(eb.ENetAmount||eb.EAmount||0);
+      // Direct (TOD) bookings don't store a separate tax-amount column —
+      // only the GST-inclusive ENetAmount and the rates that produced it —
+      // so back-derive base/tax from the rates, same tolerance-of-rounding
+      // spirit as the GRN path above. Used below to split each Expense
+      // Head row's GST-inclusive amount into a base leg + a combined GST
+      // Credit Available leg, instead of debiting the whole inclusive
+      // amount straight to the Expense Head (which silently ate the ITC).
+      const directRatePct = (parseFloat(eb.ECgstRate) || 0) + (parseFloat(eb.ESgstRate) || 0) + (parseFloat(eb.EIgstRate) || 0);
+      baseAmount = directRatePct > 0 ? totalAmount / (1 + directRatePct / 100) : totalAmount;
+      taxAmount = totalAmount - baseAmount;
     }
 
     // Cost Centre for the posted GL legs — ExpenseBooking only stores a text
@@ -4023,6 +4034,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     if (!supplierId) return res.status(422).json({ error: "Could not resolve this invoice's supplier account." });
     if (isGrnLinked && !pgrnId) return res.status(422).json({ error: "Provision for Pending GRN system ledger not configured." });
     if (isGrnLinked && taxAmount > 0 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
+    if (!isGrnLinked && taxAmount > 0.5 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
     if (!isGrnLinked && expenseHeadAllocations.length === 0 && !debitLedgerId) return res.status(422).json({ error: "Purchase system ledger not configured." });
     if (!isGrnLinked && expenseHeadAllocations.length > 0) {
       const allocSum = Math.round(expenseHeadAllocations.reduce((s, a) => s + a.amount, 0) * 100) / 100;
@@ -4051,18 +4063,55 @@ router.post("/:id/post-to-gl", async (req, res) => {
             { LHeadId: supplierId, DebitAmount: 0, CreditAmount: g.totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
           ])
       : expenseHeadAllocations.length > 0
-        ? [
-            ...expenseHeadAllocations.map((a) => ({
+        ? (() => {
+            // Each row's amount is GST-inclusive (it's required to sum to
+            // ENetAmount — see ExpenseHeadAllocationEditor). Scale every row
+            // by the invoice's own base/total ratio to get its base-only
+            // debit, and post ONE combined GST Credit Available leg for the
+            // rest — rather than debiting the full inclusive amount to the
+            // Expense Head, which silently absorbed the ITC into the
+            // expense instead of recognizing it as recoverable tax.
+            const baseRatio = totalAmount > 0 ? baseAmount / totalAmount : 1;
+            const headLegs = expenseHeadAllocations.map((a) => ({
               LHeadId: a.lHeadId,
-              DebitAmount: a.amount,
+              DebitAmount: Math.round(a.amount * baseRatio * 100) / 100,
               CreditAmount: 0,
               Narration: `Invoice Posting: ${eb.EDocNo} — ${a.lHeadName}`,
-            })),
-            { LHeadId: supplierId, DebitAmount: 0, CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
-          ]
+            }));
+            // Any rounding leftover from per-row scaling goes to the GST
+            // leg (not silently dropped) so the voucher still balances to
+            // the paisa against Supplier Payable below.
+            const headBaseSum = headLegs.reduce((s, l) => s + l.DebitAmount, 0);
+            const gstLegAmount = Math.round((totalAmount - headBaseSum) * 100) / 100;
+            return [
+              ...headLegs,
+              ...(gstLegAmount > 0
+                ? [{ LHeadId: gstCreditId, DebitAmount: gstLegAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available` }]
+                : []),
+              { LHeadId: supplierId, DebitAmount: 0, CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
+            ];
+          })()
         : [
-            { LHeadId: debitLedgerId, DebitAmount: totalAmount, CreditAmount: 0,           Narration: `Invoice Posting: ${eb.EDocNo} — ${eb.EGLAccountId ? "GL Account" : "Purchase"}` },
-            { LHeadId: supplierId,    DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
+            // PO / WO / WO_PO-linked invoices, and TOD invoices with no
+            // Expense Heads tagged, land here. baseAmount/taxAmount were
+            // already back-derived from ECgstRate/ESgstRate/EIgstRate above
+            // (same as the Expense Head branch) — split the single
+            // Purchase/GL leg the same way instead of folding the ITC into
+            // it, so every non-GRN posting recognizes GST Credit Available
+            // consistently regardless of source type. Tax leg is the
+            // remainder (totalAmount - roundedBase), not independently
+            // rounded, so the two legs always sum exactly to totalAmount.
+            ...(() => {
+              const baseLeg = Math.round(baseAmount * 100) / 100;
+              const taxLeg = Math.round((totalAmount - baseLeg) * 100) / 100;
+              return [
+                { LHeadId: debitLedgerId, DebitAmount: baseLeg, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — ${eb.EGLAccountId ? "GL Account" : "Purchase"}` },
+                ...(taxLeg > 0
+                  ? [{ LHeadId: gstCreditId, DebitAmount: taxLeg, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available` }]
+                  : []),
+              ];
+            })(),
+            { LHeadId: supplierId, DebitAmount: 0, CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
           ];
 
     // Voucher number only — GL posting is independent of the Journal

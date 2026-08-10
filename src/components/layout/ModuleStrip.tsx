@@ -59,7 +59,7 @@ const MODULES = [
     id: "loan" as Module,
     icon: MoneyRecive,
     label: "Loan",
-    desc: "Loan management (coming soon)",
+    desc: "Loan management",
     color: "#22c55e",
     bg: "rgba(34,197,94,0.22)",
     ringRgb: "34,197,94",

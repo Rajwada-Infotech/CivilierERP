@@ -2046,26 +2046,6 @@ export default function MaterialExpenseBooking() {
                         </SelectContent>
                       </Select>
                     </Field>
-                    {/* Expense Head only makes sense for Other Expenses (TOD)
-                        bookings — PO/GRN/WO-linked invoices already resolve
-                        their GL posting from the linked document's own
-                        accounts. Multiple heads can be tagged, each with its
-                        own amount — they must add up to the invoice's net
-                        amount, and each becomes its own debit leg when
-                        posted to GL (see ExpenseHeadAllocationEditor). */}
-                    {isDirect && selectedDoc?.kind === "TOD" && (
-                      <Field
-                        label="Expense Head"
-                        className="sm:col-span-2"
-                        hint="Split this invoice's debit side across one or more ledger heads — must add up to the net amount below"
-                      >
-                        <ExpenseHeadAllocationEditor
-                          rows={form.expenseHeadAllocations ?? []}
-                          onChange={(rows) => set("expenseHeadAllocations", rows)}
-                          targetAmount={bd.netAmount}
-                        />
-                      </Field>
-                    )}
                     {/* TDS — only shown once the resolved supplier is
                         actually TDS-eligible (Supplier/Contractor Master's
                         TDS Applicable flag). Never mandatory here — the
@@ -2177,6 +2157,31 @@ export default function MaterialExpenseBooking() {
                 />
               )}
 
+              {/* Expense Head allocation — placed here (right after Basic
+                  Amt / GST, before Billing Terms) so its target amount
+                  (bd.netAmount, already resolved from the fields directly
+                  above) is visible on screen the moment the user starts
+                  tagging rows, instead of living earlier in the form where
+                  editing the amount required scrolling down to Basic Amt,
+                  then back up to re-check the running allocation total.
+                  Only makes sense for Other Expenses (TOD) bookings —
+                  PO/GRN/WO-linked invoices already resolve GL posting from
+                  the linked document's own accounts. */}
+              {isDirect && selectedDoc?.kind === "TOD" && (
+                <div className="space-y-3">
+                  <SectionHeader label="Expense Head" />
+                  <Field
+                    label="Allocation"
+                    hint="Split this invoice's debit side across one or more ledger heads — must add up to the net amount above"
+                  >
+                    <ExpenseHeadAllocationEditor
+                      rows={form.expenseHeadAllocations ?? []}
+                      onChange={(rows) => set("expenseHeadAllocations", rows)}
+                      targetAmount={bd.netAmount}
+                    />
+                  </Field>
+                </div>
+              )}
 
               {/* ── 3. Billing Terms ──────────────────────────────────── */}
               <div className="space-y-3">
