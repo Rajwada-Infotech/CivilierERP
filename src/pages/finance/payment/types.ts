@@ -193,6 +193,16 @@ export interface PaymentRecord {
   // one or more Expense Heads straight from the bank instead of a Party.
   // When set (non-empty), this takes priority over partyId at posting time.
   expenseHeadAllocations: ExpenseHeadAllocationRow[];
+  // TDS (migration 304) — snapshot taken at payment time. For an
+  // invoice-linked payment this is inherited read-only from the invoice's
+  // own snapshot (never user-chosen here); for a direct payment it's
+  // user-selected. Either way the backend always re-derives/re-validates
+  // it, this is just what got persisted.
+  tdsId: number | null;
+  tdsNature: string | null;
+  tdsName: string | null;
+  tdsPercentage: number | null;
+  tdsAmount: number;
 }
 
 export const PAYMENT_MODES = [

@@ -710,6 +710,44 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       }
     }
 
+    // TDS (migration 304) — Section 8/14/17 of the spec: an invoice-linked
+    // payment (PExpenseRef set, not a Contract advance) READS the invoice's
+    // own TDS snapshot rather than letting the payment pick its own; a
+    // direct payment resolves TDS fresh against the client's chosen TDSId.
+    // resolveInvoiceLinkedTds/resolveTds both throw a 400 (via .status) when
+    // TDS is due but nothing was selected — caught below like every other
+    // validation error in this handler.
+    const isInvoiceLinkedForTds = !!PExpenseRef && !ContractId;
+    const companyIdForTds = parseInt(PCompany, 10) || null;
+    const finYearIdForTds = await resolveFinYearId(pool, PDate);
+    let tdsSnapshot;
+    try {
+      const { resolveInvoiceLinkedTds, resolveTds } = require("../services/tds");
+      if (isInvoiceLinkedForTds) {
+        tdsSnapshot = await resolveInvoiceLinkedTds(pool, sql, {
+          expenseRef: PExpenseRef,
+          companyId: companyIdForTds,
+          finYearId: finYearIdForTds,
+        });
+      } else {
+        const { resolvePaymentSupplierHeadId } = require("../services/generalLedger");
+        const directPartyId = await resolvePaymentSupplierHeadId(pool, { ContractId, PExpenseRef: null, PPartyId: partyId });
+        const tdsFlagRes = directPartyId
+          ? await pool.request().input("Id", sql.Int, directPartyId).query("SELECT IsTdsApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id")
+          : null;
+        tdsSnapshot = await resolveTds(pool, sql, {
+          partyHeadId: directPartyId,
+          tdsApplicableFlag: !!tdsFlagRes?.recordset[0]?.IsTdsApplicable,
+          billAmount: PAmount,
+          companyId: companyIdForTds,
+          finYearId: finYearIdForTds,
+          selectedTdsId: req.body.TDSId,
+        });
+      }
+    } catch (tdsErr) {
+      return res.status(tdsErr.status || 400).json({ error: tdsErr.message });
+    }
+
     // Always use 'PAY' prefix — TypeOfDoc only has a 'PAY' row.
     // rootExBDocNo is stored on the record for traceability only.
     const prefix = "PAY";
@@ -785,7 +823,12 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
       .input("PApprovedBy", sql.NVarChar(100), null)
-      .input("Status", sql.NVarChar(20), initialStatus).query(`
+      .input("Status", sql.NVarChar(20), initialStatus)
+      .input("TDSId", sql.Int, tdsSnapshot.tdsId)
+      .input("TDSNature", sql.NVarChar(200), tdsSnapshot.tdsNature)
+      .input("TDSName", sql.NVarChar(200), tdsSnapshot.tdsName)
+      .input("TDSPercentage", sql.Decimal(5, 2), tdsSnapshot.tdsPercentage)
+      .input("TDSAmount", sql.Decimal(18, 2), tdsSnapshot.tdsAmount).query(`
         INSERT INTO dbo.NewPayment (
           PPaymentName, PRemarks, PMode, PAmount, PDocType, PDate,
           PBankID, PBankName, PProject, PCompany, PExpenseRef,
@@ -794,7 +837,8 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
           DocNo, DocTypeId, DocYear, DocSerial, PFinYearId, ParentDocNo, RootExBDocNo,
           ReplacesPaymentId, BounceCharge, ContractId, PPartyId, OASkipAutoApply,
-          PCreatedAt, PCreatedBy, PApprovedBy, Status
+          PCreatedAt, PCreatedBy, PApprovedBy, Status,
+          TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount
         )
         OUTPUT INSERTED.PPaymentID
         VALUES (
@@ -805,7 +849,8 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
           @DocNo, @DocTypeId, @DocYear, @DocSerial, @PFinYearId, @ParentDocNo, @RootExBDocNo,
           @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId, @OASkipAutoApply,
-          @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
+          @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status,
+          @TDSId, @TDSNature, @TDSName, @TDSPercentage, @TDSAmount
         )
       `);
 
@@ -950,6 +995,44 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       }
     }
 
+    // TDS (migration 304) — see matching comment on POST /. ContractId/
+    // PPartyId aren't part of this PUT's own payload (never re-editable
+    // after creation, see the UPDATE below), so they're read from the
+    // existing row rather than the request body.
+    const existingLinkRes = await pool.request().input("id", sql.Int, id)
+      .query("SELECT ContractId, PPartyId FROM dbo.NewPayment WHERE PPaymentID = @id");
+    const existingLink = existingLinkRes.recordset[0] || {};
+    const isInvoiceLinkedForTdsPut = !!PExpenseRef && !existingLink.ContractId;
+    const companyIdForTdsPut = parseInt(PCompany, 10) || null;
+    const finYearIdForTdsPut = await resolveFinYearId(pool, PDate);
+    let tdsSnapshotPut;
+    try {
+      const { resolveInvoiceLinkedTds, resolveTds } = require("../services/tds");
+      if (isInvoiceLinkedForTdsPut) {
+        tdsSnapshotPut = await resolveInvoiceLinkedTds(pool, sql, {
+          expenseRef: PExpenseRef,
+          companyId: companyIdForTdsPut,
+          finYearId: finYearIdForTdsPut,
+        });
+      } else {
+        const { resolvePaymentSupplierHeadId } = require("../services/generalLedger");
+        const directPartyIdPut = await resolvePaymentSupplierHeadId(pool, { ContractId: existingLink.ContractId, PExpenseRef: null, PPartyId: existingLink.PPartyId });
+        const tdsFlagResPut = directPartyIdPut
+          ? await pool.request().input("Id", sql.Int, directPartyIdPut).query("SELECT IsTdsApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id")
+          : null;
+        tdsSnapshotPut = await resolveTds(pool, sql, {
+          partyHeadId: directPartyIdPut,
+          tdsApplicableFlag: !!tdsFlagResPut?.recordset[0]?.IsTdsApplicable,
+          billAmount: PAmount,
+          companyId: companyIdForTdsPut,
+          finYearId: finYearIdForTdsPut,
+          selectedTdsId: req.body.TDSId,
+        });
+      }
+    } catch (tdsErr) {
+      return res.status(tdsErr.status || 400).json({ error: tdsErr.message });
+    }
+
     // Re-resolve the Financial Year whenever the payment date is edited — it
     // always tracks the payment's own PDate, same as on create.
     const pFinYearIdUpdate = await resolveFinYearId(pool, PDate);
@@ -991,7 +1074,12 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PCardReference", sql.NVarChar(100), PCardReference || null)
       .input("PCardId", sql.Int, PCardId || null)
       .input("OASkipAutoApply", sql.Bit, oaSkipAutoApply === undefined ? null : (oaSkipAutoApply ? 1 : 0))
-      .input("PUpdatedBy", sql.NVarChar(100), userEmail).query(`
+      .input("PUpdatedBy", sql.NVarChar(100), userEmail)
+      .input("TDSId", sql.Int, tdsSnapshotPut.tdsId)
+      .input("TDSNature", sql.NVarChar(200), tdsSnapshotPut.tdsNature)
+      .input("TDSName", sql.NVarChar(200), tdsSnapshotPut.tdsName)
+      .input("TDSPercentage", sql.Decimal(5, 2), tdsSnapshotPut.tdsPercentage)
+      .input("TDSAmount", sql.Decimal(18, 2), tdsSnapshotPut.tdsAmount).query(`
         UPDATE dbo.NewPayment SET
           PPaymentName         = @PPaymentName,
           PRemarks             = @PRemarks,
@@ -1019,7 +1107,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
           PImpsReference       = @PImpsReference,
           PCardReference       = @PCardReference,
           PCardId              = @PCardId,
-          OASkipAutoApply      = ISNULL(@OASkipAutoApply, OASkipAutoApply)
+          OASkipAutoApply      = ISNULL(@OASkipAutoApply, OASkipAutoApply),
+          TDSId = @TDSId, TDSNature = @TDSNature, TDSName = @TDSName, TDSPercentage = @TDSPercentage, TDSAmount = @TDSAmount
         WHERE PPaymentID = @PPaymentID
       `);
 
@@ -1752,6 +1841,7 @@ router.get("/chain-posting/:expenseRef", async (req, res) => {
       .query(`
         SELECT np.PPaymentID, np.DocNo, np.PDate, np.PAmount,
                ISNULL(np.BounceCharge, 0) AS BounceCharge,
+               ISNULL(np.TDSAmount, 0) AS TDSAmount,
                np.PMode, np.Status,
                np.PBankID, np.PBankName,
                bank.LHeadName AS BankLedgerName, bank.LHeadCode AS BankLedgerCode,
@@ -1816,6 +1906,7 @@ router.get("/chain-posting/:expenseRef", async (req, res) => {
         : null;
       const pmtAmt = parseFloat(p.PAmount) || 0;
       const bounceCharge = parseFloat(p.BounceCharge) || 0;
+      const tdsAmount = parseFloat(p.TDSAmount) || 0;
       const netAmt = Math.max(0, pmtAmt - bounceCharge);
 
       // Always include payment entry — isBounced flag controls frontend postability
@@ -1828,7 +1919,11 @@ router.get("/chain-posting/:expenseRef", async (req, res) => {
         mode: p.PMode,
         isBounced: !!p.IsBounced,
         bounceReason: p.BounceReason ?? null,
-        accounts: { supplier: supplierLed, bank: bankLed },
+        // TDS (migration 304) — when set, the credit side of this entry
+        // splits into Bank + TDS Payable instead of one lump Bank credit;
+        // the debit (supplier) leg is unaffected.
+        tdsAmount,
+        accounts: { supplier: supplierLed, bank: bankLed, tdsPayable: tdsAmount > 0 ? { label: "TDS Payable A/c", code: "TDSPAY" } : null },
         isPosted: !!postedMap[p.PPaymentID],
         jvNo: postedMap[p.PPaymentID] ?? null,
       });
@@ -1947,6 +2042,7 @@ router.get("/:id/posting", async (req, res) => {
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
              np.PBankID, np.PBankName, np.ContractId, np.PPartyId,
+             np.TDSId, np.TDSNature, np.TDSName, np.TDSPercentage, np.TDSAmount,
              bank.LHeadName AS BankLedgerName, bank.LHeadCode AS BankLedgerCode,
              np.Status
       FROM dbo.NewPayment np
@@ -1987,9 +2083,14 @@ router.get("/:id/posting", async (req, res) => {
     // determines which specific account the posting actually lands in.
     const { resolvePaymentSupplierHeadId } = require("../services/generalLedger");
     const resolvedSupplierId = await resolvePaymentSupplierHeadId(pool, pmt);
+    const tdsAmount = Number(pmt.TDSAmount) || 0;
     const accounts = {
       supplier: resolvedSupplierId ? { id: resolvedSupplierId, label: "Supplier / Creditor A/c", code: null } : null,
       bank: pmt.PBankID ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null } : null,
+      // TDS (migration 304) — only present when this payment actually
+      // deducted TDS; Dr side (supplier/Expense Head) stays at the full
+      // amount, the credit side splits into Bank + TDS Payable.
+      tdsPayable: tdsAmount > 0 ? { label: "TDS Payable A/c", code: "TDSPAY" } : null,
     };
 
     // Check if already posted
@@ -2005,6 +2106,14 @@ router.get("/:id/posting", async (req, res) => {
       expenseRef: pmt.PExpenseRef,
       supplierName,
       accounts,
+      tds: tdsAmount > 0 ? {
+        tdsId: pmt.TDSId,
+        nature: pmt.TDSNature,
+        name: pmt.TDSName,
+        percentage: Number(pmt.TDSPercentage) || 0,
+        amount: tdsAmount,
+      } : null,
+      netAmount: (parseFloat(pmt.PAmount) || 0) - tdsAmount,
       isPosted,
       jvNo: isPosted ? postedRes.recordset[0].VoucherNo : null,
     });
@@ -2026,6 +2135,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
              np.PBankID, np.PBankName, np.ContractId, np.PPartyId,
+             ISNULL(np.TDSAmount, 0) AS TDSAmount,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
       FROM dbo.NewPayment np
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
@@ -2041,6 +2151,10 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     const amount = parseFloat(pmt.PAmount) || 0;
     if (amount <= 0) return res.status(400).json({ error: "No amount to post." });
+    const tdsAmount = parseFloat(pmt.TDSAmount) || 0;
+    if (tdsAmount > amount) {
+      return res.status(422).json({ error: `TDS amount (₹${tdsAmount}) exceeds the payment amount (₹${amount}) — re-save the payment before posting.` });
+    }
 
     // The payment's own resolved counter-account (Contract → linked
     // ExpenseBooking's supplier → PPartyId) — not a system-generated
@@ -2050,11 +2164,23 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     if (!supplierId) return res.status(422).json({ error: "Could not resolve this payment's supplier/party account." });
     if (!bankId) return res.status(422).json({ error: "No bank account linked to this payment." });
+    let tdsPayableId = null;
+    if (tdsAmount > 0) {
+      const { getGLHeadId } = require("../services/generalLedger");
+      const { GL_ACCOUNTS: TDS_GL } = require("../services/tds");
+      tdsPayableId = await getGLHeadId(pool, TDS_GL.TDS_PAYABLE).catch(() => null);
+      if (!tdsPayableId) return res.status(422).json({ error: "TDS Payable system ledger not configured." });
+    }
 
+    // TDS (migration 304) — Dr Supplier/Creditor stays at the full amount;
+    // the credit side splits into Bank (net of TDS) + TDS Payable.
     const narrationRef = pmt.PExpenseRef ? `${pmt.DocNo} (${pmt.PExpenseRef})` : pmt.DocNo;
     const legs = [
       { lHeadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` },
-      { lHeadId: bankId,     debit: 0, credit: amount, narration: `Payment: ${narrationRef} — Bank (${pmt.PBankName || pmt.PMode})` },
+      { lHeadId: bankId,     debit: 0, credit: amount - tdsAmount, narration: `Payment: ${narrationRef} — Bank (${pmt.PBankName || pmt.PMode})` },
+      ...(tdsAmount > 0
+        ? [{ lHeadId: tdsPayableId, debit: 0, credit: tdsAmount, narration: `Payment: ${narrationRef} — TDS Payable` }]
+        : []),
     ];
 
     // lockNextDocNumber takes a single options object, not positional args —

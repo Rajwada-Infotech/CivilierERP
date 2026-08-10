@@ -20,11 +20,14 @@ export const addHsn = async (data: Record<string, unknown>) => {
   return res.json().catch(() => ({}));
 };
 
+// HCode is deliberately not unique — the same HSN code can legitimately
+// cover multiple product descriptions. `id` here is the row's HId
+// (identity PK), not the HSN code — see migration 304.
 export const updateHsn = async (
-  code: string,
+  id: string,
   data: Record<string, unknown>,
 ) => {
-  const res = await fetchWithAuth(`${BASE_URL}/${code}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),
   });
@@ -35,8 +38,8 @@ export const updateHsn = async (
   return res.json().catch(() => ({}));
 };
 
-export const deleteHsn = async (code: string) => {
-  const res = await fetchWithAuth(`${BASE_URL}/${code}`, {
+export const deleteHsn = async (id: string) => {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "DELETE",
   });
   if (!res.ok) {

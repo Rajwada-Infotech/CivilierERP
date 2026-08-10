@@ -167,6 +167,14 @@ export interface ExpenseRecord {
   /** Vendor/supplier invoice date */
   vendorInvoiceDate?: string;
 
+  // ── TDS (Tax Deducted at Source) — snapshot taken at invoice time, never
+  //    re-derived from the TDS master later (rates can change). ─────────────
+  tdsId?: number | null;
+  tdsNature?: string | null;
+  tdsName?: string | null;
+  tdsPercentage?: number | null;
+  tdsAmount?: number;
+
   // ── Expense Allocation (Step 6 spec) ────────────────────────────────────────
   /** Cost Centre / Department for expense allocation */
   costCenter?: string;

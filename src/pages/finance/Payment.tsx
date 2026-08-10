@@ -5,6 +5,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useTds } from "@/contexts/TdsContext";
 import { Button } from "@/components/ui/button";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -122,6 +123,7 @@ import { previewOAAdjustment } from "@/api/onAccountAdjustment";
 const Payment: React.FC = () => {
   const rights = usePageRights("new-payment");
   const { theme } = useTheme();
+  const { tdsRecords } = useTds();
   const isDark = theme !== "light";
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -140,6 +142,10 @@ const Payment: React.FC = () => {
   // Direct Expense Payment (migration 303) — a payment mode with no linked
   // invoice/party, paid straight against one or more Expense Heads instead.
   const [showExpenseHeadPayment, setShowExpenseHeadPayment] = useState(false);
+  // TDS (migration 304) — live-checked against the chosen Payee/Party for a
+  // direct (no invoice linked) payment. An invoice-linked payment always
+  // inherits its invoice's own snapshot server-side instead — no dropdown.
+  const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number } | null>(null);
   const PAGE_SIZE = 20;
 
   const [view, setView] = useState<"list" | "form">("list");
@@ -506,6 +512,17 @@ const Payment: React.FC = () => {
             .join("")
         : "";
 
+    // TDS (migration 304)
+    const tdsRows = rec.tdsId
+      ? [
+          field("TDS Nature", rec.tdsNature),
+          field("TDS Name", rec.tdsName),
+          rec.tdsPercentage != null ? field("TDS Rate", `${rec.tdsPercentage}%`) : "",
+          field("TDS Amount", formatINR(rec.tdsAmount || 0)),
+          field("Net Payable", formatINR(Math.max(0, (rec.amount ?? 0) - (rec.tdsAmount || 0)))),
+        ].join("")
+      : "";
+
     const printedAt = new Date().toLocaleString("en-IN", {
       day: "2-digit",
       month: "short",
@@ -585,6 +602,9 @@ const Payment: React.FC = () => {
 
   ${expenseHeadRows ? sectionTitle(rec.expenseHeadAllocations!.length > 1 ? "Expense Heads" : "Expense Head") : ""}
   ${expenseHeadRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${expenseHeadRows}</tbody></table></div>` : ""}
+
+  ${tdsRows ? sectionTitle("TDS Details") : ""}
+  ${tdsRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${tdsRows}</tbody></table></div>` : ""}
 
   <!-- Signatories -->
   <div style="display:flex;gap:8px;margin-top:48px;">
@@ -701,6 +721,42 @@ const Payment: React.FC = () => {
 
   // Companies fetched with business_type=C from enterprise table
   const companyOptions = enterprises;
+
+  // TDS eligibility — live-checked against the chosen Payee/Party for a
+  // direct (no invoice linked) payment. Reuses the same generic endpoint
+  // the Invoice form uses (AccountHeadMaster eligibility isn't module-
+  // specific — Payee/Party here is the exact same Supplier/Contractor
+  // master row an Invoice's supplier resolves to).
+  useEffect(() => {
+    if (form.expenseRef || !form.partyId || !form.company) {
+      setTdsEligibility(null);
+      return;
+    }
+    const companyIdNum = companyOptions.find((c) => c.label === form.company)?.id;
+    if (!companyIdNum) {
+      setTdsEligibility(null);
+      return;
+    }
+    let cancelled = false;
+    const qs = new URLSearchParams({
+      supplierId: String(form.partyId),
+      companyId: String(companyIdNum),
+      amount: String(form.amount || 0),
+    });
+    if (form.date) qs.set("date", form.date);
+    fetchWithAuth(`/api/expense-booking/tds-eligibility?${qs.toString()}`)
+      .then((r) => r.json().catch(() => null))
+      .then((data) => {
+        if (!cancelled) setTdsEligibility(data);
+      })
+      .catch(() => {
+        if (!cancelled) setTdsEligibility(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.expenseRef, form.partyId, form.company, form.amount, form.date, companyOptions]);
 
   const { data: projectOptions = [] } = useQuery<
     {
@@ -1704,6 +1760,11 @@ const Payment: React.FC = () => {
       }
     }
 
+    if (!form.expenseRef && tdsEligibility?.thresholdMet && !form.tdsId) {
+      toast.error("TDS is due on this payment — please select a TDS.");
+      return false;
+    }
+
     if (isDigitalMode) {
       if (!form.bankId) {
         toast.error("Please select a bank account.");
@@ -1781,6 +1842,10 @@ const Payment: React.FC = () => {
               .filter((r) => r.lHeadId && r.amount > 0)
               .map((r) => ({ lHeadId: r.lHeadId, amount: r.amount }))
           : [],
+      // TDS (migration 304) — only meaningful for a direct (no invoice
+      // linked) payment; ignored server-side for an invoice-linked one,
+      // which always inherits the invoice's own snapshot instead.
+      TDSId: form.tdsId || null,
       // "Keep the balance on his on account" — unchecked means don't let the
       // approve-time hook auto-apply this party's on-account balance.
       oaSkipAutoApply: oaBalance > 0.01 ? !useOnAccountBalance : undefined,
@@ -2355,6 +2420,47 @@ const Payment: React.FC = () => {
                         />
                       </div>
                     </Field>
+                    {/* TDS — only shown once the chosen party is actually
+                        TDS-eligible. Never mandatory to fill here in the
+                        sense of blocking typing — the ₹30k/₹1L threshold is
+                        enforced server-side on save. */}
+                    {tdsEligibility?.tdsApplicable && (
+                      <Field
+                        label="TDS"
+                        hint={
+                          tdsEligibility.thresholdMet
+                            ? "This party has crossed the TDS threshold — select the applicable TDS"
+                            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} paid this year so far) — optional`
+                        }
+                      >
+                        <select
+                          value={form.tdsId ?? ""}
+                          onChange={(e) => {
+                            const id = e.target.value ? Number(e.target.value) : null;
+                            const rec = tdsRecords.find((t) => Number(t.id) === id);
+                            set("tdsId", id);
+                            set("tdsPercentage", rec?.percentage ?? null);
+                            set(
+                              "tdsAmount",
+                              rec ? Math.round(((Number(form.amount) || 0) * rec.percentage) / 100 * 100) / 100 : 0,
+                            );
+                          }}
+                          className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">-- No TDS --</option>
+                          {tdsRecords.filter((t) => t.status).map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name || t.nature} — {t.percentage}%
+                            </option>
+                          ))}
+                        </select>
+                        {!!form.tdsId && (
+                          <p className="text-[11px] text-muted-foreground mt-1">
+                            TDS ₹{(form.tdsAmount || 0).toLocaleString("en-IN")} · Net ₹{Math.max(0, (form.amount || 0) - (form.tdsAmount || 0)).toLocaleString("en-IN")}
+                          </p>
+                        )}
+                      </Field>
+                    )}
                   </div>
                 )}
 
@@ -5084,6 +5190,28 @@ const Payment: React.FC = () => {
                       </span>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* TDS (migration 304) */}
+              {!!viewingRec.tdsId && (
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                    TDS Details
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3">
+                    {[
+                      { label: "TDS Nature", value: viewingRec.tdsNature },
+                      { label: "TDS Name", value: viewingRec.tdsName },
+                      { label: "TDS Rate", value: viewingRec.tdsPercentage != null ? `${viewingRec.tdsPercentage}%` : null },
+                      { label: "TDS Amount", value: formatINR(viewingRec.tdsAmount || 0) },
+                    ].map(({ label, value }) => (
+                      <div key={label}>
+                        <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                        <p className="text-xs font-semibold text-foreground truncate">{value ?? "—"}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               </>

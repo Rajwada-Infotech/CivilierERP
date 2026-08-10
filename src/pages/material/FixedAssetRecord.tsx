@@ -152,6 +152,19 @@ function SectionHeader({ icon: Icon, children }: { icon: React.ElementType; chil
   );
 }
 
+function SubGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 border-b border-border/60 pb-1.5">
+        {label}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 xl:gap-5">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function SummaryCard({ label, value, color = "", icon: Icon }: { label: string; value: string; color?: string; icon?: React.ElementType }) {
   return (
     <div className="bg-muted/40 rounded-lg p-3 text-center">
@@ -745,7 +758,7 @@ export default function FixedAssetRecord() {
           {/* ── Header Info ── */}
           <div className={sectionCls}>
             <SectionHeader icon={FileText}>Header Information</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
               <div>
                 <label className={labelCls}><Calendar size={11} /> Document Date</label>
                 <input type="date" value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
@@ -773,7 +786,7 @@ export default function FixedAssetRecord() {
                   {finYears.map((f) => <option key={f.id} value={f.year}>{f.year}</option>)}
                 </select>
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2 lg:col-span-4">
                 <label className={labelCls}>Remarks</label>
                 <input type="text" value={form.remarks} onChange={(e) => setField("remarks", e.target.value)} placeholder="Optional remarks…" className={inputCls} />
               </div>
@@ -781,10 +794,11 @@ export default function FixedAssetRecord() {
           </div>
 
           {/* ── Asset Details ── */}
-          <div className={sectionCls}>
+          <div className={`${sectionCls} space-y-5`}>
             <SectionHeader icon={Package}>Asset Details</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
-              <div>
+
+            <SubGroup label="Identity">
+              <div className="sm:col-span-2">
                 <label className={labelCls}>Fixed Asset Name *</label>
                 <input type="text" value={form.assetName} onChange={(e) => setField("assetName", e.target.value)} placeholder="e.g. Dell Latitude 5520" className={inputCls} />
               </div>
@@ -803,6 +817,10 @@ export default function FixedAssetRecord() {
                 </div>
               </div>
               <div>
+                <label className={labelCls}><Hash size={11} /> Serial Number</label>
+                <input type="text" value={form.serialNumber} onChange={(e) => setField("serialNumber", e.target.value)} placeholder="Serial / IMEI…" className={inputCls} />
+              </div>
+              <div>
                 <label className={labelCls}>Brand</label>
                 <input type="text" value={form.brand} onChange={(e) => setField("brand", e.target.value)} placeholder="e.g. Dell" className={inputCls} />
               </div>
@@ -810,10 +828,9 @@ export default function FixedAssetRecord() {
                 <label className={labelCls}>Model</label>
                 <input type="text" value={form.model} onChange={(e) => setField("model", e.target.value)} placeholder="e.g. Latitude 5520" className={inputCls} />
               </div>
-              <div>
-                <label className={labelCls}><Hash size={11} /> Serial Number</label>
-                <input type="text" value={form.serialNumber} onChange={(e) => setField("serialNumber", e.target.value)} placeholder="Serial / IMEI…" className={inputCls} />
-              </div>
+            </SubGroup>
+
+            <SubGroup label="Status & Timeline">
               <div>
                 <label className={labelCls}>Status</label>
                 <select value={form.assetStatus} onChange={(e) => setField("assetStatus", e.target.value)} className={inputCls}>
@@ -832,21 +849,28 @@ export default function FixedAssetRecord() {
                 <label className={labelCls}>Purchase Invoice Ref</label>
                 <input type="text" value={form.purchaseInvoiceRef} onChange={(e) => setField("purchaseInvoiceRef", e.target.value)} placeholder="Invoice number…" className={inputCls} />
               </div>
+            </SubGroup>
+
+            <SubGroup label="Cost & Supplier">
+              <div className="relative">
+                <label className={labelCls}><IndianRupee size={11} /> Purchase Cost *</label>
+                <input type="number" min="0" step="0.01" value={form.purchaseCost} onChange={(e) => setField("purchaseCost", e.target.value)} placeholder="0.00"
+                  className={`${inputCls} font-semibold border-emerald-500/30 focus:ring-emerald-500/30 bg-emerald-500/[0.03]`} />
+              </div>
               <div>
+                <label className={labelCls}>Quantity</label>
+                <input type="number" min="1" step="1" value={form.quantity} onChange={(e) => setField("quantity", e.target.value)} className={inputCls} />
+              </div>
+              <div className="sm:col-span-2">
                 <label className={labelCls}>Supplier</label>
                 <select value={form.supplierId} onChange={(e) => setField("supplierId", e.target.value)} className={inputCls}>
                   <option value="">Select supplier…</option>
                   {suppliers.map((s) => <option key={s.LHeadId} value={s.LHeadId}>{s.LHeadName}</option>)}
                 </select>
               </div>
-              <div>
-                <label className={labelCls}><IndianRupee size={11} /> Purchase Cost *</label>
-                <input type="number" min="0" step="0.01" value={form.purchaseCost} onChange={(e) => setField("purchaseCost", e.target.value)} placeholder="0.00" className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>Quantity</label>
-                <input type="number" min="1" step="1" value={form.quantity} onChange={(e) => setField("quantity", e.target.value)} className={inputCls} />
-              </div>
+            </SubGroup>
+
+            <SubGroup label="Assignment">
               <div>
                 <label className={labelCls}><MapPin size={11} /> Location</label>
                 <input type="text" value={form.location} onChange={(e) => setField("location", e.target.value)} placeholder="Office / Site…" className={inputCls} />
@@ -859,13 +883,13 @@ export default function FixedAssetRecord() {
                 <label className={labelCls}><User size={11} /> Custodian / Assigned To</label>
                 <input type="text" value={form.custodian} onChange={(e) => setField("custodian", e.target.value)} placeholder="Employee name…" className={inputCls} />
               </div>
-            </div>
+            </SubGroup>
           </div>
 
           {/* ── Depreciation Details ── */}
           <div className={sectionCls}>
             <SectionHeader icon={TrendingDown}>Depreciation Details</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
               <div>
                 <label className={labelCls}>Depreciation Type</label>
                 <input type="text" value={form.depreciationType} readOnly placeholder="Auto-fetched…"
@@ -1062,7 +1086,7 @@ export default function FixedAssetRecord() {
       {/* ── filters ── */}
       <Card className="border-border shadow-sm mb-5">
         <CardContent className="p-4 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div className="lg:col-span-2">
               <label className={labelCls}>Search</label>
               <div className="relative">
@@ -1091,17 +1115,17 @@ export default function FixedAssetRecord() {
                 {ASSET_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-            <div className="w-full sm:w-48">
+            <div>
               <label className={labelCls}>Financial Year</label>
               <select value={filterFinYear} onChange={(e) => setFilterFinYear(e.target.value)} className={inputCls}>
                 <option value="">All Years</option>
                 {finYears.map((f) => <option key={f.id} value={f.year}>{f.year}</option>)}
               </select>
             </div>
-            <div className="flex items-center gap-3 sm:ml-auto">
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
+            <div className="flex items-center gap-3">
               {(filterCategory || filterStatus || filterFinYear || search) && (
                 <button
                   onClick={() => { setFilterCategory(""); setFilterStatus(""); setFilterFinYear(""); setSearch(""); }}

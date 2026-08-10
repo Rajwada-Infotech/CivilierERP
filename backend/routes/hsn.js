@@ -11,7 +11,7 @@ router.get("/", cache("hsn", 300), async (req, res) => {
   try {
     const pool = getPool()
     const result = await pool.request().query(
-      "SELECT HCode, HDescription, HShortDescription, HCGST, HSGST, HIGST, HStatus, CreatedBy, CreatedAt, UpdatedBy, UpdatedAt, ApprovedBy, ApprovedAt, HIsEdited FROM dbo.HSN"
+      "SELECT HId, HCode, HDescription, HShortDescription, HCGST, HSGST, HIGST, HStatus, HIsSAC, CreatedBy, CreatedAt, UpdatedBy, UpdatedAt, ApprovedBy, ApprovedAt, HIsEdited FROM dbo.HSN"
     )
     res.json(result.recordset)
   } catch (err) {
@@ -23,14 +23,18 @@ router.get("/", cache("hsn", 300), async (req, res) => {
 router.post("/", requirePageRight("hsn-master", "create"), async (req, res) => {
   const {
     HCode, HDescription, HShortDescription,
-    HCGST, HSGST, HIGST, HStatus,
+    HCGST, HSGST, HIGST, HStatus, HIsSAC,
   } = req.body
 
   const createdBy = req.user?.userId || null
 
   try {
     const pool = getPool()
-    await pool
+    // HCode is deliberately NOT unique — the same HSN code legitimately
+    // covers multiple product descriptions (e.g. '3506'/'UPVC SOLVENT' and
+    // '3506'/'CPVC SOLUTION' are both valid, distinct rows). HId (identity)
+    // is the row's real key — see migration 304.
+    const result = await pool
       .request()
       .input("HCode",             sql.VarChar,       HCode)
       .input("HDescription",      sql.NVarChar,      HDescription      || null)
@@ -39,64 +43,73 @@ router.post("/", requirePageRight("hsn-master", "create"), async (req, res) => {
       .input("HSGST",             sql.Decimal(5, 2), HSGST             || null)
       .input("HIGST",             sql.Decimal(5, 2), HIGST             || null)
       .input("HStatus",           sql.Bit,           HStatus ? 1 : 0)
+      .input("HIsSAC",            sql.Bit,           HIsSAC ? 1 : 0)
       .input("CreatedBy",         sql.Int,           createdBy)
       .input("CreatedAt",         sql.DateTime,      new Date())
       .input("HIsEdited",         sql.Bit,           0)
       .query(`
         INSERT INTO dbo.HSN (
           HCode, HDescription, HShortDescription,
-          HCGST, HSGST, HIGST, HStatus,
+          HCGST, HSGST, HIGST, HStatus, HIsSAC,
           CreatedBy, CreatedAt, HIsEdited
-        ) VALUES (
+        )
+        OUTPUT INSERTED.HId
+        VALUES (
           @HCode, @HDescription, @HShortDescription,
-          @HCGST, @HSGST, @HIGST, @HStatus,
+          @HCGST, @HSGST, @HIGST, @HStatus, @HIsSAC,
           @CreatedBy, @CreatedAt, @HIsEdited
         )
       `)
     await bumpCacheVersion("hsn")
-    res.json({ message: "HSN added successfully" })
+    res.json({ message: "HSN added successfully", HId: result.recordset[0]?.HId })
   } catch (err) {
     console.error("INSERT ERROR:", err.message)
     res.status(500).json({ error: err.message })
   }
 })
 
-router.put("/:code", requirePageRight("hsn-master", "edit"), async (req, res) => {
-  const { code } = req.params
+router.put("/:id", requirePageRight("hsn-master", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10)
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid HSN id" })
   const {
-    HDescription, HShortDescription,
-    HCGST, HSGST, HIGST, HStatus,
+    HCode, HDescription, HShortDescription,
+    HCGST, HSGST, HIGST, HStatus, HIsSAC,
   } = req.body
 
   const updatedBy = req.user?.userId || null
 
   try {
     const pool = getPool()
-    await pool
+    const result = await pool
       .request()
-      .input("HCode",             sql.VarChar,       code)
-      .input("HDescription",      sql.NVarChar,      HDescription      || null)
-      .input("HShortDescription", sql.NVarChar,      HShortDescription || null)
-      .input("HCGST",             sql.Decimal(5, 2), HCGST             || null)
-      .input("HSGST",             sql.Decimal(5, 2), HSGST             || null)
-      .input("HIGST",             sql.Decimal(5, 2), HIGST             || null)
-      .input("HStatus",           sql.Bit,           HStatus ? 1 : 0)
-      .input("HIsEdited",         sql.Bit,           1)
-      .input("UpdatedBy",         sql.Int,           updatedBy)
-      .input("UpdatedAt",         sql.DateTime,      new Date())
+      .input("HId",                sql.Int,           id)
+      .input("HCode",              sql.VarChar,       HCode)
+      .input("HDescription",       sql.NVarChar,      HDescription      || null)
+      .input("HShortDescription",  sql.NVarChar,      HShortDescription || null)
+      .input("HCGST",              sql.Decimal(5, 2), HCGST             || null)
+      .input("HSGST",              sql.Decimal(5, 2), HSGST             || null)
+      .input("HIGST",              sql.Decimal(5, 2), HIGST             || null)
+      .input("HStatus",            sql.Bit,           HStatus ? 1 : 0)
+      .input("HIsSAC",             sql.Bit,           HIsSAC ? 1 : 0)
+      .input("HIsEdited",          sql.Bit,           1)
+      .input("UpdatedBy",          sql.Int,           updatedBy)
+      .input("UpdatedAt",          sql.DateTime,      new Date())
       .query(`
         UPDATE dbo.HSN SET
+          HCode             = @HCode,
           HDescription      = @HDescription,
           HShortDescription = @HShortDescription,
           HCGST             = @HCGST,
           HSGST             = @HSGST,
           HIGST             = @HIGST,
           HStatus           = @HStatus,
+          HIsSAC            = @HIsSAC,
           HIsEdited         = @HIsEdited,
           UpdatedBy         = @UpdatedBy,
           UpdatedAt         = @UpdatedAt
-        WHERE HCode = @HCode
+        WHERE HId = @HId
       `)
+    if (!result.rowsAffected[0]) return res.status(404).json({ error: "HSN record not found" })
     await bumpCacheVersion("hsn")
     res.json({ message: "HSN updated successfully" })
   } catch (err) {
@@ -105,14 +118,16 @@ router.put("/:code", requirePageRight("hsn-master", "edit"), async (req, res) =>
   }
 })
 
-router.delete("/:code", requirePageRight("hsn-master", "delete"), async (req, res) => {
-  const { code } = req.params
+router.delete("/:id", requirePageRight("hsn-master", "delete"), async (req, res) => {
+  const id = parseInt(req.params.id, 10)
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid HSN id" })
   try {
     const pool = getPool()
-    await pool
+    const result = await pool
       .request()
-      .input("HCode", sql.VarChar, code)
-      .query("DELETE FROM dbo.HSN WHERE HCode = @HCode")
+      .input("HId", sql.Int, id)
+      .query("DELETE FROM dbo.HSN WHERE HId = @HId")
+    if (!result.rowsAffected[0]) return res.status(404).json({ error: "HSN record not found" })
     await bumpCacheVersion("hsn")
     res.json({ message: "HSN deleted successfully" })
   } catch (err) {
