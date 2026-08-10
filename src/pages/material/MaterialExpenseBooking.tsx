@@ -1541,13 +1541,13 @@ export default function MaterialExpenseBooking() {
               </div>
             </div>
 
-            <CardContent className="pt-7 space-y-8 px-5 sm:px-7">
+            <CardContent className="pt-6 space-y-7 px-5 sm:px-6">
               {/* ── 0. Booking Information ─────────────────────────────── */}
-              <div className="space-y-5">
+              <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
 
                 {/* ── Sub-section: Party & Project ── */}
-                <div className="rounded-xl border border-border bg-muted/10 p-5 space-y-4">
+                <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-3">
                   <div className="flex items-center gap-2">
                     <div className="w-6 h-6 rounded-md bg-indigo-500/10 flex items-center justify-center shrink-0">
                       <SlidersHorizontal size={12} className="text-indigo-500" />
@@ -1556,9 +1556,9 @@ export default function MaterialExpenseBooking() {
                       Party &amp; Project
                     </p>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
                         <Building2 size={11} className="shrink-0" />
                         Company
                         <span className="text-destructive">*</span>
@@ -1600,7 +1600,7 @@ export default function MaterialExpenseBooking() {
                       </Select>
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
                         <FolderKanban size={11} className="shrink-0" />
                         Project
                       </p>
@@ -1648,7 +1648,7 @@ export default function MaterialExpenseBooking() {
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
                         <CalendarDays size={11} className="shrink-0" />
                         Year
                       </p>
@@ -1674,7 +1674,7 @@ export default function MaterialExpenseBooking() {
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
                         <User size={11} className="shrink-0" />
                         {vendorLabel}
                       </p>
@@ -1759,7 +1759,7 @@ export default function MaterialExpenseBooking() {
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
                         <ShoppingCart size={11} className="shrink-0" />
                         Filter by PO
                       </p>
@@ -1966,9 +1966,9 @@ export default function MaterialExpenseBooking() {
               )}
 
                 {/* ── Sub-section: Dates & Payment ── */}
-                <div className="rounded-xl border border-border/60 bg-muted/[0.06] p-5 space-y-4">
-                  <p className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground/70">Dates &amp; Payment</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Dates &amp; Payment</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <Field label="Booking Date" required>
                       <DateField value={form.bookingDate} onChange={(val) => set("bookingDate", val)} />
                     </Field>
@@ -2008,9 +2008,9 @@ export default function MaterialExpenseBooking() {
                 </div>
 
                 {/* ── Sub-section: Vendor Invoice ── */}
-                <div className="rounded-xl border border-border/60 bg-muted/[0.06] p-5 space-y-4">
-                  <p className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground/70">Vendor Invoice</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Vendor Invoice</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Field label="Vendor Invoice No">
                       <Input value={form.vendorInvoiceNo ?? ""} onChange={(e) => set("vendorInvoiceNo", e.target.value)} placeholder="Supplier invoice number" />
                     </Field>
@@ -2021,9 +2021,9 @@ export default function MaterialExpenseBooking() {
                 </div>
 
                 {/* ── Sub-section: Accounting ── */}
-                <div className="rounded-xl border border-border/60 bg-muted/[0.06] p-5 space-y-4">
-                  <p className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground/70">Accounting</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Accounting</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Field
                       label="Cost Center"
                       className={
