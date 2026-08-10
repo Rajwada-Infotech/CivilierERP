@@ -1028,6 +1028,36 @@ const ALL_REPORTS: ReportDef[] = [
       { header: "Cleared Date",    accessor: (r) => (r.ClearedDate ?? "—") as string },
     ],
   },
+  {
+    id: "tds-report",
+    label: "TDS Report",
+    description: "TDS actually deducted on payments — invoice-linked & direct",
+    icon: Percent,
+    color: "#eab308",
+    apiPath: "/api/reports/tds",
+    filterConfig: {
+      companyParam: "companyId",
+      finYearParam: "finYearId",
+      singleDateParam: "dateFrom",
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "Payment Doc No", accessor: "DocNo" },
+      { header: "Date", accessor: (r) => (r.PayDate ?? "—") as string },
+      { header: "Company", accessor: (r) => (r.Company ?? "—") as string },
+      { header: "Party", accessor: (r) => (r.PartyName ?? "—") as string },
+      { header: "Type", accessor: (r) => (r.PaymentType ?? "—") as string },
+      { header: "Invoice Ref", accessor: (r) => (r.InvoiceRef ?? "—") as string },
+      { header: "TDS Nature", accessor: (r) => (r.TDSNature ?? "—") as string },
+      { header: "TDS Name", accessor: (r) => (r.TDSName ?? "—") as string },
+      { header: "TDS Rate", accessor: (r) => (r.TDSPercentage != null ? `${r.TDSPercentage}%` : "—") },
+      { header: "Gross Amount", accessor: (r) => fmt(r.GrossAmount as number) },
+      { header: "TDS Amount", accessor: (r) => fmt(r.TDSAmount as number) },
+      { header: "Net Paid", accessor: (r) => fmt(r.NetPaid as number) },
+      { header: "Fin Year", accessor: (r) => (r.FinYear ?? "—") as string },
+    ],
+  },
 
   // ── Sales Automation / CRM reports ──────────────────────────────────────────
   {
@@ -1618,6 +1648,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "on-account-report",
       "pdc-report",
       "cancelled-cheques-report",
+      "tds-report",
     ],
   },
   {

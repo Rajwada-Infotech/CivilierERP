@@ -38,6 +38,7 @@ import {
   Edit,
   Trash2,
   AlertCircle,
+  Lock,
   FileText,
   ChevronDown,
   Receipt,
@@ -146,6 +147,13 @@ const Payment: React.FC = () => {
   // direct (no invoice linked) payment. An invoice-linked payment always
   // inherits its invoice's own snapshot server-side instead — no dropdown.
   const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number } | null>(null);
+  // Live preview of what an invoice-linked payment will inherit/enforce —
+  // calls the exact same resolver the save itself uses, so this can never
+  // disagree with what actually happens on save.
+  const [invoiceTdsPreview, setInvoiceTdsPreview] = useState<{
+    blocked: boolean; message?: string; eligible: boolean; thresholdMet: boolean;
+    tdsAmount: number; tdsNature?: string | null; tdsName?: string | null; tdsPercentage?: number | null;
+  } | null>(null);
   const PAGE_SIZE = 20;
 
   const [view, setView] = useState<"list" | "form">("list");
@@ -855,6 +863,33 @@ const Payment: React.FC = () => {
 
   // ── Contract source ─────────────────────────────────────────────────────────
   const [selectedContract, setSelectedContract] = useState<any | null>(null);
+
+  // TDS — invoice-linked payment. Live preview of exactly what will be
+  // inherited (or what will block the save) once an invoice is picked —
+  // calls the exact same resolver the save itself uses.
+  useEffect(() => {
+    if (!form.expenseRef || selectedContract) {
+      setInvoiceTdsPreview(null);
+      return;
+    }
+    const companyIdNum = companyOptions.find((c) => c.label === form.company)?.id;
+    let cancelled = false;
+    const qs = new URLSearchParams({ expenseRef: form.expenseRef });
+    if (companyIdNum) qs.set("companyId", String(companyIdNum));
+    if (form.date) qs.set("date", form.date);
+    fetchWithAuth(`/api/new-payment/tds-preview?${qs.toString()}`)
+      .then((r) => r.json().catch(() => null))
+      .then((data) => {
+        if (!cancelled) setInvoiceTdsPreview(data);
+      })
+      .catch(() => {
+        if (!cancelled) setInvoiceTdsPreview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.expenseRef, selectedContract, form.company, form.date, companyOptions]);
   const { data: contractOptions = [], isLoading: contractsLoading } = useQuery<any[]>({
     queryKey: ["payment-contracts"],
     queryFn: async () => {
@@ -1765,6 +1800,11 @@ const Payment: React.FC = () => {
       return false;
     }
 
+    if (form.expenseRef && !selectedContract && invoiceTdsPreview?.blocked) {
+      toast.error(invoiceTdsPreview.message || "TDS is due on this invoice but none was selected — please correct the invoice first.");
+      return false;
+    }
+
     if (isDigitalMode) {
       if (!form.bankId) {
         toast.error("Please select a bank account.");
@@ -2519,6 +2559,34 @@ const Payment: React.FC = () => {
                     docNo={form.expenseRef}
                     onClear={clearExpenseLink}
                   />
+                )}
+
+                {/* TDS (migration 304) — invoice-linked payment always
+                    inherits the invoice's own snapshot read-only; this is
+                    a live preview of exactly what will be applied (or what
+                    will block the save) on save, from the same resolver. */}
+                {form.expenseRef && !selectedContract && invoiceTdsPreview?.blocked && (
+                  <div className="flex items-start gap-2.5 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
+                    <AlertCircle size={14} className="text-destructive shrink-0 mt-0.5" />
+                    <p className="text-xs text-destructive">
+                      {invoiceTdsPreview.message || "TDS is due on this invoice but none was selected — please correct the invoice before paying it."}
+                    </p>
+                  </div>
+                )}
+                {form.expenseRef && !selectedContract && !invoiceTdsPreview?.blocked && invoiceTdsPreview?.thresholdMet && (invoiceTdsPreview.tdsAmount ?? 0) > 0 && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3">
+                    <div className="flex items-center gap-2 text-xs text-foreground">
+                      <Lock size={12} className="text-amber-500 shrink-0" />
+                      <span>
+                        TDS <span className="font-semibold">{invoiceTdsPreview.tdsName || invoiceTdsPreview.tdsNature}</span>
+                        {invoiceTdsPreview.tdsPercentage != null && <span className="text-muted-foreground"> — {invoiceTdsPreview.tdsPercentage}%</span>}
+                        {" "}(inherited from invoice)
+                      </span>
+                    </div>
+                    <span className="text-xs font-mono text-muted-foreground whitespace-nowrap">
+                      TDS {formatINR(invoiceTdsPreview.tdsAmount)} · Net {formatINR(Math.max(0, (form.amount || 0) - invoiceTdsPreview.tdsAmount))}
+                    </span>
+                  </div>
                 )}
 
                 {form.expenseRef && selectedContract && (

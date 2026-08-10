@@ -1828,6 +1828,33 @@ router.get("/chain/:expenseRef", async (req, res) => {
   }
 });
 
+// ── TDS live preview for an invoice-linked payment (migration 304) ─────────
+// Called from the Payment form as soon as an invoice is picked, so the user
+// sees exactly what will be inherited/enforced before they save — reuses
+// resolveInvoiceLinkedTds directly (not a re-derived copy), so the preview
+// can never disagree with what POST/PUT actually do.
+router.get("/tds-preview", async (req, res) => {
+  const expenseRef = req.query.expenseRef ? String(req.query.expenseRef).trim() : "";
+  const companyId = parseInt(req.query.companyId, 10) || null;
+  if (!expenseRef) return res.status(400).json({ error: "expenseRef is required" });
+  try {
+    const pool = getPool();
+    const { resolveInvoiceLinkedTds } = require("../services/tds");
+    const finYearId = await resolveFinYearId(pool, req.query.date ? String(req.query.date) : new Date());
+    const result = await resolveInvoiceLinkedTds(pool, sql, { expenseRef, companyId, finYearId });
+    res.json({ blocked: false, ...result });
+  } catch (err) {
+    // resolveInvoiceLinkedTds throws (with .status=400) when TDS is due but
+    // the invoice was never tagged — surface that as a normal, non-fatal
+    // "blocked" preview result rather than an error toast.
+    if (err.status === 400) {
+      return res.json({ blocked: true, message: err.message, eligible: true, thresholdMet: true, tdsAmount: 0 });
+    }
+    console.error("TDS preview error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Chain-wide Posting: all payments for an invoice ────────────────────────
 router.get("/chain-posting/:expenseRef", async (req, res) => {
   const expenseRef = decodeURIComponent(req.params.expenseRef);
