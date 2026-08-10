@@ -38,7 +38,6 @@ import {
   Edit,
   Trash2,
   AlertCircle,
-  Lock,
   FileText,
   ChevronDown,
   Receipt,
@@ -2576,7 +2575,6 @@ const Payment: React.FC = () => {
                 {form.expenseRef && !selectedContract && !invoiceTdsPreview?.blocked && invoiceTdsPreview?.thresholdMet && (invoiceTdsPreview.tdsAmount ?? 0) > 0 && (
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3">
                     <div className="flex items-center gap-2 text-xs text-foreground">
-                      <Lock size={12} className="text-amber-500 shrink-0" />
                       <span>
                         TDS <span className="font-semibold">{invoiceTdsPreview.tdsName || invoiceTdsPreview.tdsNature}</span>
                         {invoiceTdsPreview.tdsPercentage != null && <span className="text-muted-foreground"> — {invoiceTdsPreview.tdsPercentage}%</span>}
