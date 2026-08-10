@@ -11,6 +11,7 @@ import {
 } from "@/api/accountHeadApi";
 import { getAccountGroups } from "@/api/accountApi";
 import { getContractorCategoryOptions } from "@/api/contractorCategoryApi";
+import { getVendorPaymentTermOptions } from "@/api/vendorPaymentTermApi";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
@@ -373,6 +374,15 @@ const ContractorMaster: React.FC = () => {
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
     staleTime: 10 * 60 * 1000,
+  });
+
+  // Sourced from Payment Term Master so the value stored here exactly
+  // matches a VendorPaymentTerm.Description — the invoice page auto-fills
+  // its Payment Terms field by matching this text against that master.
+  const { data: paymentTermOptions } = useQuery({
+    queryKey: ["vendor-payment-term-options"],
+    queryFn: getVendorPaymentTermOptions,
+    staleTime: 5 * 60 * 1000,
   });
 
   const accountGroups: AccountGroup[] = useMemo(() => {
@@ -1091,7 +1101,8 @@ const ContractorMaster: React.FC = () => {
                   />
                 </div>
 
-                {/* Payment Terms */}
+                {/* Payment Terms — sourced from Payment Term Master so the
+                    invoice page can auto-fill by an exact text match */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Payment Terms
@@ -1099,9 +1110,9 @@ const ContractorMaster: React.FC = () => {
                   <div className="relative">
                     <CreditCard
                       size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10"
                     />
-                    <input
+                    <select
                       value={form.LHeadPaymentTerms}
                       onChange={(e) =>
                         setForm((p) => ({
@@ -1109,9 +1120,15 @@ const ContractorMaster: React.FC = () => {
                           LHeadPaymentTerms: e.target.value,
                         }))
                       }
-                      placeholder="e.g. Net 30"
-                      className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                    />
+                      className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
+                    >
+                      <option value="">— No payment term —</option>
+                      {(paymentTermOptions ?? []).map((t) => (
+                        <option key={t.id} value={t.label}>
+                          {t.label} ({t.days} days)
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>
