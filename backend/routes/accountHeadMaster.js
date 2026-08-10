@@ -185,6 +185,8 @@ router.get("/:id", async (req, res, next) => {
       selectColumns.push("lh.LHeadCategory");
     if (hasColumn(columnMeta, "IsTdsApplicable"))
       selectColumns.push("lh.IsTdsApplicable");
+    if (hasColumn(columnMeta, "TdsLimitApplicable"))
+      selectColumns.push("lh.TdsLimitApplicable");
 
     // Login email lives on dbo.users (RoleId -> the 'supplier' row in
     // dbo.Role, LinkedLHeadId -> this row), not on AccountHeadMaster — same
@@ -249,6 +251,8 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       selectColumns.push("lh.LHeadCategory");
     if (hasColumn(columnMeta, "IsTdsApplicable"))
       selectColumns.push("lh.IsTdsApplicable");
+    if (hasColumn(columnMeta, "TdsLimitApplicable"))
+      selectColumns.push("lh.TdsLimitApplicable");
     if (hasColumn(columnMeta, "CreatedAt")) selectColumns.push("lh.CreatedAt");
     if (hasColumn(columnMeta, "UpdatedAt")) selectColumns.push("lh.UpdatedAt");
     if (hasColumn(columnMeta, "ApprovedBy"))
@@ -330,6 +334,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     LHeadCategory,
     LHeadType,
   IsTdsApplicable,
+    TdsLimitApplicable,
     SupplierPassword: supplierPasswordPlain,
   } = req.body;
 
@@ -509,6 +514,16 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       request.input("IsTdsApplicable", sql.Bit, IsTdsApplicable ? 1 : 0);
       insertColumns.push("IsTdsApplicable");
       insertValues.push("@IsTdsApplicable");
+    }
+    // TDS Limit — when ON, TDS deducts only once the ₹30k single-bill /
+    // ₹1L yearly-cumulative threshold is crossed (spec Section 13); when
+    // OFF, TDS Applicable deducts on every eligible bill unconditionally.
+    // Defaults true (threshold logic on) when omitted, matching the
+    // behaviour every party had before this toggle existed.
+    if (hasColumn(columnMeta, "TdsLimitApplicable")) {
+      request.input("TdsLimitApplicable", sql.Bit, TdsLimitApplicable === false ? 0 : 1);
+      insertColumns.push("TdsLimitApplicable");
+      insertValues.push("@TdsLimitApplicable");
     }
     if (hasColumn(columnMeta, "CreatedBy")) {
       request.input("CreatedBy", sql.NVarChar(100), userName);
@@ -792,6 +807,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     LHeadCategory,
     LHeadType,
     IsTdsApplicable,
+    TdsLimitApplicable,
     SupplierPassword: supplierPasswordPlain,
   } = req.body;
 
@@ -942,6 +958,10 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     if (hasColumn(columnMeta, "IsTdsApplicable")) {
       request.input("IsTdsApplicable", sql.Bit, IsTdsApplicable ? 1 : 0);
       updates.push("IsTdsApplicable=@IsTdsApplicable");
+    }
+    if (hasColumn(columnMeta, "TdsLimitApplicable")) {
+      request.input("TdsLimitApplicable", sql.Bit, TdsLimitApplicable === false ? 0 : 1);
+      updates.push("TdsLimitApplicable=@TdsLimitApplicable");
     }
     if (hasColumn(columnMeta, "UpdatedBy")) {
       request.input("UpdatedBy", sql.NVarChar(100), userName);

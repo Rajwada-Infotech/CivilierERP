@@ -38,6 +38,22 @@ function isThresholdMet(billAmount, cumulativeAmount) {
 }
 
 /**
+ * Whether the ₹30k/₹1L threshold actually gates TDS for this bill, per the
+ * Supplier/Contractor's own TdsLimitApplicable toggle (migration 306):
+ *   ON  (default) — normal Section 13 behaviour, threshold decides.
+ *   OFF            — threshold check is skipped entirely; TDS deducts on
+ *                     every eligible bill unconditionally (thresholdMet is
+ *                     always true, cumulative is never even queried).
+ */
+async function resolveThresholdStatus(pool, sql, { tdsLimitApplicable, billAmount, partyHeadId, companyId, finYearId }) {
+  if (tdsLimitApplicable === false) {
+    return { thresholdMet: true, cumulativeAmount: 0 };
+  }
+  const cumulativeAmount = await getYearlyCumulativeAmount(pool, sql, { partyHeadId, companyId, finYearId });
+  return { thresholdMet: isThresholdMet(billAmount, cumulativeAmount), cumulativeAmount };
+}
+
+/**
  * Sum of everything already invoiced/paid to this exact supplier/contractor
  * (AccountHeadMaster row), within one company, within one financial year —
  * used for the yearly-cumulative threshold (Section 13.2). Evaluated
@@ -108,12 +124,11 @@ async function getYearlyCumulativeAmount(pool, sql, { partyHeadId, companyId, fi
  *   tdsPercentage: number|null,
  * }}
  */
-async function resolveTds(pool, sql, { partyHeadId, tdsApplicableFlag, billAmount, companyId, finYearId, selectedTdsId }) {
+async function resolveTds(pool, sql, { partyHeadId, tdsApplicableFlag, tdsLimitApplicable, billAmount, companyId, finYearId, selectedTdsId }) {
   const empty = { eligible: false, thresholdMet: false, tdsId: null, tdsAmount: 0, tdsNature: null, tdsName: null, tdsPercentage: null };
   if (!tdsApplicableFlag) return empty;
 
-  const cumulative = await getYearlyCumulativeAmount(pool, sql, { partyHeadId, companyId, finYearId });
-  const thresholdMet = isThresholdMet(billAmount, cumulative);
+  const { thresholdMet } = await resolveThresholdStatus(pool, sql, { tdsLimitApplicable, billAmount, partyHeadId, companyId, finYearId });
   if (!thresholdMet) return { ...empty, eligible: true, thresholdMet: false };
 
   if (!selectedTdsId) {
@@ -169,18 +184,24 @@ async function resolveInvoiceLinkedTds(pool, sql, { expenseRef, companyId, finYe
     SELECT TOP 1 eb.Eid, eb.EAmount, eb.ECompanyId,
            eb.TDSId, eb.TDSNature, eb.TDSName, eb.TDSPercentage,
            (${ebSup.idExpr}) AS ResolvedSupplierId,
-           ISNULL(sup.IsTdsApplicable, 0) AS IsTdsApplicable
+           ISNULL(sup.IsTdsApplicable, 0) AS IsTdsApplicable,
+           ISNULL(sup.TdsLimitApplicable, 1) AS TdsLimitApplicable
     FROM dbo.ExpenseBooking eb
     ${ebSup.joins}
-    OUTER APPLY (SELECT IsTdsApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = (${ebSup.idExpr})) sup
+    OUTER APPLY (SELECT IsTdsApplicable, TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = (${ebSup.idExpr})) sup
     WHERE eb.EDocNo = @EDocNo
   `);
   const eb = ebRes.recordset[0];
   if (!eb || !eb.IsTdsApplicable) return empty;
 
   const effectiveCompanyId = companyId || eb.ECompanyId;
-  const cumulative = await getYearlyCumulativeAmount(pool, sql, { partyHeadId: eb.ResolvedSupplierId, companyId: effectiveCompanyId, finYearId });
-  const thresholdMet = isThresholdMet(eb.EAmount, cumulative);
+  const { thresholdMet } = await resolveThresholdStatus(pool, sql, {
+    tdsLimitApplicable: !!eb.TdsLimitApplicable,
+    billAmount: eb.EAmount,
+    partyHeadId: eb.ResolvedSupplierId,
+    companyId: effectiveCompanyId,
+    finYearId,
+  });
   if (!thresholdMet) return { ...empty, eligible: true, thresholdMet: false };
 
   if (!eb.TDSId) {
@@ -208,6 +229,7 @@ module.exports = {
   isThresholdMet,
   resolveFinYearId,
   getYearlyCumulativeAmount,
+  resolveThresholdStatus,
   resolveTds,
   resolveInvoiceLinkedTds,
 };

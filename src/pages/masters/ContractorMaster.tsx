@@ -84,6 +84,7 @@ interface Contractor {
   LHeadStatus: boolean;
   GroupName: string | null;
   isTdsApplicable: boolean;
+  tdsLimitApplicable: boolean;
 }
 
 interface AccountGroup {
@@ -107,6 +108,7 @@ interface ContractorForm {
   LBelongsTo: number | "";
   LHeadStatus: boolean;
   isTdsApplicable: boolean;
+  tdsLimitApplicable: boolean;
 }
 
 const EMPTY_FORM: ContractorForm = {
@@ -122,6 +124,7 @@ const EMPTY_FORM: ContractorForm = {
   LBelongsTo: "",
   LHeadStatus: true,
   isTdsApplicable: false,
+  tdsLimitApplicable: true,
 };
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
@@ -422,6 +425,7 @@ const ContractorMaster: React.FC = () => {
       LHeadStatus: Boolean(item.LHeadStatus),
       GroupName: item.GroupName ?? null,
       isTdsApplicable: Boolean(item.IsTdsApplicable),
+      tdsLimitApplicable: item.TdsLimitApplicable == null ? true : Boolean(item.TdsLimitApplicable),
     }));
   }, [rawData]);
 
@@ -447,6 +451,7 @@ const ContractorMaster: React.FC = () => {
     LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
     IsTdsApplicable: f.isTdsApplicable,
+    TdsLimitApplicable: f.tdsLimitApplicable,
   });
 
   const createMut = useMutation({
@@ -608,6 +613,7 @@ const ContractorMaster: React.FC = () => {
             LBelongsTo: groupId,
             LHeadStatus: isActive,
             isTdsApplicable: false,
+            tdsLimitApplicable: true,
           };
 
           await addRecord(buildPayload(rowForm), CONTRACTOR_TYPE);
@@ -667,6 +673,7 @@ const ContractorMaster: React.FC = () => {
       LBelongsTo: c.LBelongsTo ?? "",
       LHeadStatus: c.LHeadStatus,
       isTdsApplicable: c.isTdsApplicable,
+      tdsLimitApplicable: c.tdsLimitApplicable,
     });
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1183,6 +1190,36 @@ const ContractorMaster: React.FC = () => {
                 </span>
               </span>
             </div>
+
+            {/* TDS Limit — only meaningful once TDS Applicable is on.
+                ON (default): the ₹30k single-bill / ₹1L yearly-cumulative
+                threshold gates TDS deduction. OFF: TDS deducts on every
+                eligible bill unconditionally, no threshold check. */}
+            {form.isTdsApplicable && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((p) => ({ ...p, tdsLimitApplicable: !p.tdsLimitApplicable }))
+                  }
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${form.tdsLimitApplicable ? "bg-amber-500" : "bg-muted-foreground/30"}`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.tdsLimitApplicable ? "translate-x-4" : "translate-x-0.5"}`}
+                  />
+                </button>
+                <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                  TDS Limit (₹30k / ₹1L threshold) —{" "}
+                  <span
+                    className={
+                      form.tdsLimitApplicable ? "text-amber-600" : "text-foreground"
+                    }
+                  >
+                    {form.tdsLimitApplicable ? "Applied" : "Deduct on every bill"}
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Card footer — actions */}
@@ -1446,6 +1483,7 @@ const ContractorMaster: React.FC = () => {
                       : "—",
                 },
                 { label: "TDS Applicable", value: viewRecord.isTdsApplicable ? "Yes" : "No" },
+                { label: "TDS Limit", value: viewRecord.isTdsApplicable ? (viewRecord.tdsLimitApplicable ? "Applied" : "Deduct on every bill") : "—" },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value, mono }) => (
                 <div key={label}>

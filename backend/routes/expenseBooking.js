@@ -1058,19 +1058,21 @@ router.get("/tds-eligibility", async (req, res) => {
   }
   try {
     const pool = getPool();
-    const { resolveFinYearId, getYearlyCumulativeAmount, isThresholdMet, SINGLE_BILL_THRESHOLD, YEARLY_CUMULATIVE_THRESHOLD } = require("../services/tds");
+    const { resolveFinYearId, resolveThresholdStatus, SINGLE_BILL_THRESHOLD, YEARLY_CUMULATIVE_THRESHOLD } = require("../services/tds");
 
     const supRes = await pool.request().input("Id", sql.Int, supplierId)
-      .query("SELECT IsTdsApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id");
+      .query("SELECT IsTdsApplicable, ISNULL(TdsLimitApplicable, 1) AS TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id");
     const tdsApplicable = !!supRes.recordset[0]?.IsTdsApplicable;
+    const tdsLimitApplicable = !!supRes.recordset[0]?.TdsLimitApplicable;
 
     if (!tdsApplicable) {
       return res.json({ tdsApplicable: false, thresholdMet: false, cumulativeAmount: 0, singleBillThreshold: SINGLE_BILL_THRESHOLD, yearlyThreshold: YEARLY_CUMULATIVE_THRESHOLD });
     }
 
     const finYearId = await resolveFinYearId(pool, sql, date || new Date());
-    const cumulativeAmount = await getYearlyCumulativeAmount(pool, sql, { partyHeadId: supplierId, companyId, finYearId });
-    const thresholdMet = isThresholdMet(amount, cumulativeAmount);
+    const { thresholdMet, cumulativeAmount } = await resolveThresholdStatus(pool, sql, {
+      tdsLimitApplicable, billAmount: amount, partyHeadId: supplierId, companyId, finYearId,
+    });
 
     res.json({ tdsApplicable: true, thresholdMet, cumulativeAmount, singleBillThreshold: SINGLE_BILL_THRESHOLD, yearlyThreshold: YEARLY_CUMULATIVE_THRESHOLD });
   } catch (err) {
