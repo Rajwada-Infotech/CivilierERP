@@ -288,8 +288,11 @@ const ActivityMaster: React.FC = () => {
     queryFn: getHsn,
   });
 
+  // Activity Master is engineering-side (services), so only SAC-flagged
+  // HSN Master rows are offered here — plain HSN (goods) codes are hidden.
   const hsnOptions: { code: string; desc: string }[] = Array.isArray(hsnRaw)
     ? (hsnRaw as any[])
+        .filter((h) => h.HIsSAC === true)
         .map((h) => ({
           code: String(h.HCode ?? ""),
           desc: String(h.HShortDescription ?? h.HDescription ?? ""),
@@ -419,7 +422,7 @@ const ActivityMaster: React.FC = () => {
             },
             {
               name: "hsnCode",
-              label: "HSN Code",
+              label: "SAC Code",
               type: "custom",
               render: ({ value, onChange, formData }) => {
                 const isActivity = formData?.activityType === "Activity";
@@ -439,7 +442,7 @@ const ActivityMaster: React.FC = () => {
                       <option value="">
                         {!isActivity
                           ? "N/A — only for Activity type"
-                          : "Select HSN Code…"}
+                          : "Select SAC Code…"}
                       </option>
                       {isActivity &&
                         hsnOptions.map((h) => (
@@ -452,7 +455,7 @@ const ActivityMaster: React.FC = () => {
                     {!isActivity && (
                       <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                         <Hash size={10} />
-                        HSN can only be linked to an Activity, not a Group
+                        SAC can only be linked to an Activity, not a Group
                       </p>
                     )}
                   </div>
@@ -471,7 +474,7 @@ const ActivityMaster: React.FC = () => {
             { key: "shortDesc", label: "Short Desc", hideOnMobile: true },
             { key: "activityType", label: "Type" },
             { key: "groupName", label: "Group", hideOnMobile: true },
-            { key: "hsnCode", label: "HSN", hideOnMobile: true },
+            { key: "hsnCode", label: "SAC", hideOnMobile: true },
             { key: "status", label: "Status" },
           ]}
           initialData={mappedData}
@@ -663,7 +666,7 @@ const ActivityMaster: React.FC = () => {
               {viewRecord.activity_type === 1 && (
                 <div>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                    HSN Code
+                    SAC Code
                   </p>
                   {viewRecord.hsn_code ? (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">

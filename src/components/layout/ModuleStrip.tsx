@@ -300,8 +300,8 @@ export const ModuleStrip: React.FC = () => {
               <img
                 src="/loader.gif"
                 alt="Refresh"
-                width={50}
-                height={50}
+                width={56}
+                height={56}
                 className="object-contain select-none"
                 draggable={false}
               />
@@ -458,24 +458,45 @@ export const ModuleStrip: React.FC = () => {
                 transition={{ duration: 0.14, ease: "easeOut" }}
                 style={{
                   position: "fixed",
-                  left: 74,
+                  left: 86,
                   top: tooltip.y,
                   transform: "translateY(-50%)",
                   zIndex: 9999,
                   pointerEvents: "none",
                 }}
               >
+                {/* Explicit colors instead of the --popover/--card tokens —
+                    those sit only a shade lighter than --background in this
+                    theme, so the tooltip used to nearly vanish against the
+                    page behind it. Matches the strip's own pill background
+                    (also hardcoded rgba, same reason) rather than the washed
+                    -out shared tokens. */}
                 <div
-                  className="bg-popover border border-border/70 rounded-xl shadow-2xl relative"
-                  style={{ padding: "8px 14px", minWidth: 150 }}
+                  className="rounded-xl shadow-2xl relative"
+                  style={{
+                    padding: "8px 14px",
+                    minWidth: 150,
+                    background: isDark ? "rgba(36,38,56,0.98)" : "rgba(255,255,255,0.98)",
+                    border: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid rgba(15,17,26,0.10)",
+                    boxShadow: isDark
+                      ? "0 8px 28px rgba(0,0,0,0.55)"
+                      : "0 8px 28px rgba(15,17,26,0.18)",
+                  }}
                 >
-                  <p className="text-[12px] font-semibold text-foreground leading-snug">
+                  <p className="text-[12px] font-semibold leading-snug" style={{ color: isDark ? "#f4f5f9" : "#14161f" }}>
                     {tooltip.label}
                   </p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">
+                  <p className="text-[10px] mt-0.5 leading-snug" style={{ color: isDark ? "rgba(244,245,249,0.62)" : "rgba(20,22,31,0.62)" }}>
                     {tooltip.desc}
                   </p>
-                  <span className="absolute top-1/2 -translate-y-1/2 -left-[5px] w-2.5 h-2.5 rotate-45 bg-popover border-l border-b border-border/70" />
+                  <span
+                    className="absolute top-1/2 -translate-y-1/2 -left-[5px] w-2.5 h-2.5 rotate-45"
+                    style={{
+                      background: isDark ? "rgba(36,38,56,0.98)" : "rgba(255,255,255,0.98)",
+                      borderLeft: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid rgba(15,17,26,0.10)",
+                      borderBottom: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid rgba(15,17,26,0.10)",
+                    }}
+                  />
                 </div>
               </motion.div>
             )}
@@ -517,9 +538,9 @@ function IconButton({
   const ringFade = `rgba(${ringRgb},0.00)`; // transparent at max spread
   const ringGlow = `rgba(${ringRgb},0.55)`; // icon drop-shadow
 
-  // 36px ring — margin-based centering avoids CSS transform conflict with framer-motion
-  const D = 36;
-  const C = D / 2; // = 18
+  // 42px ring — margin-based centering avoids CSS transform conflict with framer-motion
+  const D = 42;
+  const C = D / 2; // = 21
 
   return (
     <div className="w-full flex justify-center">
@@ -531,7 +552,7 @@ function IconButton({
         whileTap={{ scale: 0.88 }}
         transition={{ type: "spring", stiffness: 440, damping: 22 }}
         className="relative flex items-center justify-center rounded-full cursor-pointer group"
-        style={{ width: 40, height: 40 }}
+        style={{ width: 46, height: 46 }}
       >
         {/* ── Active background circle ──────────────────────────────────────── */}
         <AnimatePresence>

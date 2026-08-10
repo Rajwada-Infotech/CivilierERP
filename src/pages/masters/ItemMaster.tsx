@@ -381,9 +381,12 @@ const ItemMaster: React.FC = () => {
         }))
     : [];
 
+  // Item Master is the material-module (goods) master, so only plain HSN
+  // codes are offered here — SAC-flagged (services) codes are reserved for
+  // the engineering module's Activity Master / Work Order.
   const hsnCodes: HsnCode[] = Array.isArray(dbHsn)
     ? dbHsn
-        .filter((h: any) => h.HStatus !== false)
+        .filter((h: any) => h.HStatus !== false && h.HIsSAC !== true)
         .map((h: any) => ({
           code: h.HCode || "",
           description: h.HShortDescription || h.HDescription || "",
