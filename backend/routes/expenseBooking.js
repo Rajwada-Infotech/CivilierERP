@@ -858,6 +858,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.ETCId, eb.ETCName, eb.ETCText,
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
           eb.EAdditionalCharges, eb.ECostCenter, eb.EGLAccount, eb.EGLAccountId, eb.EWorkDoneRef,
+          eb.TDSId, eb.TDSNature, eb.TDSName, eb.TDSPercentage, eb.TDSAmount,
           gl.LHeadName AS EGLAccountName, gl.LHeadCode AS EGLAccountCode,
           glGroup.Name AS EGLAccountGroupName, glParentGroup.Name AS EGLAccountParentGroupName,
           ${hasPaymentTermId ? "eb.PaymentTermId," : "CAST(NULL AS INT) AS PaymentTermId,"}
@@ -1041,6 +1042,42 @@ router.get("/grn-gst-data", async (req, res) => {
 });
 
 router.get("/chain-status", handleChainStatus);
+
+// ─── GET /tds-eligibility — live TDS gating for the invoice form ─────────────
+// Called as the user fills in supplier + company + amount, before the
+// booking is ever saved, purely to decide whether to show the TDS dropdown
+// and what the running cumulative figure is. Read-only — never persists
+// anything or requires a TDSId.
+router.get("/tds-eligibility", async (req, res) => {
+  const supplierId = parseInt(req.query.supplierId, 10);
+  const companyId = parseInt(req.query.companyId, 10);
+  const amount = parseFloat(req.query.amount) || 0;
+  const date = req.query.date ? String(req.query.date) : null;
+  if (!supplierId || !companyId) {
+    return res.status(400).json({ error: "supplierId and companyId are required" });
+  }
+  try {
+    const pool = getPool();
+    const { resolveFinYearId, getYearlyCumulativeAmount, isThresholdMet, SINGLE_BILL_THRESHOLD, YEARLY_CUMULATIVE_THRESHOLD } = require("../services/tds");
+
+    const supRes = await pool.request().input("Id", sql.Int, supplierId)
+      .query("SELECT IsTdsApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id");
+    const tdsApplicable = !!supRes.recordset[0]?.IsTdsApplicable;
+
+    if (!tdsApplicable) {
+      return res.json({ tdsApplicable: false, thresholdMet: false, cumulativeAmount: 0, singleBillThreshold: SINGLE_BILL_THRESHOLD, yearlyThreshold: YEARLY_CUMULATIVE_THRESHOLD });
+    }
+
+    const finYearId = await resolveFinYearId(pool, sql, date || new Date());
+    const cumulativeAmount = await getYearlyCumulativeAmount(pool, sql, { partyHeadId: supplierId, companyId, finYearId });
+    const thresholdMet = isThresholdMet(amount, cumulativeAmount);
+
+    res.json({ tdsApplicable: true, thresholdMet, cumulativeAmount, singleBillThreshold: SINGLE_BILL_THRESHOLD, yearlyThreshold: YEARLY_CUMULATIVE_THRESHOLD });
+  } catch (err) {
+    console.error("TDS eligibility error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─── GET /by-source — all expense bookings for a given source (incl. split drafts) ──
 router.get("/by-source", async (req, res) => {
@@ -1923,6 +1960,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     ContractId,
     LHeadId,
     EExpenseHeadAllocations,
+    TDSId,
   } = req.body;
 
   // EProjectName, EDocumentType, EDocDate and ECompanyId are NOT NULL columns
@@ -2360,6 +2398,32 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       finalDocNo = `INV/${finalDocNo}`;
     }
 
+    // TDS (migration 304) — never mandatory at invoice-creation time (the
+    // spec only enforces TDS at payment time, per Section 17); if the form
+    // sent a TDSId (because the supplier was already known to be
+    // TDS-eligible), validate it's Active and snapshot the calculation
+    // against EAmount — the pre-GST taxable base, matching how the payment
+    // side (once it exists) will inherit this exact snapshot rather than
+    // re-deriving it.
+    let tdsSnapshot = { TDSId: null, TDSNature: null, TDSName: null, TDSPercentage: null, TDSAmount: 0 };
+    if (TDSId) {
+      const { calculateTds } = require("../services/tds");
+      const tdsRow = await transaction.request().input("TDSId", sql.Int, parseInt(TDSId, 10))
+        .query("SELECT TDSId, Nature, Name, Percentage, Status FROM dbo.TDSMaster WHERE TDSId = @TDSId");
+      const tds = tdsRow.recordset[0];
+      if (!tds || !tds.Status) {
+        await transaction.rollback();
+        return res.status(400).json({ error: "Selected TDS is not a valid, active TDS record." });
+      }
+      tdsSnapshot = {
+        TDSId: tds.TDSId,
+        TDSNature: tds.Nature,
+        TDSName: tds.Name,
+        TDSPercentage: tds.Percentage,
+        TDSAmount: calculateTds(bookingAmount, tds.Percentage),
+      };
+    }
+
     const insertReq = transaction
       .request()
       .input("EName", sql.NVarChar(200), EName || null)
@@ -2450,7 +2514,12 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       .input("EGLAccountId", sql.Int, EGLAccountId ? parseInt(EGLAccountId, 10) : null)
       .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null)
       .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
-      .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null);
+      .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null)
+      .input("TDSId", sql.Int, tdsSnapshot.TDSId)
+      .input("TDSNature", sql.NVarChar(200), tdsSnapshot.TDSNature)
+      .input("TDSName", sql.NVarChar(200), tdsSnapshot.TDSName)
+      .input("TDSPercentage", sql.Decimal(5, 2), tdsSnapshot.TDSPercentage)
+      .input("TDSAmount", sql.Decimal(18, 2), tdsSnapshot.TDSAmount);
 
 
     if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
@@ -2468,7 +2537,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           EBillingTermId, EBillingTermName, EBillingTermsData,
           ETCId, ETCName, ETCText,
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
-          ECostCenter, EGLAccount, EGLAccountId, EWorkDoneRef, ContractId, LHeadId
+          ECostCenter, EGLAccount, EGLAccountId, EWorkDoneRef, ContractId, LHeadId,
+          TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount
           ${hasPayTermCol ? ", PaymentTermId" : ""}
           ${hasDirectItemsCol ? ", EDirectItemsData" : ""}
         ) VALUES (
@@ -2482,7 +2552,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           @EBillingTermId, @EBillingTermName, @EBillingTermsData,
           @ETCId, @ETCName, @ETCText,
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
-          @ECostCenter, @EGLAccount, @EGLAccountId, @EWorkDoneRef, @ContractId, @LHeadId
+          @ECostCenter, @EGLAccount, @EGLAccountId, @EWorkDoneRef, @ContractId, @LHeadId,
+          @TDSId, @TDSNature, @TDSName, @TDSPercentage, @TDSAmount
           ${hasPayTermCol ? ", @PaymentTermId" : ""}
           ${hasDirectItemsCol ? ", @EDirectItemsData" : ""}
         );
@@ -3081,6 +3152,7 @@ router.put(
       PaymentTermId: PaymentTermIdPut,
       EDirectItemsData: EDirectItemsDataPut,
       LHeadId,
+      TDSId,
     } = req.body;
 
     // Same NOT NULL columns as POST / — this UPDATE overwrites them
@@ -3174,6 +3246,27 @@ router.put(
         );
       }
 
+      // TDS (migration 304) — see matching comment on POST /. Re-validated
+      // and recomputed against the (possibly just-recomputed) bookingAmount
+      // on every save, same discipline as create.
+      let tdsSnapshotPut = { TDSId: null, TDSNature: null, TDSName: null, TDSPercentage: null, TDSAmount: 0 };
+      if (TDSId) {
+        const { calculateTds } = require("../services/tds");
+        const tdsRowPut = await pool.request().input("TDSId", sql.Int, parseInt(TDSId, 10))
+          .query("SELECT TDSId, Nature, Name, Percentage, Status FROM dbo.TDSMaster WHERE TDSId = @TDSId");
+        const tdsPut = tdsRowPut.recordset[0];
+        if (!tdsPut || !tdsPut.Status) {
+          return res.status(400).json({ error: "Selected TDS is not a valid, active TDS record." });
+        }
+        tdsSnapshotPut = {
+          TDSId: tdsPut.TDSId,
+          TDSNature: tdsPut.Nature,
+          TDSName: tdsPut.Name,
+          TDSPercentage: tdsPut.Percentage,
+          TDSAmount: calculateTds(bookingAmount, tdsPut.Percentage),
+        };
+      }
+
       const putReq = pool
         .request()
         .input("Eid", sql.Int, numericId)
@@ -3261,7 +3354,12 @@ router.put(
         .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
         .input("EGLAccountId", sql.Int, EGLAccountId ? parseInt(EGLAccountId, 10) : null)
         .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null)
-        .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null);
+        .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null)
+        .input("TDSId", sql.Int, tdsSnapshotPut.TDSId)
+        .input("TDSNature", sql.NVarChar(200), tdsSnapshotPut.TDSNature)
+        .input("TDSName", sql.NVarChar(200), tdsSnapshotPut.TDSName)
+        .input("TDSPercentage", sql.Decimal(5, 2), tdsSnapshotPut.TDSPercentage)
+        .input("TDSAmount", sql.Decimal(18, 2), tdsSnapshotPut.TDSAmount);
 
       if (hasPayTermColPut) putReq.input("PaymentTermIdPut", sql.Int, PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null);
       if (hasDirectItemsColPut) putReq.input("EDirectItemsDataPut", sql.NVarChar(sql.MAX), EDirectItemsDataPut || null);
@@ -3284,7 +3382,8 @@ router.put(
           EVendorInvoiceNo=@EVendorInvoiceNo, EVendorInvoiceDate=@EVendorInvoiceDate,
           EAdditionalCharges=@EAdditionalCharges,
           ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EGLAccountId=@EGLAccountId, EWorkDoneRef=@EWorkDoneRef,
-          LHeadId=@LHeadId
+          LHeadId=@LHeadId,
+          TDSId=@TDSId, TDSNature=@TDSNature, TDSName=@TDSName, TDSPercentage=@TDSPercentage, TDSAmount=@TDSAmount
           ${hasPayTermColPut ? ", PaymentTermId=@PaymentTermIdPut" : ""}
           ${hasDirectItemsColPut ? ", EDirectItemsData=@EDirectItemsDataPut" : ""}
         WHERE Eid = @Eid

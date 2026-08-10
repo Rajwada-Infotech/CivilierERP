@@ -19,6 +19,15 @@ export function fmt(n: number) {
   });
 }
 
+// Client-side preview only — the backend always recomputes and is the
+// actual source of truth (see backend/services/tds.js's calculateTds,
+// which this mirrors exactly).
+export function calculateTdsPreview(baseAmount: number, percentage: number) {
+  const base = Number(baseAmount) || 0;
+  const pct = Number(percentage) || 0;
+  return Math.round(((base * pct) / 100) * 100) / 100;
+}
+
 // Round a quantity to 3 decimal places, clearing JS floating-point drift
 // (e.g. 499.99 - 400 = 99.99000000000001 → 99.99). Quantities coming from
 // GRN line items (receivedQty/remainingQty) can carry this drift, so any
@@ -286,6 +295,11 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     tcText: "",
     vendorInvoiceNo: "",
     vendorInvoiceDate: "",
+    tdsId: null,
+    tdsNature: null,
+    tdsName: null,
+    tdsPercentage: null,
+    tdsAmount: 0,
     costCenter: "",
     glAccount: "",
     glAccountId: null,
@@ -458,6 +472,11 @@ export function dbToRecord(row: any): ExpenseRecord {
     vendorInvoiceDate: row.EVendorInvoiceDate
       ? row.EVendorInvoiceDate.slice(0, 10)
       : "",
+    tdsId: row.TDSId ?? null,
+    tdsNature: row.TDSNature ?? null,
+    tdsName: row.TDSName ?? null,
+    tdsPercentage: row.TDSPercentage != null ? Number(row.TDSPercentage) : null,
+    tdsAmount: row.TDSAmount != null ? Number(row.TDSAmount) : 0,
     costCenter: row.ECostCenter ?? "",
     glAccount: row.EGLAccount ?? "",
     glAccountId: row.EGLAccountId ?? null,
@@ -558,6 +577,9 @@ export function recordToDb(
     ETCText: form.tcText || null,
     EVendorInvoiceNo: form.vendorInvoiceNo || null,
     EVendorInvoiceDate: form.vendorInvoiceDate || null,
+    // TDS — server recomputes the actual amount/validity; TDSId is the
+    // only thing that really needs to travel here.
+    TDSId: form.tdsId || null,
     EAdditionalCharges:
       form.additionalCharges && form.additionalCharges.length > 0
         ? JSON.stringify(form.additionalCharges)

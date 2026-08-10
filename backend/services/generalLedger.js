@@ -527,7 +527,8 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     .input("PPaymentID", sql.Int, paymentId)
     .query(`
       SELECT PPaymentID, PAmount, PDate, PBankID, PExpenseRef, DocNo,
-             PCompany, PProject, ContractId, PPartyId, PPaymentName
+             PCompany, PProject, ContractId, PPartyId, PPaymentName,
+             ISNULL(TDSAmount, 0) AS TDSAmount
       FROM dbo.NewPayment
       WHERE PPaymentID = @PPaymentID
     `);
@@ -543,6 +544,27 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   const companyId = parseInt(payment.PCompany, 10);
   const projectId = parseInt(payment.PProject, 10);
   const docNo = payment.DocNo || `PMT-${paymentId}`;
+
+  // TDS (migration 304) — when set, the credit side splits into Bank (net
+  // of TDS) + TDS Payable; every debit-side branch below (Expense Head
+  // allocations, standalone advance, or a normal supplier payment) keeps
+  // debiting its full, un-reduced amount — only the credit legs change.
+  const tdsAmount = Number(payment.TDSAmount) || 0;
+  if (tdsAmount > amount) {
+    return { posted: false, reason: `Payment ${paymentId}: TDS amount (₹${tdsAmount}) exceeds the payment amount (₹${amount}) — data issue, re-save the payment.` };
+  }
+  let tdsPayableHeadId = null;
+  if (tdsAmount > 0) {
+    const { GL_ACCOUNTS: TDS_GL_ACCOUNTS } = require("./tds");
+    tdsPayableHeadId = await getGLHeadId(pool, TDS_GL_ACCOUNTS.TDS_PAYABLE);
+    if (!tdsPayableHeadId) {
+      return { posted: false, reason: `Payment ${paymentId}: TDS Payable system ledger not configured.` };
+    }
+  }
+  const bankAndTdsLegs = (bankId, bankNarration, tdsNarration) => [
+    { lHeadId: bankId, credit: amount - tdsAmount, narration: bankNarration },
+    ...(tdsAmount > 0 ? [{ lHeadId: tdsPayableHeadId, credit: tdsAmount, narration: tdsNarration }] : []),
+  ];
 
   // Direct Expense Payment (migration 303, dbo.ExpenseHeadAllocation) — pays
   // one or more Expense Heads straight from the bank, with no invoice,
@@ -573,11 +595,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
           debit: a.amount,
           narration: `${docNo} — ${a.lHeadName} (direct expense payment)`,
         })),
-        {
-          lHeadId: payment.PBankID,
-          credit: amount,
-          narration: `${docNo} — direct expense payment`,
-        },
+        ...bankAndTdsLegs(payment.PBankID, `${docNo} — direct expense payment`, `${docNo} — TDS Payable`),
       ],
     });
     return { posted: true };
@@ -621,11 +639,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
           ? `${docNo} — advance / on account payment`
           : `${docNo} — payment made`,
       },
-      {
-        lHeadId: payment.PBankID,
-        credit: amount,
-        narration: `${docNo} — payment made`,
-      },
+      ...bankAndTdsLegs(payment.PBankID, `${docNo} — payment made`, `${docNo} — TDS Payable`),
     ],
   });
   return { posted: true };

@@ -50,6 +50,11 @@ export function blankForm(): Omit<PaymentRecord, "id"> {
     contractId: "",
     partyId: null,
     expenseHeadAllocations: [],
+    tdsId: null,
+    tdsNature: null,
+    tdsName: null,
+    tdsPercentage: null,
+    tdsAmount: 0,
   };
 }
 
@@ -114,5 +119,10 @@ export function dbToRecord(item: DbPayment): PaymentRecord {
           amount: Number(a.amount) || 0,
         }))
       : [],
+    tdsId: (item as any).TDSId ?? null,
+    tdsNature: (item as any).TDSNature ?? null,
+    tdsName: (item as any).TDSName ?? null,
+    tdsPercentage: (item as any).TDSPercentage != null ? Number((item as any).TDSPercentage) : null,
+    tdsAmount: (item as any).TDSAmount != null ? Number((item as any).TDSAmount) : 0,
   };
 }

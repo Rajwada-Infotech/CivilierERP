@@ -9,6 +9,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useFinYear } from "@/contexts/FinYearContext";
+import { useTds } from "@/contexts/TdsContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -73,6 +74,7 @@ import { ExpenseBookingPreviewModal } from "./ExpenseBookingPreviewModal";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import {
   blankForm,
+  calculateTdsPreview,
   computeBreakdown,
   computeGrnNetWithTerms,
   dbToRecord,
@@ -191,6 +193,7 @@ export default function MaterialExpenseBooking() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { finYears } = useFinYear();
+  const { tdsRecords } = useTds();
   const activeFinYears = finYears
     .filter((fy) => fy.status === "Active")
     .sort((a, b) => b.year.localeCompare(a.year));
@@ -294,6 +297,11 @@ export default function MaterialExpenseBooking() {
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
+  // TDS eligibility — live-checked against the resolved supplier as the
+  // form is filled (direct/TOD bookings only; see the field's gating
+  // condition below for why). Purely informational until save, where the
+  // backend re-validates everything server-side regardless.
+  const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number } | null>(null);
 
   const isEditing = editingId !== null;
 
@@ -1334,6 +1342,38 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "WO_PO";
   /** True when the booking is a direct / Other-Expenses (TOD) entry with no linked source doc. */
   const isDirect = !isGRN && !isPOorWO;
+
+  // TDS eligibility — live-checked as the direct/TOD form fills in. Scoped
+  // to direct bookings only: GRN/PO/WORK_DONE-sourced bookings don't carry
+  // a resolved supplier LHeadId client-side to check against (their
+  // supplier only exists as a display label until the source document is
+  // actually saved against) — the backend itself is source-type agnostic,
+  // this is purely a frontend UI gap for a later pass.
+  const tdsSupplierId = (form as any).supplierLHeadId as number | null | undefined;
+  useEffect(() => {
+    if (!isDirect || selectedDoc?.kind !== "TOD" || !tdsSupplierId || !form.companyId) {
+      setTdsEligibility(null);
+      return;
+    }
+    let cancelled = false;
+    const qs = new URLSearchParams({
+      supplierId: String(tdsSupplierId),
+      companyId: String(form.companyId),
+      amount: String(form.basicAmount || 0),
+    });
+    if (form.bookingDate) qs.set("date", form.bookingDate);
+    apiFetch(`${API}/tds-eligibility?${qs.toString()}`)
+      .then((data: any) => {
+        if (!cancelled) setTdsEligibility(data);
+      })
+      .catch(() => {
+        if (!cancelled) setTdsEligibility(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirect, selectedDoc?.kind, tdsSupplierId, form.companyId, form.basicAmount, form.bookingDate]);
   const { bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds } =
     useMemo(() => {
       const editingIdNum = editingId ? parseInt(editingId, 10) : null;
@@ -2024,6 +2064,48 @@ export default function MaterialExpenseBooking() {
                           onChange={(rows) => set("expenseHeadAllocations", rows)}
                           targetAmount={bd.netAmount}
                         />
+                      </Field>
+                    )}
+                    {/* TDS — only shown once the resolved supplier is
+                        actually TDS-eligible (Supplier/Contractor Master's
+                        TDS Applicable flag). Never mandatory here — the
+                        ₹30k single-bill / ₹1L yearly-cumulative threshold is
+                        only enforced later, at payment time. */}
+                    {isDirect && selectedDoc?.kind === "TOD" && tdsEligibility?.tdsApplicable && (
+                      <Field
+                        label="TDS"
+                        className="sm:col-span-2"
+                        hint={
+                          tdsEligibility.thresholdMet
+                            ? "This supplier/contractor has crossed the TDS threshold — select the applicable TDS"
+                            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} booked this year so far) — optional`
+                        }
+                      >
+                        <div className="flex items-center gap-3">
+                          <select
+                            value={form.tdsId ?? ""}
+                            onChange={(e) => {
+                              const id = e.target.value ? Number(e.target.value) : null;
+                              const rec = tdsRecords.find((t) => Number(t.id) === id);
+                              set("tdsId", id);
+                              set("tdsPercentage", rec?.percentage ?? null);
+                              set("tdsAmount", rec ? calculateTdsPreview(form.basicAmount, rec.percentage) : 0);
+                            }}
+                            className="flex-1 appearance-none pl-3 pr-7 py-2.5 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                          >
+                            <option value="">-- No TDS --</option>
+                            {tdsRecords.filter((t) => t.status).map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name || t.nature} — {t.percentage}%
+                              </option>
+                            ))}
+                          </select>
+                          {form.tdsId && (
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">
+                              TDS ₹{fmt(form.tdsAmount || 0)} · Net ₹{fmt(Math.max(0, bd.netAmount - (form.tdsAmount || 0)))}
+                            </span>
+                          )}
+                        </div>
                       </Field>
                     )}
                   </div>

@@ -186,6 +186,14 @@ const expenseBookingBodySchema = z.object({
       }),
     )
     .optional(),
+  // TDS (migration 304) — the TDS record picked on this invoice, if the
+  // resolved supplier/contractor is TDS-eligible. Optional at invoice time
+  // (never mandatory here — only enforced later, at payment time, per the
+  // spec). Re-validated and the amount recomputed server-side on save.
+  TDSId: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
+    z.number().int().positive().optional(),
+  ),
 });
 
 // PUT /:id — partial update (all fields optional except numeric consistency)

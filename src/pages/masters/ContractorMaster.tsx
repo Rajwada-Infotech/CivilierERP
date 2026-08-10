@@ -82,6 +82,7 @@ interface Contractor {
   LBelongsTo: number | null;
   LHeadStatus: boolean;
   GroupName: string | null;
+  isTdsApplicable: boolean;
 }
 
 interface AccountGroup {
@@ -104,6 +105,7 @@ interface ContractorForm {
   LHeadAddress: string;
   LBelongsTo: number | "";
   LHeadStatus: boolean;
+  isTdsApplicable: boolean;
 }
 
 const EMPTY_FORM: ContractorForm = {
@@ -118,6 +120,7 @@ const EMPTY_FORM: ContractorForm = {
   LHeadAddress: "",
   LBelongsTo: "",
   LHeadStatus: true,
+  isTdsApplicable: false,
 };
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
@@ -408,6 +411,7 @@ const ContractorMaster: React.FC = () => {
       LBelongsTo: item.LBelongsTo != null ? Number(item.LBelongsTo) : null,
       LHeadStatus: Boolean(item.LHeadStatus),
       GroupName: item.GroupName ?? null,
+      isTdsApplicable: Boolean(item.IsTdsApplicable),
     }));
   }, [rawData]);
 
@@ -432,6 +436,7 @@ const ContractorMaster: React.FC = () => {
     LCountry: "India",
     LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
+    IsTdsApplicable: f.isTdsApplicable,
   });
 
   const createMut = useMutation({
@@ -592,6 +597,7 @@ const ContractorMaster: React.FC = () => {
             LHeadAddress: address,
             LBelongsTo: groupId,
             LHeadStatus: isActive,
+            isTdsApplicable: false,
           };
 
           await addRecord(buildPayload(rowForm), CONTRACTOR_TYPE);
@@ -650,6 +656,7 @@ const ContractorMaster: React.FC = () => {
       LHeadAddress: c.LHeadAddress ?? "",
       LBelongsTo: c.LBelongsTo ?? "",
       LHeadStatus: c.LHeadStatus,
+      isTdsApplicable: c.isTdsApplicable,
     });
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1134,6 +1141,31 @@ const ContractorMaster: React.FC = () => {
                 </span>
               </span>
             </div>
+
+            {/* TDS Applicable */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  setForm((p) => ({ ...p, isTdsApplicable: !p.isTdsApplicable }))
+                }
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${form.isTdsApplicable ? "bg-amber-500" : "bg-muted-foreground/30"}`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.isTdsApplicable ? "translate-x-4" : "translate-x-0.5"}`}
+                />
+              </button>
+              <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                TDS Applicable —{" "}
+                <span
+                  className={
+                    form.isTdsApplicable ? "text-amber-600" : "text-foreground"
+                  }
+                >
+                  {form.isTdsApplicable ? "Yes" : "No"}
+                </span>
+              </span>
+            </div>
           </div>
 
           {/* Card footer — actions */}
@@ -1396,6 +1428,7 @@ const ContractorMaster: React.FC = () => {
                         )?.name ?? "—")
                       : "—",
                 },
+                { label: "TDS Applicable", value: viewRecord.isTdsApplicable ? "Yes" : "No" },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
