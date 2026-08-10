@@ -476,8 +476,8 @@ export const ModuleStrip: React.FC = () => {
                   style={{
                     padding: "8px 14px",
                     minWidth: 150,
-                    background: isDark ? "rgba(36,38,56,0.98)" : "rgba(255,255,255,0.98)",
-                    border: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid rgba(15,17,26,0.10)",
+                    background: isDark ? "rgba(58,61,86,0.98)" : "rgba(255,255,255,0.98)",
+                    border: isDark ? "1px solid rgba(255,255,255,0.22)" : "1px solid rgba(15,17,26,0.10)",
                     boxShadow: isDark
                       ? "0 8px 28px rgba(0,0,0,0.55)"
                       : "0 8px 28px rgba(15,17,26,0.18)",
@@ -492,9 +492,9 @@ export const ModuleStrip: React.FC = () => {
                   <span
                     className="absolute top-1/2 -translate-y-1/2 -left-[5px] w-2.5 h-2.5 rotate-45"
                     style={{
-                      background: isDark ? "rgba(36,38,56,0.98)" : "rgba(255,255,255,0.98)",
-                      borderLeft: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid rgba(15,17,26,0.10)",
-                      borderBottom: isDark ? "1px solid rgba(255,255,255,0.16)" : "1px solid rgba(15,17,26,0.10)",
+                      background: isDark ? "rgba(58,61,86,0.98)" : "rgba(255,255,255,0.98)",
+                      borderLeft: isDark ? "1px solid rgba(255,255,255,0.22)" : "1px solid rgba(15,17,26,0.10)",
+                      borderBottom: isDark ? "1px solid rgba(255,255,255,0.22)" : "1px solid rgba(15,17,26,0.10)",
                     }}
                   />
                 </div>
