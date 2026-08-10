@@ -805,14 +805,14 @@ export function ExpenseBookingPreviewModal({
         )}
 
         {previewTab === "details" && (
-        <div className="px-4 sm:px-6 py-4 sm:py-5 space-y-5">
+        <div className="px-4 sm:px-6 py-5 sm:py-6 space-y-6">
           {/* ── Section 1: Booking Info ── */}
           <div>
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
               <CalendarDays size={10} className="text-emerald-600 dark:text-emerald-400" />
               Booking Information
             </p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
               {([
                 { label: "Booking Date", value: previewRecord.bookingDate },
                 { label: "Due Date", value: previewRecord.dueDate },
@@ -828,8 +828,8 @@ export function ExpenseBookingPreviewModal({
                 { label: "Company", value: previewRecord.companyName || (previewRecord.companyId ? `Company #${previewRecord.companyId}` : null) },
                 { label: "Project / Site", value: previewRecord.projectName || (previewRecord.projectId ? `Project #${previewRecord.projectId}` : null) },
               ] as { label: string; value: any; mono?: boolean }[]).map(({ label, value, mono }) => (
-                <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                <div key={label} className="px-3.5 py-3 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">{label}</p>
                   <p className={`text-xs font-semibold truncate ${mono ? "font-mono text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{value || "—"}</p>
                 </div>
               ))}
