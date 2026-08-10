@@ -3654,56 +3654,100 @@ export default function GRN() {
                         Could not load posting data.
                       </div>
                     ) : (() => {
-                      const { baseAmount, taxAmount, costCentre, accounts } = grnPostingData;
+                      const { baseAmount, taxAmount, costCentre, accounts, items } = grnPostingData;
                       const fmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                       type PostRow = { key: string; label: string; code: string | null; side: "debit" | "credit"; amount: number };
+                      const purchaseLabel = accounts?.purchase?.name ?? accounts?.purchase?.label ?? "Purchase A/c";
+                      const purchaseCode = accounts?.purchase?.code ?? null;
+                      const pgrnLabel = accounts?.pgrn?.name ?? accounts?.pgrn?.label ?? "Provision for Pending GRN A/c";
+                      const pgrnCode = accounts?.pgrn?.code ?? null;
+                      const provisionalLabel = accounts?.provisional?.name ?? accounts?.provisional?.label ?? "Provisional Credit Available";
+                      const provisionalCode = accounts?.provisional?.code ?? null;
+
                       // Base and tax post as two separate self-balancing
-                      // pairs: Purchase Dr (base) = PGRN Cr (base), and
-                      // Provisional Credit Dr (tax) = Purchase Cr (tax) — a
-                      // same-account repetition rather than crediting PGRN
+                      // pairs per item: Purchase Dr (base) = PGRN Cr (base),
+                      // and Provisional Credit Dr (tax) = Purchase Cr (tax) —
+                      // a same-account repetition rather than crediting PGRN
                       // with the GST-inclusive total. Mirrors backend
-                      // /post-to-gl's `lines` construction exactly.
-                      const rows: PostRow[] = [
-                        { key: "purchase-base", label: accounts?.purchase?.label ?? "Purchase A/c", code: accounts?.purchase?.code ?? null, side: "debit", amount: baseAmount },
-                        { key: "pgrn", label: accounts?.pgrn?.label ?? "Provision for Pending GRN A/c", code: accounts?.pgrn?.code ?? null, side: "credit", amount: baseAmount },
-                        ...(taxAmount > 0
+                      // /post-to-gl's `lines` construction exactly, just
+                      // broken out per received item instead of lumped into
+                      // one cumulative figure, so a reviewer can see exactly
+                      // what each line item contributed.
+                      const buildRows = (idx: string, base: number, gst: number): PostRow[] => [
+                        { key: `purchase-base-${idx}`, label: purchaseLabel, code: purchaseCode, side: "debit", amount: base },
+                        { key: `pgrn-${idx}`, label: pgrnLabel, code: pgrnCode, side: "credit", amount: base },
+                        ...(gst > 0
                           ? [
-                              { key: "provisional", label: accounts?.provisional?.label ?? "Provisional Credit Available", code: accounts?.provisional?.code ?? null, side: "debit" as const, amount: taxAmount },
-                              { key: "purchase-tax", label: accounts?.purchase?.label ?? "Purchase A/c", code: accounts?.purchase?.code ?? null, side: "credit" as const, amount: taxAmount },
+                              { key: `provisional-${idx}`, label: provisionalLabel, code: provisionalCode, side: "debit" as const, amount: gst },
+                              { key: `purchase-tax-${idx}`, label: purchaseLabel, code: purchaseCode, side: "credit" as const, amount: gst },
                             ]
                           : []),
                       ];
-                      const totalDebit = rows.filter(r => r.side === "debit").reduce((s, r) => s + r.amount, 0);
-                      const totalCredit = rows.filter(r => r.side === "credit").reduce((s, r) => s + r.amount, 0);
+
+                      type ItemGroup = { key: string; itemName: string | null; qty: number | null; rate: number | null; uom: string | null; rows: PostRow[] };
+                      const itemGroups: ItemGroup[] =
+                        Array.isArray(items) && items.length > 0
+                          ? items.map((it: any, idx: number) => ({
+                              key: String(it.itemId ?? idx),
+                              itemName: it.itemName ?? null,
+                              qty: it.qty ?? null,
+                              rate: it.rate ?? null,
+                              uom: it.uom ?? null,
+                              rows: buildRows(String(it.itemId ?? idx), Number(it.baseAmount) || 0, Number(it.gstAmount) || 0),
+                            }))
+                          : [{ key: "lumped", itemName: null, qty: null, rate: null, uom: null, rows: buildRows("lumped", baseAmount, taxAmount) }];
+
+                      const allRows = itemGroups.flatMap((g) => g.rows);
+                      const totalDebit = allRows.filter(r => r.side === "debit").reduce((s, r) => s + r.amount, 0);
+                      const totalCredit = allRows.filter(r => r.side === "credit").reduce((s, r) => s + r.amount, 0);
+
+                      const gridCols = "grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr]";
+
                       return (
                         <div className="rounded-xl border border-border overflow-hidden">
-                          <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
+                          <div className={`grid ${gridCols} bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2`}>
                             <span>Account</span>
                             <span className="text-center">Cost Centre</span>
                             <span className="text-right">Debit (₹)</span>
                             <span className="text-right">Credit (₹)</span>
                           </div>
-                          {rows.map((row) => (
-                            <div
-                              key={row.key}
-                              className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2"
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
-                                <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0" title={row.code ? `${row.label} (${row.code})` : row.label}>
-                                  {row.label}{row.code ? ` (${row.code})` : ""}
-                                </span>
-                              </div>
-                              <span className="text-[11px] text-muted-foreground text-center truncate">{costCentre?.name || "—"}</span>
-                              <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
-                                {row.side === "debit" ? fmt(row.amount) : ""}
-                              </span>
-                              <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
-                                {row.side === "credit" ? fmt(row.amount) : ""}
-                              </span>
+                          {itemGroups.map((group) => (
+                            <div key={group.key}>
+                              {group.itemName && (
+                                <div className="px-2 sm:px-4 pt-3 pb-1.5 bg-muted/10 flex items-baseline justify-between gap-2 border-b border-border/30">
+                                  <span className="text-[11px] sm:text-xs font-semibold text-foreground truncate">{group.itemName}</span>
+                                  {(group.qty != null || group.rate != null) && (
+                                    <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                                      {group.qty != null ? `${group.qty}${group.uom ? ` ${group.uom}` : ""}` : ""}
+                                      {group.qty != null && group.rate != null ? " × " : ""}
+                                      {group.rate != null ? `₹${fmt(group.rate)}` : ""}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              {group.rows.map((row) => (
+                                <div
+                                  key={row.key}
+                                  className={`grid ${gridCols} px-2 sm:px-4 py-3 border-b border-border/50 items-center gap-1 sm:gap-2`}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0 pl-1">
+                                    <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                                    <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0" title={row.code ? `${row.label} (${row.code})` : row.label}>
+                                      {row.label}{row.code ? ` (${row.code})` : ""}
+                                    </span>
+                                  </div>
+                                  <span className="text-[11px] text-muted-foreground text-center truncate">{costCentre?.name || "—"}</span>
+                                  <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                                    {row.side === "debit" ? fmt(row.amount) : ""}
+                                  </span>
+                                  <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                                    {row.side === "credit" ? fmt(row.amount) : ""}
+                                  </span>
+                                </div>
+                              ))}
                             </div>
                           ))}
-                          <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
+                          <div className={`grid ${gridCols} px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2`}>
                             <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
                             <span />
                             <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(totalDebit)}</span>

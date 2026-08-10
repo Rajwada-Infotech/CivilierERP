@@ -253,12 +253,13 @@ export default function BalanceEnquiry() {
             </div>
           </div>
 
-          {/* Quick date-range presets + custom From/To — horizontally
-              scrollable on narrow screens so nothing wraps awkwardly. */}
-          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
-            <div className="flex-1 min-w-0 overflow-x-auto">
+          {/* Quick date-range presets + custom From/To. Presets WRAP onto
+              their own line(s) on narrow screens instead of scrolling — no
+              scrollbar to ever show. */}
+          <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+            <div className="flex-1 min-w-0">
               <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">Range</label>
-              <div className="flex items-center gap-1.5 mt-1.5 pb-0.5">
+              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                 {([
                   ["today", "Today"],
                   ["week", "7 Days"],
@@ -280,25 +281,25 @@ export default function BalanceEnquiry() {
                 ))}
               </div>
             </div>
-            <div className="flex items-end gap-2">
-              <div className="flex-1 sm:flex-none">
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="flex-1 min-w-[140px] lg:flex-none">
                 <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">From</label>
                 <input
                   type="date"
                   value={fromDate}
                   onChange={(e) => { setFromDate(e.target.value); setActivePreset("custom"); }}
                   max={toDate || undefined}
-                  className="mt-1 w-full sm:w-auto h-8 px-2.5 rounded-lg border border-border bg-input/70 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
+                  className="mt-1 w-full lg:w-auto h-8 px-2.5 rounded-lg border border-border bg-input/70 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
                 />
               </div>
-              <div className="flex-1 sm:flex-none">
+              <div className="flex-1 min-w-[140px] lg:flex-none">
                 <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">To</label>
                 <input
                   type="date"
                   value={toDate}
                   onChange={(e) => { setToDate(e.target.value); setActivePreset("custom"); }}
                   min={fromDate || undefined}
-                  className="mt-1 w-full sm:w-auto h-8 px-2.5 rounded-lg border border-border bg-input/70 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
+                  className="mt-1 w-full lg:w-auto h-8 px-2.5 rounded-lg border border-border bg-input/70 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
                 />
               </div>
               {(fromDate || toDate) && (

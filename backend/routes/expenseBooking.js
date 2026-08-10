@@ -3855,11 +3855,20 @@ router.post("/:id/post-to-gl", async (req, res) => {
           { LHeadId: supplierId,    DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
         ];
 
+    // Voucher number only — GL posting is independent of the Journal
+    // Voucher module. This used to ALSO insert a dbo.JournalVoucher header +
+    // JournalVoucherLines row mirroring these exact legs, which meant every
+    // invoice posting silently created a second, duplicate-looking JV that
+    // (a) cluttered the Journal Voucher list with system-generated rows
+    // indistinguishable from real user-entered ones, and (b) would have
+    // double-posted the same accounting event a second time under
+    // SourceType='JournalVoucher' if anything ever approved/posted it (a
+    // GL-backfill script found exactly this). dbo.GeneralLedgerEntry below
+    // (SourceType='InvoicePosting') is the single, independent source of
+    // truth — lockNextDocNumber still reserves a real doc number for the
+    // voucher label shown to the user, it just no longer needs a
+    // JournalVoucher table row to hang off.
     const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
-    // lockNextDocNumber takes a single options object, not positional args —
-    // calling it positionally (as this used to) silently failed every time,
-    // leaving VoucherNo as the JV-<id> fallback instead of a real locked doc
-    // number, and the frontend showing "Posted as ." (blank jvNo).
     const finalDocNo = dtId
       ? await lockNextDocNumber(pool, sql, {
           docTypeId: dtId,
@@ -3868,31 +3877,9 @@ router.post("/:id/post-to-gl", async (req, res) => {
           issuedBy: userEmail,
         }).catch(() => null)
       : null;
-    const insertHdr = await pool.request()
-      .input("JVNo", sql.NVarChar(100), finalDocNo || null)
-      .input("JVDate", sql.Date, new Date())
-      .input("Narration", sql.NVarChar(500), `Invoice Posting: ${eb.EDocNo}`)
-      .input("CompanyId", sql.Int, eb.CompanyId || null)
-      .input("ProjectId", sql.Int, eb.ProjectId || null)
-      .input("DocTypeId", sql.Int, dtId || null)
-      .input("CreatedBy", sql.NVarChar(150), userEmail)
-      .query(`INSERT INTO dbo.JournalVoucher (JVNo,JVDate,Narration,CompanyId,ProjectId,Status,DocTypeId,CreatedBy) OUTPUT INSERTED.JVID VALUES (@JVNo,@JVDate,@Narration,@CompanyId,@ProjectId,'Approved',@DocTypeId,@CreatedBy)`);
-    const jvId = insertHdr.recordset[0].JVID;
-
-    let sortOrder = 0;
-    for (const line of lines) {
-      await pool.request()
-        .input("JVID", sql.Int, jvId)
-        .input("LHeadId", sql.Int, line.LHeadId)
-        .input("DebitAmount", sql.Decimal(18,2), line.DebitAmount)
-        .input("CreditAmount", sql.Decimal(18,2), line.CreditAmount)
-        .input("Narration", sql.NVarChar(500), line.Narration)
-        .input("SortOrder", sql.Int, ++sortOrder)
-        .query(`INSERT INTO dbo.JournalVoucherLines (JVID,LHeadId,DebitAmount,CreditAmount,Narration,SortOrder) VALUES (@JVID,@LHeadId,@DebitAmount,@CreditAmount,@Narration,@SortOrder)`);
-    }
 
     await postVoucher(pool, {
-      voucherNo: finalDocNo || `JV-${jvId}`,
+      voucherNo: finalDocNo || `JV-EXB${ebId}`,
       voucherDate: new Date(),
       sourceType: "InvoicePosting",
       sourceId: ebId,
@@ -3903,7 +3890,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
       legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
     });
 
-    res.json({ jvId, jvNo: finalDocNo, message: "Posted successfully." });
+    res.json({ jvNo: finalDocNo, message: "Posted successfully." });
   } catch (err) {
     console.error("Invoice post-to-gl error:", err.message);
     res.status(500).json({ error: err.message });
