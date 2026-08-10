@@ -733,11 +733,12 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
         const { resolvePaymentSupplierHeadId } = require("../services/generalLedger");
         const directPartyId = await resolvePaymentSupplierHeadId(pool, { ContractId, PExpenseRef: null, PPartyId: partyId });
         const tdsFlagRes = directPartyId
-          ? await pool.request().input("Id", sql.Int, directPartyId).query("SELECT IsTdsApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id")
+          ? await pool.request().input("Id", sql.Int, directPartyId).query("SELECT IsTdsApplicable, ISNULL(TdsLimitApplicable, 1) AS TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id")
           : null;
         tdsSnapshot = await resolveTds(pool, sql, {
           partyHeadId: directPartyId,
           tdsApplicableFlag: !!tdsFlagRes?.recordset[0]?.IsTdsApplicable,
+          tdsLimitApplicable: !!tdsFlagRes?.recordset[0]?.TdsLimitApplicable,
           billAmount: PAmount,
           companyId: companyIdForTds,
           finYearId: finYearIdForTds,
@@ -1018,11 +1019,12 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
         const { resolvePaymentSupplierHeadId } = require("../services/generalLedger");
         const directPartyIdPut = await resolvePaymentSupplierHeadId(pool, { ContractId: existingLink.ContractId, PExpenseRef: null, PPartyId: existingLink.PPartyId });
         const tdsFlagResPut = directPartyIdPut
-          ? await pool.request().input("Id", sql.Int, directPartyIdPut).query("SELECT IsTdsApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id")
+          ? await pool.request().input("Id", sql.Int, directPartyIdPut).query("SELECT IsTdsApplicable, ISNULL(TdsLimitApplicable, 1) AS TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id")
           : null;
         tdsSnapshotPut = await resolveTds(pool, sql, {
           partyHeadId: directPartyIdPut,
           tdsApplicableFlag: !!tdsFlagResPut?.recordset[0]?.IsTdsApplicable,
+          tdsLimitApplicable: !!tdsFlagResPut?.recordset[0]?.TdsLimitApplicable,
           billAmount: PAmount,
           companyId: companyIdForTdsPut,
           finYearId: finYearIdForTdsPut,
