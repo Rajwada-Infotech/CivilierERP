@@ -113,7 +113,7 @@ import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
 import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
 import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
 import { DirectItemsTable } from "./ExpenseBooking/DirectItemsTable";
-import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
+import { ExpenseHeadAllocationEditor } from "./ExpenseBooking/ExpenseHeadAllocationEditor";
 import type {
   CompanyOption,
   ProjectOption,
@@ -1148,6 +1148,26 @@ export default function MaterialExpenseBooking() {
             form.igstRate ?? 0,
           );
 
+    // Expense Head allocations (direct/TOD bookings only) must add up to
+    // the invoice's net amount — the same check the backend re-runs, but
+    // catching it here avoids a round trip.
+    if (isDirect && selectedDoc?.kind === "TOD" && (form.expenseHeadAllocations?.length ?? 0) > 0) {
+      const allocSum = Math.round(
+        (form.expenseHeadAllocations ?? []).reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100,
+      ) / 100;
+      const target = Math.round(bd.netAmount * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        toast.error(
+          `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the invoice total (₹${target.toFixed(2)}).`,
+        );
+        return;
+      }
+      if ((form.expenseHeadAllocations ?? []).some((r) => !r.lHeadId)) {
+        toast.error("Every Expense Head row needs a ledger selected.");
+        return;
+      }
+    }
+
     // Partial payment (EMI) — EMI is generated against the remaining balance
     // after the up-front partial amount, not the full net payable.
     const emiBaseAmountForSave =
@@ -1986,20 +2006,23 @@ export default function MaterialExpenseBooking() {
                         </SelectContent>
                       </Select>
                     </Field>
-                    {/* GL Account only makes sense for Other Expenses (TOD)
+                    {/* Expense Head only makes sense for Other Expenses (TOD)
                         bookings — PO/GRN/WO-linked invoices already resolve
                         their GL posting from the linked document's own
-                        accounts, so a free-text GL field there is unused and
-                        confusing. */}
+                        accounts. Multiple heads can be tagged, each with its
+                        own amount — they must add up to the invoice's net
+                        amount, and each becomes its own debit leg when
+                        posted to GL (see ExpenseHeadAllocationEditor). */}
                     {isDirect && selectedDoc?.kind === "TOD" && (
-                      <Field label="GL Account" hint="Posts this invoice's debit leg against the selected ledger head">
-                        <GLAccountSelect
-                          value={form.glAccountId ?? null}
-                          onChange={(id, label) => {
-                            set("glAccountId", id);
-                            set("glAccount", label ?? "");
-                          }}
-                          placeholder="Select GL account..."
+                      <Field
+                        label="Expense Head"
+                        className="sm:col-span-2"
+                        hint="Split this invoice's debit side across one or more ledger heads — must add up to the net amount below"
+                      >
+                        <ExpenseHeadAllocationEditor
+                          rows={form.expenseHeadAllocations ?? []}
+                          onChange={(rows) => set("expenseHeadAllocations", rows)}
+                          targetAmount={bd.netAmount}
                         />
                       </Field>
                     )}

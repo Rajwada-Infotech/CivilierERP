@@ -13,6 +13,18 @@ export type BookingStatus =
 
 export type BillStatus = "Payment Due" | "Partially Paid" | "Paid";
 
+/** One row of a direct booking's multi "Expense Head" tagging (migration
+ *  303, dbo.ExpenseHeadAllocation) — an Expense Head (AccountHeadMaster,
+ *  LHeadType='GL') plus the amount debited to it. `_key` is a stable local
+ *  React key, never persisted. */
+export interface ExpenseHeadAllocationRow {
+  _key: string;
+  lHeadId: number | null;
+  label: string | null;
+  code?: string | null;
+  amount: number;
+}
+
 export type PageView = "list" | "form";
 
 export interface PurchaseOrder {
@@ -166,6 +178,11 @@ export interface ExpenseRecord {
   glAccountName?: string | null;
   /** Immediate Account Group id the GL account belongs to (for rendering the nested parent tree on view) */
   glAccountGroupId?: number | null;
+  /** Multi "Expense Head" tagging (migration 303, dbo.ExpenseHeadAllocation)
+   *  — a direct/manual booking's amount split across one or more Expense
+   *  Heads instead of the single glAccountId above, which is kept only as
+   *  a legacy fallback for records saved before this existed. */
+  expenseHeadAllocations?: ExpenseHeadAllocationRow[];
   /** Work Done doc reference — auto-populated when source is WO_PO or WORK_DONE */
   workDoneRef?: string;
   /** Additional charges: freight, insurance, etc. JSON array {label, amount} */

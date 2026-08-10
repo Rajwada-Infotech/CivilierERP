@@ -112,6 +112,7 @@ import { ModeInfoBanner } from "./payment/components/ModeInfoBanner";
 import { ChequePanel } from "./payment/components/ChequePanel";
 import { DigitalRefPanel } from "./payment/components/DigitalRefPanel";
 import { CardPanel } from "./payment/components/CardPanel";
+import { ExpenseHeadAllocationEditor } from "@/pages/material/ExpenseBooking/ExpenseHeadAllocationEditor";
 import { getPayableEmis, payLoan, type PayableEmi } from "@/api/loanSanctionApi";
 import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
 import { previewOAAdjustment } from "@/api/onAccountAdjustment";
@@ -136,6 +137,9 @@ const Payment: React.FC = () => {
   const [dateFromFilter, setDateFromFilter] = useState("");
   const [dateToFilter, setDateToFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  // Direct Expense Payment (migration 303) — a payment mode with no linked
+  // invoice/party, paid straight against one or more Expense Heads instead.
+  const [showExpenseHeadPayment, setShowExpenseHeadPayment] = useState(false);
   const PAGE_SIZE = 20;
 
   const [view, setView] = useState<"list" | "form">("list");
@@ -1671,6 +1675,23 @@ const Payment: React.FC = () => {
       return false;
     }
 
+    if ((form.expenseHeadAllocations?.length ?? 0) > 0) {
+      const allocSum = Math.round(
+        (form.expenseHeadAllocations ?? []).reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100,
+      ) / 100;
+      const target = Math.round((form.amount ?? 0) * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        toast.error(
+          `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the payment amount (₹${target.toFixed(2)}).`,
+        );
+        return false;
+      }
+      if ((form.expenseHeadAllocations ?? []).some((r) => !r.lHeadId)) {
+        toast.error("Every Expense Head row needs a ledger selected.");
+        return false;
+      }
+    }
+
     if (isDigitalMode) {
       if (!form.bankId) {
         toast.error("Please select a bank account.");
@@ -1740,6 +1761,14 @@ const Payment: React.FC = () => {
       cardReference: form.cardReference || null,
       cardId: form.cardId ?? null,
       ContractId: form.contractId ? Number(form.contractId) : null,
+      // Direct Expense Payment (migration 303) — pay one or more Expense
+      // Heads straight from the bank instead of a Party/Invoice.
+      EExpenseHeadAllocations:
+        form.expenseHeadAllocations && form.expenseHeadAllocations.length > 0
+          ? form.expenseHeadAllocations
+              .filter((r) => r.lHeadId && r.amount > 0)
+              .map((r) => ({ lHeadId: r.lHeadId, amount: r.amount }))
+          : [],
       // "Keep the balance on his on account" — unchecked means don't let the
       // approve-time hook auto-apply this party's on-account balance.
       oaSkipAutoApply: oaBalance > 0.01 ? !useOnAccountBalance : undefined,
@@ -2316,6 +2345,48 @@ const Payment: React.FC = () => {
                     </Field>
                   </div>
                 )}
+
+                {/* Direct Expense Payment (migration 303) — an alternative to
+                    picking a Party above: split the payment across one or
+                    more Expense Heads instead, debited directly with no
+                    counter-party at all (e.g. paying a courier or bank
+                    charge with no invoice/vendor on file). */}
+                {!form.expenseRef && !selectedContract && (() => {
+                  const expanded = showExpenseHeadPayment || (form.expenseHeadAllocations?.length ?? 0) > 0;
+                  return (
+                    <div className="space-y-2">
+                      {!expanded ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowExpenseHeadPayment(true)}
+                          className="text-[11px] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
+                        >
+                          or pay Expense Head(s) directly →
+                        </button>
+                      ) : (
+                        <Field
+                          label="Expense Head"
+                          hint="Pay one or more ledger heads directly — no party required. Must add up to the amount below."
+                        >
+                          <ExpenseHeadAllocationEditor
+                            rows={form.expenseHeadAllocations ?? []}
+                            onChange={(rows) => set("expenseHeadAllocations", rows)}
+                            targetAmount={form.amount ?? 0}
+                          />
+                          {(form.expenseHeadAllocations?.length ?? 0) === 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowExpenseHeadPayment(false)}
+                              className="mt-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              Cancel — pay a Party instead
+                            </button>
+                          )}
+                        </Field>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {form.expenseRef && selectedContract && (
                   <AutoFillBanner

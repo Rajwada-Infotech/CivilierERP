@@ -18,6 +18,13 @@ const {
   emiToggleSchema,
   expenseRejectSchema,
 } = require("../validation/expenseBookingSchemas");
+const {
+  normalizeAllocations,
+  sumAllocations,
+  replaceAllocations,
+  getAllocations,
+  getAllocationsForMany,
+} = require("../services/expenseHeadAllocation");
 const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier");
 const { buildDirectExpenseBooking } = require("../services/directExpenseBooking");
 const { computeMultiGRNInvoice } = require("../services/invoiceLinking");
@@ -1313,7 +1320,9 @@ router.get("/:id", async (req, res) => {
       );
     }
 
-    res.json({ ...row, EGrnTotalAmount, ENetAmount: liveENetAmount });
+    const expenseHeadAllocations = await getAllocations(pool, sql, "ExpenseBooking", id);
+
+    res.json({ ...row, EGrnTotalAmount, ENetAmount: liveENetAmount, EExpenseHeadAllocations: expenseHeadAllocations });
   } catch (err) {
     console.error("Get by id error:", err.message);
     res.status(500).json({ error: err.message });
@@ -1913,6 +1922,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     // Contract Master (Migration 177) — see services/contractLedger.js
     ContractId,
     LHeadId,
+    EExpenseHeadAllocations,
   } = req.body;
 
   // EProjectName, EDocumentType, EDocDate and ECompanyId are NOT NULL columns
@@ -2142,7 +2152,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
 
     // For direct invoices (TOD or no linked source), amounts and the
     // supplier link come from the request body — see buildDirectExpenseBooking.
-    if (bookingAmount == null) {
+    const isDirectBooking = bookingAmount == null;
+    if (isDirectBooking) {
       const direct = buildDirectExpenseBooking({
         EAmount: EAmountBody,
         ENetAmount: ENetAmountBody,
@@ -2158,6 +2169,24 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       bookingCgstRate = direct.bookingCgstRate;
       bookingSgstRate = direct.bookingSgstRate;
       bookingIgstRate = direct.bookingIgstRate;
+    }
+
+    // Multi Expense Head tagging — only meaningful for a direct booking
+    // (GRN/PO/WO_PO/WORK_DONE-sourced bookings still post to the system
+    // Purchase ledger, unaffected). When provided, replaces the single
+    // EGLAccountId dropdown: each row is its own future Dr leg, and
+    // together they must add up to exactly what's owed to the supplier
+    // (bookingNetAmount) since that's the Cr side of the same voucher.
+    const expenseHeadAllocations = isDirectBooking ? normalizeAllocations(EExpenseHeadAllocations) : [];
+    if (expenseHeadAllocations.length > 0) {
+      const allocSum = sumAllocations(expenseHeadAllocations);
+      const target = Math.round((Number(bookingNetAmount) || 0) * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the invoice total (₹${target.toFixed(2)}).`,
+        });
+      }
     }
 
     let isDinvDocType = false;
@@ -2481,6 +2510,16 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
         .query(
           "UPDATE dbo.ExpenseBooking SET ELinkedGrnIds = @ELinkedGrnIds WHERE EId = @EId",
         );
+    }
+
+    if (expenseHeadAllocations.length > 0 && newExpenseId) {
+      await replaceAllocations(
+        () => transaction.request(),
+        sql,
+        "ExpenseBooking",
+        parseInt(newExpenseId, 10),
+        expenseHeadAllocations,
+      );
     }
 
     await transaction.commit();
@@ -3085,6 +3124,24 @@ router.put(
       let bookingSgstRate = direct.bookingSgstRate;
       let bookingIgstRate = direct.bookingIgstRate;
 
+      // Multi Expense Head tagging — see the matching comment on POST /.
+      // Validated up front (before the UPDATE runs) since this route isn't
+      // transaction-wrapped — a bad allocation sum should never leave a
+      // half-applied edit.
+      const isDirectBookingPut = ESourceType !== "GRN";
+      const expenseHeadAllocationsPut = isDirectBookingPut
+        ? normalizeAllocations(req.body.EExpenseHeadAllocations)
+        : [];
+      if (expenseHeadAllocationsPut.length > 0) {
+        const allocSum = sumAllocations(expenseHeadAllocationsPut);
+        const target = Math.round((Number(bookingNetAmount) || 0) * 100) / 100;
+        if (Math.abs(allocSum - target) > 0.5) {
+          return res.status(400).json({
+            error: `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the invoice total (₹${target.toFixed(2)}).`,
+          });
+        }
+      }
+
       if (ESourceType === "GRN") {
         const grnId = parseInt(ESourceId, 10);
         if (!Number.isFinite(grnId) || grnId <= 0) {
@@ -3236,6 +3293,12 @@ router.put(
       if (!result.rowsAffected?.[0]) {
         return res.status(404).json({ error: "Expense booking not found" });
       }
+
+      // Multi Expense Head tagging — always replace wholesale on save. If
+      // the booking is no longer "direct" (switched to a GRN/PO source) or
+      // simply has no allocations this time, this clears out any stale
+      // rows from a previous edit rather than leaving them dangling.
+      await replaceAllocations(() => pool.request(), sql, "ExpenseBooking", numericId, expenseHeadAllocationsPut);
 
       // If EMI is being enabled and a schedule is provided, sync EmiInstallments.
       // Only insert rows that don't already exist (idempotent — safe to call on re-save).
@@ -3751,6 +3814,12 @@ router.get("/:id/posting", async (req, res) => {
       .query(`SELECT TOP 1 EntryId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='InvoicePosting' AND SourceId=@SrcId AND IsReversed=0`);
     const isPosted = postedRes.recordset.length > 0;
 
+    // Multi Expense Head tagging (migration 303) — for a direct booking
+    // this is now the primary source of the debit-side breakdown; the
+    // single accounts.purchase resolved above stays as the fallback for
+    // any booking that hasn't been re-saved under the new structure yet.
+    const expenseHeadAllocations = isGrnLinked ? [] : await getAllocations(pool, sql, "ExpenseBooking", ebId);
+
     res.json({
       isGrnLinked: !!isGrnLinked,
       baseAmount, taxAmount, totalAmount,
@@ -3760,6 +3829,7 @@ router.get("/:id/posting", async (req, res) => {
       grnBreakdown: perGrn,
       supplierName: eb.SupplierName,
       accounts,
+      expenseHeadAllocations,
       isPosted,
       jvNo: isPosted ? postedRes.recordset[0].VoucherNo : null,
       jvId: isPosted ? postedRes.recordset[0].EntryId : null,
@@ -3841,14 +3911,26 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // ledger), which is why searching IsSystemGenerated=1 rows for it
     // always failed with "Supplier/Creditor system ledger not configured."
     const supplierId = eb.ResolvedSupplierId;
-    // Direct (non-GRN) bookings post their debit leg to the invoice's own
-    // chosen GL Account (General Ledger master) when one was selected on
-    // the form, instead of the generic system "Purchase A/c" ledger.
+    // Multi Expense Head tagging (migration 303) — a direct booking's
+    // amount can now be split across several heads instead of one. When
+    // present, these ARE the debit legs; debitLedgerId (the old single
+    // EGLAccountId/Purchase fallback) is only used when there are none —
+    // an older booking saved before this feature, or one where the user
+    // never tagged anything.
+    const expenseHeadAllocations = isGrnLinked ? [] : await getAllocations(pool, sql, "ExpenseBooking", ebId);
     const debitLedgerId = !isGrnLinked && eb.EGLAccountId ? eb.EGLAccountId : purchaseId;
     if (!supplierId) return res.status(422).json({ error: "Could not resolve this invoice's supplier account." });
     if (isGrnLinked && !pgrnId) return res.status(422).json({ error: "Provision for Pending GRN system ledger not configured." });
     if (isGrnLinked && taxAmount > 0 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
-    if (!isGrnLinked && !debitLedgerId) return res.status(422).json({ error: "Purchase system ledger not configured." });
+    if (!isGrnLinked && expenseHeadAllocations.length === 0 && !debitLedgerId) return res.status(422).json({ error: "Purchase system ledger not configured." });
+    if (!isGrnLinked && expenseHeadAllocations.length > 0) {
+      const allocSum = Math.round(expenseHeadAllocations.reduce((s, a) => s + a.amount, 0) * 100) / 100;
+      if (Math.abs(allocSum - totalAmount) > 0.5) {
+        return res.status(422).json({
+          error: `Expense Head amounts (₹${allocSum.toFixed(2)}) no longer add up to the invoice total (₹${totalAmount.toFixed(2)}) — re-save the invoice before posting.`,
+        });
+      }
+    }
 
     // GRN-linked: base clears the GRN provision; tax is recognized as
     // confirmed ITC (GST Credit Available) now that an actual invoice
@@ -3867,10 +3949,20 @@ router.post("/:id/post-to-gl", async (req, res) => {
               : []),
             { LHeadId: supplierId, DebitAmount: 0, CreditAmount: g.totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
           ])
-      : [
-          { LHeadId: debitLedgerId, DebitAmount: totalAmount, CreditAmount: 0,           Narration: `Invoice Posting: ${eb.EDocNo} — ${eb.EGLAccountId ? "GL Account" : "Purchase"}` },
-          { LHeadId: supplierId,    DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
-        ];
+      : expenseHeadAllocations.length > 0
+        ? [
+            ...expenseHeadAllocations.map((a) => ({
+              LHeadId: a.lHeadId,
+              DebitAmount: a.amount,
+              CreditAmount: 0,
+              Narration: `Invoice Posting: ${eb.EDocNo} — ${a.lHeadName}`,
+            })),
+            { LHeadId: supplierId, DebitAmount: 0, CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
+          ]
+        : [
+            { LHeadId: debitLedgerId, DebitAmount: totalAmount, CreditAmount: 0,           Narration: `Invoice Posting: ${eb.EDocNo} — ${eb.EGLAccountId ? "GL Account" : "Purchase"}` },
+            { LHeadId: supplierId,    DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
+          ];
 
     // Voucher number only — GL posting is independent of the Journal
     // Voucher module. This used to ALSO insert a dbo.JournalVoucher header +

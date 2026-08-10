@@ -545,7 +545,7 @@ export function ExpenseBookingPreviewModal({
                 Could not load posting data.
               </div>
             ) : (() => {
-              const { isGrnLinked, baseAmount, taxAmount, totalAmount, accounts, grnBreakdown } = invPostingData;
+              const { isGrnLinked, baseAmount, taxAmount, totalAmount, accounts, grnBreakdown, expenseHeadAllocations: postingAllocations } = invPostingData;
               const isMultiGrn = isGrnLinked && Array.isArray(grnBreakdown) && grnBreakdown.length > 1;
               const fmtAmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
               const fmtGrnDate = (d: string | null) =>
@@ -565,13 +565,15 @@ export function ExpenseBookingPreviewModal({
                   : []),
                 { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: g.totalAmount },
               ];
-              // Direct (non-GRN, e.g. DINV) booking: the whole invoice still
-              // posts as ONE debit leg to its chosen GL Account (Dr) against
-              // Supplier (Cr) — that hasn't changed. What this breaks out is
-              // the PREVIEW: each direct line item's own contribution to
-              // that same GL head, plus GST as its own line, instead of one
-              // opaque lumped total — mirrors the GRN posting tab's
-              // per-item breakdown.
+              // Direct (non-GRN, e.g. DINV) booking. Two possible shapes:
+              //  1. Multi Expense Head allocations (migration 303) — these
+              //     ARE the real debit legs actually posted, one row per
+              //     head, straight from the backend. Preferred whenever
+              //     present.
+              //  2. Legacy single EGLAccountId — one lumped debit leg, with
+              //     line-item / GST breakdown shown for readability only
+              //     (the real posted leg is still the one lump amount).
+              const hasAllocations = !isGrnLinked && Array.isArray(postingAllocations) && postingAllocations.length > 0;
               const directItems = (previewRecord?.directItems ?? []).filter((it: any) => Number(it.amount) > 0);
               const directItemsSum = Math.round(directItems.reduce((s: number, it: any) => s + (Number(it.amount) || 0), 0) * 100) / 100;
               // Only show the per-item split when it actually reconciles to
@@ -579,7 +581,7 @@ export function ExpenseBookingPreviewModal({
               // stale items after an edit, etc.) fall back to one lumped
               // row rather than showing a breakdown whose sum wouldn't
               // match the Total row beneath it.
-              const hasDirectItems = !isGrnLinked && directItems.length > 0 && Math.abs(directItemsSum - baseAmount) < 0.5;
+              const hasDirectItems = !isGrnLinked && !hasAllocations && directItems.length > 0 && Math.abs(directItemsSum - baseAmount) < 0.5;
               const purchaseLabel = accounts?.purchase?.label ?? "Purchase A/c";
               const purchaseCode = accounts?.purchase?.code ?? null;
               const groups: PostGroup[] = isGrnLinked
@@ -592,16 +594,24 @@ export function ExpenseBookingPreviewModal({
                       docNo: null,
                       date: null,
                       rows: [
-                        ...(hasDirectItems
-                          ? directItems.map((it: any, idx: number) => ({
-                              key: `item-${it._key ?? idx}`,
-                              label: `${purchaseLabel} — ${it.description || "Item"}`,
-                              code: purchaseCode,
+                        ...(hasAllocations
+                          ? postingAllocations.map((a: any) => ({
+                              key: `head-${a.allocationId}`,
+                              label: a.lHeadName,
+                              code: a.lHeadCode,
                               side: "debit" as const,
-                              amount: Number(it.amount) || 0,
+                              amount: Number(a.amount) || 0,
                             }))
-                          : [{ key: "purchase", label: purchaseLabel, code: purchaseCode, side: "debit" as const, amount: baseAmount }]),
-                        ...(taxAmount > 0
+                          : hasDirectItems
+                            ? directItems.map((it: any, idx: number) => ({
+                                key: `item-${it._key ?? idx}`,
+                                label: `${purchaseLabel} — ${it.description || "Item"}`,
+                                code: purchaseCode,
+                                side: "debit" as const,
+                                amount: Number(it.amount) || 0,
+                              }))
+                            : [{ key: "purchase", label: purchaseLabel, code: purchaseCode, side: "debit" as const, amount: baseAmount }]),
+                        ...(!hasAllocations && taxAmount > 0
                           ? [{ key: "gst", label: `${purchaseLabel} — GST`, code: purchaseCode, side: "debit" as const, amount: taxAmount }]
                           : []),
                         { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: totalAmount },
@@ -614,6 +624,10 @@ export function ExpenseBookingPreviewModal({
                     <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
                       GRN-linked invoice — Provision for Pending GRN is debited (reversing the GRN posting); Supplier is credited.
                       {isMultiGrn && " Combines multiple GRNs — grouped below by GRN with its own entry date."}
+                    </div>
+                  ) : hasAllocations ? (
+                    <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
+                      Direct booking — split across {postingAllocations.length} Expense Head{postingAllocations.length > 1 ? "s" : ""} below (each its own debit leg); Supplier is credited for the total.
                     </div>
                   ) : (
                     <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
@@ -1369,6 +1383,7 @@ export function ExpenseBookingPreviewModal({
           {(previewRecord.vendorInvoiceNo ||
             previewRecord.costCenter ||
             previewRecord.glAccount ||
+            (previewRecord.expenseHeadAllocations && previewRecord.expenseHeadAllocations.length > 0) ||
             previewRecord.workDoneRef ||
             (previewRecord.additionalCharges &&
               previewRecord.additionalCharges.length > 0)) && (
@@ -1385,12 +1400,14 @@ export function ExpenseBookingPreviewModal({
                   { label: "Vendor Invoice No", value: previewRecord.vendorInvoiceNo, mono: true },
                   { label: "Vendor Invoice Date", value: previewRecord.vendorInvoiceDate },
                   { label: "Cost Centre", value: previewRecord.costCenter },
-                  // GL Account is rendered separately below (as its full nested
-                  // chart-of-accounts path) when it's a proper ledger-master
-                  // reference; only fall back to a plain tile for legacy
-                  // free-text-only records that predate the GL master link.
-                  ...(!previewRecord.glAccountId
-                    ? [{ label: "GL Account", value: previewRecord.glAccount }]
+                  // Expense Head is rendered separately below — either its
+                  // full nested chart-of-accounts path (single legacy
+                  // EGLAccountId) or a multi-row breakdown (new
+                  // ExpenseHeadAllocation rows) — so it's excluded from this
+                  // plain-tile grid except for the oldest free-text-only
+                  // records that predate any real ledger link at all.
+                  ...(!previewRecord.glAccountId && (!previewRecord.expenseHeadAllocations || previewRecord.expenseHeadAllocations.length === 0)
+                    ? [{ label: "Expense Head", value: previewRecord.glAccount }]
                     : []),
                   { label: "Work Done Ref", value: previewRecord.workDoneRef, mono: true, accent: "text-violet-600 dark:text-violet-400" },
                 ] as { label: string; value: any; mono?: boolean; accent?: string }[])
@@ -1402,15 +1419,32 @@ export function ExpenseBookingPreviewModal({
                     </div>
                   ))}
               </div>
-              {previewRecord.glAccountId && (
+              {previewRecord.expenseHeadAllocations && previewRecord.expenseHeadAllocations.length > 0 ? (
+                <div className="mt-3 rounded-xl border border-border overflow-hidden">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                    Expense Head{previewRecord.expenseHeadAllocations.length > 1 ? "s" : ""}
+                  </p>
+                  {previewRecord.expenseHeadAllocations.map((a) => (
+                    <div key={a._key} className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/50 last:border-b-0">
+                      <span className="text-xs text-foreground truncate">
+                        {a.label}
+                        {a.code ? <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">({a.code})</span> : null}
+                      </span>
+                      <span className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                        ₹{Number(a.amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : previewRecord.glAccountId ? (
                 <div className="mt-3 px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1.5">GL Account (Chart of Accounts)</p>
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1.5">Expense Head (Chart of Accounts)</p>
                   <GLAccountPath
                     glAccountName={previewRecord.glAccountName || previewRecord.glAccount}
                     glAccountGroupId={previewRecord.glAccountGroupId}
                   />
                 </div>
-              )}
+              ) : null}
               {previewRecord.additionalCharges &&
                 previewRecord.additionalCharges.length > 0 && (
                   <div className="mt-3 rounded-xl border border-border overflow-hidden">

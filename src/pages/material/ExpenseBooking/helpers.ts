@@ -291,6 +291,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     glAccountId: null,
     glAccountName: null,
     glAccountGroupId: null,
+    expenseHeadAllocations: [],
     workDoneRef: "",
     additionalCharges: [],
     paymentTermId: null,
@@ -462,6 +463,15 @@ export function dbToRecord(row: any): ExpenseRecord {
     glAccountId: row.EGLAccountId ?? null,
     glAccountName: row.EGLAccountName ?? null,
     glAccountGroupId: row.EGLAccountGroupId ?? null,
+    expenseHeadAllocations: Array.isArray(row.EExpenseHeadAllocations)
+      ? row.EExpenseHeadAllocations.map((a: any) => ({
+          _key: `eha-${a.allocationId}`,
+          lHeadId: a.lHeadId ?? null,
+          label: a.lHeadName ?? null,
+          code: a.lHeadCode ?? null,
+          amount: Number(a.amount) || 0,
+        }))
+      : [],
     workDoneRef: row.EWorkDoneRef ?? "",
     paymentTermId: row.PaymentTermId ?? null,
     additionalCharges: (() => {
@@ -555,6 +565,17 @@ export function recordToDb(
     ECostCenter: form.costCenter || null,
     EGLAccount: form.glAccount || null,
     EGLAccountId: form.glAccountId ?? null,
+    // Multi "Expense Head" tagging — replaces EGLAccountId above when the
+    // form used the allocation editor (direct/TOD bookings only). Rows with
+    // no head picked or a zero amount are dropped; an empty array here is
+    // fine (backend just leaves the booking with no allocations, falling
+    // back to the legacy single EGLAccountId leg at posting time).
+    EExpenseHeadAllocations:
+      form.expenseHeadAllocations && form.expenseHeadAllocations.length > 0
+        ? form.expenseHeadAllocations
+            .filter((r) => r.lHeadId && r.amount > 0)
+            .map((r) => ({ lHeadId: r.lHeadId, amount: r.amount }))
+        : [],
     EWorkDoneRef: form.workDoneRef || null,
     PaymentTermId: form.paymentTermId ?? null,
     // Persist direct (TOD) line items as JSON; null when no items.

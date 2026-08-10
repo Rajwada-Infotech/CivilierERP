@@ -16,6 +16,12 @@ const {
   resolveDocTypeId,
 } = require("../utils/docNumberLock");
 const { syncBillStatus } = require("../utils/syncBillStatus");
+const {
+  normalizeAllocations,
+  sumAllocations,
+  replaceAllocations,
+  getAllocationsForMany,
+} = require("../services/expenseHeadAllocation");
 
 router.use(checkPermissionForMethod("Finance", "Payments"));
 
@@ -298,8 +304,19 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
+    // Direct Expense Payment (migration 303) — attach each row's Expense
+    // Head allocations (empty for every "normal" payment, which is the vast
+    // majority) so the edit form can repopulate the allocation editor.
+    const allocMap = await getAllocationsForMany(
+      pool, sql, "NewPayment", result.recordset.map((r) => r.PPaymentID),
+    );
+    const dataWithAllocations = result.recordset.map((r) => ({
+      ...r,
+      EExpenseHeadAllocations: allocMap.get(r.PPaymentID) ?? [],
+    }));
+
     res.json({
-      data: result.recordset,
+      data: dataWithAllocations,
       page,
       limit,
       total,
@@ -601,6 +618,10 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     partyId,
     // "Keep the balance on his on account" checkbox — see migration 188.
     oaSkipAutoApply,
+    // Direct Expense Payment (migration 303) — pay one or more Expense
+    // Heads straight from the bank, with no linked invoice/contract/party.
+    // See services/expenseHeadAllocation.js.
+    EExpenseHeadAllocations,
   } = req.body;
 
   try {
@@ -608,6 +629,17 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     if (!userEmail) return;
 
     const pool = getPool();
+
+    const expenseHeadAllocations = normalizeAllocations(EExpenseHeadAllocations);
+    if (expenseHeadAllocations.length > 0) {
+      const allocSum = sumAllocations(expenseHeadAllocations);
+      const target = Math.round((Number(PAmount) || 0) * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        return res.status(400).json({
+          error: `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the payment amount (₹${target.toFixed(2)}).`,
+        });
+      }
+    }
 
     // Inter-Company Stock Transfer payments must always be deposited to
     // the Dummy Bank — this is a system-generated payment for a stock
@@ -780,6 +812,10 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     const newId = insertResult.recordset[0]?.PPaymentID;
     await backPatchRecordId(pool, sql, finalDocNo, "NewPayment", newId);
 
+    if (expenseHeadAllocations.length > 0 && newId) {
+      await replaceAllocations(() => pool.request(), sql, "NewPayment", newId, expenseHeadAllocations);
+    }
+
     // Sync bill status on the referenced expense booking
     if (PExpenseRef) await _syncBillStatus(pool, PExpenseRef);
 
@@ -861,6 +897,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     PCardId,
     // "Keep the balance on his on account" checkbox — see migration 188.
     oaSkipAutoApply,
+    // Direct Expense Payment (migration 303) — see matching comment on POST /.
+    EExpenseHeadAllocations,
   } = req.body;
 
   try {
@@ -868,6 +906,17 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     if (!userEmail) return;
 
     const pool = getPool();
+
+    const expenseHeadAllocationsPut = normalizeAllocations(EExpenseHeadAllocations);
+    if (expenseHeadAllocationsPut.length > 0) {
+      const allocSum = sumAllocations(expenseHeadAllocationsPut);
+      const target = Math.round((Number(PAmount) || 0) * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        return res.status(400).json({
+          error: `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the payment amount (₹${target.toFixed(2)}).`,
+        });
+      }
+    }
 
     // Enforce: a payment can only be linked to an Approved Expense Booking.
     if (PExpenseRef) {
@@ -973,6 +1022,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
           OASkipAutoApply      = ISNULL(@OASkipAutoApply, OASkipAutoApply)
         WHERE PPaymentID = @PPaymentID
       `);
+
+    await replaceAllocations(() => pool.request(), sql, "NewPayment", parseInt(id, 10), expenseHeadAllocationsPut);
 
     // Sync bill status since amount may have changed
     const updatedRef = await pool.request().input("id", sql.Int, id)
