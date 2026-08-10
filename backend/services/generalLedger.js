@@ -540,6 +540,49 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   if (amount <= 0)
     return { posted: false, reason: `Payment ${paymentId} amount is ${amount} (<= 0)` };
 
+  const companyId = parseInt(payment.PCompany, 10);
+  const projectId = parseInt(payment.PProject, 10);
+  const docNo = payment.DocNo || `PMT-${paymentId}`;
+
+  // Direct Expense Payment (migration 303, dbo.ExpenseHeadAllocation) — pays
+  // one or more Expense Heads straight from the bank, with no invoice,
+  // contract, or party involved at all. When present, these ARE the debit
+  // legs; the whole supplier/party/advance resolution below is skipped
+  // entirely (there is no counter-party to resolve).
+  const { getAllocations } = require("./expenseHeadAllocation");
+  const allocations = await getAllocations(pool, sql, "NewPayment", paymentId);
+  if (allocations.length > 0) {
+    const allocSum = Math.round(allocations.reduce((s, a) => s + a.amount, 0) * 100) / 100;
+    if (Math.abs(allocSum - amount) > 0.5) {
+      return {
+        posted: false,
+        reason: `Payment ${paymentId}: Expense Head amounts (₹${allocSum.toFixed(2)}) no longer add up to the payment amount (₹${amount.toFixed(2)}) — re-save the payment before approving.`,
+      };
+    }
+    await postVoucher(pool, {
+      voucherNo: docNo,
+      voucherDate: payment.PDate,
+      sourceType: "NewPayment",
+      sourceId: paymentId,
+      companyId: Number.isFinite(companyId) ? companyId : null,
+      projectId: Number.isFinite(projectId) ? projectId : null,
+      createdBy: userEmail,
+      legs: [
+        ...allocations.map((a) => ({
+          lHeadId: a.lHeadId,
+          debit: a.amount,
+          narration: `${docNo} — ${a.lHeadName} (direct expense payment)`,
+        })),
+        {
+          lHeadId: payment.PBankID,
+          credit: amount,
+          narration: `${docNo} — direct expense payment`,
+        },
+      ],
+    });
+    return { posted: true };
+  }
+
   // A standalone advance/on-account payment (no invoice, no contract — see
   // newPayment.js's matching OnAccountLedger CREDIT hook) is booked as an
   // advance ASSET, not a reduction of what we owe the party — so its Dr leg
@@ -561,10 +604,6 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
         ? `Payment ${paymentId}: could not resolve supplier from expense ref "${payment.PExpenseRef}"`
         : `Payment ${paymentId}: no PExpenseRef/ContractId/PPartyId, cannot resolve counter-account`,
     };
-
-  const companyId = parseInt(payment.PCompany, 10);
-  const projectId = parseInt(payment.PProject, 10);
-  const docNo = payment.DocNo || `PMT-${paymentId}`;
 
   await postVoucher(pool, {
     voucherNo: docNo,

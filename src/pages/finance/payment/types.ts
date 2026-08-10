@@ -1,4 +1,6 @@
 // ─── Types shared across the Payment page and its sub-components ──────────────
+import type { ExpenseHeadAllocationRow } from "@/pages/material/ExpenseBooking/types";
+export type { ExpenseHeadAllocationRow };
 
 export interface DbPayment {
   PPaymentID: number;
@@ -187,6 +189,10 @@ export interface PaymentRecord {
   // linked GRN/PO/WorkDone. Stored as PPartyId on NewPayment so resolvePartyFromRef
   // can derive it for On Account credit logic.
   partyId: number | null;
+  // Direct Expense Payment (migration 303, dbo.ExpenseHeadAllocation) — pay
+  // one or more Expense Heads straight from the bank instead of a Party.
+  // When set (non-empty), this takes priority over partyId at posting time.
+  expenseHeadAllocations: ExpenseHeadAllocationRow[];
 }
 
 export const PAYMENT_MODES = [

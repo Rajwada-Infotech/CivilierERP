@@ -1717,7 +1717,12 @@ router.get("/:id/posting", async (req, res) => {
         || Number(it.totalAmount || 0) > 0;
     });
 
+    // Per-item breakdown for the posting-preview tab — each item's own
+    // base/GST contribution, not just the GRN-wide sum, so a reviewer can
+    // see exactly what's being posted instead of one opaque lumped figure
+    // per GL account.
     let totalBase = 0, totalGST = 0;
+    const itemBreakdown = [];
     if (receivedItems.length > 0) {
       const itemIds = receivedItems.map((it) => String(it.itemId || it.ItemId || "").trim()).filter(Boolean);
       let masterMap = {};
@@ -1730,13 +1735,24 @@ router.get("/:id/posting", async (req, res) => {
       for (const it of receivedItems) {
         const itemId = String(it.itemId || it.ItemId || "");
         const receivedQty = Number(it.receivedQty || it.ReceivedQty || 0);
+        const qty = Number(it.quantity || it.Quantity || receivedQty || 0);
         const rate = Number(it.rate || it.Rate || 0);
-        const baseAmount = Number(it.totalAmount) > 0 ? Number(it.totalAmount) : rate * Number(it.quantity || it.Quantity || receivedQty || 0);
+        const baseAmount = Number(it.totalAmount) > 0 ? Number(it.totalAmount) : rate * qty;
         const master = masterMap[itemId] || { cgstRate: 0, sgstRate: 0 };
         const lineGstPct = Number(it.gstPct ?? it.GstPct ?? NaN);
         const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate + master.sgstRate);
+        const gstAmount = Math.round(baseAmount * (totalGSTRate / 100) * 100) / 100;
         totalBase += baseAmount;
-        totalGST += baseAmount * (totalGSTRate / 100);
+        totalGST += gstAmount;
+        itemBreakdown.push({
+          itemId,
+          itemName: it.itemName || it.ItemName || it.description || it.Description || "Item",
+          uom: it.uom || it.UOM || it.uomName || null,
+          qty,
+          rate,
+          baseAmount: Math.round(baseAmount * 100) / 100,
+          gstAmount,
+        });
       }
     }
     totalBase = Math.round(totalBase * 100) / 100;
@@ -1766,6 +1782,7 @@ router.get("/:id/posting", async (req, res) => {
       baseAmount: totalBase,
       taxAmount: totalGST,
       totalAmount: totalInclGST,
+      items: itemBreakdown,
       costCentre: grn.CostCenterName ? { id: grn.CostCenterId, name: grn.CostCenterName, code: grn.CostCenterCode } : null,
       accounts: { purchase: purchaseLed, pgrn: pgrnLed, provisional: provisionalLed },
       isPosted: !!existingPost,
@@ -1785,7 +1802,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
   const userEmail = req.user?.email || "system";
   try {
     const pool = getPool();
-    const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
+    const { lockNextDocNumber, resolveDocTypeId } = require("../utils/docNumberLock");
 
     // Fetch posting preview (reuse endpoint logic via internal call)
     const grnRes = await pool.request().input("GRNID", sql.Int, grnId).query(`
@@ -1862,12 +1879,20 @@ router.post("/:id/post-to-gl", async (req, res) => {
         : []),
     ];
 
-    // Create JV
+    // Voucher number only — GL posting is independent of the Journal
+    // Voucher module. This used to ALSO insert a dbo.JournalVoucher header +
+    // JournalVoucherLines row mirroring these exact legs, which meant every
+    // GRN posting silently created a second, duplicate-looking JV that
+    // (a) cluttered the Journal Voucher list with system-generated rows
+    // indistinguishable from real user-entered ones, and (b) would have
+    // double-posted the same accounting event a second time under
+    // SourceType='JournalVoucher' if anything ever approved/posted it (a
+    // GL-backfill script found exactly this). dbo.GeneralLedgerEntry below
+    // (SourceType='GRNPosting') is the single, independent source of truth —
+    // lockNextDocNumber still reserves a real doc number for the voucher
+    // label shown to the user, it just no longer needs a JournalVoucher
+    // table row to hang off.
     const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
-    // lockNextDocNumber takes a single options object, not positional args —
-    // calling it positionally (as this used to) silently failed every time
-    // (caught below), leaving VoucherNo as the JV-<id> fallback instead of a
-    // real locked doc number, and the frontend showing "Posted as ." (blank).
     const finalDocNo = dtId
       ? await lockNextDocNumber(pool, sql, {
           docTypeId: dtId,
@@ -1876,34 +1901,11 @@ router.post("/:id/post-to-gl", async (req, res) => {
           issuedBy: userEmail,
         }).catch(() => null)
       : null;
-    const insertHdr = await pool.request()
-      .input("JVNo", sql.NVarChar(100), finalDocNo || null)
-      .input("JVDate", sql.Date, new Date())
-      .input("Narration", sql.NVarChar(500), `GRN Posting: ${grn.GRNNo}`)
-      .input("CompanyId", sql.Int, grn.CompanyId || null)
-      .input("ProjectId", sql.Int, grn.ProjectId || null)
-      .input("DocTypeId", sql.Int, dtId || null)
-      .input("CreatedBy", sql.NVarChar(150), userEmail)
-      .query(`INSERT INTO dbo.JournalVoucher (JVNo,JVDate,Narration,CompanyId,ProjectId,Status,DocTypeId,CreatedBy) OUTPUT INSERTED.JVID VALUES (@JVNo,@JVDate,@Narration,@CompanyId,@ProjectId,'Approved',@DocTypeId,@CreatedBy)`);
-    const jvId = insertHdr.recordset[0].JVID;
-
-    let sortOrder = 0;
-    for (const line of lines) {
-      await pool.request()
-        .input("JVID", sql.Int, jvId)
-        .input("LHeadId", sql.Int, line.LHeadId)
-        .input("DebitAmount", sql.Decimal(18,2), line.DebitAmount)
-        .input("CreditAmount", sql.Decimal(18,2), line.CreditAmount)
-        .input("Narration", sql.NVarChar(255), line.Narration)
-        .input("SortOrder", sql.Int, sortOrder++)
-        .query(`INSERT INTO dbo.JournalVoucherLines (JVID,LHeadId,DebitAmount,CreditAmount,Narration,SortOrder) VALUES (@JVID,@LHeadId,@DebitAmount,@CreditAmount,@Narration,@SortOrder)`);
-    }
-    if (finalDocNo) await backPatchRecordId(pool, sql, finalDocNo, "JournalVoucher", jvId);
 
     // Post to GL using GRNPosting source type so we can detect it later
     const { postVoucher } = require("../services/generalLedger");
     await postVoucher(pool, {
-      voucherNo: finalDocNo || `JV-${jvId}`,
+      voucherNo: finalDocNo || `JV-GRN${grnId}`,
       voucherDate: new Date(),
       sourceType: "GRNPosting",
       sourceId: grnId,
@@ -1915,7 +1917,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     });
 
     await bumpCacheVersion("journal-voucher");
-    res.json({ jvId, jvNo: finalDocNo, message: "GRN posted to GL successfully." });
+    res.json({ jvNo: finalDocNo, message: "GRN posted to GL successfully." });
   } catch (err) {
     console.error("GRN post-to-gl error:", err.message);
     res.status(500).json({ error: err.message });

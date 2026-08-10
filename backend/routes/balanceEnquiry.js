@@ -95,9 +95,17 @@ router.get("/:bankId/summary", requirePageRight("balance-enquiry", "view"), asyn
     const from = req.query.from ? String(req.query.from) : null;
     const to = req.query.to ? String(req.query.to) : null;
 
-    const request = pool.request().input("BId", sql.Int, bankId);
-    if (from) request.input("From", sql.Date, from);
-    if (to) request.input("To", sql.Date, to);
+    // Always bind @From/@To (as NULL when not supplied) — the query text
+    // below references them unconditionally (@From IS NULL OR ...), so
+    // skipping the .input() call entirely when from/to are empty ("All
+    // Time") left the parameter undeclared and SQL Server threw "Must
+    // declare the scalar variable '@From'" instead of just treating it as
+    // an open-ended range.
+    const request = pool
+      .request()
+      .input("BId", sql.Int, bankId)
+      .input("From", sql.Date, from || null)
+      .input("To", sql.Date, to || null);
 
     const result = await request.query(`
       SELECT
@@ -161,9 +169,15 @@ router.get("/:bankId/transactions", requirePageRight("balance-enquiry", "view"),
     const to = req.query.to ? String(req.query.to) : null;
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 2000);
 
-    const request = pool.request().input("BId", sql.Int, bankId).input("Limit", sql.Int, limit);
-    if (from) request.input("From", sql.Date, from);
-    if (to) request.input("To", sql.Date, to);
+    // See the comment on the /summary handler above — @From/@To must always
+    // be bound, even as NULL, since the SQL text references them
+    // unconditionally.
+    const request = pool
+      .request()
+      .input("BId", sql.Int, bankId)
+      .input("Limit", sql.Int, limit)
+      .input("From", sql.Date, from || null)
+      .input("To", sql.Date, to || null);
 
     // Pre-window opening: opening balance + everything strictly before @From.
     const openingResult = await request.query(`
@@ -179,9 +193,13 @@ router.get("/:bankId/transactions", requirePageRight("balance-enquiry", "view"),
     `);
     const windowOpening = Number(openingResult.recordset[0]?.WindowOpening || bank.BOpeningBalance || 0);
 
-    const request2 = pool.request().input("BId", sql.Int, bankId).input("Limit", sql.Int, limit).input("Opening", sql.Decimal(18, 2), windowOpening);
-    if (from) request2.input("From", sql.Date, from);
-    if (to) request2.input("To", sql.Date, to);
+    const request2 = pool
+      .request()
+      .input("BId", sql.Int, bankId)
+      .input("Limit", sql.Int, limit)
+      .input("Opening", sql.Decimal(18, 2), windowOpening)
+      .input("From", sql.Date, from || null)
+      .input("To", sql.Date, to || null);
 
     const result = await request2.query(`
       SELECT TOP (@Limit) *

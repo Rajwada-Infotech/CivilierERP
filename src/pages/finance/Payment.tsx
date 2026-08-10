@@ -112,6 +112,7 @@ import { ModeInfoBanner } from "./payment/components/ModeInfoBanner";
 import { ChequePanel } from "./payment/components/ChequePanel";
 import { DigitalRefPanel } from "./payment/components/DigitalRefPanel";
 import { CardPanel } from "./payment/components/CardPanel";
+import { ExpenseHeadAllocationEditor } from "@/pages/material/ExpenseBooking/ExpenseHeadAllocationEditor";
 import { getPayableEmis, payLoan, type PayableEmi } from "@/api/loanSanctionApi";
 import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
 import { previewOAAdjustment } from "@/api/onAccountAdjustment";
@@ -131,8 +132,14 @@ const Payment: React.FC = () => {
   const [projectFilter, setProjectFilter] = useState("");
   const [finYearFilter, setFinYearFilter] = useState("");
   const [docNumberFilter, setDocNumberFilter] = useState("");
-  const [docDateFilter, setDocDateFilter] = useState("");
+  // Payment Date range (np.PDate) — was a single exact-match date filter,
+  // now a From/To range for a more useful list-view search.
+  const [dateFromFilter, setDateFromFilter] = useState("");
+  const [dateToFilter, setDateToFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  // Direct Expense Payment (migration 303) — a payment mode with no linked
+  // invoice/party, paid straight against one or more Expense Heads instead.
+  const [showExpenseHeadPayment, setShowExpenseHeadPayment] = useState(false);
   const PAGE_SIZE = 20;
 
   const [view, setView] = useState<"list" | "form">("list");
@@ -490,6 +497,15 @@ const Payment: React.FC = () => {
         ].join("")
       : "";
 
+    // Direct Expense Payment (migration 303) — paid straight against one
+    // or more Expense Heads, no Party involved.
+    const expenseHeadRows =
+      rec.expenseHeadAllocations && rec.expenseHeadAllocations.length > 0
+        ? rec.expenseHeadAllocations
+            .map((a) => field(a.label ?? "Expense Head", formatINR(a.amount)))
+            .join("")
+        : "";
+
     const printedAt = new Date().toLocaleString("en-IN", {
       day: "2-digit",
       month: "short",
@@ -566,6 +582,9 @@ const Payment: React.FC = () => {
 
   ${taxRows ? sectionTitle("Tax Details") : ""}
   ${taxRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${taxRows}</tbody></table></div>` : ""}
+
+  ${expenseHeadRows ? sectionTitle(rec.expenseHeadAllocations!.length > 1 ? "Expense Heads" : "Expense Head") : ""}
+  ${expenseHeadRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${expenseHeadRows}</tbody></table></div>` : ""}
 
   <!-- Signatories -->
   <div style="display:flex;gap:8px;margin-top:48px;">
@@ -648,7 +667,8 @@ const Payment: React.FC = () => {
       projectFilter,
       finYearFilter,
       docNumberFilter,
-      docDateFilter,
+      dateFromFilter,
+      dateToFilter,
     ],
     queryFn: () =>
       getPayments(
@@ -659,7 +679,12 @@ const Payment: React.FC = () => {
         projectFilter,
         finYearFilter,
         docNumberFilter,
-        docDateFilter,
+        "",
+        "",
+        "",
+        "",
+        dateFromFilter,
+        dateToFilter,
       ),
     staleTime: 0,
   });
@@ -725,14 +750,19 @@ const Payment: React.FC = () => {
         projectFilter,
         finYearFilter,
         docNumberFilter,
-        docDateFilter,
+        "",
+        "",
+        "",
+        "",
+        dateFromFilter,
+        dateToFilter,
       );
       all = all.concat(Array.isArray(data?.data) ? data.data : []);
       pages = data?.totalPages ?? 1;
       p += 1;
     } while (p <= pages);
     return all.map(dbToRecord) as unknown as Record<string, unknown>[];
-  }, [supplierFilter, companyNameFilter, projectFilter, finYearFilter, docNumberFilter, docDateFilter]);
+  }, [supplierFilter, companyNameFilter, projectFilter, finYearFilter, docNumberFilter, dateFromFilter, dateToFilter]);
 
   // Fetch full detail (name + logo + address) for the selected company — used in PDF export
   const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
@@ -1657,6 +1687,23 @@ const Payment: React.FC = () => {
       return false;
     }
 
+    if ((form.expenseHeadAllocations?.length ?? 0) > 0) {
+      const allocSum = Math.round(
+        (form.expenseHeadAllocations ?? []).reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100,
+      ) / 100;
+      const target = Math.round((form.amount ?? 0) * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        toast.error(
+          `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the payment amount (₹${target.toFixed(2)}).`,
+        );
+        return false;
+      }
+      if ((form.expenseHeadAllocations ?? []).some((r) => !r.lHeadId)) {
+        toast.error("Every Expense Head row needs a ledger selected.");
+        return false;
+      }
+    }
+
     if (isDigitalMode) {
       if (!form.bankId) {
         toast.error("Please select a bank account.");
@@ -1726,6 +1773,14 @@ const Payment: React.FC = () => {
       cardReference: form.cardReference || null,
       cardId: form.cardId ?? null,
       ContractId: form.contractId ? Number(form.contractId) : null,
+      // Direct Expense Payment (migration 303) — pay one or more Expense
+      // Heads straight from the bank instead of a Party/Invoice.
+      EExpenseHeadAllocations:
+        form.expenseHeadAllocations && form.expenseHeadAllocations.length > 0
+          ? form.expenseHeadAllocations
+              .filter((r) => r.lHeadId && r.amount > 0)
+              .map((r) => ({ lHeadId: r.lHeadId, amount: r.amount }))
+          : [],
       // "Keep the balance on his on account" — unchecked means don't let the
       // approve-time hook auto-apply this party's on-account balance.
       oaSkipAutoApply: oaBalance > 0.01 ? !useOnAccountBalance : undefined,
@@ -2302,6 +2357,48 @@ const Payment: React.FC = () => {
                     </Field>
                   </div>
                 )}
+
+                {/* Direct Expense Payment (migration 303) — an alternative to
+                    picking a Party above: split the payment across one or
+                    more Expense Heads instead, debited directly with no
+                    counter-party at all (e.g. paying a courier or bank
+                    charge with no invoice/vendor on file). */}
+                {!form.expenseRef && !selectedContract && (() => {
+                  const expanded = showExpenseHeadPayment || (form.expenseHeadAllocations?.length ?? 0) > 0;
+                  return (
+                    <div className="space-y-2">
+                      {!expanded ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowExpenseHeadPayment(true)}
+                          className="text-[11px] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
+                        >
+                          or pay Expense Head(s) directly →
+                        </button>
+                      ) : (
+                        <Field
+                          label="Expense Head"
+                          hint="Pay one or more ledger heads directly — no party required. Must add up to the amount below."
+                        >
+                          <ExpenseHeadAllocationEditor
+                            rows={form.expenseHeadAllocations ?? []}
+                            onChange={(rows) => set("expenseHeadAllocations", rows)}
+                            targetAmount={form.amount ?? 0}
+                          />
+                          {(form.expenseHeadAllocations?.length ?? 0) === 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowExpenseHeadPayment(false)}
+                              className="mt-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              Cancel — pay a Party instead
+                            </button>
+                          )}
+                        </Field>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {form.expenseRef && selectedContract && (
                   <AutoFillBanner
@@ -3632,7 +3729,8 @@ const Payment: React.FC = () => {
                 projectFilter ||
                 finYearFilter ||
                 docNumberFilter ||
-                docDateFilter ||
+                dateFromFilter ||
+                dateToFilter ||
                 supplierFilter
               );
               const clearAll = () => {
@@ -3641,7 +3739,8 @@ const Payment: React.FC = () => {
                 setProjectFilter("");
                 setFinYearFilter("");
                 setDocNumberFilter("");
-                setDocDateFilter("");
+                setDateFromFilter("");
+                setDateToFilter("");
                 setSupplierFilter("");
                 setPage(1);
               };
@@ -3668,7 +3767,8 @@ const Payment: React.FC = () => {
                               projectFilter,
                               finYearFilter,
                               docNumberFilter,
-                              docDateFilter,
+                              dateFromFilter,
+                              dateToFilter,
                               supplierFilter,
                             ].filter(Boolean).length
                           }{" "}
@@ -3838,25 +3938,56 @@ const Payment: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* 5. Document Date */}
+                        {/* 5. Payment Date range */}
                         <div className="space-y-1.5">
                           <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                            <FileText size={10} /> Document Date
+                            <FileText size={10} /> Date From
                           </label>
                           <div className="relative">
                             <input
                               type="date"
-                              value={docDateFilter}
+                              value={dateFromFilter}
+                              max={dateToFilter || undefined}
                               onChange={(e) => {
-                                setDocDateFilter(e.target.value);
+                                setDateFromFilter(e.target.value);
                                 setPage(1);
                               }}
                               className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                             />
-                            {docDateFilter && (
+                            {dateFromFilter && (
                               <button
                                 onClick={() => {
-                                  setDocDateFilter("");
+                                  setDateFromFilter("");
+                                  setPage(1);
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              >
+                                <X size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 5b. Payment Date range — To */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <FileText size={10} /> Date To
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="date"
+                              value={dateToFilter}
+                              min={dateFromFilter || undefined}
+                              onChange={(e) => {
+                                setDateToFilter(e.target.value);
+                                setPage(1);
+                              }}
+                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                            />
+                            {dateToFilter && (
+                              <button
+                                onClick={() => {
+                                  setDateToFilter("");
                                   setPage(1);
                                 }}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
@@ -3970,13 +4101,14 @@ const Payment: React.FC = () => {
                           </button>
                         </span>
                       )}
-                      {docDateFilter && (
+                      {(dateFromFilter || dateToFilter) && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-cyan-500/10 text-cyan-600 border border-cyan-500/20">
                           <FileText size={9} />
-                          Date: {docDateFilter}
+                          Date: {dateFromFilter || "…"} – {dateToFilter || "…"}
                           <button
                             onClick={() => {
-                              setDocDateFilter("");
+                              setDateFromFilter("");
+                              setDateToFilter("");
                               setPage(1);
                             }}
                             className="ml-0.5 hover:text-destructive"
@@ -4933,6 +5065,27 @@ const Payment: React.FC = () => {
                   </div>
                 ))}
               </div>
+
+              {/* Direct Expense Payment (migration 303) — paid straight
+                  against one or more Expense Heads, no Party involved. */}
+              {viewingRec.expenseHeadAllocations && viewingRec.expenseHeadAllocations.length > 0 && (
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                    Expense Head{viewingRec.expenseHeadAllocations.length > 1 ? "s" : ""}
+                  </p>
+                  {viewingRec.expenseHeadAllocations.map((a) => (
+                    <div key={a._key} className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/50 last:border-b-0">
+                      <span className="text-xs text-foreground truncate">
+                        {a.label}
+                        {a.code ? <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">({a.code})</span> : null}
+                      </span>
+                      <span className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                        {formatINR(a.amount)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               </>
               )}
 
@@ -5147,6 +5300,21 @@ const Payment: React.FC = () => {
                   undone.
                 </p>
               </div>
+            </div>
+            {/* Doc numbers are never reused after a delete — the sequence
+                simply continues from its current max, so removing a
+                record permanently leaves a gap. */}
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+              <span>
+                {(() => {
+                  const rec = records.find((r) => r.id === deleteId);
+                  const docNo = rec?.docNo;
+                  return docNo
+                    ? `${docNo}'s number will not be reused — it leaves a permanent gap in the document sequence.`
+                    : "This document's number will not be reused — it leaves a permanent gap in the document sequence.";
+                })()}
+              </span>
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button

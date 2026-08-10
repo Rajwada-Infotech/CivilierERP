@@ -1,4 +1,4 @@
-import { Chart2, Bank, Judge, DocumentText, MoneyRecive } from "iconsax-react";
+import { Chart2, Bank, Judge, DocumentText } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
@@ -17,13 +17,13 @@ export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
       { label: "Cheque Cancellation", path: "/finance/cheque-cancellation", pageKey: "cheque-cancellation" },
     ],
   },
-  { label: "Balance Enquiry", icon: MoneyRecive, path: "/finance/balance-enquiry", pageKey: "balance-enquiry" },
   { label: "Journal Voucher", icon: DocumentText, path: "/journal-voucher", pageKey: "journal-voucher" },
   {
     label: "Query",
     icon: Judge,
     children: [
       { label: "Trial Balance",      path: "/trial-balance",       pageKey: "trial-balance" },
+      { label: "Balance Enquiry",    path: "/finance/balance-enquiry", pageKey: "balance-enquiry" },
     ],
   },
 ];

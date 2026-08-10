@@ -16,6 +16,12 @@ const {
   resolveDocTypeId,
 } = require("../utils/docNumberLock");
 const { syncBillStatus } = require("../utils/syncBillStatus");
+const {
+  normalizeAllocations,
+  sumAllocations,
+  replaceAllocations,
+  getAllocationsForMany,
+} = require("../services/expenseHeadAllocation");
 
 router.use(checkPermissionForMethod("Finance", "Payments"));
 
@@ -79,6 +85,9 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const dueDate = req.query.dueDate ? String(req.query.dueDate).trim() : "";
     const remarks = req.query.remarks ? String(req.query.remarks).trim() : "";
     const idFilter = req.query.id ? parseInt(req.query.id, 10) : null;
+    // Payment Date (np.PDate) range — list view's Date filter.
+    const dateFrom = req.query.from ? String(req.query.from).trim() : "";
+    const dateTo = req.query.to ? String(req.query.to).trim() : "";
 
     // Every column here is qualified with np. — the data query joins
     // dbo.GoodsReceiptNotes and dbo.PurchaseOrders, both of which also have a
@@ -108,6 +117,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (docDate) conditions.push(`CAST(np.PCreatedAt AS DATE) = @docDate`);
     if (dateParam) conditions.push(`np.PDate = @dateParam`);
     if (dueDate) conditions.push(`np.PChequeDate = @dueDate`);
+    if (dateFrom) conditions.push(`np.PDate >= @dateFrom`);
+    if (dateTo) conditions.push(`np.PDate <= @dateTo`);
     if (remarks)
       conditions.push(
         `(np.PPaymentName LIKE @remarks OR np.PExpenseRef LIKE @remarks)`,
@@ -128,6 +139,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (docDate) request.input("docDate", sql.Date, docDate);
     if (dateParam) request.input("dateParam", sql.Date, dateParam);
     if (dueDate) request.input("dueDate", sql.Date, dueDate);
+    if (dateFrom) request.input("dateFrom", sql.Date, dateFrom);
+    if (dateTo) request.input("dateTo", sql.Date, dateTo);
     if (remarks) request.input("remarks", sql.NVarChar(200), `%${remarks}%`);
 
     const countResult = await request.query(
@@ -150,6 +163,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (docDate) dataRequest.input("docDate", sql.Date, docDate);
     if (dateParam) dataRequest.input("dateParam", sql.Date, dateParam);
     if (dueDate) dataRequest.input("dueDate", sql.Date, dueDate);
+    if (dateFrom) dataRequest.input("dateFrom", sql.Date, dateFrom);
+    if (dateTo) dataRequest.input("dateTo", sql.Date, dateTo);
     if (remarks)
       dataRequest.input("remarks", sql.NVarChar(200), `%${remarks}%`);
 
@@ -289,8 +304,19 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
+    // Direct Expense Payment (migration 303) — attach each row's Expense
+    // Head allocations (empty for every "normal" payment, which is the vast
+    // majority) so the edit form can repopulate the allocation editor.
+    const allocMap = await getAllocationsForMany(
+      pool, sql, "NewPayment", result.recordset.map((r) => r.PPaymentID),
+    );
+    const dataWithAllocations = result.recordset.map((r) => ({
+      ...r,
+      EExpenseHeadAllocations: allocMap.get(r.PPaymentID) ?? [],
+    }));
+
     res.json({
-      data: result.recordset,
+      data: dataWithAllocations,
       page,
       limit,
       total,
@@ -592,6 +618,10 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     partyId,
     // "Keep the balance on his on account" checkbox — see migration 188.
     oaSkipAutoApply,
+    // Direct Expense Payment (migration 303) — pay one or more Expense
+    // Heads straight from the bank, with no linked invoice/contract/party.
+    // See services/expenseHeadAllocation.js.
+    EExpenseHeadAllocations,
   } = req.body;
 
   try {
@@ -599,6 +629,17 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     if (!userEmail) return;
 
     const pool = getPool();
+
+    const expenseHeadAllocations = normalizeAllocations(EExpenseHeadAllocations);
+    if (expenseHeadAllocations.length > 0) {
+      const allocSum = sumAllocations(expenseHeadAllocations);
+      const target = Math.round((Number(PAmount) || 0) * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        return res.status(400).json({
+          error: `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the payment amount (₹${target.toFixed(2)}).`,
+        });
+      }
+    }
 
     // Inter-Company Stock Transfer payments must always be deposited to
     // the Dummy Bank — this is a system-generated payment for a stock
@@ -771,6 +812,10 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     const newId = insertResult.recordset[0]?.PPaymentID;
     await backPatchRecordId(pool, sql, finalDocNo, "NewPayment", newId);
 
+    if (expenseHeadAllocations.length > 0 && newId) {
+      await replaceAllocations(() => pool.request(), sql, "NewPayment", newId, expenseHeadAllocations);
+    }
+
     // Sync bill status on the referenced expense booking
     if (PExpenseRef) await _syncBillStatus(pool, PExpenseRef);
 
@@ -852,6 +897,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     PCardId,
     // "Keep the balance on his on account" checkbox — see migration 188.
     oaSkipAutoApply,
+    // Direct Expense Payment (migration 303) — see matching comment on POST /.
+    EExpenseHeadAllocations,
   } = req.body;
 
   try {
@@ -859,6 +906,17 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     if (!userEmail) return;
 
     const pool = getPool();
+
+    const expenseHeadAllocationsPut = normalizeAllocations(EExpenseHeadAllocations);
+    if (expenseHeadAllocationsPut.length > 0) {
+      const allocSum = sumAllocations(expenseHeadAllocationsPut);
+      const target = Math.round((Number(PAmount) || 0) * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        return res.status(400).json({
+          error: `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the payment amount (₹${target.toFixed(2)}).`,
+        });
+      }
+    }
 
     // Enforce: a payment can only be linked to an Approved Expense Booking.
     if (PExpenseRef) {
@@ -964,6 +1022,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
           OASkipAutoApply      = ISNULL(@OASkipAutoApply, OASkipAutoApply)
         WHERE PPaymentID = @PPaymentID
       `);
+
+    await replaceAllocations(() => pool.request(), sql, "NewPayment", parseInt(id, 10), expenseHeadAllocationsPut);
 
     // Sync bill status since amount may have changed
     const updatedRef = await pool.request().input("id", sql.Int, id)

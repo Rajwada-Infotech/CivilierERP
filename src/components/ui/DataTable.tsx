@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   useReactTable,
   getCoreRowModel,
@@ -127,12 +127,39 @@ export function DataTable<TData extends RowData>({
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getRowId,
-    // Reset to page 0 when filter changes
-    autoResetPageIndex: true,
+    // TanStack's own autoResetPageIndex fires on ANY change to `data`
+    // (by reference), not just a real content change — and every caller
+    // of this component passes `data` as a fresh array literal each
+    // render (e.g. `data={records.filter(...)}`), so any unrelated
+    // parent re-render (a scroll-position state update, a sibling
+    // effect, anything) silently bounced the user back to page 1 while
+    // they were browsing page 2/3. Disabled here; the effect below
+    // resets the page only for the cases that should actually reset it
+    // (the filter text itself changing), not on every render.
+    autoResetPageIndex: false,
   });
+
+  // Reset to page 0 only when the search/filter actually changes — not on
+  // every `data` reference change (see autoResetPageIndex comment above).
+  useEffect(() => {
+    setPagination((p) => (p.pageIndex === 0 ? p : { ...p, pageIndex: 0 }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalFilter, columnFilters]);
 
   const { rows } = table.getRowModel();
   const totalFiltered = table.getFilteredRowModel().rows.length;
+
+  // Clamp — but never reset to 0 — if the current page fell out of range
+  // (e.g. a row was deleted and page 3 no longer exists). A same-length
+  // `data` update that's still in range is a no-op, so this doesn't
+  // reproduce the scroll-reset bug the two changes above just fixed.
+  const pageCount = table.getPageCount();
+  useEffect(() => {
+    if (pageCount > 0 && pagination.pageIndex > pageCount - 1) {
+      setPagination((p) => ({ ...p, pageIndex: pageCount - 1 }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageCount]);
 
   return (
     <div className={className}>
