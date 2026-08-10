@@ -14,9 +14,13 @@
 -- second batch (and its COMMIT) ever runs. Each batch below already commits
 -- implicitly under SQL Server's autocommit mode, so no wrapper is needed.
 
--- 1. Add the new columns.
-ALTER TABLE dbo.CrmAgreement ADD ProposedDate DATE NULL;
-ALTER TABLE dbo.CrmAgreement ADD ProposedDateStatus NVARCHAR(30) NULL;
+-- 1. Add the new columns (idempotent — a prior manual/partial run may have
+--    already added these on this environment without getting logged in
+--    dbo.__Migrations).
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CrmAgreement') AND name = 'ProposedDate')
+  ALTER TABLE dbo.CrmAgreement ADD ProposedDate DATE NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CrmAgreement') AND name = 'ProposedDateStatus')
+  ALTER TABLE dbo.CrmAgreement ADD ProposedDateStatus NVARCHAR(30) NULL;
 GO
 -- The GO above is required, not optional: SQL Server resolves column names
 -- for an entire batch at parse time, before any statement in it executes.

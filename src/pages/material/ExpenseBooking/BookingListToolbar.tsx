@@ -80,7 +80,7 @@ export function BookingListToolbar({
       {/* Fin Year + Document Date range — narrows the paginated list
           server-side (unlike the status chips/search above, which only
           ever filter within the current page). */}
-      <div className="flex flex-wrap items-end gap-2 pt-1 border-t border-border/60">
+      <div className="flex flex-wrap items-end gap-3 pt-1 border-t border-border/60">
         <div className="space-y-1 mt-2">
           <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
             <CalendarDays size={10} /> Fin Year
@@ -107,7 +107,7 @@ export function BookingListToolbar({
             value={dateFrom}
             max={dateTo || undefined}
             onChange={(e) => onDateFromChange(e.target.value)}
-            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/30 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+            className="h-8 min-w-[140px] rounded-md border border-border bg-background px-2.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/30 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
           />
         </div>
         <div className="space-y-1 mt-2">
@@ -119,7 +119,7 @@ export function BookingListToolbar({
             value={dateTo}
             min={dateFrom || undefined}
             onChange={(e) => onDateToChange(e.target.value)}
-            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/30 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+            className="h-8 min-w-[140px] rounded-md border border-border bg-background px-2.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/30 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
           />
         </div>
         {hasDateOrYear && (

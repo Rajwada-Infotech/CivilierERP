@@ -29,17 +29,18 @@ const addHsn = (data: object) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => r.json().catch(() => ({})));
-const updateHsn = (code: string, data: object) =>
-  fetchWithAuth(`${BASE}/${code}`, {
+const updateHsn = (id: string, data: object) =>
+  fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => r.json().catch(() => ({})));
-const deleteHsn = (code: string) =>
-  fetchWithAuth(`${BASE}/${code}`, { method: "DELETE" }).then((r) => r.json().catch(() => ({})));
+const deleteHsn = (id: string) =>
+  fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => r.json().catch(() => ({})));
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbHsn {
+  HId: number;
   HCode: string;
   HDescription: string;
   HShortDescription: string | null;
@@ -47,6 +48,7 @@ interface DbHsn {
   HSGST: number | null;
   HIGST: number | null;
   HStatus: boolean;
+  HIsSAC: boolean;
 }
 
 // ─── Payload ──────────────────────────────────────────────────────────────────
@@ -58,6 +60,7 @@ const toPayload = (r: Record<string, unknown>) => ({
   HSGST: r.sgstRate ? Number(r.sgstRate) : 0,
   HIGST: r.igstRate ? Number(r.igstRate) : 0,
   HStatus: r.status !== false,
+  HIsSAC: r.isSac === true,
 });
 
 // ── CSV template / import column mapping ─────────────────────────────────────
@@ -71,6 +74,7 @@ const CSV_HEADERS = {
   sgst: "SGST Rate (%)",
   igst: "IGST Rate (%)",
   status: "Status (Active/Inactive)",
+  isSac: "Is SAC Code (Yes/No)",
 } as const;
 
 const HSN_CSV_TEMPLATE_COLUMNS: ExportColumn[] = [
@@ -81,6 +85,7 @@ const HSN_CSV_TEMPLATE_COLUMNS: ExportColumn[] = [
   { header: CSV_HEADERS.sgst, accessor: "sgst" },
   { header: CSV_HEADERS.igst, accessor: "igst" },
   { header: CSV_HEADERS.status, accessor: "status" },
+  { header: CSV_HEADERS.isSac, accessor: "isSac" },
 ];
 
 interface ImportRowResult {
@@ -108,7 +113,9 @@ const HsnMaster: React.FC = () => {
   const dbItems: DbHsn[] = Array.isArray(dbData) ? dbData : [];
 
   const mappedData: RecordWithId[] = dbItems.map((item) => ({
-    _id: item.HCode,
+    // HCode is deliberately not unique (multiple descriptions can share one
+    // HSN code) — HId (identity PK) is the row's real, stable identity.
+    _id: String(item.HId),
     code: item.HCode || "",
     description: item.HDescription || "",
     shortDesc: item.HShortDescription || "",
@@ -116,6 +123,7 @@ const HsnMaster: React.FC = () => {
     sgstRate: item.HSGST ?? "",
     igstRate: item.HIGST ?? "",
     status: item.HStatus,
+    isSac: item.HIsSAC ?? false,
   }));
 
   // CSV import
@@ -212,6 +220,9 @@ const HsnMaster: React.FC = () => {
               `Status must be "Active" or "Inactive" (got "${raw[CSV_HEADERS.status]}")`,
             );
 
+          const isSacRaw = (raw[CSV_HEADERS.isSac] || "").trim().toLowerCase();
+          const isSac = isSacRaw === "yes" || isSacRaw === "true";
+
           await addHsn(
             toPayload({
               code,
@@ -221,6 +232,7 @@ const HsnMaster: React.FC = () => {
               sgstRate,
               igstRate,
               status: isActive,
+              isSac,
             }),
           );
           results.push({ row: rowNum, code, status: "success" });
@@ -322,6 +334,14 @@ const HsnMaster: React.FC = () => {
       ) : (
         "—"
       ),
+    isSac: (value) =>
+      value ? (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border bg-violet-500/10 border-violet-500/20 text-violet-600">
+          SAC
+        </span>
+      ) : (
+        <span className="text-muted-foreground text-xs">—</span>
+      ),
   };
 
   if (isLoading)
@@ -376,10 +396,28 @@ const HsnMaster: React.FC = () => {
           fields={[
             {
               name: "code",
-              label: "HSN Code",
-              type: "text",
+              label: "",
+              type: "custom",
               required: true,
               uppercase: true,
+              render: ({ value, onChange, error, formData }) => {
+                const isSac = !!formData.isSac;
+                return (
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                      {isSac ? "SAC Code" : "HSN Code"}
+                      <span className="text-destructive ml-0.5">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={(value as string) || ""}
+                      onChange={(e) => onChange(e.target.value.toUpperCase())}
+                      placeholder={isSac ? "Enter SAC code…" : "Enter HSN code…"}
+                      className={`w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${error ? "border-destructive" : "border-border"}`}
+                    />
+                  </div>
+                );
+              },
             },
             {
               name: "shortDesc",
@@ -397,6 +435,12 @@ const HsnMaster: React.FC = () => {
             { name: "cgstRate", label: "CGST Rate (%)", type: "number" },
             { name: "sgstRate", label: "SGST Rate (%)", type: "number" },
             {
+              name: "isSac",
+              label: "Is SAC Code",
+              type: "toggle",
+              defaultValue: false,
+            },
+            {
               name: "status",
               label: "Status",
               type: "toggle",
@@ -409,6 +453,7 @@ const HsnMaster: React.FC = () => {
             { key: "igstRate", label: "IGST %", hideOnMobile: true },
             { key: "cgstRate", label: "CGST %", hideOnMobile: true },
             { key: "sgstRate", label: "SGST %", hideOnMobile: true },
+            { key: "isSac", label: "SAC", hideOnMobile: true },
             { key: "status", label: "Status" },
           ]}
           columnRenderers={columnRenderers}
@@ -423,6 +468,7 @@ const HsnMaster: React.FC = () => {
               { header: "IGST %", accessor: "igstRate" },
               { header: "CGST %", accessor: "cgstRate" },
               { header: "SGST %", accessor: "sgstRate" },
+              { header: "Is SAC Code", accessor: "isSac" },
               { header: "Status", accessor: "status" },
             ],
           } : undefined}
