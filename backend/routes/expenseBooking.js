@@ -1570,7 +1570,14 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
       const prefix = rawPrefix.replace(/\d+$/, "");
       const startFrom = typeRow.StartingDocNo ?? 1;
 
-      // Count globally across ALL fin years — fin year is only a suffix.
+      // Scope the MAX-sequence lookup to this specific fin year — each fin
+      // year gets its own counter starting back at startFrom (e.g. "01"),
+      // instead of numbering continuing across fin-year boundaries. The
+      // fin year is always the DocNo's trailing "/<finYear>" suffix, so
+      // matching on that suffix needs no schema change. Doc types with no
+      // fin year at all keep the old global-count behaviour.
+      const scopedPrefixPattern = finYear ? `${prefix}%/${finYear}` : `${prefix}%`;
+
       // The serial is extracted as "however many digits immediately follow
       // the prefix", NOT a fixed-width substring — a fixed length (the old
       // SUBSTRING(..., 6) here) silently drops any row whose actual digit
@@ -1583,7 +1590,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
         .request()
         .input("TypeOfDocId", sql.Int, typeId)
         .input("PrefixLen", sql.Int, prefix.length)
-        .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
+        .input("Prefix", sql.NVarChar(100), scopedPrefixPattern).query(`
           SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
           FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
           CROSS APPLY (SELECT SUBSTRING(DocNo, @PrefixLen + 1, 30) AS afterPrefix) a
@@ -1593,12 +1600,12 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
             AND DocNo LIKE @Prefix
         `);
 
-      // Also check ExpenseBooking across ALL fin years
+      // Also check ExpenseBooking, scoped to the same fin year
       const ebMaxResult = await transaction
         .request()
         .input("EDocTypeId2", sql.Int, typeId)
         .input("Prefix2Len", sql.Int, prefix.length)
-        .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
+        .input("Prefix2", sql.NVarChar(100), scopedPrefixPattern).query(`
           SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
           FROM dbo.ExpenseBooking WITH (UPDLOCK, HOLDLOCK)
           CROSS APPLY (SELECT SUBSTRING(EDocNo, @Prefix2Len + 1, 30) AS afterPrefix) a
@@ -2171,7 +2178,14 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       const prefix = rawPrefix.replace(/\d+$/, "");
       const startFrom = typeRow.StartingDocNo ?? 1;
 
-      // Count globally across ALL fin years — fin year is only a suffix.
+      // Scope the MAX-sequence lookup to this specific fin year — each fin
+      // year gets its own counter starting back at startFrom (e.g. "01"),
+      // instead of numbering continuing across fin-year boundaries. The
+      // fin year is always the DocNo's trailing "/<finYear>" suffix, so
+      // matching on that suffix needs no schema change. Doc types with no
+      // fin year at all keep the old global-count behaviour.
+      const scopedPrefixPattern = finYear ? `${prefix}%/${finYear}` : `${prefix}%`;
+
       // The serial is extracted as "however many digits immediately follow
       // the prefix", NOT a fixed-width substring — a fixed length (the old
       // SUBSTRING(..., 6) here) silently drops any row whose actual digit
@@ -2184,7 +2198,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
         .request()
         .input("TypeOfDocId", sql.Int, typeId)
         .input("PrefixLen", sql.Int, prefix.length)
-        .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
+        .input("Prefix", sql.NVarChar(100), scopedPrefixPattern).query(`
           SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
           FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
           CROSS APPLY (SELECT SUBSTRING(DocNo, @PrefixLen + 1, 30) AS afterPrefix) a
@@ -2194,12 +2208,12 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
             AND DocNo LIKE @Prefix
         `);
 
-      // Also check ExpenseBooking across ALL fin years
+      // Also check ExpenseBooking, scoped to the same fin year
       const ebMaxResult = await transaction
         .request()
         .input("EDocTypeId2", sql.Int, typeId)
         .input("Prefix2Len", sql.Int, prefix.length)
-        .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
+        .input("Prefix2", sql.NVarChar(100), scopedPrefixPattern).query(`
           SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
           FROM dbo.ExpenseBooking WITH (UPDLOCK, HOLDLOCK)
           CROSS APPLY (SELECT SUBSTRING(EDocNo, @Prefix2Len + 1, 30) AS afterPrefix) a
@@ -2840,6 +2854,11 @@ router.put(
                 const startFrom = typeRow.StartingDocNo ?? 1;
                 const finYear = (parentRow.EFinYear || "").toString().trim();
 
+                // Scope to this fin year — see the matching comment on the
+                // main create-path MAX lookups above for why (each fin year
+                // gets its own counter, restarting at startFrom).
+                const scopedPrefixPattern = finYear ? `${prefix}%/${finYear}` : `${prefix}%`;
+
                 // See the matching comment on the main create-path MAX
                 // lookups above — fixed-width SUBSTRING(...,6) silently
                 // drops rows whose digit count differs and can reset the
@@ -2848,7 +2867,7 @@ router.put(
                   .request()
                   .input("TypeOfDocId", sql.Int, parentRow.EDocTypeId)
                   .input("PrefixLen", sql.Int, prefix.length)
-                  .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
+                  .input("Prefix", sql.NVarChar(100), scopedPrefixPattern).query(`
                   SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
                   FROM dbo.DocNumberSequence
                   CROSS APPLY (SELECT SUBSTRING(DocNo, @PrefixLen + 1, 30) AS afterPrefix) a
@@ -2860,7 +2879,7 @@ router.put(
                   .request()
                   .input("EDocTypeId2", sql.Int, parentRow.EDocTypeId)
                   .input("Prefix2Len", sql.Int, prefix.length)
-                  .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
+                  .input("Prefix2", sql.NVarChar(100), scopedPrefixPattern).query(`
                   SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
                   FROM dbo.ExpenseBooking
                   CROSS APPLY (SELECT SUBSTRING(EDocNo, @Prefix2Len + 1, 30) AS afterPrefix) a
