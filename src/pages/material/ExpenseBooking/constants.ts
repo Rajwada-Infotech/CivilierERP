@@ -28,32 +28,12 @@ export const SECTION_ICONS: Record<string, ElementType> = {
   "Booking Information": CalendarDays,
   "Amount & GST": BadgePercent,
   "GRN Items Summary": Truck,
-  "Expense Head": CreditCard,
   "Billing Terms": Receipt,
   "EMI / Installment Options": CreditCard,
   "Approval Workflow": CheckCircle2,
   "Terms & Conditions": FileText,
   Remarks: StickyNote,
 };
-
-// Gives each section of the Invoice form its own accent color (icon badge +
-// label tint) instead of every SectionHeader looking identical — a quick
-// visual anchor for "which part of the form am I in" on a long scroll.
-// Tailwind classes must be static strings (no dynamic `bg-${x}-500` — the
-// JIT compiler can't see those), hence the plain lookup table.
-export const SECTION_COLORS: Record<string, { badge: string; icon: string }> = {
-  "Booking Information": { badge: "bg-indigo-500/10", icon: "text-indigo-500" },
-  "Document Selection": { badge: "bg-sky-500/10", icon: "text-sky-500" },
-  "Amount & GST": { badge: "bg-emerald-500/10", icon: "text-emerald-500" },
-  "GRN Items Summary": { badge: "bg-teal-500/10", icon: "text-teal-500" },
-  "Expense Head": { badge: "bg-violet-500/10", icon: "text-violet-500" },
-  "Billing Terms": { badge: "bg-amber-500/10", icon: "text-amber-500" },
-  "EMI / Installment Options": { badge: "bg-fuchsia-500/10", icon: "text-fuchsia-500" },
-  "Approval Workflow": { badge: "bg-cyan-500/10", icon: "text-cyan-500" },
-  "Terms & Conditions": { badge: "bg-sky-500/10", icon: "text-sky-500" },
-  Remarks: { badge: "bg-slate-500/10", icon: "text-slate-500" },
-};
-export const DEFAULT_SECTION_COLOR = { badge: "bg-emerald-500/10", icon: "text-emerald-500" };
 
 export const BOOKING_STATUSES: BookingStatus[] = [
   "Pending",

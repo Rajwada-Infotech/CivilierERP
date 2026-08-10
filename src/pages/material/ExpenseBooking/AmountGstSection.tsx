@@ -33,10 +33,6 @@ interface AmountGstSectionProps {
   onChangeIgstRate: (val: number) => void;
   onToggleGstEnabled: (enabled: boolean) => void;
   onChangeGstMode: (mode: DirectGstMode) => void;
-  /** Set to false when the caller renders its own PriceBreakdownPanel /
-   * Net Payable box elsewhere (e.g. a sticky summary sidebar) — avoids
-   * showing the same totals twice. Defaults to true (original behavior). */
-  showBreakdown?: boolean;
 }
 
 export function AmountGstSection({
@@ -59,7 +55,6 @@ export function AmountGstSection({
   onChangeIgstRate,
   onToggleGstEnabled,
   onChangeGstMode,
-  showBreakdown = true,
 }: AmountGstSectionProps) {
   const isDirect = !isGRN && !isPOorWO;
   // Direct/manual bookings gate IGST on the user's CGST+SGST / IGST toggle.
@@ -245,7 +240,7 @@ export function AmountGstSection({
           </Field>
         )}
       </div>
-      {showBreakdown && basicAmount > 0 && (
+      {basicAmount > 0 && (
         <>
           <PriceBreakdownPanel
             bd={bd}

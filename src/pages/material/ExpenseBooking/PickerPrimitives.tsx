@@ -11,7 +11,7 @@ import { CalendarDays, AlertCircle, ChevronRight, Truck, FileText, Wrench } from
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { fmt } from "./helpers";
-import { SECTION_ICONS, SECTION_COLORS, DEFAULT_SECTION_COLOR, inputCls } from "./constants";
+import { SECTION_ICONS, inputCls } from "./constants";
 
 // ─── Smooth date picker (popover calendar) ───────────────────────────────────
 // Replaces native <input type="date"> — avoids the inconsistent, unstyled
@@ -71,12 +71,11 @@ export function DateField({
 
 export function SectionHeader({ label }: { label: string }) {
   const Icon = SECTION_ICONS[label];
-  const color = SECTION_COLORS[label] ?? DEFAULT_SECTION_COLOR;
   return (
     <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
       {Icon && (
-        <div className={`flex items-center justify-center w-6 h-6 rounded-md shrink-0 ${color.badge}`}>
-          <Icon size={12} className={color.icon} />
+        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-emerald-500/10 shrink-0">
+          <Icon size={12} className="text-emerald-500" />
         </div>
       )}
       <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
