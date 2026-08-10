@@ -7,7 +7,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
-const { maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoCreateBrokerage, maybeUnlockBrokerageMilestoneTranche, requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoCreateBrokerage, requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
 const { postCrmReceiptToGL, postCrmOnAccountToGL, postCrmOnAccountApplied } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 
@@ -132,7 +132,6 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   if (becamePaid) {
     await maybeAutoCreateSalesDeed(pool, targetRow.BookingId, actorUserId);
     await maybeAutoGenerateInvoice(pool, targetRow.BookingId, actorUserId);
-    await maybeUnlockBrokerageMilestoneTranche(pool, targetRow.BookingId, milestoneId);
   }
 
   return { applied: requested, remaining: remaining - requested, becamePaid, milestoneId, onAccountId };
@@ -531,7 +530,6 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
       if (targetRow.MilestoneNo === 1) {
         await maybeAutoCreateBrokerage(pool, targetRow.BookingId, actorUserId);
       }
-      await maybeUnlockBrokerageMilestoneTranche(pool, targetRow.BookingId, milestoneId);
       brokerWarning = await warnIfBrokerUnpaid(pool, targetRow.BookingId, actorUserId);
     }
   }
@@ -875,10 +873,6 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
     // Auto-flow: a waived milestone can also be the last one outstanding.
     await maybeAutoCreateSalesDeed(pool, result.recordset[0].BookingId, actorId(req));
     await maybeAutoGenerateInvoice(pool, result.recordset[0].BookingId, actorId(req));
-    // Waiving still resolves the milestone — the broker's tranche for it
-    // shouldn't stay locked forever just because the customer's charge was
-    // forgiven.
-    await maybeUnlockBrokerageMilestoneTranche(pool, result.recordset[0].BookingId, id);
 
     res.json({ success: true, status: "Waived" });
   } catch (e) {

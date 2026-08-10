@@ -216,10 +216,14 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/applications",
     label: "CRM Applications",
   },
+  // navPath points at the dedicated Level-2 verification screen
+  // (/crm/bookings/verify/:id — see CrmBookingVerify.tsx), same reasoning
+  // as crm-applications above: this IS the moment someone's doing L2
+  // verification, so hand them straight to the focused checklist screen.
   "crm-bookings": {
     icon: Home,
     color: "text-orange-500 bg-orange-500/10",
-    navPath: "/crm/bookings",
+    navPath: "/crm/bookings/verify",
     apiEndpoint: "/api/crm/bookings",
     label: "CRM Bookings",
   },
@@ -313,6 +317,18 @@ const SUB_GATE_MODULES = new Set(Object.keys(SUB_GATE_SUFFIX));
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
 
+// Modules whose one-click Approve is either guaranteed to fail without a
+// review step first (crm-applications/crm-bookings' checklist gates) or
+// whose approved amount is only ever editable before approval
+// (crm-brokerage) — see the reviewInstead comment below for the full
+// reasoning per module. Label differs because "verify" fits a checklist,
+// "approve" fits reviewing/adjusting an amount before the same click.
+const REVIEW_INSTEAD_LABEL: Record<string, string> = {
+  "crm-applications": "Review & Verify",
+  "crm-bookings": "Review & Verify",
+  "crm-brokerage": "Review & Approve",
+};
+
 // Modules whose page already supports a "?view=<RecordId>" deep link that
 // auto-opens that exact record's own preview/view modal on load (see the
 // `searchParams.get("view")` effect in each page). Modules not listed here
@@ -324,17 +340,19 @@ const VIEW_PARAM_MODULES = new Set([
   "payments",
   "vehicle-in-out",
   "material-requests",
+  "crm-brokerage",
 ]);
 
 // Builds the URL to open a given inbox item directly in its module's own
 // preview mode, instead of dumping the user on a blank list page to hunt
 // for the record themselves.
 function openInModulePath(item: InboxItem, navPath: string): string {
-  // crm-applications' navPath already points straight at the dedicated
-  // verification screen (/crm/applications/verify), which takes the record
-  // id as a path segment (/verify/:id), not a query param — see
-  // CrmApplicationVerify.tsx's useParams<{ id: string }>().
-  if (item.Module === "crm-applications") {
+  // crm-applications/crm-bookings' navPath already points straight at their
+  // own dedicated verification screens (/crm/applications/verify,
+  // /crm/bookings/verify), which take the record id as a path segment
+  // (/verify/:id), not a query param — see CrmApplicationVerify.tsx /
+  // CrmBookingVerify.tsx's useParams<{ id: string }>().
+  if (item.Module === "crm-applications" || item.Module === "crm-bookings") {
     return `${navPath}/${item.RecordId}`;
   }
   // crm-agreements/crm-agreement-date use "?id=" (opens the read-only detail
@@ -826,19 +844,21 @@ const InboxRow: React.FC<{
           : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
           : undefined
         }
-        // crm-applications' own PUT /:id/approve (crmApplications.js) 400s
-        // until every Level-1 checklist item is ticked — a one-click Approve
-        // here can never succeed on its own, it can only ever produce the
-        // "Complete the Level-1 verification checklist..." error toast. So
-        // for this module only, swap that button for a direct hand-off to
-        // the checklist screen instead of offering a button that's
-        // guaranteed to fail. Reject is untouched — it has no checklist
-        // gate and stays a normal, direct action from this row. Scoped to
-        // crm-applications specifically (not all of CRM_MODULES) — no other
-        // CRM module has this per-field verification step.
+        // crm-applications'/crm-bookings' own PUT /:id/approve routes 400
+        // until every Level-1/Level-2 checklist item is ticked — a one-click
+        // Approve here can never succeed on its own, it can only ever
+        // produce the "Complete the Level-X verification checklist..."
+        // error toast. crm-brokerage's approve CAN succeed one-click (no
+        // checklist gate), but the computed amount is meant to be reviewed
+        // — and is only ever editable — before approval (see crmBrokerage.js
+        // PUT /:id "can only be customized before approval"), so a blind
+        // one-click Approve here skips the one chance to catch/adjust a
+        // wrong figure. All three swap the Approve button for a direct
+        // hand-off to their own review screen instead. Reject is untouched
+        // for all of them — no checklist/review gate applies to rejecting.
         reviewInstead={
-          item.Module === "crm-applications" && cfg?.navPath
-            ? { label: "Review & Verify", onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
+          REVIEW_INSTEAD_LABEL[item.Module] && cfg?.navPath
+            ? { label: REVIEW_INSTEAD_LABEL[item.Module], onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
             : undefined
         }
         onSuccess={(action) => {
@@ -848,12 +868,13 @@ const InboxRow: React.FC<{
           onActionDone();
         }}
       />
-      {/* The separate "open in preview" arrow is redundant for crm-applications
-          while Pending — Review & Verify above already does the exact same
-          navigation. Once it leaves Pending (Approved/Rejected/Cancelled),
-          there's no Review & Verify button rendered above, so the arrow comes
-          back as the only way to open the record from this row. */}
-      {cfg?.navPath && !(item.Module === "crm-applications" && item.Status === "Pending") && (
+      {/* The separate "open in preview" arrow is redundant for any module
+          with a reviewInstead button while Pending — that button above
+          already does the exact same navigation. Once it leaves Pending
+          (Approved/Rejected/Cancelled), reviewInstead isn't rendered above,
+          so the arrow comes back as the only way to open the record from
+          this row. */}
+      {cfg?.navPath && !(REVIEW_INSTEAD_LABEL[item.Module] && item.Status === "Pending") && (
         <button
           onClick={() => navigate(openInModulePath(item, cfg.navPath))}
           className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"

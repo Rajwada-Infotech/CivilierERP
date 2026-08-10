@@ -1,6 +1,12 @@
 // backend/services/crmApplicationChecklist.js
 //
-// Level-1 verification checklist for CrmApplication.
+// Level-1 (Application) and Level-2 (Booking) verification checklists.
+// Both levels share this one service and one table
+// (dbo.CrmApplicationVerificationChecklist, keyed by ApplicationId + Level)
+// since a Booking is always 1:1 with the Application it came from — this is
+// exactly the extensibility migration 302's own comment anticipated when it
+// added the Level column ahead of there being a second level. L2's own
+// routes live in crmBookings.js (GET/PUT /:id/checklist/*), not here.
 //
 // Before this, PUT /:id/approve (crmApplications.js, via approvalService's
 // generic transition()) let a verifier mark an entire Application "Approved"
@@ -24,7 +30,7 @@
 // remarks" behaviour that was asked for, instead of the old all-or-nothing
 // single Reject button.
 //
-// CHECKLIST_ITEMS is the actual Level-1 checklist. Edit this array to
+// CHECKLIST_ITEMS is the Level-1 checklist (Application). Edit this array to
 // add/remove/reword items — ensureChecklistRows() below only ever INSERTs
 // rows for keys missing on a given application, so editing this list never
 // disturbs already-recorded checks on existing applications, and a removed
@@ -40,6 +46,30 @@ const CHECKLIST_ITEMS = [
   { key: "Documents", label: "Required KYC / ID / Address / Income-proof documents are uploaded and legible" },
 ];
 
+// CHECKLIST_ITEMS_L2 is the Level-2 checklist — a second, independent
+// verifier re-checks the BOOKING this application produced: is it a
+// genuine sale, did the money actually land, does the payment schedule and
+// everything else meet company policy. Stored in the exact same table as
+// Level 1 (dbo.CrmApplicationVerificationChecklist, keyed by ApplicationId
+// + Level — see migration 302's own comment anticipating this), since a
+// Booking is always 1:1 with the Application it came from
+// (createCrmBookingRecord enforces this). Call site: crmBookings.js's own
+// GET/PUT /:id/checklist/* routes, gating PUT /:id/approve the same way
+// Level 1 gates crmApplications.js's PUT /:id/approve.
+const CHECKLIST_ITEMS_L2 = [
+  { key: "BookingGenuine", label: "Booking's unit, rate and total/grand value genuinely match the approved Application — no unexplained change" },
+  { key: "BookingAmountReceived", label: "Booking Amount / Milestone #1 payment is actually received and reconciled, not just marked paid" },
+  { key: "PaymentScheduleCompliance", label: "Payment plan and milestone schedule are correctly generated and comply with company norms" },
+  { key: "ParkingExtraCharges", label: "Parking and Extra Charges (if any) are correctly recorded and priced" },
+  { key: "KycDocumentsComplete", label: "Customer KYC and required documents are complete and consistent, ready for the Welcome Call stage" },
+  { key: "BrokerageTerms", label: "Broker / commission terms are correctly recorded and within policy (if applicable)" },
+  { key: "CompanyRequirements", label: "Booking fulfills all other company requirements (minimum token %, discount/approval limits, etc.)" },
+];
+
+function itemsForLevel(level) {
+  return level === 2 ? CHECKLIST_ITEMS_L2 : CHECKLIST_ITEMS;
+}
+
 const { sql } = require("../db");
 
 /**
@@ -47,12 +77,13 @@ const { sql } = require("../db");
  * inserting only what's missing, then returns the full current row set.
  */
 async function ensureChecklistRows(pool, applicationId, level = 1) {
+  const items = itemsForLevel(level);
   const existing = await pool.request()
     .input("aid", sql.Int, applicationId)
     .input("lvl", sql.Int, level)
     .query("SELECT ItemKey FROM dbo.CrmApplicationVerificationChecklist WHERE ApplicationId = @aid AND Level = @lvl");
   const have = new Set(existing.recordset.map((r) => r.ItemKey));
-  const missing = CHECKLIST_ITEMS.filter((it) => !have.has(it.key));
+  const missing = items.filter((it) => !have.has(it.key));
 
   for (const it of missing) {
     await pool.request()
@@ -74,8 +105,8 @@ async function ensureChecklistRows(pool, applicationId, level = 1) {
   return result.recordset;
 }
 
-function assertKnownItem(itemKey) {
-  const def = CHECKLIST_ITEMS.find((c) => c.key === itemKey);
+function assertKnownItem(itemKey, level = 1) {
+  const def = itemsForLevel(level).find((c) => c.key === itemKey);
   if (!def) {
     const e = new Error(`Unknown checklist item: ${itemKey}`);
     e.status = 400;
@@ -86,7 +117,7 @@ function assertKnownItem(itemKey) {
 
 /** Verifier ticks an item as checked. `remarks` is optional here (a confirming note). */
 async function checkItem(pool, applicationId, itemKey, { actor, remarks, level = 1 } = {}) {
-  assertKnownItem(itemKey);
+  assertKnownItem(itemKey, level);
   const result = await pool.request()
     .input("aid", sql.Int, applicationId)
     .input("lvl", sql.Int, level)
@@ -106,7 +137,7 @@ async function checkItem(pool, applicationId, itemKey, { actor, remarks, level =
 
 /** Verifier flags an item as wrong. `remarks` is mandatory — this is the "tell the preparer what to fix" note. */
 async function flagItem(pool, applicationId, itemKey, { actor, remarks, level = 1 } = {}) {
-  assertKnownItem(itemKey);
+  assertKnownItem(itemKey, level);
   if (!remarks || !remarks.trim()) {
     const e = new Error("A remark is required to flag a checklist item for recheck");
     e.status = 400;
@@ -140,7 +171,7 @@ async function flagItem(pool, applicationId, itemKey, { actor, remarks, level = 
  * no-op state-wise, so it's rejected rather than silently doing nothing.
  */
 async function uncheckItem(pool, applicationId, itemKey, { actor, level = 1 } = {}) {
-  assertKnownItem(itemKey);
+  assertKnownItem(itemKey, level);
   const cur = await pool.request()
     .input("aid", sql.Int, applicationId)
     .input("lvl", sql.Int, level)
@@ -170,7 +201,7 @@ async function uncheckItem(pool, applicationId, itemKey, { actor, level = 1 } = 
 
 /** Preparer marks a flagged item as revised — sends it back to 'Pending' (unchecked) for the verifier to look at again. */
 async function resubmitItem(pool, applicationId, itemKey, { actor, level = 1 } = {}) {
-  assertKnownItem(itemKey);
+  assertKnownItem(itemKey, level);
   const cur = await pool.request()
     .input("aid", sql.Int, applicationId)
     .input("lvl", sql.Int, level)
@@ -196,4 +227,4 @@ async function resubmitItem(pool, applicationId, itemKey, { actor, level = 1 } =
   return result.recordset[0];
 }
 
-module.exports = { CHECKLIST_ITEMS, ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem };
+module.exports = { CHECKLIST_ITEMS, CHECKLIST_ITEMS_L2, itemsForLevel, ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem };

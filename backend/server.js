@@ -310,6 +310,7 @@ const ALL_ROUTES = [
   { path: "/api/crm/reports",              file: "./routes/crmReports"             },
   { path: "/api/crm/customer-bank-details",file: "./routes/crmCustomerBankDetails" },
   { path: "/api/crm/brokerage",            file: "./routes/crmBrokerage"           },
+  { path: "/api/crm/brokerage-rate-tiers", file: "./routes/crmBrokerageRateTiers"  },
   { path: "/api/crm/payment-plans",        file: "./routes/crmPaymentPlans"        },
   { path: "/api/crm/project-banks",        file: "./routes/crmProjectBanks"        },
   { path: "/api/crm/milestone-master",     file: "./routes/crmMilestoneMaster"     },

@@ -90,7 +90,7 @@ router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, r
       JOIN dbo.CrmBrokerageMaster br ON br.Id = np.SourceCrmBrokerageId
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE np.Status IN ('Draft','Pending') ${status ? "AND br.Status = @st" : ""}
+      WHERE np.Status IN ('Draft','Pending','Approved') ${status ? "AND br.Status = @st" : ""}
       ORDER BY PaidDate DESC, CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -128,10 +128,9 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
 
   const br = await pool.request().input("id", sql.Int, brokerageId).query(`
     SELECT br.Id, br.Status, br.ComputedAmount, br.BrokerId, br.BrokerName,
-           br.MilestoneNo, m.MilestoneName, b.BookingNo, b.CompanyId, b.ProjectId
+           br.TrancheLabel, b.BookingNo, b.CompanyId, b.ProjectId
     FROM dbo.CrmBrokerageMaster br
     JOIN dbo.CrmBooking b ON b.Id = br.BookingId
-    LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = br.MilestoneId
     WHERE br.Id = @id
   `);
   const row = br.recordset[0];
@@ -155,9 +154,13 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
   const docSerial = parseInt(parts[parts.length - 1], 10) || null;
   const today = new Date().toISOString().slice(0, 10);
   const pFinYearId = await resolveFinYearId(pool, today);
-  const milestoneText = row.MilestoneNo
-    ? `Milestone #${row.MilestoneNo}${row.MilestoneName ? ` - ${row.MilestoneName}` : ""}`
-    : "full brokerage";
+  // TrancheLabel is the real distinguishing field under the current
+  // OneTime/TwoPart/AgreementOnly design ('Full', 'Booking', 'Agreement') —
+  // this used to key off MilestoneNo, which is never set anymore (tranches
+  // aren't tied to a specific milestone), so every handoff's remark always
+  // read "full brokerage" even for a TwoPart plan's half-share tranche,
+  // giving Finance no way to tell a partial payment apart from the whole.
+  const milestoneText = row.TrancheLabel ? `${row.TrancheLabel} tranche` : "full brokerage";
 
   const result = await pool.request()
     .input("name", sql.VarChar, "Brokerage Payment")
@@ -266,10 +269,12 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
       return res.status(400).json({ error: e.message });
     }
 
+    // Same deal-value base the auto-engine uses (maybeAutoCreateBrokerage in
+    // crmWorkflowGuards.js) — unit price + parking + extras, GST excluded.
     const bk = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
-      .query("SELECT TotalValue FROM dbo.CrmBooking WHERE Id = @bid");
-    const totalValue = bk.recordset[0]?.TotalValue || 0;
-    const computedAmount = rateType === "Percentage" ? Math.round(totalValue * rateValue) / 100 : rateValue;
+      .query("SELECT TotalValue, ParkingTotal, ExtraChargesTotal FROM dbo.CrmBooking WHERE Id = @bid");
+    const dealValue = Number(bk.recordset[0]?.TotalValue || 0) + Number(bk.recordset[0]?.ParkingTotal || 0) + Number(bk.recordset[0]?.ExtraChargesTotal || 0);
+    const computedAmount = rateType === "Percentage" ? Math.round(dealValue * rateValue) / 100 : rateValue;
 
     const result = await pool.request()
       .input("bid",   sql.Int,           parseInt(b.BookingId))
@@ -306,11 +311,10 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
     const id = parseInt(req.params.id);
     const b = req.body;
     const cur = await pool.request().input("id", sql.Int, id).query(`
-      SELECT br.Status, br.RateType, br.RateValue, br.MilestoneId,
-             b.TotalValue, m.AmountDue
+      SELECT br.Status, br.RateType, br.RateValue,
+             b.TotalValue, b.ParkingTotal, b.ExtraChargesTotal
       FROM dbo.CrmBrokerageMaster br
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
-      LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = br.MilestoneId
       WHERE br.Id = @id
     `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Brokerage record not found" });
@@ -327,7 +331,15 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
     } catch (e) {
       return res.status(400).json({ error: e.message });
     }
-    const baseAmount = row.MilestoneId ? row.AmountDue : row.TotalValue;
+    // Same base the auto-engine uses (maybeAutoCreateBrokerage in
+    // crmWorkflowGuards.js) — unit price + parking + extras, GST excluded
+    // since it's a statutory pass-through, not deal revenue. This used to
+    // read row.MilestoneId ? row.AmountDue : row.TotalValue, but
+    // MilestoneId is never populated under the current tranche-plan design
+    // (see buildBrokerageTranches), so that branch always fell through to
+    // TotalValue alone — silently under-basing a customized amount on any
+    // booking with parking or extra charges.
+    const baseAmount = Number(row.TotalValue || 0) + Number(row.ParkingTotal || 0) + Number(row.ExtraChargesTotal || 0);
     const computedAmount = b.ComputedAmount != null && b.ComputedAmount !== ""
       ? Math.round(Number(b.ComputedAmount) * 100) / 100
       : computeBrokerageAmount(rateType, rateValue, baseAmount);
@@ -384,17 +396,16 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
-    // Each tranche stays locked until its own milestone is Paid/Waived (see
-    // maybeUnlockBrokerageMilestoneTranche) — can't be approved (or, by
-    // extension, paid) before then.
+    // An Agreement-gated tranche (TwoPart's second half / AgreementOnly)
+    // stays locked until the Agreement is Executed (see
+    // maybeUnlockBrokerageOnAgreementExecuted) — can't be approved (or, by
+    // extension, paid) before then. A Booking-gated tranche is never
+    // created locked, so this branch only ever fires for UnlockGate='Agreement'.
     const pool = getPool();
     const locked = await pool.request().input("id", sql.Int, id)
-      .query("SELECT IsLocked, UnlockGate, MilestoneNo FROM dbo.CrmBrokerageMaster WHERE Id = @id");
+      .query("SELECT IsLocked, UnlockGate FROM dbo.CrmBrokerageMaster WHERE Id = @id");
     if (locked.recordset[0]?.IsLocked) {
-      const gate = locked.recordset[0].UnlockGate;
-      const msg = gate === "Agreement"
-        ? "This tranche unlocks once the Agreement is Executed"
-        : `This tranche unlocks once Milestone #${locked.recordset[0].MilestoneNo ?? "?"} is paid`;
+      const msg = "This tranche unlocks once the Agreement is Executed";
       return res.status(400).json({ error: msg });
     }
 

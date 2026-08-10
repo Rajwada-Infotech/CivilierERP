@@ -146,6 +146,16 @@ async function fetchBlockPlanTags(): Promise<any[]> {
   try { const r = await fetchWithAuth("/api/block-master"); return r.ok ? r.json() : []; } catch { return []; }
 }
 
+// Admin-editable commission tiers (dbo.CrmBrokerageRateTier, see
+// crmBrokerageRateTiers.js / CrmBrokerageRateTiers.tsx) — this is only a
+// staff-facing preview of the same fallback rate the server itself applies
+// (tierBrokeragePercent in crmWorkflowGuards.js) when no explicit override
+// is typed; it's never used to compute what actually gets saved.
+type RateTier = { MinDealValue: number; MaxDealValue: number | null; RatePercent: number; IsActive: boolean };
+async function fetchBrokerageRateTiers(): Promise<RateTier[]> {
+  try { const r = await fetchWithAuth("/api/crm/brokerage-rate-tiers"); return r.ok ? r.json() : []; } catch { return []; }
+}
+
 // Same shape CrmPaymentPlans.tsx already parses off the list endpoint's
 // MilestonesJson column — reused here so the brief plan-preview card below
 // can compute real ₹ figures instead of just repeating raw %s.
@@ -354,6 +364,7 @@ const CrmApplication: React.FC = () => {
   const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 30_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["crm-brokers-dropdown"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
+  const { data: rateTiers = [] } = useQuery({ queryKey: ["crm-brokerage-rate-tiers"], queryFn: fetchBrokerageRateTiers, staleTime: 5 * 60_000 });
   const { data: blockPlanTags = [] } = useQuery({ queryKey: ["crm-app-block-plan-tags"], queryFn: fetchBlockPlanTags, staleTime: 5 * 60_000 });
   const { data: crmGstRates } = useGstRates();
   // Same queryKey ParkingSelectionStep (Step 2) uses for this applicationId
@@ -640,11 +651,35 @@ const CrmApplication: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPlanBookingAmount]);
 
-  // Preview only — under 1Cr -> 2%, 1Cr and above -> 1%. The real, final
-  // percentage/amount is computed server-side off the Booking's actual
-  // TotalValue once one exists (see maybeAutoCreateBrokerage in
-  // crmWorkflowGuards.js); this just gives staff a rate hint at intake time.
-  const brokerageTierDefault = computedTotal >= 10000000 ? 1 : 2;
+  // Preview only, driven by the real editable tiers (rateTiers, above) —
+  // the real, final percentage/amount is computed server-side off the
+  // Booking's actual TotalValue once one exists (tierBrokeragePercent in
+  // crmWorkflowGuards.js reads the same table); this just gives staff a
+  // rate hint at intake time. Falls back to 2% if tiers haven't loaded yet
+  // or none are configured, matching the server's own fallback.
+  const activeTiers = useMemo(() =>
+    (rateTiers as RateTier[]).filter((t) => t.IsActive).sort((a, b) => a.MinDealValue - b.MinDealValue),
+    [rateTiers]
+  );
+  const brokerageTierDefault = useMemo(() => {
+    const match = [...activeTiers].reverse().find((t) =>
+      computedTotal >= Number(t.MinDealValue) && (t.MaxDealValue == null || computedTotal < Number(t.MaxDealValue))
+    );
+    return match ? Number(match.RatePercent) : 2;
+  }, [activeTiers, computedTotal]);
+  const brokerageTierPreviewText = useMemo(() => {
+    if (!activeTiers.length) return `${brokerageTierDefault}%`;
+    const cr = (v: number) => `₹${(v / 10000000).toFixed(v % 10000000 === 0 ? 0 : 2)}Cr`;
+    const parts = activeTiers.map((t) => {
+      const range = Number(t.MinDealValue) === 0
+        ? `< ${cr(Number(t.MaxDealValue))}`
+        : t.MaxDealValue == null
+        ? `≥ ${cr(Number(t.MinDealValue))}`
+        : `${cr(Number(t.MinDealValue))}–${cr(Number(t.MaxDealValue))}`;
+      return `${range} → ${t.RatePercent}%`;
+    });
+    return `${brokerageTierDefault}% (${parts.join(", ")})`;
+  }, [activeTiers, brokerageTierDefault]);
 
   const resetWizard = () => {
     setForm({ ...EMPTY_FORM });
@@ -1633,12 +1668,12 @@ const CrmApplication: React.FC = () => {
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className={labelCls}>Default rate (preview)</label>
-                        <input readOnly value={`${brokerageTierDefault}% (< 1 Cr → 2%, ≥ 1 Cr → 1%)`}
+                        <input readOnly value={brokerageTierPreviewText}
                           className={`${inputCls} bg-muted/30 text-muted-foreground`} />
                       </div>
                       <div>
                         <label className={labelCls}>Commission override % (only if this deal needs a custom rate)</label>
-                        <input type="number" step="0.01" min="0" max="100" value={form.BrokerageRatePercent}
+                        <input type="number" step="0.01" min="0" max="10" value={form.BrokerageRatePercent}
                           onChange={(e) => setForm((f) => ({ ...f, BrokerageRatePercent: e.target.value }))}
                           placeholder={String(brokerageTierDefault)} className={inputCls} />
                       </div>

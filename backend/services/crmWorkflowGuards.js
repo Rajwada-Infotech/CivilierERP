@@ -894,27 +894,35 @@ async function syncParkingPaymentStatus(pool, bookingId) {
     .query(`UPDATE dbo.CrmParkingAllotment SET PaymentStatus = @st WHERE BookingId = @bid AND IsActive = 1`);
 }
 
-// Same 2%-under-1Cr / 1%-at-or-above-1Cr tier crmBrokerage.js's manual POST
-// leaves to a human to type in — this is the auto path's own default, used
-// only when the Application/Booking didn't carry an explicit override.
-const BROKERAGE_TIER_THRESHOLD = 10000000; // 1 Crore
-function tierBrokeragePercent(totalValue) {
-  return Number(totalValue) >= BROKERAGE_TIER_THRESHOLD ? 1 : 2;
+// Admin-editable commission tiers (dbo.CrmBrokerageRateTier — see
+// crmBrokerageRateTiers.js) — used only as a fallback default when the
+// Application/Booking didn't carry an explicit BrokerageRatePercent
+// override. Was previously a hardcoded 2%-under-1Cr / 1%-at-1Cr+ pair of JS
+// constants; now a real, queryable master so the thresholds/rates can
+// change without a code deploy. Falls back to the same 2% default the old
+// constants used if no active tier matches (misconfigured/empty table) —
+// never silently computes a 0%/null rate.
+async function tierBrokeragePercent(pool, dealValue) {
+  const value = Number(dealValue) || 0;
+  const result = await pool.request().input("val", sql.Decimal(18, 2), value).query(`
+    SELECT TOP 1 RatePercent
+    FROM dbo.CrmBrokerageRateTier
+    WHERE IsActive = 1 AND MinDealValue <= @val AND (MaxDealValue IS NULL OR MaxDealValue > @val)
+    ORDER BY MinDealValue DESC
+  `);
+  return result.recordset[0]?.RatePercent != null ? Number(result.recordset[0].RatePercent) : 2;
 }
 
 /**
  * Auto-advance step: the moment a booking's first payment milestone is fully
  * Paid, a broker selected at Application/Booking stage automatically gets
- * ONE CrmBrokerageMaster row PER payment milestone — the broker's payout
- * follows the exact same milestone schedule the customer's own payments do,
- * not a fixed one/two-tranche split. Each row's ComputedAmount is calculated
- * from the milestone's real AmountDue and the broker's actual commission
- * rate. Do not multiply the deal rate by the milestone percent and store
- * that as RateValue: a 1% brokerage on a 1% booking milestone is still a
- * 1% brokerage rate, not 0.01%. A milestone that's already Paid by
- * the time this fires (Milestone #1 itself, the trigger) is created
- * unlocked; every later milestone is created locked until
- * maybeUnlockBrokerageMilestoneTranche fires for it.
+ * one or more CrmBrokerageMaster tranche rows, shaped by the booking's own
+ * BrokeragePaymentPlan (OneTime/TwoPart/AgreementOnly — see
+ * buildBrokerageTranches below), not tied to the customer's own payment
+ * milestone schedule. ComputedAmount is the broker's real commission rate
+ * applied to the deal value (unit + parking + extras, GST excluded).
+ * TwoPart/AgreementOnly tranches gated on the Agreement start locked and are
+ * released by maybeUnlockBrokerageOnAgreementExecuted once it's Executed.
  * Idempotent: no-op if the booking has no BrokerId, or brokerage rows
  * already exist for it (still available as crmBrokerage.js POST / for
  * bookings that never had a broker picked up front).
@@ -978,7 +986,7 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   // per-milestone schedule's real total was TotalValue + ParkingTotal,
   // confirmed against CrmPaymentMilestone.AmountDue sums.)
   const dealValue = Number(bk.TotalValue || 0) + Number(bk.ParkingTotal || 0) + Number(bk.ExtraChargesTotal || 0);
-  const totalPercent = bk.BrokerageRatePercent != null ? Number(bk.BrokerageRatePercent) : tierBrokeragePercent(dealValue);
+  const totalPercent = bk.BrokerageRatePercent != null ? Number(bk.BrokerageRatePercent) : await tierBrokeragePercent(pool, dealValue);
   const totalBrokerageAmount = Math.round(dealValue * totalPercent) / 100;
   if (totalBrokerageAmount <= 0) return null;
 
@@ -1043,25 +1051,6 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   }
 
   return { ids };
-}
-
-/**
- * Unlocks the brokerage tranche tied to one specific payment milestone the
- * moment that milestone becomes Paid (or Waived — waiving still resolves
- * the milestone, and the broker's cut for it shouldn't stay stuck forever
- * just because the customer's own charge was forgiven). No-op if there's no
- * such row (bookings with no broker, or a milestone excluded from the
- * brokerage schedule).
- * Call sites: every place in crmPayments.js where a milestone's Status
- * transitions to Paid/Waived — createReceiptForMilestone, the direct
- * milestone PUT /:id edit, PUT /:id/waive, and the on-account "apply to
- * milestone" route.
- */
-async function maybeUnlockBrokerageMilestoneTranche(pool, bookingId, milestoneId) {
-  await pool.request().input("bid", sql.Int, bookingId).input("mid", sql.Int, milestoneId).query(`
-    UPDATE dbo.CrmBrokerageMaster SET IsLocked = 0
-    WHERE BookingId = @bid AND MilestoneId = @mid AND IsLocked = 1
-  `);
 }
 
 /**
@@ -1178,7 +1167,6 @@ module.exports = {
   maybeAutoGenerateBookingInvoice,
   maybeAutoGenerateAgreementInvoice,
   maybeAutoCreateBrokerage,
-  maybeUnlockBrokerageMilestoneTranche,
   maybeUnlockBrokerageOnAgreementExecuted,
   proposeAgreementDate,
   acceptAgreementDate,

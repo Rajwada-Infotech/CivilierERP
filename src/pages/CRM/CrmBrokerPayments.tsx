@@ -44,7 +44,7 @@ const CrmBrokerPayments: React.FC = () => {
     .filter((p: any) => p.FinancePaymentStatus === "Paid" || p.FinancePaymentStatus === undefined)
     .reduce((s: number, p: any) => s + Number(p.Amount || 0), 0);
   const totalPending = filtered
-    .filter((p: any) => p.FinancePaymentStatus === "Draft" || p.FinancePaymentStatus === "Pending")
+    .filter((p: any) => p.FinancePaymentStatus === "Draft" || p.FinancePaymentStatus === "Pending" || p.FinancePaymentStatus === "Approved")
     .reduce((s: number, p: any) => s + Number(p.Amount || 0), 0);
 
   const columns: ColumnDef<any, unknown>[] = [

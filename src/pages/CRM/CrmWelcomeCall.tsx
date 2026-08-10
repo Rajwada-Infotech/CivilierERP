@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car, AlertTriangle, Download, ShieldCheck, ShieldAlert, RotateCcw, ClipboardList, Send, Unlock } from "lucide-react";
+import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car, AlertTriangle, Download, ShieldCheck, ShieldAlert, RotateCcw, ClipboardList, Send, Unlock, MapPin } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -16,6 +16,8 @@ const DOC_API = "/api/crm/booking-documents";
 const BKG_API = "/api/crm/bookings";
 const SA_LEADS_API = "/api/sa/leads";
 const BANK_DETAIL_API = "/api/crm/customer-bank-details";
+const PARKING_API = "/api/crm/parking";
+const EXTRA_CHARGE_API = "/api/crm/extra-charges";
 const VC_API = "/api/crm/welcome-checklist"; // per-item verification checklist: checkbox + remarks + recheck + submit
 
 const EMPTY_BANK = {
@@ -112,6 +114,17 @@ async function fetchBookingMilestones(bookingId: number): Promise<any[]> {
 // projection, so the click-to-detail dialog doesn't need its own endpoint.
 async function fetchBookingInvoices(bookingId: number): Promise<any[]> {
   try { const r = await fetchWithAuth(`${BKG_API}/${bookingId}/invoices`); return r.ok ? r.json() : []; } catch { return []; }
+}
+// Read-only reference data for the new Parking / Extra Charges checklist
+// items — staff need to actually see what was sold before they can confirm
+// it with the customer. Neither of these was fetched anywhere on this page
+// before; both fail soft to an empty list (e.g. a role without crm-bookings
+// view rights) rather than blocking the rest of the dossier from loading.
+async function fetchParkingAllotments(bookingId: number): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${PARKING_API}/${bookingId}`); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchExtraCharges(bookingId: number): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${EXTRA_CHARGE_API}/${bookingId}`); return r.ok ? r.json() : []; } catch { return []; }
 }
 // ─── Verification checklist (per-item checkbox + remarks + recheck) ────────
 type VcItem = {
@@ -381,7 +394,18 @@ const ChecklistItemRow: React.FC<{
   );
 };
 
-const VerificationChecklist: React.FC<{ bookingId: number }> = ({ bookingId }) => {
+// ─── Verification checklist — split into composable pieces ─────────────────
+// Was one monolithic component rendering all 8 sections back-to-back before
+// ANY of the actual customer data (Documents, Co-Applicant, Nominee & Bank
+// Details all render further down the page) — so staff hit "PAN confirmed" /
+// "Bank account confirmed" checkboxes before they'd even scrolled far enough
+// to see the actual PAN or account number to read out to the customer.
+// useVerificationChecklist is the single shared data/mutation source (one
+// fetch, one refetch keeps every section in sync); ChecklistProgressBar and
+// ChecklistSubmitFooter are the non-section chrome; ChecklistSectionBlock
+// renders exactly one section's items and is dropped in directly under that
+// section's own data card, wherever that card actually lives on the page.
+function useVerificationChecklist(bookingId: number) {
   const { data: vc, refetch } = useQuery({
     queryKey: ["crm-welcome-verification-checklist", bookingId],
     queryFn: () => fetchVerificationChecklist(bookingId),
@@ -420,61 +444,92 @@ const VerificationChecklist: React.FC<{ bookingId: number }> = ({ bookingId }) =
     }
   };
 
-  if (!vc) return (
-    <div className="rounded-xl border border-border p-4 text-sm text-muted-foreground">Loading verification checklist…</div>
-  );
+  return { vc, refetch, locked, submitting, reopening, handleSubmit, handleReopen };
+}
 
+// Slim, sticky-friendly progress readout — dropped in once near the top of
+// the working area (not tied to any one section) so staff always know
+// overall completion without needing to scroll to the very end.
+const ChecklistProgressBar: React.FC<{ vc: any; bookingId: number }> = ({ vc, bookingId }) => {
+  if (!vc) return <div className="text-xs text-muted-foreground">Loading verification checklist…</div>;
   return (
-    <div className="rounded-xl border border-border p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardList size={14} className="text-primary" /> Verification Checklist</h3>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-muted-foreground">{vc.checkedCount}/{vc.totalCount} verified</span>
-          {vc.openRecheckCount > 0 && (
-            <span className="flex items-center gap-1 font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
-              <ShieldAlert size={11} /> {vc.openRecheckCount} in recheck
-            </span>
-          )}
-        </div>
+    <div className="rounded-xl border border-border p-3 flex items-center justify-between gap-2">
+      <span className="text-sm font-semibold flex items-center gap-1.5"><ClipboardList size={14} className="text-primary" /> Verification Checklist</span>
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-muted-foreground">{vc.checkedCount}/{vc.totalCount} verified</span>
+        {vc.openRecheckCount > 0 && (
+          <span className="flex items-center gap-1 font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+            <ShieldAlert size={11} /> {vc.openRecheckCount} in recheck
+          </span>
+        )}
+        {vc.submission?.IsLocked && (
+          <span className="flex items-center gap-1 font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+            <Lock size={11} /> Locked
+          </span>
+        )}
       </div>
+    </div>
+  );
+};
 
-      {locked && (
+// One section's worth of checklist items — dropped in directly under that
+// section's own data card (e.g. sectionKey="BankNominee" right after the
+// Nominee & Bank Details card) so the real value being confirmed is always
+// the thing staff just looked at, never something further down the page.
+const ChecklistSectionBlock: React.FC<{
+  vc: any; bookingId: number; locked: boolean; onChanged: () => void; sectionKey: string;
+}> = ({ vc, bookingId, locked, onChanged, sectionKey }) => {
+  if (!vc) return null;
+  const s = vc.sections.find((sec: any) => sec.section === sectionKey);
+  if (!s) return null;
+  return (
+    <div className="rounded-xl border border-border p-3.5 space-y-2">
+      <div className="flex items-center justify-between">
+        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+          <ClipboardCheck size={12} className="text-primary" /> Verify: {s.label}
+        </h4>
+        {s.complete && <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-700"><ShieldCheck size={11} /> Complete</span>}
+      </div>
+      <div className="space-y-1.5">
+        {s.items.map((item: VcItem) => (
+          <ChecklistItemRow key={item.ItemKey} item={item} bookingId={bookingId} locked={locked} onChanged={onChanged} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Final action bar — placed after the last section in DOM order (Nominee &
+// Bank Details, currently the last data card on the page). Submitting here
+// requires every section's items checked with zero open rechecks, exactly
+// as the old single-block version did — this only changes where the items
+// themselves render, not the gate itself.
+const ChecklistSubmitFooter: React.FC<{
+  vc: any; locked: boolean; submitting: boolean; reopening: boolean;
+  onSubmit: () => void; onReopen: () => void;
+}> = ({ vc, locked, submitting, reopening, onSubmit, onReopen }) => {
+  if (!vc) return null;
+  return (
+    <div className="rounded-xl border border-border p-3.5 space-y-2">
+      {locked ? (
         <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
           <span className="flex items-center gap-1.5 font-medium"><Lock size={12} /> Submitted and locked{vc.submission?.SubmittedAt ? ` — ${String(vc.submission.SubmittedAt).slice(0, 16).replace("T", " ")}` : ""}</span>
-          <button type="button" onClick={handleReopen} disabled={reopening}
+          <button type="button" onClick={onReopen} disabled={reopening}
             className="flex items-center gap-1 font-medium text-emerald-700 hover:underline disabled:opacity-40">
             <Unlock size={12} /> {reopening ? "Reopening..." : "Reopen"}
           </button>
         </div>
-      )}
-
-      <div className="space-y-4">
-        {vc.sections.map((s) => (
-          <div key={s.section} className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{s.label}</h4>
-              {s.complete && <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-700"><ShieldCheck size={11} /> Complete</span>}
-            </div>
-            <div className="space-y-1.5">
-              {s.items.map((item) => (
-                <ChecklistItemRow key={item.ItemKey} item={item} bookingId={bookingId} locked={locked} onChanged={refetch} />
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="pt-2 border-t border-border flex items-center justify-between">
-        <p className="text-[11px] text-muted-foreground">
-          {vc.canSubmit ? "All items verified — ready to submit." : "Every item must be checked, with no open rechecks, before this can be submitted."}
-        </p>
-        {!locked && (
-          <button type="button" onClick={handleSubmit} disabled={!vc.canSubmit || submitting}
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] text-muted-foreground">
+            {vc.canSubmit ? "All items verified — ready to submit." : "Every item must be checked, with no open rechecks, before this can be submitted."}
+          </p>
+          <button type="button" onClick={onSubmit} disabled={!vc.canSubmit || submitting}
             className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 shrink-0">
             {submitting ? "Submitting..." : "Submit Verification"}
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -557,6 +612,14 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
     queryKey: ["crm-co-applicants", booking.BookingId],
     queryFn: () => fetchCoApplicants(booking.BookingId),
   });
+  const { data: parkingAllotments = [] } = useQuery({
+    queryKey: ["crm-welcome-parking", booking.BookingId],
+    queryFn: () => fetchParkingAllotments(booking.BookingId),
+  });
+  const { data: extraCharges = [] } = useQuery({
+    queryKey: ["crm-welcome-extra-charges", booking.BookingId],
+    queryFn: () => fetchExtraCharges(booking.BookingId),
+  });
   // Only fetched once its card is actually expanded — no point loading the
   // full milestone schedule / full loan record on every call just to show a
   // one-line teaser.
@@ -570,6 +633,11 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
     queryFn: () => fetchLoanDetail(booking.BookingId),
     enabled: expandedCard === "bank",
   });
+  // Single shared source for the verification checklist — every
+  // ChecklistSectionBlock dropped in near its matching data card below
+  // reads from this same vc/refetch pair, so ticking an item in one place
+  // and the progress bar / submit gate elsewhere always agree.
+  const vcState = useVerificationChecklist(booking.BookingId);
   useEffect(() => {
     let cancelled = false;
     setBankLoaded(false);
@@ -809,7 +877,23 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                 <Car size={12} className="shrink-0" />
                 <span className="truncate">Unit {callContext?.booking?.UnitNo || booking.UnitNo || "—"}</span>
               </div>
+              {/* Backs the "Communication address confirmed" checklist item
+                  below — call-context previously only carried Name/Mobile/
+                  Email/PAN, so that item had no data anywhere on the page
+                  to actually verify against. */}
+              {(callContext?.customer?.Address || callContext?.customer?.City) && (
+                <div className="flex items-start gap-1.5 text-xs text-muted-foreground pt-1 border-t border-border">
+                  <MapPin size={12} className="shrink-0 mt-0.5" />
+                  <span>
+                    {[callContext.customer.Address, callContext.customer.City, callContext.customer.State, callContext.customer.Pincode]
+                      .filter(Boolean).join(", ")}
+                  </span>
+                </div>
+              )}
             </div>
+
+            <ChecklistSectionBlock vc={vcState.vc} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} sectionKey="PersonalContact" />
+            <ChecklistSectionBlock vc={vcState.vc} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} sectionKey="ProjectUnit" />
 
             <div className="rounded-xl border border-border p-3.5 space-y-2.5">
               <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Financial Summary</h4>
@@ -873,6 +957,8 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                 )}
               </div>
 
+              <ChecklistSectionBlock vc={vcState.vc} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} sectionKey="PaymentPlan" />
+
               {/* Bank Preference (home loan) — a genuinely separate record
                   from the customer's own Nominee & Bank Details below (that's
                   KYC/refund banking; this is which bank is financing the
@@ -934,6 +1020,42 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                 </div>
               )}
             </div>
+
+            {/* Parking & Extra Charges — read-only reference so staff can
+                actually see what was sold before confirming it with the
+                customer against the matching checklist items below. Only
+                rendered when there's something to show; N/A is handled by
+                staff just checking the item's "or marked N/A" language. */}
+            {(parkingAllotments.length > 0 || extraCharges.length > 0) && (
+              <div className="rounded-xl border border-border p-3.5 space-y-2.5">
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Parking & Extra Charges</h4>
+                {parkingAllotments.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Car size={11} /> Parking</span>
+                    {parkingAllotments.map((p: any) => (
+                      <div key={p.Id} className="flex items-center justify-between text-xs rounded-lg border border-border bg-background px-2.5 py-1.5">
+                        <span className="truncate">{p.ParkingSlotNo || p.ParkingType || "Slot"} {p.Quantity > 1 ? `× ${p.Quantity}` : ""}</span>
+                        <span className="font-medium shrink-0">{fmt(p.TotalAmount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {extraCharges.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><IndianRupee size={11} /> Extra Charges</span>
+                    {extraCharges.map((c: any) => (
+                      <div key={c.Id} className="flex items-center justify-between text-xs rounded-lg border border-border bg-background px-2.5 py-1.5">
+                        <span className="truncate">{c.Description || c.MasterChargeName || "Extra charge"}</span>
+                        <span className="font-medium shrink-0">{fmt(c.TotalAmount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <ChecklistSectionBlock vc={vcState.vc} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} sectionKey="Parking" />
+            <ChecklistSectionBlock vc={vcState.vc} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} sectionKey="ExtraCharges" />
 
             {/* Progress stepper — a vertical readout of the same checklist
                 fields the working area's own sections keep in sync (each
@@ -1162,7 +1284,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
               </button>
             </div>
 
-            <VerificationChecklist bookingId={booking.BookingId} />
+            <ChecklistProgressBar vc={vcState.vc} bookingId={booking.BookingId} />
 
             {/* ── Document Verification ── */}
             <div className="rounded-xl border border-border p-4 space-y-2">
@@ -1219,6 +1341,8 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
               <p className="text-[11px] text-muted-foreground">PDF, images, Word, Excel · up to 10 files, 25 MB each</p>
             </div>
 
+            <ChecklistSectionBlock vc={vcState.vc} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} sectionKey="Documents" />
+
             {/* ── Co-Applicant — full detail cards, not a one-line summary ── */}
             <div className="rounded-xl border border-border p-4 space-y-2.5">
               <h3 className="text-sm font-semibold flex items-center gap-1.5"><Users size={14} /> Co-Applicant</h3>
@@ -1266,6 +1390,8 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                 </div>
               )}
             </div>
+
+            <ChecklistSectionBlock vc={vcState.vc} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} sectionKey="CoApplicant" />
 
             {/* ── Nominee & Bank Details — done here, not a link to another
                 page. Starts locked/read-only (this is usually already on
@@ -1357,6 +1483,12 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                 </>
               )}
             </div>
+
+            <ChecklistSectionBlock vc={vcState.vc} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} sectionKey="BankNominee" />
+            <ChecklistSubmitFooter
+              vc={vcState.vc} locked={vcState.locked} submitting={vcState.submitting} reopening={vcState.reopening}
+              onSubmit={vcState.handleSubmit} onReopen={vcState.handleReopen}
+            />
 
           </div>
         </div>

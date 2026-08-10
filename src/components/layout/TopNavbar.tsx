@@ -45,6 +45,7 @@ import {
   Wallet,
   CalendarClock,
   Wand2,
+  Percent,
 } from "lucide-react";
 import {
   Crown,
@@ -454,6 +455,13 @@ const crmSetupItems = [
     path: "/crm/milestone-master",
     color: "text-teal-500",
     pageKey: "crm-milestone-master",
+  },
+  {
+    icon: Percent,
+    label: "Brokerage Rate Tiers",
+    path: "/crm/brokerage-rate-tiers",
+    color: "text-rose-500",
+    pageKey: "crm-brokerage-rate-tiers",
   },
   {
     icon: Car,
