@@ -565,6 +565,23 @@ export function ExpenseBookingPreviewModal({
                   : []),
                 { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: g.totalAmount },
               ];
+              // Direct (non-GRN, e.g. DINV) booking: the whole invoice still
+              // posts as ONE debit leg to its chosen GL Account (Dr) against
+              // Supplier (Cr) — that hasn't changed. What this breaks out is
+              // the PREVIEW: each direct line item's own contribution to
+              // that same GL head, plus GST as its own line, instead of one
+              // opaque lumped total — mirrors the GRN posting tab's
+              // per-item breakdown.
+              const directItems = (previewRecord?.directItems ?? []).filter((it: any) => Number(it.amount) > 0);
+              const directItemsSum = Math.round(directItems.reduce((s: number, it: any) => s + (Number(it.amount) || 0), 0) * 100) / 100;
+              // Only show the per-item split when it actually reconciles to
+              // the base amount being posted — otherwise (manual override,
+              // stale items after an edit, etc.) fall back to one lumped
+              // row rather than showing a breakdown whose sum wouldn't
+              // match the Total row beneath it.
+              const hasDirectItems = !isGrnLinked && directItems.length > 0 && Math.abs(directItemsSum - baseAmount) < 0.5;
+              const purchaseLabel = accounts?.purchase?.label ?? "Purchase A/c";
+              const purchaseCode = accounts?.purchase?.code ?? null;
               const groups: PostGroup[] = isGrnLinked
                 ? isMultiGrn
                   ? grnBreakdown.map((g: any) => ({ groupKey: String(g.grnId), docNo: g.docNo, date: g.date, rows: grnRows(g) }))
@@ -575,17 +592,33 @@ export function ExpenseBookingPreviewModal({
                       docNo: null,
                       date: null,
                       rows: [
-                        { key: "purchase", label: accounts?.purchase?.label  ?? "Purchase A/c",                  code: accounts?.purchase?.code ?? null,  side: "debit",  amount: totalAmount },
+                        ...(hasDirectItems
+                          ? directItems.map((it: any, idx: number) => ({
+                              key: `item-${it._key ?? idx}`,
+                              label: `${purchaseLabel} — ${it.description || "Item"}`,
+                              code: purchaseCode,
+                              side: "debit" as const,
+                              amount: Number(it.amount) || 0,
+                            }))
+                          : [{ key: "purchase", label: purchaseLabel, code: purchaseCode, side: "debit" as const, amount: baseAmount }]),
+                        ...(taxAmount > 0
+                          ? [{ key: "gst", label: `${purchaseLabel} — GST`, code: purchaseCode, side: "debit" as const, amount: taxAmount }]
+                          : []),
                         { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: totalAmount },
                       ],
                     },
                   ];
               return (
                 <>
-                  {isGrnLinked && (
+                  {isGrnLinked ? (
                     <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
                       GRN-linked invoice — Provision for Pending GRN is debited (reversing the GRN posting); Supplier is credited.
                       {isMultiGrn && " Combines multiple GRNs — grouped below by GRN with its own entry date."}
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
+                      Direct booking — debited to <span className="font-medium text-foreground">{purchaseLabel}</span>{purchaseCode ? ` (${purchaseCode})` : ""}; Supplier is credited.
+                      {hasDirectItems && " Broken down by line item below."}
                     </div>
                   )}
 

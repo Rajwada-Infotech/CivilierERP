@@ -3712,8 +3712,13 @@ router.get("/:id/posting", async (req, res) => {
     if (isGrnLinked) {
       ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, resolveGrnIds(eb)));
     } else {
-      totalAmount = parseFloat(eb.ENetAmount||eb.EAmount||0);
-      baseAmount = totalAmount;
+      // Direct (non-GRN) booking: EAmount is the taxable base, ENetAmount
+      // the GST-inclusive total — split them properly instead of the old
+      // baseAmount = totalAmount (which silently swallowed the GST portion
+      // into an untracked lump, showing no tax line at all in the preview).
+      totalAmount = parseFloat(eb.ENetAmount || eb.EAmount || 0);
+      baseAmount = parseFloat(eb.EAmount || totalAmount || 0);
+      taxAmount = Math.max(0, Math.round((totalAmount - baseAmount) * 100) / 100);
     }
 
     // System ledgers (Purchase, PGRN) plus the invoice's own resolved

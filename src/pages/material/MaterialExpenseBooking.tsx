@@ -57,7 +57,6 @@ import {
   Building2,
   FolderKanban,
   SlidersHorizontal,
-  Clock,
   ShoppingCart,
   AlertTriangle,
 } from "lucide-react";
@@ -109,6 +108,7 @@ import { ExpenseBookingStatCards } from "./ExpenseBooking/ExpenseBookingStatCard
 import { BookingListToolbar } from "./ExpenseBooking/BookingListToolbar";
 import { BookingPagination } from "./ExpenseBooking/BookingPagination";
 import { DocSelectorPanel } from "./ExpenseBooking/DocSelectorPanel";
+import { StatusBadge } from "@/components/StatusBadge";
 import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
 import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
 import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
@@ -2542,14 +2542,7 @@ export default function MaterialExpenseBooking() {
                                     <ApprovalStatusChain
                                       table="ExpenseBooking"
                                       recordId={rec.id}
-                                      fallback={
-                                        rec.status === "Pending" ? (
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold whitespace-nowrap bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800">
-                                            <Clock size={10} />
-                                            Pending
-                                          </span>
-                                        ) : null
-                                      }
+                                      fallback={<StatusBadge status={rec.status} className="text-[10px] px-2 py-0.5" />}
                                     />
                                   </TableCell>
                                   <TableCell className="py-3">
