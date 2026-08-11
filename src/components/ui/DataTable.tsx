@@ -166,7 +166,7 @@ export function DataTable<TData extends RowData>({
       {/* ── Search bar ── */}
       {searchable && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60">
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[11px] font-body text-muted-foreground">
             {loading
               ? "Loading..."
               : `${totalFiltered} record${totalFiltered !== 1 ? "s" : ""}`}
@@ -216,7 +216,7 @@ export function DataTable<TData extends RowData>({
           const totalSize = allCols.reduce((s, c) => s + (c.columnDef.size ?? 150), 0);
           const widthOf = (size: number | undefined) => size ?? 150;
           return (
-        <table className="text-sm" style={{ tableLayout: "fixed", width: totalSize, minWidth: "100%" }}>
+        <table className="text-sm font-body" style={{ tableLayout: "fixed", width: totalSize, minWidth: "100%" }}>
           <thead>
             <tr className="border-b border-border bg-muted/30">
               {table.getHeaderGroups().map((hg) =>
@@ -281,7 +281,7 @@ export function DataTable<TData extends RowData>({
               <tr>
                 <td
                   colSpan={columns.length}
-                  className="px-4 py-10 text-center text-muted-foreground text-sm"
+                  className="px-4 py-10 text-center text-muted-foreground text-sm font-body"
                 >
                   {emptyMessage}
                 </td>
@@ -316,7 +316,7 @@ export function DataTable<TData extends RowData>({
       </div>
 
       {/* ── Cards (mobile + tablet, below lg) ── */}
-      <div className="lg:hidden">
+      <div className="lg:hidden font-body">
         {loading ? (
           <div className="divide-y divide-border">
             {Array.from({ length: skeletonRows }).map((_, i) => (
@@ -377,7 +377,7 @@ export function DataTable<TData extends RowData>({
 
       {/* ── Pagination ── */}
       {paginated && !loading && totalFiltered > 0 && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border-t border-border bg-card/40">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border-t border-border bg-card/40 font-body">
           {/* Page size selector */}
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-xs text-muted-foreground">Rows</span>
@@ -390,7 +390,7 @@ export function DataTable<TData extends RowData>({
                   pageIndex: 0,
                 }))
               }
-              className="text-xs rounded-md bg-muted border border-border px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+              className="text-xs font-body rounded-md bg-muted border border-border px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
             >
               {pageSizeOptions.map((s) => (
                 <option key={s} value={s}>

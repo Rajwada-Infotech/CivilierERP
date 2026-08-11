@@ -33,6 +33,7 @@ import {
   AlertCircle,
   Eye,
   PenSquare,
+  FilePenLine,
   Search,
   RefreshCw,
   ChevronLeft,
@@ -69,6 +70,8 @@ import {
   type WOItemOption,
 } from "@/api/workOrderApi";
 import { StatusBadge } from "@/components/StatusBadge";
+import { AmendedBadge } from "@/components/AmendedBadge";
+import { useAmendmentStatus } from "@/hooks/useAmendmentStatus";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getTCRecords } from "@/api/tcMasterApi";
@@ -1580,6 +1583,7 @@ const WorkOrderDetailPanel: React.FC<{
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [creatingMaterialPO, setCreatingMaterialPO] = useState(false);
   const rights = usePageRights("work-order");
+  const amendmentStatus = useAmendmentStatus("WorkOrder", workOrderId, detail?.Status);
 
   const { status: chainStatus } = useWOChainStatus(workOrderId ?? null);
 
@@ -1750,13 +1754,37 @@ const WorkOrderDetailPanel: React.FC<{
                   );
                 }}
               />
-              {rights.canEdit && (<button
-                onClick={() => onEdit(workOrderId)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 text-primary text-xs font-medium hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
-              >
-                <PenSquare size={12} />
-                Edit
-              </button>)}
+              {rights.canEdit && !amendmentStatus.isApproved && (
+                <button
+                  onClick={() => onEdit(workOrderId)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 text-primary text-xs font-medium hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
+                >
+                  <PenSquare size={12} />
+                  Edit
+                </button>
+              )}
+              {rights.canEdit && amendmentStatus.isApproved && (
+                <button
+                  onClick={() =>
+                    navigate("/engineering/amendment-menu", {
+                      state: {
+                        prefill: {
+                          tab: "WO",
+                          docId: workOrderId,
+                          docNo: detail.DocumentNumber,
+                          projectName: detail.ProjectName,
+                          companyName: detail.CompanyName,
+                          totalAmount: detail.TotalAmount,
+                        },
+                      },
+                    })
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-500/30 text-violet-600 dark:text-violet-400 text-xs font-medium hover:bg-violet-500/5 dark:hover:bg-violet-500/10 transition-colors"
+                >
+                  <FilePenLine size={12} />
+                  Amend
+                </button>
+              )}
               {detail.Status === "Approved" && (
                 <button
                   onClick={() => void handleCreateMaterialPO()}
@@ -1801,6 +1829,7 @@ const WorkOrderDetailPanel: React.FC<{
               {statusCfg.icon}
               {detail.Status || "Draft"}
             </span>
+            {amendmentStatus.isAmended && <AmendedBadge />}
             <span className="font-mono text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
               {detail.DocumentNumber}
             </span>

@@ -18,6 +18,8 @@ const { getPool, sql } = require("../db");
 //   updated_by        nvarchar(300) → sql.NVarChar(300)
 //   approved_by       nvarchar(300) → sql.NVarChar(300)
 //   belongsTo         nvarchar(200) → sql.NVarChar(200)
+//   cost_center_id    int NULL      → sql.Int   (migration 315, Activities only)
+//   gl_head_id        int NULL      → sql.Int   (migration 315, Activities only)
 //
 // activity_type:  0 = Group    → group_id = NULL,      belongsTo = NULL
 // activity_type:  1 = Activity → group_id = INT id,    belongsTo = String(group_id)
@@ -29,22 +31,28 @@ router.get("/", cache("activity-master", 300), async (req, res) => {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        id,
-        activity_name,
-        short_description,
-        activity_type,
-        group_id,
-        is_active,
-        created_by,
-        created_datetime,
-        approved_by,
-        approved_at,
-        updated_by,
-        updated_at,
-        belongsTo,
-        hsn_code
-      FROM dbo.ActivityMaster
-      ORDER BY id ASC
+        am.id,
+        am.activity_name,
+        am.short_description,
+        am.activity_type,
+        am.group_id,
+        am.is_active,
+        am.created_by,
+        am.created_datetime,
+        am.approved_by,
+        am.approved_at,
+        am.updated_by,
+        am.updated_at,
+        am.belongsTo,
+        am.hsn_code,
+        am.cost_center_id,
+        cc.Name AS cost_center_name,
+        am.gl_head_id,
+        gl.LHeadName AS gl_head_name
+      FROM dbo.ActivityMaster am
+      LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = am.cost_center_id
+      LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = am.gl_head_id
+      ORDER BY am.id ASC
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -60,22 +68,28 @@ router.get("/:id", async (req, res) => {
     const result = await pool.request().input("id", sql.Int, req.params.id)
       .query(`
         SELECT
-          id,
-          activity_name,
-          short_description,
-          activity_type,
-          group_id,
-          is_active,
-          created_by,
-          created_datetime,
-          approved_by,
-          approved_at,
-          updated_by,
-          updated_at,
-          belongsTo,
-          hsn_code
-        FROM dbo.ActivityMaster
-        WHERE id = @id
+          am.id,
+          am.activity_name,
+          am.short_description,
+          am.activity_type,
+          am.group_id,
+          am.is_active,
+          am.created_by,
+          am.created_datetime,
+          am.approved_by,
+          am.approved_at,
+          am.updated_by,
+          am.updated_at,
+          am.belongsTo,
+          am.hsn_code,
+          am.cost_center_id,
+          cc.Name AS cost_center_name,
+          am.gl_head_id,
+          gl.LHeadName AS gl_head_name
+        FROM dbo.ActivityMaster am
+        LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = am.cost_center_id
+        LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = am.gl_head_id
+        WHERE am.id = @id
       `);
 
     if (result.recordset.length === 0)
@@ -97,6 +111,8 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     group_id,
     is_active,
     hsn_code, // only for Activity (activity_type === 1)
+    cost_center_id, // only for Activity (activity_type === 1)
+    gl_head_id, // only for Activity (activity_type === 1)
   } = req.body;
 
   // ── Validation ───────────────────────────────────────────────────────────
@@ -110,12 +126,14 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
   }
 
   // ── belongsTo logic ───────────────────────────────────────────────────────
-  // activity_type === 0 (Group)    → group_id = NULL,  belongsTo = NULL, hsn_code = NULL
-  // activity_type === 1 (Activity) → group_id = INT,   belongsTo = String(group_id), hsn_code = optional
+  // activity_type === 0 (Group)    → group_id = NULL,  belongsTo = NULL, hsn_code/cost_center_id/gl_head_id = NULL
+  // activity_type === 1 (Activity) → group_id = INT,   belongsTo = String(group_id), hsn_code/cost_center_id/gl_head_id = optional
   const resolvedGroupId = activity_type === 1 ? group_id || null : null;
   const resolvedBelongsTo =
     activity_type === 1 ? (group_id ? String(group_id) : null) : null;
   const resolvedHsnCode = activity_type === 1 ? hsn_code || null : null;
+  const resolvedCostCenterId = activity_type === 1 ? cost_center_id || null : null;
+  const resolvedGlHeadId = activity_type === 1 ? gl_head_id || null : null;
 
   try {
     const pool = getPool();
@@ -133,14 +151,18 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("created_datetime", sql.DateTime2, now)
       .input("belongsTo", sql.NVarChar(200), resolvedBelongsTo) // nvarchar(200) — group id as string
       .input("hsn_code", sql.NVarChar(50), resolvedHsnCode) // nvarchar(50) — null for Groups
+      .input("cost_center_id", sql.Int, resolvedCostCenterId) // null for Groups
+      .input("gl_head_id", sql.Int, resolvedGlHeadId) // null for Groups
       .query(`
         INSERT INTO dbo.ActivityMaster
           (activity_name, short_description, activity_type, group_id,
-           is_active, created_by, created_datetime, belongsTo, hsn_code)
+           is_active, created_by, created_datetime, belongsTo, hsn_code,
+           cost_center_id, gl_head_id)
         OUTPUT INSERTED.id AS id
         VALUES
           (@activity_name, @short_description, @activity_type, @group_id,
-           @is_active, @created_by, @created_datetime, @belongsTo, @hsn_code)
+           @is_active, @created_by, @created_datetime, @belongsTo, @hsn_code,
+           @cost_center_id, @gl_head_id)
       `);
 
     await bumpCacheVersion("activity-master");
@@ -163,6 +185,8 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     group_id,
     is_active,
     hsn_code, // only for Activity (activity_type === 1)
+    cost_center_id, // only for Activity (activity_type === 1)
+    gl_head_id, // only for Activity (activity_type === 1)
   } = req.body;
 
   // ── Validation ───────────────────────────────────────────────────────────
@@ -176,13 +200,15 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   }
 
   // ── belongsTo logic ───────────────────────────────────────────────────────
-  // activity_type === 0 (Group)    → group_id = NULL,  belongsTo = NULL, hsn_code = NULL
-  // activity_type === 1 (Activity) → group_id = INT,   belongsTo = String(group_id), hsn_code = optional
+  // activity_type === 0 (Group)    → group_id = NULL,  belongsTo = NULL, hsn_code/cost_center_id/gl_head_id = NULL
+  // activity_type === 1 (Activity) → group_id = INT,   belongsTo = String(group_id), hsn_code/cost_center_id/gl_head_id = optional
   const resolvedGroupId =
     activity_type === 1 ? (group_id ? group_id : null) : null;
   const resolvedBelongsTo =
     activity_type === 1 ? (group_id ? String(group_id) : null) : null;
   const resolvedHsnCode = activity_type === 1 ? hsn_code || null : null;
+  const resolvedCostCenterId = activity_type === 1 ? cost_center_id || null : null;
+  const resolvedGlHeadId = activity_type === 1 ? gl_head_id || null : null;
 
   try {
     const pool = getPool();
@@ -201,6 +227,8 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("updated_at", sql.DateTime2, now)
       .input("belongsTo", sql.NVarChar(200), resolvedBelongsTo) // nvarchar(200) — group id as string
       .input("hsn_code", sql.NVarChar(50), resolvedHsnCode) // nvarchar(50) — null for Groups
+      .input("cost_center_id", sql.Int, resolvedCostCenterId) // null for Groups
+      .input("gl_head_id", sql.Int, resolvedGlHeadId) // null for Groups
       .query(`
         UPDATE dbo.ActivityMaster SET
           activity_name     = @activity_name,
@@ -211,7 +239,9 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           updated_by        = @updated_by,
           updated_at        = @updated_at,
           belongsTo         = @belongsTo,
-          hsn_code          = @hsn_code
+          hsn_code          = @hsn_code,
+          cost_center_id    = @cost_center_id,
+          gl_head_id        = @gl_head_id
         WHERE id = @id
       `);
 

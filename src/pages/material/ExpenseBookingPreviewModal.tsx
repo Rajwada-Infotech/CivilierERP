@@ -431,9 +431,18 @@ export function ExpenseBookingPreviewModal({
   const displayNetAmount =
     grnNetPayable !== null ? grnNetPayable : rbd.netAmount;
 
+  // TDS is deducted at source — the Breakdown's own "Net Payable" figure
+  // was showing the pre-TDS amount with no deduction line at all, so the
+  // TDS Details section below looked disconnected from what's actually
+  // payable. Surface it here too.
+  const displayTdsAmount = previewRecord.tdsId
+    ? Number(previewRecord.tdsAmount) || 0
+    : 0;
+  const displayPayableAfterTds = Math.max(0, displayNetAmount - displayTdsAmount);
+
   const displayRemainingAmount = Math.max(
     0,
-    displayNetAmount - (previewRecord.totalPaid ?? 0),
+    displayPayableAfterTds - (previewRecord.totalPaid ?? 0),
   );
 
   return createPortal(
@@ -545,25 +554,48 @@ export function ExpenseBookingPreviewModal({
                 Could not load posting data.
               </div>
             ) : (() => {
-              const { isGrnLinked, baseAmount, taxAmount, totalAmount, accounts, grnBreakdown, expenseHeadAllocations: postingAllocations } = invPostingData;
+              const { isGrnLinked, baseAmount, taxAmount, totalAmount, tdsAmount = 0, accounts, grnBreakdown, expenseHeadAllocations: postingAllocations } = invPostingData;
               const isMultiGrn = isGrnLinked && Array.isArray(grnBreakdown) && grnBreakdown.length > 1;
               const fmtAmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
               const fmtGrnDate = (d: string | null) =>
                 d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
               type PostRow = { key: string; label: string; code: string | null; side: "debit" | "credit"; amount: number };
               type PostGroup = { groupKey: string; docNo: string | null; date: string | null; rows: PostRow[] };
-              // GRN-linked: base clears the GRN provision; tax (if any) is
-              // recognized as confirmed ITC (GST Credit Available) — mirrors
-              // backend/routes/expenseBooking.js's post-to-gl line construction.
-              // A combined invoice groups the legs by GRN (one group per
+              // TDS is withheld from the supplier, not paid out — split the
+              // credit side into Supplier (net of TDS) + TDS Payable, same
+              // as backend/routes/expenseBooking.js's post-to-gl creditLegs.
+              const tdsShareOf = (fullAmount: number) =>
+                tdsAmount <= 0 ? 0 : fullAmount >= totalAmount - 0.5 ? tdsAmount : Math.round((fullAmount / totalAmount) * tdsAmount * 100) / 100;
+              const creditLegs = (keyPrefix: string, fullAmount: number): PostRow[] => {
+                const tdsShare = tdsShareOf(fullAmount);
+                const supplierShare = Math.round((fullAmount - tdsShare) * 100) / 100;
+                return [
+                  { key: `${keyPrefix}-supplier`, label: accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: accounts?.supplier?.code ?? null, side: "credit", amount: supplierShare },
+                  ...(tdsShare > 0
+                    ? [{ key: `${keyPrefix}-tds`, label: accounts?.tdsPayable?.label ?? "TDS Payable A/c", code: accounts?.tdsPayable?.code ?? null, side: "credit" as const, amount: tdsShare }]
+                    : []),
+                ];
+              };
+              // ONE combined debit leg for the whole TDS amount, to its own
+              // Nature-specific GL head (194C/194J/...) — not lumped into
+              // the Expense Head/Purchase/PGRN debit, which is reduced by
+              // this same amount below.
+              const tdsNatureRow: PostRow[] = tdsAmount > 0
+                ? [{ key: "tdsNature", label: accounts?.tdsNature?.label ?? "TDS Nature A/c", code: accounts?.tdsNature?.code ?? null, side: "debit", amount: tdsAmount }]
+                : [];
+              // GRN-linked: base (net of this GRN's TDS share) clears the
+              // GRN provision; tax (if any) is recognized as confirmed ITC
+              // (GST Credit Available) — mirrors backend/routes/
+              // expenseBooking.js's post-to-gl line construction. A
+              // combined invoice groups the legs by GRN (one group per
               // GRN, each dated with that GRN's own entry date) instead of
               // lumping every GRN's contribution into one row per account.
               const grnRows = (g: any): PostRow[] => [
-                { key: "pgrn",     label: accounts?.pgrn?.label     ?? "Provision for Pending GRN A/c", code: accounts?.pgrn?.code ?? null,     side: "debit",  amount: g.baseAmount },
+                { key: "pgrn",     label: accounts?.pgrn?.label     ?? "Provision for Pending GRN A/c", code: accounts?.pgrn?.code ?? null,     side: "debit",  amount: Math.round((g.baseAmount - tdsShareOf(g.totalAmount)) * 100) / 100 },
                 ...(g.taxAmount > 0
                   ? [{ key: "gstCredit", label: accounts?.gstCredit?.label ?? "GST Credit Available", code: accounts?.gstCredit?.code ?? null, side: "debit" as const, amount: g.taxAmount }]
                   : []),
-                { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: g.totalAmount },
+                ...creditLegs("grn", g.totalAmount),
               ];
               // Direct (non-GRN, e.g. DINV) booking. Two possible shapes:
               //  1. Multi Expense Head allocations (migration 303) — these
@@ -581,13 +613,23 @@ export function ExpenseBookingPreviewModal({
               // stale items after an edit, etc.) fall back to one lumped
               // row rather than showing a breakdown whose sum wouldn't
               // match the Total row beneath it.
-              const hasDirectItems = !isGrnLinked && !hasAllocations && directItems.length > 0 && Math.abs(directItemsSum - baseAmount) < 0.5;
+              // Gated off when TDS is present: this per-item breakdown is a
+              // readability-only alternative to the single lumped Purchase
+              // row below, and its rows aren't individually reduced by
+              // TDS — showing them alongside a separate TDS Nature row
+              // would double the TDS amount in the displayed total. The
+              // lumped Purchase row (which IS reduced by TDS) covers this
+              // case correctly instead.
+              const hasDirectItems = !isGrnLinked && !hasAllocations && tdsAmount <= 0 && directItems.length > 0 && Math.abs(directItemsSum - baseAmount) < 0.5;
               const purchaseLabel = accounts?.purchase?.label ?? "Purchase A/c";
               const purchaseCode = accounts?.purchase?.code ?? null;
               const groups: PostGroup[] = isGrnLinked
-                ? isMultiGrn
-                  ? grnBreakdown.map((g: any) => ({ groupKey: String(g.grnId), docNo: g.docNo, date: g.date, rows: grnRows(g) }))
-                  : [{ groupKey: "single", docNo: null, date: null, rows: grnRows({ baseAmount, taxAmount, totalAmount }) }]
+                ? [
+                    ...(isMultiGrn
+                      ? grnBreakdown.map((g: any) => ({ groupKey: String(g.grnId), docNo: g.docNo, date: g.date, rows: grnRows(g) }))
+                      : [{ groupKey: "single", docNo: null, date: null, rows: grnRows({ baseAmount, taxAmount, totalAmount }) }]),
+                    ...(tdsNatureRow.length > 0 ? [{ groupKey: "tds-nature", docNo: null, date: null, rows: tdsNatureRow }] : []),
+                  ]
                 : [
                     {
                       groupKey: "direct",
@@ -595,26 +637,54 @@ export function ExpenseBookingPreviewModal({
                       date: null,
                       rows: [
                         ...(hasAllocations
-                          ? postingAllocations.map((a: any) => ({
-                              key: `head-${a.allocationId}`,
-                              label: a.lHeadName,
-                              code: a.lHeadCode,
-                              side: "debit" as const,
-                              amount: Number(a.amount) || 0,
-                            }))
-                          : hasDirectItems
-                            ? directItems.map((it: any, idx: number) => ({
-                                key: `item-${it._key ?? idx}`,
-                                label: `${purchaseLabel} — ${it.description || "Item"}`,
-                                code: purchaseCode,
+                          ? // Mirrors backend/routes/expenseBooking.js's post-to-gl
+                            // split EXACTLY: each row's amount is GST-inclusive, so
+                            // scale by the invoice's own (base - TDS)/total ratio to
+                            // get its net debit, with GST posted as ONE combined GST
+                            // Credit Available row and TDS as its own Nature row below
+                            // — never the full inclusive amount straight to the
+                            // Expense Head.
+                            (() => {
+                              const netRatio = totalAmount > 0 ? (baseAmount - tdsAmount) / totalAmount : 1;
+                              const headRows = postingAllocations.map((a: any) => ({
+                                key: `head-${a.allocationId}`,
+                                label: a.lHeadName,
+                                code: a.lHeadCode,
                                 side: "debit" as const,
-                                amount: Number(it.amount) || 0,
-                              }))
-                            : [{ key: "purchase", label: purchaseLabel, code: purchaseCode, side: "debit" as const, amount: baseAmount }]),
-                        ...(!hasAllocations && taxAmount > 0
-                          ? [{ key: "gst", label: `${purchaseLabel} — GST`, code: purchaseCode, side: "debit" as const, amount: taxAmount }]
-                          : []),
-                        { key: "supplier", label: accounts?.supplier?.label  ?? "Supplier / Creditor A/c",       code: accounts?.supplier?.code ?? null,  side: "credit", amount: totalAmount },
+                                amount: Math.round((Number(a.amount) || 0) * netRatio * 100) / 100,
+                              }));
+                              const headNetSum = headRows.reduce((s, r) => s + r.amount, 0);
+                              const gstLegAmount = Math.round((totalAmount - tdsAmount - headNetSum) * 100) / 100;
+                              return [
+                                ...headRows,
+                                ...(gstLegAmount > 0
+                                  ? [{ key: "gst", label: accounts?.gstCredit?.label ?? "GST Credit Available", code: accounts?.gstCredit?.code ?? null, side: "debit" as const, amount: gstLegAmount }]
+                                  : []),
+                                ...tdsNatureRow,
+                              ];
+                            })()
+                          : hasDirectItems
+                            ? [
+                                ...directItems.map((it: any, idx: number) => ({
+                                  key: `item-${it._key ?? idx}`,
+                                  label: `${purchaseLabel} — ${it.description || "Item"}`,
+                                  code: purchaseCode,
+                                  side: "debit" as const,
+                                  amount: Number(it.amount) || 0,
+                                })),
+                                ...(taxAmount > 0
+                                  ? [{ key: "gst", label: accounts?.gstCredit?.label ?? "GST Credit Available", code: accounts?.gstCredit?.code ?? null, side: "debit" as const, amount: taxAmount }]
+                                  : []),
+                                ...tdsNatureRow,
+                              ]
+                            : [
+                                { key: "purchase", label: purchaseLabel, code: purchaseCode, side: "debit" as const, amount: Math.round((baseAmount - tdsAmount) * 100) / 100 },
+                                ...(taxAmount > 0
+                                  ? [{ key: "gst", label: accounts?.gstCredit?.label ?? "GST Credit Available", code: accounts?.gstCredit?.code ?? null, side: "debit" as const, amount: taxAmount }]
+                                  : []),
+                                ...tdsNatureRow,
+                              ]),
+                        ...creditLegs("direct", totalAmount),
                       ],
                     },
                   ];
@@ -819,10 +889,17 @@ export function ExpenseBookingPreviewModal({
                 { label: "Document Type", value: previewRecord.docTypeName || previewRecord.materialCategory },
                 {
                   label: "Source Document",
-                  value: previewRecord.sourceDocNo
-                    || (previewRecord.eSourceType && previewRecord.eSourceId ? `${previewRecord.eSourceType}-${previewRecord.eSourceId}` : null)
-                    || (previewRecord.purchaseOrderId ? `PO-${previewRecord.purchaseOrderId}` : null)
-                    || (previewRecord.workOrderId ? `WO-${previewRecord.workOrderId}` : null),
+                  // TOD (Other Expenses) is a direct/manual booking with no
+                  // actual source document — its eSourceId is just the
+                  // internal TypeOfDoc id used to build the doc-number
+                  // prefix, not a real linked record, so showing it as
+                  // "TOD-35" was a meaningless internal id, not a name.
+                  value: previewRecord.eSourceType === "TOD"
+                    ? "Direct Entry"
+                    : previewRecord.sourceDocNo
+                      || (previewRecord.purchaseOrderId ? `PO-${previewRecord.purchaseOrderId}` : null)
+                      || (previewRecord.workOrderId ? `WO-${previewRecord.workOrderId}` : null)
+                      || (previewRecord.eSourceType && previewRecord.eSourceId ? `${previewRecord.eSourceType}-${previewRecord.eSourceId}` : null),
                   mono: true,
                 },
                 { label: "Company", value: previewRecord.companyName || (previewRecord.companyId ? `Company #${previewRecord.companyId}` : null) },
@@ -1133,6 +1210,32 @@ export function ExpenseBookingPreviewModal({
                     ₹{fmt(displayNetAmount)}
                   </p>
                 </div>
+                {displayTdsAmount > 0 && (
+                  <>
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-amber-500/5 border border-amber-500/20 rounded-xl">
+                      <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                        <TrendingUp size={10} />
+                        TDS Deducted
+                        {previewRecord.tdsPercentage != null && (
+                          <span className="font-mono text-[10px] bg-amber-500/10 px-1.5 py-0.5 rounded">
+                            {previewRecord.tdsPercentage}%
+                          </span>
+                        )}
+                      </p>
+                      <p className="font-mono text-sm font-semibold text-amber-600 dark:text-amber-400">
+                        − ₹{fmt(displayTdsAmount)}
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border border-primary/20 rounded-xl">
+                      <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
+                        Amount Payable (After TDS)
+                      </p>
+                      <p className="font-mono text-base font-bold text-primary">
+                        ₹{fmt(displayPayableAfterTds)}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
               /* ── Standard breakdown (non-GRN) ── */
@@ -1250,6 +1353,32 @@ export function ExpenseBookingPreviewModal({
                     ₹{fmt(displayNetAmount)}
                   </p>
                 </div>
+                {displayTdsAmount > 0 && (
+                  <>
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-amber-500/5 border-t border-amber-500/20">
+                      <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                        <TrendingUp size={10} />
+                        TDS Deducted
+                        {previewRecord.tdsPercentage != null && (
+                          <span className="font-mono text-[10px] bg-amber-500/10 px-1.5 py-0.5 rounded">
+                            {previewRecord.tdsPercentage}%
+                          </span>
+                        )}
+                      </p>
+                      <p className="font-mono text-sm font-semibold text-amber-600 dark:text-amber-400">
+                        − ₹{fmt(displayTdsAmount)}
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border-t border-primary/20">
+                      <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
+                        Amount Payable (After TDS)
+                      </p>
+                      <p className="font-mono text-base font-bold text-primary">
+                        ₹{fmt(displayPayableAfterTds)}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>

@@ -25,7 +25,7 @@ router.post("/", requirePageRight("tds-master", "create"), async (req, res) => {
       .request()
       .input("Nature", sql.NVarChar, Nature || null)
       .input("Name", sql.NVarChar, Name || null)
-      .input("Percentage", sql.Decimal(5, 2), Percentage || null)
+      .input("Percentage", sql.Decimal(5, 2), Percentage ?? null)
       .input("Status", sql.Bit, Status ? 1 : 0)
       .input("CreatedAt", sql.DateTime, new Date()).query(`
         INSERT INTO dbo.TDSMaster (Nature, Name, Percentage, Status, CreatedAt)
@@ -48,7 +48,7 @@ router.put("/:id", requirePageRight("tds-master", "edit"), async (req, res) => {
       .input("TDSId", sql.Int, req.params.id)
       .input("Nature", sql.NVarChar, Nature || null)
       .input("Name", sql.NVarChar, Name || null)
-      .input("Percentage", sql.Decimal(5, 2), Percentage || null)
+      .input("Percentage", sql.Decimal(5, 2), Percentage ?? null)
       .input("Status", sql.Bit, Status ? 1 : 0)
       .input("UpdatedAt", sql.DateTime, new Date()).query(`
         UPDATE dbo.TDSMaster SET

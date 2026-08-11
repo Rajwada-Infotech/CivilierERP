@@ -77,6 +77,16 @@ export interface FieldDef {
   }) => React.ReactNode;
 }
 
+// A required "number" field is satisfied by an explicit 0 (e.g. NIL TDS,
+// a 0% rate, a free-of-charge line) — only a truthiness check (`!value`)
+// would wrongly treat 0 as "empty" and block save. Every other field type
+// keeps the original "non-empty after trim" behavior.
+function isFieldFilled(field: FieldDef, value: unknown): boolean {
+  if (field.type === "number") return value !== null && value !== undefined && value !== "";
+  if (typeof value === "string") return value.trim() !== "";
+  return !!value;
+}
+
 export interface ColumnDef {
   key: string;
   label: string;
@@ -373,13 +383,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const validate = () => {
     const errs: Record<string, boolean> = {};
     fields.forEach((f) => {
-      if (
-        f.required &&
-        (!form[f.name] ||
-          (typeof form[f.name] === "string" &&
-            !(form[f.name] as string).trim()))
-      )
-        errs[f.name] = true;
+      if (f.required && !isFieldFilled(f, form[f.name])) errs[f.name] = true;
     });
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -502,13 +506,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     (k) => String(form[k] ?? "") !== String(defaults[k] ?? "")
   );
 
-  const canSave = fields.every(
-    (f) =>
-      !f.required ||
-      (form[f.name] &&
-        (typeof form[f.name] !== "string" ||
-          (form[f.name] as string).trim() !== "")),
-  );
+  const canSave = fields.every((f) => !f.required || isFieldFilled(f, form[f.name]));
 
   const filtered = data.filter((row) => {
     if (!search) return true;
@@ -598,7 +596,11 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       )}
                       <input
                         type={field.type === "number" ? "number" : "text"}
-                        value={(form[field.name] as string) || ""}
+                        value={
+                          form[field.name] !== null && form[field.name] !== undefined
+                            ? (form[field.name] as string | number)
+                            : ""
+                        }
                         onChange={(e) =>
                           updateField(field.name, e.target.value, field)
                         }

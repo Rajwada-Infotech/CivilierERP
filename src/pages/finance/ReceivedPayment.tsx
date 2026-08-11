@@ -71,6 +71,9 @@ import { formatINR } from "@/utils/formatCurrency";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { usePageRights } from "@/hooks/usePageRights";
+import { EditOrAmendButton } from "@/components/EditOrAmendButton";
+import { AmendedBadge } from "@/components/AmendedBadge";
+import { useAmendmentStatus } from "@/hooks/useAmendmentStatus";
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
@@ -343,6 +346,11 @@ export default function ReceivedPaymentPage() {
   );
   const [viewingPayment, setViewingPayment] = useState<ReceivedPayment | null>(
     null,
+  );
+  const viewingAmendmentStatus = useAmendmentStatus(
+    "ReceivedPayment",
+    viewingPayment?.id,
+    viewingPayment?.status,
   );
   const PAGE_SIZE = 20;
 
@@ -1066,14 +1074,20 @@ export default function ReceivedPaymentPage() {
                                 <Printer size={13} />
                               </button>
                             )}
-                            {rights.canEdit && p.status === "Draft" && (
-                              <button
-                                onClick={() => openEdit(p)}
-                                title="Edit"
-                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-blue-500 hover:bg-blue-500/10 transition-colors"
-                              >
-                                <Pencil size={13} />
-                              </button>
+                            {(p.status === "Draft" || p.status === "Approved") && (
+                              <EditOrAmendButton
+                                refDocType="ReceivedPayment"
+                                refDocId={p.id}
+                                docStatus={p.status}
+                                docNo={p.docNo}
+                                projectName={p.projectName}
+                                companyName={p.companyName}
+                                totalAmount={p.amount}
+                                amendTab="RECEIVED_PAYMENT"
+                                amendMenuPath="/material/amendment-menu"
+                                canEdit={rights.canEdit}
+                                onEdit={() => openEdit(p)}
+                              />
                             )}
                             {p.status === "Draft" && (
                               <button
@@ -1160,13 +1174,20 @@ export default function ReceivedPaymentPage() {
                             <Printer size={13} />
                           </button>
                         )}
-                        {rights.canEdit && p.status === "Draft" && (
-                          <button
-                            onClick={() => openEdit(p)}
-                            className="p-1.5 text-muted-foreground/50 hover:text-blue-500"
-                          >
-                            <Pencil size={13} />
-                          </button>
+                        {(p.status === "Draft" || p.status === "Approved") && (
+                          <EditOrAmendButton
+                            refDocType="ReceivedPayment"
+                            refDocId={p.id}
+                            docStatus={p.status}
+                            docNo={p.docNo}
+                            projectName={p.projectName}
+                            companyName={p.companyName}
+                            totalAmount={p.amount}
+                            amendTab="RECEIVED_PAYMENT"
+                            amendMenuPath="/material/amendment-menu"
+                            canEdit={rights.canEdit}
+                            onEdit={() => openEdit(p)}
+                          />
                         )}
                         {p.status === "Draft" && (
                           <button
@@ -1875,6 +1896,9 @@ export default function ReceivedPaymentPage() {
 
             {/* Footer */}
             <div className="px-5 py-3 border-t border-border bg-muted/10 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {viewingAmendmentStatus.isAmended && <AmendedBadge />}
+              </div>
               <p className="text-[10px] text-muted-foreground">
                 Created{" "}
                 {viewingPayment.createdAt
@@ -1917,6 +1941,22 @@ export default function ReceivedPaymentPage() {
                     <SendHorizontal size={12} /> Submit
                   </button>
                 </div>
+              )}
+              {viewingPayment.status === "Approved" && rights.canEdit && (
+                <EditOrAmendButton
+                  refDocType="ReceivedPayment"
+                  refDocId={viewingPayment.id}
+                  docStatus={viewingPayment.status}
+                  docNo={viewingPayment.docNo}
+                  projectName={viewingPayment.projectName}
+                  companyName={viewingPayment.companyName}
+                  totalAmount={viewingPayment.amount}
+                  amendTab="RECEIVED_PAYMENT"
+                  amendMenuPath="/material/amendment-menu"
+                  canEdit={rights.canEdit}
+                  size="sm"
+                  onEdit={() => {}}
+                />
               )}
             </div>
           </div>

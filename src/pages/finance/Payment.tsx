@@ -27,6 +27,7 @@ import { toast } from "sonner";
 import { formatINR } from "@/utils/formatCurrency";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { EditOrAmendButton } from "@/components/EditOrAmendButton";
 import {
   Banknote,
   CheckCircle2,
@@ -4407,14 +4408,19 @@ const Payment: React.FC = () => {
                           >
                             <Eye size={12} />
                           </button>
-                          {rights.canEdit && (
-                            <button
-                              onClick={() => openEdit(rec)}
-                              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                            >
-                              <Edit size={12} />
-                            </button>
-                          )}
+                          <EditOrAmendButton
+                            refDocType="Payment"
+                            refDocId={rec.id}
+                            docStatus={rec.status}
+                            docNo={rec.docNo}
+                            projectName={rec.project}
+                            companyName={rec.company}
+                            totalAmount={rec.amount}
+                            amendTab="PAYMENT"
+                            amendMenuPath="/material/amendment-menu"
+                            canEdit={rights.canEdit}
+                            onEdit={() => openEdit(rec)}
+                          />
                           {rights.canDelete && (
                             <button
                               onClick={() => setDeleteId(rec.id)}
@@ -4588,14 +4594,19 @@ const Payment: React.FC = () => {
                               >
                                 <Eye size={12} />
                               </button>
-                              {rights.canEdit && (
-                                <button
-                                  onClick={() => openEdit(rec)}
-                                  className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                                >
-                                  <Edit size={12} />
-                                </button>
-                              )}
+                              <EditOrAmendButton
+                                refDocType="Payment"
+                                refDocId={rec.id}
+                                docStatus={rec.status}
+                                docNo={rec.docNo}
+                                projectName={rec.project}
+                                companyName={rec.company}
+                                totalAmount={rec.amount}
+                                amendTab="PAYMENT"
+                                amendMenuPath="/material/amendment-menu"
+                                canEdit={rights.canEdit}
+                                onEdit={() => openEdit(rec)}
+                              />
                               {rights.canDelete && (
                                 <button
                                   onClick={() => setDeleteId(rec.id)}
@@ -5451,18 +5462,24 @@ const Payment: React.FC = () => {
                   <Printer size={12} /> Print / PDF
                 </button>
               )}
-              {rights.canEdit && (
-                <button
-                  onClick={() => {
-                    setViewingRec(null);
-                    setViewingChain(null);
-                    openEdit(viewingRec);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
-                >
-                  <Edit size={12} /> Edit
-                </button>
-              )}
+              <EditOrAmendButton
+                refDocType="Payment"
+                refDocId={viewingRec.id}
+                docStatus={viewingRec.status}
+                docNo={viewingRec.docNo}
+                projectName={viewingRec.project}
+                companyName={viewingRec.company}
+                totalAmount={viewingRec.amount}
+                amendTab="PAYMENT"
+                amendMenuPath="/material/amendment-menu"
+                canEdit={rights.canEdit}
+                size="sm"
+                onEdit={() => {
+                  setViewingRec(null);
+                  setViewingChain(null);
+                  openEdit(viewingRec);
+                }}
+              />
               <button
                 onClick={() => {
                   setViewingRec(null);

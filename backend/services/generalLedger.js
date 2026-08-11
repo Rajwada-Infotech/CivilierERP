@@ -549,7 +549,18 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   // of TDS) + TDS Payable; every debit-side branch below (Expense Head
   // allocations, standalone advance, or a normal supplier payment) keeps
   // debiting its full, un-reduced amount — only the credit legs change.
-  const tdsAmount = Number(payment.TDSAmount) || 0;
+  //
+  // Invoice-linked payments (PExpenseRef set) are the one exception: TDS
+  // was already carved out as its own liability leg when the INVOICE
+  // itself was posted (see routes/expenseBooking.js post-to-gl). The
+  // payment's own TDSAmount here is only an inherited display/eligibility
+  // snapshot (tds.js's resolveInvoiceLinkedTds — "Section 8, read-only
+  // inheritance, not re-selected") — applying it to the payment's own GL
+  // split too would post a SECOND TDS Payable credit for the same amount,
+  // double-counting the liability. Only a standalone/contract payment
+  // (no linked invoice, TDS never deducted anywhere else yet) should
+  // actually split TDS out of its own posting.
+  const tdsAmount = payment.PExpenseRef ? 0 : Number(payment.TDSAmount) || 0;
   if (tdsAmount > amount) {
     return { posted: false, reason: `Payment ${paymentId}: TDS amount (₹${tdsAmount}) exceeds the payment amount (₹${amount}) — data issue, re-save the payment.` };
   }

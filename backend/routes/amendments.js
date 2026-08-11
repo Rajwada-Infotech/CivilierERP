@@ -194,6 +194,7 @@ router.get("/", async (req, res) => {
     const search = normalizeText(req.query.search);
     const status = normalizeText(req.query.status);
     const refDocType = normalizeText(req.query.refDocType);
+    const refDocId = normalizeNumber(req.query.refDocId);
 
     const filters = ["IsDeleted = 0"];
     if (search) {
@@ -208,6 +209,7 @@ router.get("/", async (req, res) => {
     }
     if (status) filters.push("Status = @Status");
     if (refDocType) filters.push("RefDocType = @RefDocType");
+    if (!Number.isNaN(refDocId)) filters.push("RefDocId = @RefDocId");
 
     const whereClause = `WHERE ${filters.join(" AND ")}`;
     const pool = getPool();
@@ -219,6 +221,7 @@ router.get("/", async (req, res) => {
       if (refDocType) {
         request.input("RefDocType", sql.NVarChar(100), refDocType);
       }
+      if (!Number.isNaN(refDocId)) request.input("RefDocId", sql.Int, refDocId);
       return request;
     };
 

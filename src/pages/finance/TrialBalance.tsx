@@ -7,6 +7,10 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
+import { ExpenseBookingPreviewModal } from "@/pages/material/ExpenseBookingPreviewModal";
+import { dbToRecord } from "@/pages/material/ExpenseBooking/helpers";
+import type { ExpenseRecord } from "@/pages/material/ExpenseBooking/types";
+import { API as EXPENSE_BOOKING_API, apiFetch as ebApiFetch } from "@/pages/material/ExpenseBooking/apiFetch";
 import {
   Dialog,
   DialogContent,
@@ -454,13 +458,18 @@ function TBRow({
                       const badge = st === "newpayment"      ? { label: "Payment",    cls: "bg-blue-500/10 text-blue-500" }
                                   : st === "receivedpayment" ? { label: "Received",   cls: "bg-emerald-500/10 text-emerald-600" }
                                   : st === "expensebooking"  ? { label: "Expense Bkg",cls: "bg-amber-500/10 text-amber-600" }
-                                  : st === "grn"             ? { label: "GRN",        cls: "bg-violet-500/10 text-violet-500" }
+                                  : st === "invoiceposting"  ? { label: "Invoice",    cls: "bg-amber-500/10 text-amber-600" }
+                                  : st === "grn" || st === "grnposting" ? { label: "GRN", cls: "bg-violet-500/10 text-violet-500" }
                                   : st === "journalvoucher"  ? { label: "JV",         cls: "bg-rose-500/10 text-rose-500" }
                                   : { label: t.sourceType ?? "Entry", cls: "bg-muted text-muted-foreground" };
 
                       const ref = (t as any).sourceRef as { id: number; docNo: string; type: string } | null;
                       const displayDoc = (t as any).docNo || t.voucherNo || (ref?.docNo) || "—";
-                      const isClickable = st === "newpayment" && t.payment;
+                      // Every row with a resolvable source (a linked
+                      // payment, or a sourceId the switch in openSourceEntry
+                      // knows how to open) drills through — not just
+                      // payments.
+                      const isClickable = (st === "newpayment" && !!t.payment) || !!t.sourceId;
 
                       return (
                         <tr
@@ -784,6 +793,11 @@ export default function TrialBalance() {
   const [payDetail, setPayDetail] = useState<Record<string, any> | null>(null);
   const [payDetailLoading, setPayDetailLoading] = useState(false);
 
+  // ── Level 3: invoice / expense booking preview (same popup used on the
+  // Expense Booking page itself) ───────────────────────────────────────────
+  const [ebPreview, setEbPreview] = useState<ExpenseRecord | null>(null);
+  const [ebPreviewLoading, setEbPreviewLoading] = useState(false);
+
   // ── Cost Centre view — replaces the account tree when a cost centre is
   // selected, showing individual PO/GRN/Invoice postings instead of an
   // account-group rollup ────────────────────────────────────────────────────
@@ -975,20 +989,44 @@ export default function TrialBalance() {
       return;
     }
 
-    // Other source types — navigate to the relevant page
     if (!t.sourceId) return;
+
+    // Invoice / Expense Booking: fetch full detail and show the same
+    // popup-style preview card used on the Expense Booking page itself,
+    // instead of navigating away.
+    if (srcType === "EXPENSEBOOKING" || srcType === "INVOICEPOSTING") {
+      setEbPreview(null);
+      setEbPreviewLoading(true);
+      try {
+        const row = await ebApiFetch(`${EXPENSE_BOOKING_API}/${t.sourceId}`);
+        setEbPreview(dbToRecord(row));
+      } catch {
+        // leave ebPreview null — modal simply won't open
+      } finally {
+        setEbPreviewLoading(false);
+      }
+      return;
+    }
+
+    // Other source types — navigate to the relevant page. srcType here is
+    // t.sourceType.toUpperCase() straight from GeneralLedgerEntry.SourceType
+    // (see backend/routes/trialBalance.js), e.g. "ReceivedPayment",
+    // "JournalVoucher", "GRNPosting" — match those exactly, not underscored
+    // guesses that never fired.
     switch (srcType) {
-      case "RECEIVED_PAYMENT":
+      case "RECEIVEDPAYMENT":
       case "RECEIPT":
         navigate(`/received-payments?view=${t.sourceId}`); break;
       case "PURCHASE_ORDER":
       case "PO":
         navigate(`/purchase-orders?view=${t.sourceId}`); break;
       case "GRN":
+      case "GRNPOSTING":
         navigate(`/material/grn?view=${t.sourceId}`); break;
       case "JOURNAL":
       case "JV":
-        navigate(`/journal?view=${t.sourceId}`); break;
+      case "JOURNALVOUCHER":
+        navigate(`/journal-voucher?view=${t.sourceId}`); break;
       default:
         break;
     }
@@ -1765,6 +1803,23 @@ export default function TrialBalance() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {/* ── Level 3: invoice / expense booking preview popup ─────────────── */}
+      <Dialog open={ebPreviewLoading} onOpenChange={() => {}}>
+        <DialogContent className="max-w-xs">
+          <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground text-xs">
+            <Loader2 size={14} className="animate-spin" /> Loading invoice…
+          </div>
+        </DialogContent>
+      </Dialog>
+      <ExpenseBookingPreviewModal
+        previewRecord={ebPreview}
+        onClose={() => setEbPreview(null)}
+        onEdit={() => {
+          if (ebPreview) navigate(`/material/expense-booking?view=${ebPreview.id}`);
+          setEbPreview(null);
+        }}
+      />
 
       {/* ── Drill-down dialog — Level 2: entity transactions, Level 3: open receipt ── */}
 
