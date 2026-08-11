@@ -4326,8 +4326,13 @@ const Payment: React.FC = () => {
 
             {!isLoading && !isError && (
               <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-                {/* Mobile cards */}
-                <div className="sm:hidden divide-y divide-border">
+                {/* Mobile cards — the desktop table switches over at lg
+                    (1024px), not sm (640px): six columns (Payment Purpose,
+                    Doc No, Expense Ref, Amount, Status, Actions) genuinely
+                    don't fit in the 640-1024px range, where the header row
+                    used to render as an illegible squeeze (e.g. "Amount"
+                    and "Status" crowding together with no visible gap). */}
+                <div className="lg:hidden divide-y divide-border">
                   {records.length === 0 && (
                     <div className="text-center py-14 text-muted-foreground text-sm">
                       <AlertCircle
@@ -4435,8 +4440,9 @@ const Payment: React.FC = () => {
                   ))}
                 </div>
 
-                {/* Desktop table — compact, no horizontal scroll */}
-                <div className="hidden sm:block">
+                {/* Desktop table — compact, no horizontal scroll. Matches
+                    the lg breakpoint on the mobile-cards wrapper above. */}
+                <div className="hidden lg:block">
                   <table className="w-full text-sm table-fixed">
                     <thead>
                       <tr className="bg-muted/30 border-b border-border">
@@ -5095,7 +5101,13 @@ const Payment: React.FC = () => {
                       : paymentChainData?.invoice?.GrnTotalAmount
                         ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount))
                         : 0;
-                    const displayNet = grnTotal > 0 ? grnTotal : viewingChain.netAmount;
+                    const grossNet = grnTotal > 0 ? grnTotal : viewingChain.netAmount;
+                    // TDS is withheld at source, never paid to the supplier through
+                    // NewPayment — so the amount actually still owed in cash is the
+                    // invoice's net (GST-inclusive, untouched) minus TDS, not the raw
+                    // invoice net itself. GST/netAmount math above is unaffected.
+                    const displayTds = viewingChain.tdsAmount ?? 0;
+                    const displayNet = Math.max(0, grossNet - displayTds);
                     // Exclude bounce charges — they're bank fees, not supplier payments
                     const chainStatus = computePaymentStatus(displayNet, paymentChainData?.payments);
                     const displayTotalPaid = paymentChainData?.payments?.length
@@ -5113,6 +5125,19 @@ const Payment: React.FC = () => {
                           {formatINR(displayNet)}
                         </p>
                       </div>
+                      {displayTds > 0 && (
+                        <>
+                          <div className="w-px h-6 bg-border" />
+                          <div className="flex-1 text-center">
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                              TDS
+                            </p>
+                            <p className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">
+                              {formatINR(displayTds)}
+                            </p>
+                          </div>
+                        </>
+                      )}
                       <div className="w-px h-6 bg-border" />
                       <div className="flex-1 text-center">
                         <p className="text-[9px] text-muted-foreground uppercase tracking-wider">

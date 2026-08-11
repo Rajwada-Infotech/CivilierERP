@@ -162,6 +162,7 @@ export function RecordCard({
               amendMenuPath="/material/amendment-menu"
               canEdit={canEdit}
               onEdit={onEdit}
+              reuseEditForm
             />
             {canDelete && (
               <button

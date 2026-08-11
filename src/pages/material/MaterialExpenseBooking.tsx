@@ -1016,20 +1016,41 @@ export default function MaterialExpenseBooking() {
     setView("form");
   };
 
-  const openAmend = (rec: ExpenseRecord) => {
-    navigate("/material/amendment-menu", {
-      state: {
-        prefill: {
-          tab: "EB",
-          docId: rec.id ?? "",
-          docNo: rec.bookingReference ?? "",
-          supplierName: rec.supplier ?? "",
-          projectName: rec.projectName ?? "",
-          companyName: rec.companyName ?? "",
-          totalAmount: rec.netAmount ?? rec.basicAmount ?? 0,
-        },
-      },
-    });
+  // Single entry point for both "Edit" (Draft/Rejected) and "Amend"
+  // (Approved) — same form either way. The backend PUT /:id route itself
+  // decides which one this actually is: a Draft/Rejected booking updates
+  // directly, an Approved one gets routed into a Pending amendment instead
+  // (see routes/expenseBooking.js, isAmendmentFlow). This replaces the old
+  // openAmend(), which always deep-linked into the separate free-text
+  // Amendment popup regardless of the record's real status.
+  const openEditForm = async (rec: ExpenseRecord) => {
+    if (!rec.id) return;
+    setPreviewRecord(null);
+    _mastersCache.grn = null;
+    fetchMasters();
+    try {
+      const row = await apiFetch(`${API}/${rec.id}`);
+      const loaded = dbToRecord(row);
+      setForm(loaded);
+      // selectedDoc is normally only populated by picking a document in the
+      // panel above (applyDoc) — on edit-load nothing sets it, so isDirect/
+      // isGRN/isPOorWO all silently misclassify and every block gated on
+      // `selectedDoc?.kind === "TOD"` (the TDS field, Direct Items, Expense
+      // Head allocation) vanishes even for a plain Direct/TOD booking. Only
+      // reconstruct it for TOD here — GRN/PO/WORK_DONE edits don't drive any
+      // of those TOD-only blocks and aren't part of this fix.
+      setSelectedDoc(
+        loaded.eSourceType === "TOD"
+          ? { kind: "TOD", docNo: loaded.bookingReference || "", sourceId: loaded.eSourceId ?? 0 }
+          : null,
+      );
+      setEditingId(String(rec.id));
+      setView("form");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to load booking for editing.",
+      );
+    }
   };
 
   const requestDelete = async (id: string) => {
@@ -1226,7 +1247,7 @@ export default function MaterialExpenseBooking() {
     try {
       if (isEditing) {
         if (!editingId) throw new Error("Missing booking id for update.");
-        await apiFetch(
+        const updateResult = await apiFetch(
           `${API}/${editingId}`,
           {
             method: "PUT",
@@ -1234,7 +1255,20 @@ export default function MaterialExpenseBooking() {
           },
           30000,
         );
-        toast.success("Expense booking updated.");
+        // Editing an already-Approved invoice doesn't update it directly —
+        // the backend routes it into a Pending amendment instead (see
+        // routes/expenseBooking.js PUT /:id, isAmendmentFlow) and responds
+        // 202 rather than the normal 200. Same edit form either way; only
+        // the outcome message differs.
+        if (updateResult?.pending) {
+          toast.success(
+            updateResult.message ||
+              "This invoice is already approved — your changes were submitted as a pending amendment awaiting approval.",
+            { duration: 7000 },
+          );
+        } else {
+          toast.success("Expense booking updated.");
+        }
         setSaved(true);
         await fetchRecords(page);
         fetchBookedSources();
@@ -1491,7 +1525,7 @@ export default function MaterialExpenseBooking() {
         icon={Receipt}
         action={
           view === "list" ? (
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
               <ExportMenu
                 data={filteredRecords as unknown as Record<string, unknown>[]}
@@ -1863,6 +1897,20 @@ export default function MaterialExpenseBooking() {
                 <>
                   <div className="space-y-3">
                     <SectionHeader label="Document Selection" />
+                    {isEditing ? (
+                      <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border bg-muted/30 text-xs">
+                        <span className="text-muted-foreground shrink-0">Source Document</span>
+                        <span className="font-mono font-semibold text-foreground">
+                          {form.eSourceType && form.eSourceType !== "TOD"
+                            ? form.sourceDocNo || `${form.eSourceType}-${form.poId ?? ""}`
+                            : "Direct Entry"}
+                        </span>
+                        <span className="ml-auto text-[10px] text-muted-foreground italic">
+                          Locked — the source document can't be changed once a booking exists.
+                        </span>
+                      </div>
+                    ) : (
+                      <>
                     <p className="text-[11px] text-muted-foreground -mt-1">
                       Pick a Purchase Order, confirmed Work Done entry, or GRN
                       to auto-fill booking details, or choose a document type
@@ -1942,6 +1990,8 @@ export default function MaterialExpenseBooking() {
                           </span>
                         </div>
                       )}
+                      </>
+                    )}
 
                     <Field
                       label="Booking Reference"
@@ -2456,7 +2506,7 @@ export default function MaterialExpenseBooking() {
                               : `booking-card-${index}`
                           }
                           rec={rec}
-                          onEdit={() => openAmend(rec)}
+                          onEdit={() => openEditForm(rec)}
                           onPreview={() => openPreview(rec)}
                           onDelete={() => requestDelete(rec.id)}
                           onApprovalSuccess={fetchRecords}
@@ -2787,7 +2837,7 @@ export default function MaterialExpenseBooking() {
         <ExpenseBookingPreviewModal
           previewRecord={previewRecord}
           onClose={() => setPreviewRecord(null)}
-          onEdit={(record) => openAmend(record)}
+          onEdit={(record) => openEditForm(record)}
         />
 
         {/* Remaining GRN Items — auto-created silently on save */}

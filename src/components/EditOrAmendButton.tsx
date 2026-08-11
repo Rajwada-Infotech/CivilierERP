@@ -28,6 +28,13 @@ interface Props {
   showBadge?: boolean;
   className?: string;
   size?: "sm" | "icon";
+  /** Document types migrated onto the propose→approve→apply amendment
+   *  engine (see routes/amendments.js proposeAmendment) don't need a
+   *  separate free-text popup — "Amend" just opens the same edit form as
+   *  `onEdit`, and that form's own save handler detects the Approved
+   *  status and submits a pending amendment instead of updating directly.
+   *  Doc types not yet migrated keep deep-linking into `amendMenuPath`. */
+  reuseEditForm?: boolean;
 }
 
 /**
@@ -51,25 +58,28 @@ export function EditOrAmendButton({
   showBadge = true,
   className,
   size = "icon",
+  reuseEditForm = false,
 }: Props) {
   const navigate = useNavigate();
   const amendmentStatus = useAmendmentStatus(refDocType, refDocId, docStatus);
 
   if (!canEdit) return null;
 
-  const goToAmend = () =>
-    navigate(amendMenuPath, {
-      state: {
-        prefill: {
-          tab: amendTab,
-          docId: refDocId,
-          docNo: docNo ?? "",
-          projectName: projectName ?? "",
-          companyName: companyName ?? "",
-          totalAmount: totalAmount ?? undefined,
-        },
-      },
-    });
+  const goToAmend = reuseEditForm
+    ? onEdit
+    : () =>
+        navigate(amendMenuPath, {
+          state: {
+            prefill: {
+              tab: amendTab,
+              docId: refDocId,
+              docNo: docNo ?? "",
+              projectName: projectName ?? "",
+              companyName: companyName ?? "",
+              totalAmount: totalAmount ?? undefined,
+            },
+          },
+        });
 
   if (amendmentStatus.isApproved) {
     return (

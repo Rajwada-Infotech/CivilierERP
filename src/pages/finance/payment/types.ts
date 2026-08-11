@@ -223,6 +223,11 @@ export interface ChainSummary {
   status: string | null;
   billStatus: string | null;
   netAmount: number;
+  /** TDS withheld at source on this invoice (0 when not applicable) —
+   * deducted from netAmount before computing what's actually still payable. */
+  tdsAmount: number;
+  /** netAmount − tdsAmount, floored at 0 — what's actually payable in cash. */
+  payableAfterTds: number;
   totalPaid: number;
   remaining: number;
   payments: {
