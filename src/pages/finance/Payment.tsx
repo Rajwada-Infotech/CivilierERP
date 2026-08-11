@@ -4326,8 +4326,13 @@ const Payment: React.FC = () => {
 
             {!isLoading && !isError && (
               <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-                {/* Mobile cards */}
-                <div className="sm:hidden divide-y divide-border">
+                {/* Mobile cards — the desktop table switches over at lg
+                    (1024px), not sm (640px): six columns (Payment Purpose,
+                    Doc No, Expense Ref, Amount, Status, Actions) genuinely
+                    don't fit in the 640-1024px range, where the header row
+                    used to render as an illegible squeeze (e.g. "Amount"
+                    and "Status" crowding together with no visible gap). */}
+                <div className="lg:hidden divide-y divide-border">
                   {records.length === 0 && (
                     <div className="text-center py-14 text-muted-foreground text-sm">
                       <AlertCircle
@@ -4435,8 +4440,9 @@ const Payment: React.FC = () => {
                   ))}
                 </div>
 
-                {/* Desktop table — compact, no horizontal scroll */}
-                <div className="hidden sm:block">
+                {/* Desktop table — compact, no horizontal scroll. Matches
+                    the lg breakpoint on the mobile-cards wrapper above. */}
+                <div className="hidden lg:block">
                   <table className="w-full text-sm table-fixed">
                     <thead>
                       <tr className="bg-muted/30 border-b border-border">
