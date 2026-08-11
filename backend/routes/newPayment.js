@@ -1810,6 +1810,7 @@ router.get("/chain/:expenseRef", async (req, res) => {
         SELECT
           eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType,
           eb.ETotalPaid, eb.ERemainingAmount, eb.EBillStatus,
+          ISNULL(eb.TDSAmount, 0) AS TDSAmount,
           COALESCE(proj.name, eb.EProjectName, '') AS ProjectName,
           eb.EName AS PartyName,
           grn.TotalAmount AS GrnTotalAmount

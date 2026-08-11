@@ -1273,8 +1273,15 @@ const Payment: React.FC = () => {
             return matched?.label || String(detail.ECompanyId ?? "");
           })(),
           // If an override is provided (Pay Remaining flow), always use it.
-          // Otherwise use remainingAmount from the options list (reflects partial payments).
-          // Fall back to full invoice amount if remaining is not available.
+          // Otherwise compute what's actually still payable: gross amount,
+          // minus TDS withheld at source, minus whatever's already been
+          // paid. Computed directly from amount/tdsAmount/totalPaid rather
+          // than trusting selectedOption.remainingAmount (ExpenseBooking.
+          // ERemainingAmount) to already be correct — that column is only
+          // refreshed at invoice approval and on payment changes, so an
+          // invoice whose TDS was added afterward (e.g. via an amendment)
+          // could still have it stuck at the pre-TDS figure.
+          // Fall back to full invoice amount if nothing better is available.
           amount: (() => {
             if (amountOverride != null) return amountOverride;
             const fullAmt = detail.ENetAmount
@@ -1282,11 +1289,11 @@ const Payment: React.FC = () => {
               : (detail as any).EGrnTotalAmount
                 ? parseFloat((detail as any).EGrnTotalAmount)
                 : (detail.EAmount ?? null);
-            const remaining = selectedOption?.remainingAmount;
-            if (remaining != null && remaining > 0 && fullAmt != null && remaining < fullAmt) {
-              return remaining;
-            }
-            return fullAmt;
+            if (fullAmt == null) return fullAmt;
+            const tdsAmt = selectedOption?.tdsAmount ?? 0;
+            const paidSoFar = selectedOption?.totalPaid ?? 0;
+            const trueRemaining = Math.max(0, fullAmt - tdsAmt - paidSoFar);
+            return trueRemaining > 0 ? trueRemaining : fullAmt;
           })(),
           docType: detail.DocTypeName || detail.EDocumentType || "",
           // For GRN: baseAmount = pre-tax base (totalBase), rates from DB.
@@ -1637,13 +1644,16 @@ const Payment: React.FC = () => {
   }, [form.expenseRef]);
 
   // Once chain data loads, derive the live remaining from chain payments (source of truth).
-  // ENetAmount is the net payable (base + GST + adjustments). BounceCharge is excluded
-  // because it's paid to the bank, not the supplier.
+  // ENetAmount is the net payable (base + GST + adjustments), minus TDS
+  // withheld at source (never actually paid to the supplier — see
+  // backend/utils/syncBillStatus.js for the same formula server-side).
+  // BounceCharge is excluded because it's paid to the bank, not the supplier.
   useEffect(() => {
     if (!formChainData || editingId) return;
     const inv = formChainData.invoice;
     if (!inv) return;
-    const fullAmt = parseFloat(String(inv.ENetAmount ?? inv.EAmount ?? 0)) || 0;
+    const grossAmt = parseFloat(String(inv.ENetAmount ?? inv.EAmount ?? 0)) || 0;
+    const fullAmt = Math.max(0, grossAmt - (parseFloat(String(inv.TDSAmount ?? 0)) || 0));
     if (!fullAmt) return;
     const { totalPaid: paidExcludingBounced, remaining: liveRemaining } =
       computePaymentStatus(fullAmt, formChainData.payments);
@@ -2778,14 +2788,23 @@ const Payment: React.FC = () => {
                   Math.abs(grnInclTotal - (opt.amount ?? 0)) > 0.01
                     ? grnInclTotal
                     : (opt.amount ?? 0);
+                // TDS withheld at source is never paid to the supplier — the
+                // amount actually payable in cash is netAmt minus it. Computed
+                // directly from opt.tdsAmount rather than trusting
+                // opt.remainingAmount (ExpenseBooking.ERemainingAmount) to
+                // already reflect it: that column is only refreshed at
+                // approval and on payment changes, so an invoice whose TDS
+                // was added afterward (e.g. via an amendment) can still be
+                // stuck showing its pre-TDS figure.
+                const tdsAmt = opt.tdsAmount ?? 0;
+                const payableAfterTds = Math.max(0, netAmt - tdsAmt);
                 // Use live chain-derived values when available (excludes bounced, subtracts bounce charges).
-                // Fall back to stale DB opt.totalPaid only when chain hasn't loaded yet.
-                const livePaid = formLiveRemaining != null ? Math.max(0, netAmt - formLiveRemaining) : null;
+                // formLiveRemaining is already TDS-net (see the effect that sets it), so
+                // paid-so-far is payableAfterTds minus it, not netAmt minus it.
+                const livePaid = formLiveRemaining != null ? Math.max(0, payableAfterTds - formLiveRemaining) : null;
                 const paid = livePaid ?? opt.totalPaid ?? 0;
-                const remaining = formLiveRemaining ?? (opt.remainingAmount != null
-                  ? opt.remainingAmount
-                  : Math.max(0, netAmt - paid));
-                const bStatus = deriveBillStatus(paid, remaining, netAmt);
+                const remaining = formLiveRemaining ?? Math.max(0, payableAfterTds - paid);
+                const bStatus = deriveBillStatus(paid, remaining, payableAfterTds);
                 return (
                   <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 space-y-2">
                     <div className="flex items-center justify-between">
@@ -2805,7 +2824,12 @@ const Payment: React.FC = () => {
                     <div className="grid grid-cols-3 gap-2">
                       <div className="text-center">
                         <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Invoice Total</p>
-                        <p className="font-mono text-xs font-bold text-foreground">{formatINR(netAmt)}</p>
+                        <p className="font-mono text-xs font-bold text-foreground">{formatINR(payableAfterTds)}</p>
+                        {tdsAmt > 0 && (
+                          <p className="text-[8px] text-amber-600 dark:text-amber-400 mt-0.5">
+                            less {formatINR(tdsAmt)} TDS
+                          </p>
+                        )}
                       </div>
                       <div className="text-center">
                         <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Paid</p>

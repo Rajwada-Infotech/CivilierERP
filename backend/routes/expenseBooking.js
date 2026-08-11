@@ -578,6 +578,10 @@ router.get("/options", async (req, res) => {
           -- terms — preferring it here used to silently understate/overstate
           -- the invoice amount for every billing-terms-adjusted booking.
           ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
+          -- TDS withheld at source (0 when not applicable) — the picker
+          -- and payment form both need this to show "what's actually
+          -- payable" (amount − TDS) instead of the gross invoice amount.
+          ISNULL(eb.TDSAmount, 0)         AS tdsAmount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
           ISNULL(e.name, '')              AS companyName,
           ISNULL(eb.EFinYear, '')         AS financialYear,
@@ -2649,7 +2653,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
                  @PCreatedAt, @PCreatedBy, @Status)
             `);
           const { syncBillStatus } = require("./newPayment");
-          await syncBillStatus(pool, finalDocNo);
+          await syncBillStatus(pool, sql, finalDocNo);
         }
       }
     }
