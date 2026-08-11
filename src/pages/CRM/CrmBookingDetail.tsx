@@ -856,61 +856,33 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
+  // This page generates exactly one invoice type: the Booking Amount
+  // invoice (Milestone #1) — the one thing every booking always has and
+  // that staff need right here the moment it's paid+demanded. Every other
+  // invoice (later milestones, Maintenance, Other, On-Account) now belongs
+  // exclusively to the dedicated CRM Invoices page, which lists and
+  // generates across every booking rather than duplicating that flow here
+  // per-booking. Keeping this page single-purpose avoids the same "two
+  // places do the same thing" trap the checklist/payment-form duplication
+  // bugs earlier in this build all came from.
+  const bookingMilestone = milestoneList.find((m: any) => Number(m.MilestoneNo) === 1);
+  const bookingInvoiceReady = !!bookingMilestone && bookingMilestone.Status === "Paid" && bookingMilestone.DemandStatus !== "Pending"
+    && !(invoices as any[]).some((inv: any) => inv.MilestoneId === bookingMilestone.Id);
+  const canGenerateAnything = bookingInvoiceReady;
+
   const openInvoiceDialog = () => {
-    const todayStr = new Date().toLocaleDateString("en-CA"); // yyyy-mm-dd, matches <input type="date">
-    const defaultType = uninvoicedPaidMilestones.length > 0
-      ? "Milestone"
-      : uninvoicedOnAccountPayments.length > 0
-      ? "OnAccount"
-      : "Milestone";
-    setInvoiceForm({ InvoiceType: defaultType, Amount: "", InvoiceDate: todayStr, Description: "", MilestoneId: "", OnAccountPaymentId: "" });
+    setInvoiceForm({ InvoiceType: "Milestone", Amount: "", InvoiceDate: "", Description: "", MilestoneId: bookingMilestone ? String(bookingMilestone.Id) : "", OnAccountPaymentId: "" });
     setInvoiceDialog(true);
   };
 
-  // Milestones that are fully paid, have had a Demand raised (server-side
-  // gate — no auto-generation anywhere, invoices are demand-gated manual
-  // only), and don't have an invoice yet. Milestone #1 (the Booking
-  // milestone) is no longer excluded — Booking invoices are just as manual
-  // as every other milestone now. This is what keeps the dialog "well
-  // synced" rather than a disconnected freehand entry: amount/date always
-  // come from the milestone's real payment record (enforced again
-  // server-side), never typed by staff.
-  const uninvoicedPaidMilestones = milestoneList.filter(
-    (m: any) => m.Status === "Paid" && m.DemandStatus !== "Pending"
-      && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id)
-  );
-  // On-account deposits (money received in excess of what's currently due,
-  // auto-parked into CrmOnAccountPayment) are just as real as a paid
-  // milestone — they're cash already received and must not sit un-invoiced
-  // either.
-  const uninvoicedOnAccountPayments = (onAccountData?.payments || []).filter(
-    (p: any) => !p.InvoiceId && !(invoices as any[]).some((inv: any) => inv.OnAccountPaymentId === p.Id)
-  );
-  const canGenerateAnything = uninvoicedPaidMilestones.length > 0 || uninvoicedOnAccountPayments.length > 0;
-
   const handleGenerateInvoice = async () => {
-    if (invoiceForm.InvoiceType === "Milestone") {
-      if (!invoiceForm.MilestoneId) { toast.error("Select a milestone"); return; }
-    } else if (invoiceForm.InvoiceType === "OnAccount") {
-      if (!invoiceForm.OnAccountPaymentId) { toast.error("Select an on-account payment"); return; }
-    } else if (!invoiceForm.Amount) {
-      toast.error("Amount is required"); return;
-    }
+    if (!invoiceForm.MilestoneId) { toast.error("Booking milestone not found"); return; }
     setSaving(true);
     try {
-      const body: any = { InvoiceType: invoiceForm.InvoiceType, Description: invoiceForm.Description };
-      if (invoiceForm.InvoiceType === "Milestone") {
-        body.MilestoneId = parseInt(invoiceForm.MilestoneId);
-      } else if (invoiceForm.InvoiceType === "OnAccount") {
-        body.OnAccountPaymentId = parseInt(invoiceForm.OnAccountPaymentId);
-      } else {
-        body.Amount = parseFloat(invoiceForm.Amount);
-        body.InvoiceDate = invoiceForm.InvoiceDate;
-      }
       const res = await fetchWithAuth(`${API}/${bookingId}/invoices`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ InvoiceType: "Milestone", MilestoneId: parseInt(invoiceForm.MilestoneId), Description: invoiceForm.Description }),
       });
       const resData = await res.json();
       if (!res.ok) throw new Error(resData.error);
@@ -921,27 +893,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       toast.error(e.message);
     } finally {
       setSaving(false);
-    }
-  };
-
-  const [generatingOnAccountId, setGeneratingOnAccountId] = useState<number | null>(null);
-  const handleGenerateOnAccountInvoice = async (onAccountPaymentId: number) => {
-    setGeneratingOnAccountId(onAccountPaymentId);
-    try {
-      const res = await fetchWithAuth(`${API}/${bookingId}/invoices`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ InvoiceType: "OnAccount", OnAccountPaymentId: onAccountPaymentId }),
-      });
-      const resData = await res.json();
-      if (!res.ok) throw new Error(resData.error);
-      toast.success(`Invoice ${resData.InvoiceNo} generated — visible to the customer in their portal`);
-      qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-booking-on-account", bookingId] });
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setGeneratingOnAccountId(null);
     }
   };
 
@@ -1385,10 +1336,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 On-Account section above: a milestone that's
                                 fully paid but has no matching invoice yet is
                                 real money sitting un-invoiced. Milestone 1
-                                (Booking) is excluded — it's auto-invoiced on
-                                its own separate path. Read-only here; the
-                                existing "+ Generate Invoice" dialog on the
-                                Payment & Invoice tab already raises it. */}
+                                (Booking) is excluded — that one's generated
+                                from this page's own Payment & Invoice tab;
+                                every later milestone is generated from the
+                                dedicated CRM Invoices page instead. Read-only
+                                here, just a pointer. */}
                             {m.Status === "Paid" && Number(m.MilestoneNo) !== 1
                               && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id) && (
                               <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">
@@ -1520,10 +1472,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   Invoice Generation Pending
                                 </span>
                                 {canEdit && (
-                                  <button onClick={() => handleGenerateOnAccountInvoice(p.Id)} disabled={generatingOnAccountId === p.Id}
-                                    className="px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
-                                    {generatingOnAccountId === p.Id ? "Generating…" : "Generate Invoice"}
-                                  </button>
+                                  <a href="/crm/invoices" className="px-2.5 py-1 text-xs border border-border rounded-md font-medium hover:bg-muted">
+                                    Generate from Invoices page
+                                  </a>
                                 )}
                               </div>
                             )}
@@ -1979,17 +1930,25 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
                 <div className="flex items-center justify-between gap-2 pt-3">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={15} className="text-primary" /> Invoices</h3>
-                  {canEdit && booking.Status !== "Approved" && canGenerateAnything && (
+                  {/* Invoices are manual-only, gated on a milestone's own
+                      Demand — not on whether the booking is still Approved.
+                      That used to hide this button once Approved (a leftover
+                      from the old auto-invoice design, back when Approved
+                      meant "everything already happened automatically"), but
+                      that's backwards now: Approved is exactly when staff
+                      actually need to generate the Booking-amount invoice
+                      and every milestone invoice after it. */}
+                  {canEdit && canGenerateAnything && (
                     <button onClick={openInvoiceDialog}
                       className="px-3 py-1.5 text-xs border border-border rounded-lg font-medium hover:bg-muted">
                       + Generate Invoice
                     </button>
                   )}
                 </div>
-                {booking.Status === "Approved" && (invoices as any[]).length === 0 && (
+                {booking.Status === "Approved" && !canGenerateAnything && (invoices as any[]).length === 0 && (
                   <div className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 font-medium">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-                    Booking confirmed — invoice generation is pending
+                    Booking confirmed — invoice generation is pending a Demand being raised on a milestone
                   </div>
                 )}
                 {(invoices as any[]).length === 0 ? (
@@ -2037,89 +1996,39 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 )}
 
-                {/* Invoice dialog */}
+                {/* Invoice dialog — Booking Amount invoice only, one click.
+                    Every other invoice type lives on the dedicated CRM
+                    Invoices page now. */}
                 {invoiceDialog && (
                   <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setInvoiceDialog(false)}>
                     <div className="bg-background border border-border rounded-xl p-6 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
-                      <h3 className="text-sm font-semibold">Generate Invoice</h3>
+                      <h3 className="text-sm font-semibold">Generate Booking Invoice</h3>
                       {!canGenerateAnything ? (
-                        <div className="space-y-2">
-                          <p className="text-xs text-muted-foreground">
-                            No paid milestone with a raised demand, or on-account payment, is waiting on an invoice right now.
-                            Raise a demand from the Demands page once a milestone is paid, then come back here.
-                          </p>
-                          <div className="flex justify-end pt-1">
-                            <button onClick={() => setInvoiceDialog(false)}
-                              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-                              Close
-                            </button>
-                          </div>
-                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          The Booking Amount milestone isn't paid-and-demanded yet, or already has an invoice.
+                        </p>
                       ) : (
                         <>
-                          <div className="space-y-2">
-                            <select value={invoiceForm.InvoiceType}
-                              onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value, MilestoneId: "", OnAccountPaymentId: "", Amount: "", InvoiceDate: f.InvoiceDate }))}
-                              className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                              {uninvoicedPaidMilestones.length > 0 && <option value="Milestone">Milestone Payment</option>}
-                              {uninvoicedOnAccountPayments.length > 0 && <option value="OnAccount">On-Account Payment</option>}
-                              <option value="Maintenance">Maintenance</option>
-                              <option value="Other">Other</option>
-                            </select>
-                            {invoiceForm.InvoiceType === "Milestone" ? (
-                              <>
-                                <select value={invoiceForm.MilestoneId}
-                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, MilestoneId: e.target.value }))}
-                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                                  <option value="">— Select a paid milestone —</option>
-                                  {uninvoicedPaidMilestones.map((m: any) => (
-                                    <option key={m.Id} value={String(m.Id)}>{m.MilestoneName} — {fmt(m.AmountPaid)}</option>
-                                  ))}
-                                </select>
-                                {uninvoicedPaidMilestones.length === 0 && (
-                                  <p className="text-[11px] text-muted-foreground">No paid milestone is waiting on an invoice right now.</p>
-                                )}
-                                <p className="text-[11px] text-muted-foreground">Amount and date are pulled from the milestone's own payment record — not editable here.</p>
-                              </>
-                            ) : invoiceForm.InvoiceType === "OnAccount" ? (
-                              <>
-                                <select value={invoiceForm.OnAccountPaymentId}
-                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, OnAccountPaymentId: e.target.value }))}
-                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                                  <option value="">-- Select an on-account payment --</option>
-                                  {uninvoicedOnAccountPayments.map((p: any) => (
-                                    <option key={p.Id} value={String(p.Id)}>{p.ReceiptNo} - {fmt(p.Amount)}</option>
-                                  ))}
-                                </select>
-                                <p className="text-[11px] text-muted-foreground">Amount and date are pulled from the on-account receipt - not editable here.</p>
-                              </>
-                            ) : (
-                              <>
-                                <input type="number" placeholder="Amount" value={invoiceForm.Amount}
-                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
-                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                                <input type="date" value={invoiceForm.InvoiceDate}
-                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
-                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                              </>
-                            )}
-                            <input placeholder="Description" value={invoiceForm.Description}
-                              onChange={(e) => setInvoiceForm((f) => ({ ...f, Description: e.target.value }))}
-                              className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                          </div>
-                          <div className="flex justify-end gap-2 pt-1">
-                            <button onClick={() => setInvoiceDialog(false)}
-                              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-                              Cancel
-                            </button>
-                            <button onClick={handleGenerateInvoice}
-                              disabled={saving || (invoiceForm.InvoiceType === "Milestone" && !invoiceForm.MilestoneId) || (invoiceForm.InvoiceType === "OnAccount" && !invoiceForm.OnAccountPaymentId)}
-                              className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                              {saving ? "Generating..." : "Generate"}
-                            </button>
-                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {bookingMilestone.MilestoneName} — {fmt(bookingMilestone.AmountPaid)} paid. Amount and date come from the milestone's own payment record.
+                          </p>
+                          <input placeholder="Description (optional)" value={invoiceForm.Description}
+                            onChange={(e) => setInvoiceForm((f) => ({ ...f, Description: e.target.value }))}
+                            className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                         </>
                       )}
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button onClick={() => setInvoiceDialog(false)}
+                          className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+                          {canGenerateAnything ? "Cancel" : "Close"}
+                        </button>
+                        {canGenerateAnything && (
+                          <button onClick={handleGenerateInvoice} disabled={saving}
+                            className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                            {saving ? "Generating..." : "Generate"}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
