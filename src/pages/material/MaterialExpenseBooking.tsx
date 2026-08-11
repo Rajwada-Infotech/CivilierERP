@@ -1030,7 +1030,20 @@ export default function MaterialExpenseBooking() {
     fetchMasters();
     try {
       const row = await apiFetch(`${API}/${rec.id}`);
-      setForm(dbToRecord(row));
+      const loaded = dbToRecord(row);
+      setForm(loaded);
+      // selectedDoc is normally only populated by picking a document in the
+      // panel above (applyDoc) — on edit-load nothing sets it, so isDirect/
+      // isGRN/isPOorWO all silently misclassify and every block gated on
+      // `selectedDoc?.kind === "TOD"` (the TDS field, Direct Items, Expense
+      // Head allocation) vanishes even for a plain Direct/TOD booking. Only
+      // reconstruct it for TOD here — GRN/PO/WORK_DONE edits don't drive any
+      // of those TOD-only blocks and aren't part of this fix.
+      setSelectedDoc(
+        loaded.eSourceType === "TOD"
+          ? { kind: "TOD", docNo: loaded.bookingReference || "", sourceId: loaded.eSourceId ?? 0 }
+          : null,
+      );
       setEditingId(String(rec.id));
       setView("form");
     } catch (err) {

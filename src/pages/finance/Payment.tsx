@@ -5095,7 +5095,13 @@ const Payment: React.FC = () => {
                       : paymentChainData?.invoice?.GrnTotalAmount
                         ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount))
                         : 0;
-                    const displayNet = grnTotal > 0 ? grnTotal : viewingChain.netAmount;
+                    const grossNet = grnTotal > 0 ? grnTotal : viewingChain.netAmount;
+                    // TDS is withheld at source, never paid to the supplier through
+                    // NewPayment — so the amount actually still owed in cash is the
+                    // invoice's net (GST-inclusive, untouched) minus TDS, not the raw
+                    // invoice net itself. GST/netAmount math above is unaffected.
+                    const displayTds = viewingChain.tdsAmount ?? 0;
+                    const displayNet = Math.max(0, grossNet - displayTds);
                     // Exclude bounce charges — they're bank fees, not supplier payments
                     const chainStatus = computePaymentStatus(displayNet, paymentChainData?.payments);
                     const displayTotalPaid = paymentChainData?.payments?.length
@@ -5113,6 +5119,19 @@ const Payment: React.FC = () => {
                           {formatINR(displayNet)}
                         </p>
                       </div>
+                      {displayTds > 0 && (
+                        <>
+                          <div className="w-px h-6 bg-border" />
+                          <div className="flex-1 text-center">
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                              TDS
+                            </p>
+                            <p className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">
+                              {formatINR(displayTds)}
+                            </p>
+                          </div>
+                        </>
+                      )}
                       <div className="w-px h-6 bg-border" />
                       <div className="flex-1 text-center">
                         <p className="text-[9px] text-muted-foreground uppercase tracking-wider">

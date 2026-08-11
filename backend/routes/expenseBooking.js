@@ -3755,6 +3755,7 @@ router.get("/:id/payment-summary", async (req, res) => {
           eb.ENetAmount, eb.EAmount, eb.ETotalPaid, eb.ERemainingAmount,
           eb.ESourceType, eb.ESourceId, eb.EWorkDoneRef,
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
+          eb.TDSId, eb.TDSNature, eb.TDSName, eb.TDSPercentage, eb.TDSAmount,
           -- GRN info
           grn.GRNNo, grn.GRNID, grn.TotalAmount AS GrnTotalAmount,
           -- PO info via GRN or direct
@@ -3790,6 +3791,12 @@ router.get("/:id/payment-summary", async (req, res) => {
     const netAmount = parseFloat(eb.ENetAmount ?? 0) > 0
       ? parseFloat(eb.ENetAmount)
       : parseFloat(eb.EAmount ?? 0) || 0;
+    // TDS is deducted at source, not paid to the supplier through NewPayment —
+    // so the amount actually still owed in cash is netAmount minus whatever
+    // TDS was withheld, not netAmount itself. GST/netAmount math is untouched
+    // above; this only affects what counts as "payable in cash" below.
+    const tdsAmount = parseFloat(eb.TDSAmount ?? 0) || 0;
+    const payableAfterTds = Math.max(0, Math.round((netAmount - tdsAmount) * 100) / 100);
 
     // Fetch approved payments against this booking, joining BRS to detect bounced cheques
     const payRes = await pool
@@ -3825,7 +3832,11 @@ router.get("/:id/payment-summary", async (req, res) => {
     const totalPaid = payments
       .filter((p) => p.status === 'Approved' && !p.isBounced)
       .reduce((sum, p) => sum + p.amount - p.bounceCharge, 0);
-    const remaining = Math.max(0, Math.round((netAmount - totalPaid) * 100) / 100);
+    // Remaining is measured against what's actually still payable in cash
+    // (net of TDS already withheld), not the gross invoice net amount —
+    // otherwise a fully-settled TDS bill shows a phantom "remaining" equal
+    // to the TDS amount forever.
+    const remaining = Math.max(0, Math.round((payableAfterTds - totalPaid) * 100) / 100);
 
     res.json({
       expenseId: eb.Eid,
@@ -3834,6 +3845,8 @@ router.get("/:id/payment-summary", async (req, res) => {
       billStatus:
         eb.EBillStatus || (payments.length === 0 ? "Payment Due" : null),
       netAmount,
+      tdsAmount,
+      payableAfterTds,
       totalPaid,
       remaining,
       payments,
