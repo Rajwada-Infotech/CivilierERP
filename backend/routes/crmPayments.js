@@ -453,50 +453,6 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
     CrmBookingId: targetRow.BookingId,
     CrmApplicationId: targetRow.ApplicationId,
   }, actorEmail || String(actorUserId));
-
-  // Money Receipt (customer-facing, downloadable PDF, "Pending Approval"
-  // until this same ReceivedPayment is approved) is generated as a direct
-  // byproduct of THIS submission for the Booking Amount (Milestone #1) —
-  // never a separate, re-typed form. One real-world payment, one place it's
-  // entered, one receipt. A rejected/bounced cheque followed by a fresh
-  // submission naturally produces its own new Money Receipt here too — that
-  // IS the "ask for repayment/reissue" flow, no separate bounce mechanism
-  // needed. See getMoneyReceiptStatus in moneyReceiptPdf.js for how its
-  // Pending/Approved/Bounced status is derived live from this RP row rather
-  // than stored independently.
-  if (targetRow.MilestoneNo === 1) {
-    try {
-      const { getNextDocNumber: getNextDocNo } = require("../services/docNumber");
-      const receiptNo = await getNextDocNo(pool, "MR", "MR");
-      const mrResult = await pool.request()
-        .input("no", sql.NVarChar(30), receiptNo)
-        .input("bid", sql.Int, targetRow.BookingId)
-        .input("rpid", sql.Int, rp.RPPaymentID)
-        .input("amt", sql.Decimal(18, 2), amount)
-        .input("mode", sql.NVarChar(30), data.PaymentMode || "Other")
-        .input("chq", sql.NVarChar(50), data.PaymentMode === "Cheque" ? (data.TransactionRef || null) : null)
-        .input("chqDt", sql.Date, data.ChequeDate || null)
-        .input("bank", sql.NVarChar(150), data.DepositBankName || null)
-        .input("ref", sql.NVarChar(150), data.PaymentMode !== "Cheque" ? (data.TransactionRef || null) : null)
-        .input("rcvd", sql.Date, data.ReceivedDate || new Date().toISOString().slice(0, 10))
-        .input("rem", sql.NVarChar(500), data.Notes || null)
-        .input("cb", sql.Int, actorUserId)
-        .query(`
-          INSERT INTO dbo.CrmMoneyReceipt
-            (ReceiptNo, BookingId, ReceivedPaymentId, Amount, PaymentMode, ChequeNo, ChequeDate, BankName, TransactionRef, ReceivedDate, Remarks, Status, CreatedBy, CreatedAt, UpdatedAt)
-          OUTPUT INSERTED.Id
-          VALUES (@no, @bid, @rpid, @amt, @mode, @chq, @chqDt, @bank, @ref, @rcvd, @rem, 'Pending', @cb, SYSDATETIME(), SYSDATETIME())
-        `);
-      const { generateMoneyReceiptPdf } = require("../services/moneyReceiptPdf");
-      await generateMoneyReceiptPdf(pool, mrResult.recordset[0].Id);
-    } catch (mrErr) {
-      // Best-effort, same rule as GL posting/PDF generation elsewhere in this
-      // function — a Money Receipt hiccup must never block the real payment
-      // submission it's documenting.
-      console.error("[crm-payments] Money Receipt auto-generation failed:", mrErr.message);
-    }
-  }
-
   return { submitted: true, ReceivedPaymentId: rp.RPPaymentID, RPDocNo: rp.RPDocNo, bookingId: targetRow.BookingId };
 }
 
@@ -1097,3 +1053,4 @@ module.exports.applyCrmOnAccountPaymentApproval = applyCrmOnAccountPaymentApprov
 module.exports.autoApplyOnAccount = autoApplyOnAccount;
 module.exports.ReceiptError = ReceiptError;
 module.exports.raiseDemandForMilestone = raiseDemandForMilestone;
+

@@ -60,7 +60,9 @@ function decodeLogo(dataUrl) {
 // cheque/instrument — RPRejectionNote becomes the bounce reason shown on
 // the document). The mr.Status column still exists on the row (set once at
 // INSERT) but is never trusted for display; this mapping is authoritative.
-function deriveStatus(rpStatus) {
+function deriveStatus(moneyReceiptStatus, rpStatus) {
+  if (moneyReceiptStatus === "Approved") return "Approved";
+  if (moneyReceiptStatus === "Bounced") return "Bounced";
   if (rpStatus === "Approved") return "Approved";
   if (rpStatus === "Rejected") return "Bounced";
   return "Pending";
@@ -90,7 +92,7 @@ async function fetchMoneyReceiptData(pool, receiptId) {
   `);
   const row = result.recordset[0];
   if (!row) return null;
-  row.Status = deriveStatus(row.RPStatus);
+  row.Status = deriveStatus(row.Status, row.RPStatus);
   if (row.Status === "Bounced") row.BouncedReason = row.RPRejectionNote || row.BouncedReason;
   return row;
 }

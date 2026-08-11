@@ -274,7 +274,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const { data: moneyReceipts = [] } = useQuery({
     queryKey: ["crm-booking-money-receipts", bookingId],
     queryFn: () => fetchMoneyReceipts(bookingId),
-    enabled: tab === "Payment & Invoice",
+    enabled: !!bookingId,
   });
   const { data: onAccountData } = useQuery({
     queryKey: ["crm-booking-on-account", bookingId],
@@ -634,10 +634,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // "Unit confirmed" / "Plan confirmed" are no longer separate booking
   // columns — they ARE the Data Review checklist's own ProjectUnitRate /
   // PaymentPlanAmounts items being Checked. One source of truth for both
-  // the top progress strip below and the Confirm & Book gate.
+  // the top progress strip below and the booking-approval gate.
   const unitConfirmed = checklistItems.find((it: any) => it.ItemKey === "ProjectUnitRate")?.CheckStatus === "Checked";
   const planConfirmed = checklistItems.find((it: any) => it.ItemKey === "PaymentPlanAmounts")?.CheckStatus === "Checked";
-  const mandatoryReady = checklistAllChecked && bookingAmountPaidInFull;
+  const mandatoryReady = checklistAllChecked;
   // Which specific gating step to point staff at, in the order they must be
   // completed — replaces the old generic "complete the checklist" message
   // with the actual step name and where to go do it, since the gates live
@@ -648,8 +648,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     ? { tab: "Payment Plan" as Tab, text: "Step 2 (Payment Plan) is pending — check the Payment Plan item on the Payment Plan tab." }
     : !checklistAllChecked
     ? { tab: "Booking" as Tab, text: "The Data Review checklist still has unchecked items." }
-    : !bookingAmountPaidInFull
-    ? { tab: "Payment & Invoice" as Tab, text: "Step 3 (Booking Amount Paid) is pending — the Booking Amount must be fully paid on the Payment & Invoice tab." }
     : null;
 
   const goStep = (dir: 1 | -1) => {
@@ -664,9 +662,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [rejectRemark, setRejectRemark] = useState("");
   const currentStage = booking?.WorkflowStage || stageState?.WorkflowStage || "Review";
   const stageLabels: Record<string, string> = {
-    Review: "Application Review",
-    MarketingHeadApproval: "Marketing Head Approval",
-    DirectorApproval: "Director Approval",
+    Review: "Data Review",
+    MarketingHeadApproval: "Marketing Head Approval (L1)",
+    DirectorApproval: "Director Approval (L2 — Final)",
     Confirmed: "Confirmed",
   };
   const userRole = String(currentUser?.role || "").toLowerCase();
@@ -749,11 +747,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       toast.error("Complete the data review checklist before booking approval.");
       return;
     }
-    if (!mandatoryReady) {
-      toast.error("Complete unit review, payment plan review, and booking amount payment before booking approval.");
-      setTab("Payment & Invoice");
-      return;
-    }
     if (booking.Status === "Approved") {
       toast.success("Booking is already approved");
       return;
@@ -763,7 +756,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const res = await fetchWithAuth(`${API}/${bookingId}/ready-for-approval`, { method: "PUT" });
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Failed to mark ready for approval");
-      toast.success(`Application review completed - sent to ${resData.label || "Marketing Head Approval"}`);
+      toast.success(`Data review complete — sent to ${resData.label || "Marketing Head Approval"}`);
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
     } catch (e: any) {
@@ -803,25 +796,31 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   };
 
   const handleRecordPayment = async () => {
-    if (!firstMilestone?.Id) { toast.error("Set the Booking Amount first"); return; }
     if (!payForm.Amount || parseFloat(payForm.Amount) <= 0) { toast.error("Enter a valid amount"); return; }
     setPaySaving(true);
     try {
       const bankName = payForm.DepositBankId
         ? (bankOptions as any[]).find((b: any) => String(b.BId) === payForm.DepositBankId)?.BName
         : undefined;
-      const res = await fetchWithAuth(`${PAY_API}/${firstMilestone.Id}/receipts`, {
+      const res = await fetchWithAuth(`/api/crm/money-receipts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payForm, DepositBankName: bankName }),
+        body: JSON.stringify({
+          BookingId: bookingId,
+          Amount: payForm.Amount,
+          PaymentMode: payForm.PaymentMode,
+          ReceivedDate: payForm.ReceivedDate,
+          TransactionRef: payForm.TransactionRef,
+          ChequeDate: payForm.ChequeDate,
+          DepositBankName: bankName,
+        }),
       });
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Submission failed");
-      toast.success(`Submitted for Finance approval${resData.RPDocNo ? ` — ${resData.RPDocNo}` : ""}. It won't count as paid until Account's Head approves it.`);
+      toast.success(`Money Receipt ${resData.ReceiptNo || ""} created — Pending approval.`);
       setPayForm({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-milestones", String(bookingId)] });
-      qc.invalidateQueries({ queryKey: ["crm-booking-on-account", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", bookingId] });
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -1057,18 +1056,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 )}
               </div>
-              {canActOnStage && (
-                <div className="flex items-center gap-2 shrink-0">
-                  <button onClick={handleStageApprove} disabled={stageActioning !== null}
-                    className="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40">
-                    {stageActioning === "approve" ? "Approving..." : "Approve"}
-                  </button>
-                  <button onClick={() => setRejectOpen(true)} disabled={stageActioning !== null}
-                    className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">
-                    Reject
-                  </button>
-                </div>
-              )}
             </div>
 
             {rejectOpen && (
@@ -1092,34 +1079,52 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               </div>
             )}
 
-            {/* 3-step required flow, always visible regardless of which tab
-                is open — the flat tab bar alone doesn't show that Booking,
-                Payment Plan, and Payment are the only 3 gating steps for
-                the Book action; everything else (Parking & Extra Work,
-                Bank Details, Attachments, Invoice) is supporting detail,
-                not part of the approval path. */}
-            {booking.Status !== "Approved" && (
-              <div className="flex items-center gap-1.5 px-1 py-2 text-xs overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {[
-                  { label: "1. Unit & Value", done: unitConfirmed, t: "Booking" as Tab },
-                  { label: "2. Payment Plan", done: planConfirmed, t: "Payment Plan" as Tab },
-                  { label: "3. Booking Amount Paid", done: bookingAmountPaidInFull, t: "Payment & Invoice" as Tab },
-                ].map((s, i) => (
-                  <React.Fragment key={s.label}>
-                    <button onClick={() => setTab(s.t)}
-                      className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium shrink-0 ${
-                        s.done ? "text-emerald-700 bg-emerald-50" : tab === s.t ? "text-primary bg-primary/10" : "text-muted-foreground bg-muted/40"
-                      }`}>
-                      {s.done && <Check size={11} />} {s.label}
-                    </button>
-                    {i < 2 && <ArrowRight size={11} className="text-muted-foreground shrink-0" />}
-                  </React.Fragment>
-                ))}
-                <span className="ml-4 shrink-0 whitespace-nowrap text-muted-foreground">
-                  {mandatoryReady ? "All 3 steps complete — ready to Confirm & Book" : "Complete all 3 to unlock Confirm & Book"}
-                </span>
-              </div>
-            )}
+            {/* 2-step required flow (Unit & Value, Payment Plan — both are
+                Data Review checklist items) plus a 3rd, INFORMATIONAL-ONLY
+                Money Receipt status chip. Money Receipt does not gate
+                the Verify/L1/L2 approval flow — that's the whole point of the
+                decoupled design — but it was invisible from this header
+                before, so staff had no way to tell it existed without
+                clicking into the Payment & Invoice tab. This chip answers
+                "where is the payment record" directly from the summary. */}
+            {booking.Status !== "Approved" && (() => {
+              const latestReceipt = (moneyReceipts as any[])[0];
+              const mrStatus: string = latestReceipt?.Status
+                || (currentStage !== "Review" ? "Not created yet" : "Available once submitted for approval");
+              const mrChipClass = latestReceipt?.Status === "Approved"
+                ? "text-emerald-700 bg-emerald-50"
+                : latestReceipt?.Status === "Bounced"
+                ? "text-red-700 bg-red-50"
+                : latestReceipt?.Status === "Pending"
+                ? "text-amber-700 bg-amber-50"
+                : "text-muted-foreground bg-muted/40";
+              return (
+                <div className="flex items-center gap-1.5 px-1 py-2 text-xs overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {[
+                    { label: "1. Unit & Value", done: unitConfirmed, t: "Booking" as Tab },
+                    { label: "2. Payment Plan", done: planConfirmed, t: "Payment Plan" as Tab },
+                  ].map((s, i) => (
+                    <React.Fragment key={s.label}>
+                      <button onClick={() => setTab(s.t)}
+                        className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium shrink-0 ${
+                          s.done ? "text-emerald-700 bg-emerald-50" : tab === s.t ? "text-primary bg-primary/10" : "text-muted-foreground bg-muted/40"
+                        }`}>
+                        {s.done && <Check size={11} />} {s.label}
+                      </button>
+                      <ArrowRight size={11} className="text-muted-foreground shrink-0" />
+                    </React.Fragment>
+                  ))}
+                  <button onClick={() => setTab("Payment & Invoice")}
+                    title="Not required to book — informational only"
+                    className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium shrink-0 ${mrChipClass}`}>
+                    {latestReceipt?.Status === "Approved" && <Check size={11} />} 3. Money Receipt: {mrStatus}
+                  </button>
+                  <span className="ml-4 shrink-0 whitespace-nowrap text-muted-foreground">
+                    {mandatoryReady ? "Both required steps complete — ready to submit" : "Complete both required steps to submit"}
+                  </span>
+                </div>
+              );
+            })()}
 
             {/* Overall Data Review progress — a small at-a-glance readout;
                 each item's actual tick/flag/remarks controls now live in
@@ -1529,11 +1534,26 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 )}
 
+                {/* Legacy fallback ONLY — Money Receipt (create -> approve) is
+                    the real path for the Booking Amount now, auto-created
+                    the moment the booking is actually submitted for approval
+                    (Confirm & Book), not merely once the checklist is
+                    complete — see PUT /:id/ready-for-approval. This must
+                    never show before that submission (the server-side gate
+                    would reject it anyway), or a booking still sitting at
+                    Review could get a payment submitted with no
+                    CrmMoneyReceipt attached, and the auto-create trigger
+                    would then create a second, duplicate receipt for the
+                    same money once it's actually submitted. It only exists
+                    for bookings that had already moved past Review before
+                    this feature shipped, so the auto-create trigger never
+                    fired for them. */}
                 {canEdit && booking.Status !== "Approved" && !bookingAmountPaidInFull && bookingAmountDue > 0
-                  && !(Number(firstMilestone?.PendingVerificationAmount) > 0) && (
+                  && !(Number(firstMilestone?.PendingVerificationAmount) > 0)
+                  && currentStage !== "Review" && moneyReceipts.length === 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
                     <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Submit Payment for Approval</h3>
-                    <p className="text-[11px] text-muted-foreground">Goes to Finance's Received Payment queue — Account's Head (or admin/super admin) must approve before it counts as paid.</p>
+                    <p className="text-[11px] text-muted-foreground">Creates the Money Receipt for this booking — it goes Pending until Finance/Account's Head approves it.</p>
                     <div className="grid grid-cols-2 gap-2">
                       <input type="number" placeholder={`Amount — Balance Due ${fmt(bookingAmountBalance)}`} value={payForm.Amount}
                         onChange={(e) => setPayForm((f) => ({ ...f, Amount: e.target.value }))}
@@ -1931,20 +1951,20 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Payment & Invoice" && (
               <div className="space-y-4 pt-4 mt-1 border-t border-border">
-                {/* Money Receipt — auto-generated the moment a Booking
-                    Amount (Milestone #1) payment is actually submitted via
-                    "Submit Payment for Approval" below; not a separate form,
-                    not gated on the checklist alone (a receipt can't exist
-                    for money that hasn't been submitted yet). It has no
-                    approval of its own — its status mirrors that submitted
-                    payment's own approval in Finance's Received Payment
-                    queue. */}
+                {/* Money Receipt — auto-generated the moment this booking is
+                    actually submitted for approval (Confirm & Book, PUT
+                    /:id/ready-for-approval), never merely once the Data
+                    Review checklist is complete — a booking can sit fully
+                    checked at Review for a while before staff submit it, and
+                    a receipt must not exist before that real submission. */}
                 <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2.5">
                   <div className="text-xs">
                     <span className="font-semibold flex items-center gap-1.5"><FileText size={14} className="text-primary" /> Money Receipt</span>
                     <span className="text-muted-foreground">
                       {moneyReceipts.length === 0
-                        ? "Generated automatically once a Booking Amount payment is submitted for approval below."
+                        ? (currentStage === "Review"
+                          ? "Generated automatically once this booking is submitted for approval (Confirm & Book)."
+                          : "Not created yet.")
                         : `${moneyReceipts.length} receipt${moneyReceipts.length > 1 ? "s" : ""} — latest ${moneyReceipts[0]?.Status || "Pending"}.`}
                     </span>
                   </div>
@@ -2110,10 +2130,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               </div>
             )}
 
-            {/* Footer navigation — Previous + (Save & Next, or Confirm & Book
-                on the last tab only), both in the bottom-right cluster. No
-                separate Close button here — the dialog's own "X" (top-right)
-                already covers that. */}
+            {/* Footer navigation — Previous + one dynamic primary action on
+                the last tab only, all in a single bottom-right cluster. This
+                is the ONLY place any stage action lives now — Approve/Reject
+                used to also have their own duplicate buttons up in the
+                header; consolidated here so there's one button per action,
+                its label telling you exactly what stage it's for:
+                Review -> "Verify & Send for Approval", Marketing Head (L1)
+                -> "Approve", Director (L2, final) -> "Final Approve", then
+                "Approved & Booked" once Confirmed. No separate Close button
+                here either — the dialog's own "X" (top-right) covers that. */}
             <div className="flex items-center justify-end gap-3 pt-4 border-t border-border mt-4">
               {isLastTab && !mandatoryReady && booking.Status !== "Approved" && pendingStepMessage && (
                 <button onClick={() => setTab(pendingStepMessage.tab)}
@@ -2131,17 +2157,35 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     className="px-4 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted flex items-center gap-1">
                     Save &amp; Next <ArrowRight size={14} />
                   </button>
-                ) : canEdit && booking.Status !== "Approved" && currentStage === "Review" ? (
+                ) : booking.Status === "Approved" ? (
+                  <button disabled
+                    className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium cursor-default flex items-center gap-1">
+                    <Check size={14} /> Approved &amp; Booked
+                  </button>
+                ) : canEdit && currentStage === "Review" ? (
                   <button onClick={handleFinalBook} disabled={bookingRequesting || !mandatoryReady || !checklistAllChecked}
                     title={!mandatoryReady || !checklistAllChecked ? pendingStepMessage?.text : undefined}
                     className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">
-                    {bookingRequesting ? "Submitting..." : "Confirm & Book"}
+                    {bookingRequesting ? "Submitting..." : "Verify & Send for Approval"}
                     {!bookingRequesting && <Check size={14} />}
                   </button>
-                ) : canEdit && booking.Status !== "Approved" && currentStage !== "Review" ? (
+                ) : canActOnStage ? (
+                  <>
+                    <button onClick={() => setRejectOpen(true)} disabled={stageActioning !== null}
+                      className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">
+                      Reject
+                    </button>
+                    <button onClick={handleStageApprove} disabled={stageActioning !== null}
+                      className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 flex items-center gap-1">
+                      {stageActioning === "approve"
+                        ? "Approving..."
+                        : <>{currentStage === "DirectorApproval" ? "Final Approve" : "Approve"} <Check size={14} /></>}
+                    </button>
+                  </>
+                ) : canEdit ? (
                   <button disabled
                     className="px-4 py-1.5 text-sm bg-emerald-100 text-emerald-700 rounded-lg font-medium cursor-default flex items-center gap-1">
-                    <Check size={14} /> Sent to {stageLabels[currentStage] || "Approval"}
+                    <Check size={14} /> Sent for {currentStage === "DirectorApproval" ? "Final (L2) Approval" : "L1 Approval"}
                   </button>
                 ) : null}
               </div>

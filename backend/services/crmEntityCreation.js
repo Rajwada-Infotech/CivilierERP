@@ -15,7 +15,6 @@ const { validateSourceChain } = require("./sourceChain");
 const { logStatusChange } = require("./crmApplicationWorkflow");
 const { guardAndConvertHold, assertEntityNotTaken, findActiveHold, placeHoldIfNeeded } = require("./crmHoldService");
 const { rollupBookingTotals, applyAddParking } = require("../routes/crmParking");
-const { createReceiptForMilestone } = require("../routes/crmPayments");
 const { recalculateRemainingMilestones } = require("./crmWorkflowGuards");
 
 const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "Website", "EventLead", "Other"];
@@ -782,69 +781,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // selections to this Booking.
   await rollupBookingTotals(pool, bookingId);
 
-  // The Application's Payment Details step already captured the token
-  // amount as "paid" (PaymentMode + a cheque/transaction reference, see
-  // CrmApplication.tsx) — that is real money Finance needs to know about,
-  // not just descriptive text sitting on the Application. Sync it into a
-  // real, GL-posted receipt against Milestone #1 the moment the booking
-  // (and its milestone schedule) exists, through the exact same accounting
-  // path a manually-entered receipt goes through (crmPayments.js). Never
-  // allowed to block booking creation — same partial-failure tolerance as
-  // every other best-effort step in this function.
-  if (bookingAmount > 0) {
-    try {
-      const m1 = await pool.request().input("bid", sql.Int, bookingId)
-        .query("SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
-      const instrument = await pool.request().input("bid", sql.Int, bookingId)
-        .query("SELECT ChequeNo, ChequeDate, TransactionRef FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
-      const actorRow = await pool.request().input("uid", sql.Int, actorUserId)
-        .query("SELECT email, name FROM dbo.users WHERE id = @uid");
-      // The COMPANY bank the token payment landed in — captured on the
-      // Application's own Payment Details step (b.DepositBankId, resolved
-      // from CrmApplication.DepositBankId by the caller) — is a completely
-      // separate thing from the customer's own bank above (that's KYC/
-      // refund banking, never where the company's money actually sits).
-      // Resolved here rather than trusting a caller-supplied name string, so
-      // it can never drift from what CrmProjectBank/AccountHeadMaster
-      // actually call this account.
-      let depositBankName = null;
-      if (b.DepositBankId) {
-        const bank = await pool.request().input("bid2", sql.Int, parseInt(b.DepositBankId))
-          .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @bid2");
-        depositBankName = bank.recordset[0]?.LHeadName || null;
-      }
-      if (m1.recordset.length) {
-        const inst = instrument.recordset[0] || {};
-        const actorEmail = actorRow.recordset[0]?.email || actorRow.recordset[0]?.name || null;
-        // The real amount actually received, not the plan's fixed figure —
-        // TokenValue on the Application's Payment Details step is what staff
-        // captured the customer as having actually paid, which can
-        // legitimately be more OR less than the fixed Booking Amount (the
-        // plan only fixes what's DUE, not what's collected). Passing this
-        // through lets createReceiptForMilestone's own overpayment-cap logic
-        // do the right thing either way: excess auto-parks to On Account,
-        // and a genuine underpayment leaves the milestone correctly
-        // Partially-paid instead of the system silently recording money that
-        // was never actually received. Falls back to the plan's fixed
-        // figure only when no token amount was captured at all.
-        const actualAmount = b.TokenValue != null && b.TokenValue !== "" ? parseFloat(b.TokenValue) : bookingAmount;
-        await createReceiptForMilestone(pool, m1.recordset[0].Id, {
-          Amount: actualAmount,
-          ReceivedDate: b.BookingDate,
-          PaymentMode: b.PaymentMode || null,
-          TransactionRef: b.PaymentMode === "Cheque" ? (inst.ChequeNo || null) : (inst.TransactionRef || null),
-          ChequeDate: b.PaymentMode === "Cheque" ? (inst.ChequeDate || null) : null,
-          DepositBankId: b.DepositBankId || null,
-          DepositBankName: depositBankName,
-          Notes: "Auto-synced from Application token payment capture",
-        }, actorUserId, actorEmail, { enforceBankMandate: true });
-      }
-    } catch (receiptErr) {
-      console.error("[crmEntityCreation] auto-receipt sync failed:", receiptErr.message);
-    }
-  }
-
-  // No status force-advance here anymore — the Application was already
+  // Booking Amount payment is no longer auto-submitted here. Data Review`r`n  // completion creates the independent Money Receipt, and Money Receipt`r`n  // approval creates the pending Finance ReceivedPayment row.`r`n`r`n  // No status force-advance here anymore — the Application was already
   // Approved (registered) before this function would even let it through
   // the gate above. Booking creation is now a downstream consequence of
   // that approval, not the thing that causes it.
@@ -875,3 +812,4 @@ module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
   generateMilestonesForBooking, resolveApplicationPaymentPlan, getApplicablePaymentPlans,
 };
+

@@ -492,7 +492,20 @@ const CrmApplication: React.FC = () => {
   // application with a blank (optional) Notes field would incorrectly show
   // Resume, while other field combinations could just as easily fail to show
   // it on a genuinely incomplete one. Status is the real answer; stop guessing.
-  const isResumeEditable = (app: any) => !!app && (app.Status === "Draft" || app.Status === "Pending");
+  //
+  // BUG FIX: Status alone isn't enough — a Booking is auto-attempted the
+  // moment an Application is submitted (see PUT /:id/submit), and Status
+  // stays 'Pending' on the Application even after that Booking exists and
+  // is later Approved (Status only ever moves to 'Approved'/'Rejected' via
+  // the Application's own, now-mostly-vestigial transitions). Without also
+  // checking Stage, a fully Converted application (real Booking, possibly
+  // already Approved) still shows Resume — reopening the wizard and
+  // resubmitting tries to book the SAME unit a second time, which the
+  // backend correctly rejects with "This unit is already booked", but the
+  // button should never have been offered in the first place. Stage is
+  // computed server-side from whether a live Booking exists (see APP_SELECT
+  // in crmApplications.js) and is the actual source of truth here.
+  const isResumeEditable = (app: any) => !!app && app.Stage !== "Converted" && (app.Status === "Draft" || app.Status === "Pending");
 
   // Same Draft/Pending gate as isResumeEditable, applied inside the open
   // wizard rather than at the Resume button: null status means a brand-new
@@ -516,7 +529,14 @@ const CrmApplication: React.FC = () => {
   // real Booking's own Cancellation Request flow is the only path from there,
   // so this never shows for an Approved application. The button itself is
   // just a convenience gate; the backend re-checks and is the real guard.
-  const canCancelApplication = (app: any) => !!app && !["Approved", "Cancelled", "Expired"].includes(app.Status);
+  //
+  // BUG FIX: same Stage gap as isResumeEditable above — Status can still
+  // read 'Pending' on an already-Converted application (real Booking exists,
+  // possibly Approved), which incorrectly offered "Cancel Application" here
+  // too, alongside Resume, for a record that isn't cancellable through this
+  // flow anymore — its Booking's own Cancellation Request is the only real
+  // path once converted.
+  const canCancelApplication = (app: any) => !!app && app.Stage !== "Converted" && !["Approved", "Cancelled", "Expired"].includes(app.Status);
 
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.

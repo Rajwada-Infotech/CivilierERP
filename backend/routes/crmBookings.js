@@ -30,6 +30,7 @@ const {
 // gate) — see the "Data Review checklist" comment block below for why this
 // now lives here instead.
 const { ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem, CHECKLIST_ITEMS } = require("../services/crmApplicationChecklist");
+const { createMoneyReceiptAfterDataReview } = require("../services/crmMoneyReceiptWorkflow");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -518,10 +519,8 @@ router.put("/:id/submit", requirePageRight("crm-bookings", "edit"), async (req, 
 // truth (the checklist), one action per fact.
 async function checkBookingApprovalReadiness(pool, id) {
   const row = await pool.request().input("id", sql.Int, id).query(`
-    SELECT b.ApplicationId,
-           ISNULL(fm.AmountDue, 0) AS FirstMilestoneDue, ISNULL(fm.AmountPaid, 0) AS FirstMilestonePaid
+    SELECT b.ApplicationId
     FROM dbo.CrmBooking b
-    OUTER APPLY (SELECT TOP 1 AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) fm
     WHERE b.Id = @id
   `);
   if (!row.recordset.length) return { notFound: true, missing: [] };
@@ -532,7 +531,6 @@ async function checkBookingApprovalReadiness(pool, id) {
 
   const missing = [];
   if (uncheckedCount > 0) missing.push(`Data Review Checklist (${uncheckedCount} item(s) unchecked)`);
-  if (!(chk.FirstMilestoneDue > 0) || chk.FirstMilestonePaid < chk.FirstMilestoneDue) missing.push("Booking Amount Payment");
   return { notFound: false, missing };
 }
 
@@ -571,6 +569,18 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const stageResult = await submitForApproval(pool, id, userEmail, req.user?.role, actor);
+
+    // Money Receipt only ever becomes real once the booking has actually
+    // been submitted for approval here — not the instant the Data Review
+    // checklist happens to be fully ticked, which can sit there for a
+    // while before staff actually hit Confirm & Book. submitForApproval
+    // above already hard-requires the checklist complete, so this is
+    // strictly the later of the two gates.
+    try {
+      await createMoneyReceiptAfterDataReview(pool, id, actor);
+    } catch (mrErr) {
+      console.error("[crm-bookings] auto money receipt creation on submit-for-approval failed:", mrErr.message);
+    }
 
     const booking = await pool.request().input("id", sql.Int, id).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @id");
     const bookingNo = booking.recordset[0]?.BookingNo;
@@ -660,6 +670,11 @@ router.put("/:id/checklist/:itemKey/check", requirePageRight("crm-bookings", "ed
 
     const items = await ensureChecklistRows(pool, bk.ApplicationId, 1);
     const allChecked = items.every((it) => it.CheckStatus === "Checked");
+    // Money Receipt is NOT created here anymore — the checklist being fully
+    // checked is only half the gate. It's created once the booking is
+    // actually submitted for approval (PUT /:id/ready-for-approval, "Confirm
+    // & Book"), which itself requires this same checklist complete first.
+    // See createMoneyReceiptAfterDataReview's call site there.
 
     res.json({ success: true, item, allChecked });
   } catch (e) {

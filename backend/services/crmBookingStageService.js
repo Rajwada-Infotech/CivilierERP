@@ -183,12 +183,8 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
   }
 
   const readiness = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT
-      b.Status,
-      ISNULL(fm.AmountDue, 0) AS FirstMilestoneDue,
-      ISNULL(fm.AmountPaid, 0) AS FirstMilestonePaid
+    SELECT b.Status
     FROM dbo.CrmBooking b
-    OUTER APPLY (SELECT TOP 1 AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) fm
     WHERE b.Id = @bid
   `);
   const chk = readiness.recordset[0];
@@ -198,11 +194,6 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
     return { ok: true, noop: true, stage: STAGE_CONFIRMED };
   }
 
-  if (!(chk.FirstMilestoneDue > 0) || chk.FirstMilestonePaid < chk.FirstMilestoneDue) {
-    const e = new Error("Complete the review first — Booking Amount Payment is still pending");
-    e.status = 400;
-    throw e;
-  }
 
   await pool.request().input("bid", sql.Int, bookingId)
     .query(`
@@ -382,3 +373,4 @@ module.exports = {
   rejectStageRequest,
   canApproveStage,
 };
+
