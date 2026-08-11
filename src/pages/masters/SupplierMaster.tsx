@@ -721,7 +721,7 @@ const SupplierMaster: React.FC = () => {
             LHeadStatus: isActive,
             // Same service-category rule as the form's dropdown — see its
             // onChange handler above.
-            isTdsApplicable: category === "Services" || category === "Both",
+            isTdsApplicable: category === "Services",
             tdsLimitApplicable: true,
             SupplierPassword: password,
           };
@@ -1110,10 +1110,11 @@ const SupplierMaster: React.FC = () => {
                         supplierCategory: v,
                         // TDS mainly attaches to service payments (194C/194J),
                         // not straight goods purchases — auto-set the toggle
-                        // whenever the category changes to/from a service
-                        // category. Still a normal toggle below, so it can be
-                        // corrected by hand for any exception.
-                        isTdsApplicable: v === "Services" || v === "Both",
+                        // whenever the category changes to/from "Services".
+                        // "Both" is deliberately excluded (goods+services is
+                        // not auto-enabled). Still a normal toggle below, so
+                        // it can be corrected by hand for any exception.
+                        isTdsApplicable: v === "Services",
                       }))
                     }
                     options={SUPPLIER_CATEGORIES.map((c) => ({
