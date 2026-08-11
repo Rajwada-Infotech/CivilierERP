@@ -314,6 +314,13 @@ const financeSetupItems: SetupItem[] = [
     color: "text-lime-500",
     pageKey: "payment-reason-master",
   },
+  {
+    icon: Users,
+    label: "Customer Master",
+    path: "/masters/customers",
+    color: "text-violet-500",
+    pageKey: "customer-master",
+  },
 ];
 
 const materialSetupItems: SetupItem[] = [
@@ -448,13 +455,6 @@ const crmSetupItems: SetupItem[] = [
     path: "/crm/setup/auto-project-setup",
     color: "text-fuchsia-500",
     pageKey: "crm-auto-project-setup",
-  },
-  {
-    icon: Users,
-    label: "Customer Master",
-    path: "/masters/customers",
-    color: "text-violet-500",
-    pageKey: "customer-master",
   },
   {
     icon: Ruler,

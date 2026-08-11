@@ -3855,20 +3855,23 @@ router.get("/:id/posting", async (req, res) => {
     const ebSupplierPost = expenseBookingSupplierSql("eb", "postprev");
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
       SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
-             eb.ELinkedGrnIds, eb.EGLAccountId,
+             eb.ELinkedGrnIds, eb.EGLAccountId, eb.TDSAmount, eb.TDSId,
              eb.ECgstRate, eb.ESgstRate, eb.EIgstRate,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
              eb.EName AS SupplierName,
              ${ebSupplierPost.idExpr} AS ResolvedSupplierId,
              ${ebSupplierPost.nameExpr} AS ResolvedSupplierName,
-             gl.LHeadName AS EGLAccountName
+             gl.LHeadName AS EGLAccountName,
+             tm.GLHeadId AS TdsNatureGLHeadId, tm.Nature AS TdsNature
       FROM dbo.ExpenseBooking eb
       LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = eb.EGLAccountId
+      LEFT JOIN dbo.TDSMaster tm ON tm.TDSId = eb.TDSId
       ${ebSupplierPost.joins}
       WHERE eb.Eid = @Eid
     `);
     if (!ebRes.recordset.length) return res.status(404).json({ error: "Not found" });
     const eb = ebRes.recordset[0];
+    const tdsAmount = Math.max(0, Math.round((parseFloat(eb.TDSAmount) || 0) * 100) / 100);
 
     // Determine if GRN-linked
     const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
@@ -3914,6 +3917,12 @@ router.get("/:id/posting", async (req, res) => {
       // GRN — distinct from Provisional Credit Available (the GRN-stage
       // provisional estimate, left untouched at invoice time).
       gstCredit: find((l)=>l.LHeadName.toLowerCase().includes("gst credit")),
+      // TDS withheld from the supplier — a separate liability leg, not
+      // part of what's owed to the vendor. Mirrors POST /:id/post-to-gl.
+      tdsPayable: find((l)=>l.LHeadName.toLowerCase().includes("tds payable")),
+      // Distinct GL head per TDS Nature (194C/194J/...) that gets debited
+      // for the TDS amount, separate from the Expense Head itself.
+      tdsNature: eb.TdsNatureGLHeadId ? { id: eb.TdsNatureGLHeadId, label: `TDS ${eb.TdsNature || ""} A/c`.trim() } : null,
     };
 
     // Check if already posted
@@ -3929,7 +3938,7 @@ router.get("/:id/posting", async (req, res) => {
 
     res.json({
       isGrnLinked: !!isGrnLinked,
-      baseAmount, taxAmount, totalAmount,
+      baseAmount, taxAmount, totalAmount, tdsAmount,
       // Per-GRN breakdown (doc no, date, amounts) — only meaningfully
       // multi-row for a combined invoice; a single-GRN invoice still gets
       // a 1-row array so the frontend can render one consistent shape.
@@ -3960,17 +3969,25 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const ebSupplierPost2 = expenseBookingSupplierSql("eb", "postgl");
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
       SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
-             eb.ELinkedGrnIds, eb.EGLAccountId,
+             eb.ELinkedGrnIds, eb.EGLAccountId, eb.TDSAmount, eb.TDSId,
              eb.ECgstRate, eb.ESgstRate, eb.EIgstRate,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
              ${ebSupplierPost2.idExpr} AS ResolvedSupplierId,
-             ${ebSupplierPost2.nameExpr} AS ResolvedSupplierName
+             ${ebSupplierPost2.nameExpr} AS ResolvedSupplierName,
+             tm.GLHeadId AS TdsNatureGLHeadId, tm.Nature AS TdsNature
       FROM dbo.ExpenseBooking eb
+      LEFT JOIN dbo.TDSMaster tm ON tm.TDSId = eb.TDSId
       ${ebSupplierPost2.joins}
       WHERE eb.Eid = @Eid
     `);
     if (!ebRes.recordset.length) return res.status(404).json({ error: "Not found" });
     const eb = ebRes.recordset[0];
+    // TDS is withheld from the supplier, not paid out — it's a separate
+    // liability to the tax authority, not part of what's owed to the
+    // vendor. Previously the Supplier/Creditor leg was credited the FULL
+    // invoice amount with no TDS Payable leg at all, silently overstating
+    // the vendor's payable and never recording the TDS liability.
+    const tdsAmount = Math.max(0, Math.round((parseFloat(eb.TDSAmount) || 0) * 100) / 100);
 
     // Check already posted
     const alreadyPosted = await pool.request().input("SrcId", sql.Int, ebId)
@@ -4024,6 +4041,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const purchaseId  = findId((l)=>l.LHeadName.toLowerCase().includes("purchase"));
     const pgrnId      = findId((l)=>l.LHeadName.toLowerCase().includes("pending"));
     const gstCreditId = findId((l)=>l.LHeadName.toLowerCase().includes("gst credit"));
+    const tdsPayableId = findId((l)=>l.LHeadName.toLowerCase().includes("tds payable"));
     // "Supplier / Creditor A/c" is the invoice's own resolved supplier —
     // that specific vendor's own AccountHeadMaster row. There's no shared
     // system-generated GL placeholder for this (every vendor has their own
@@ -4043,6 +4061,36 @@ router.post("/:id/post-to-gl", async (req, res) => {
     if (isGrnLinked && !pgrnId) return res.status(422).json({ error: "Provision for Pending GRN system ledger not configured." });
     if (isGrnLinked && taxAmount > 0 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
     if (!isGrnLinked && taxAmount > 0.5 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
+    if (tdsAmount > 0.5 && !tdsPayableId) return res.status(422).json({ error: "TDS Payable system ledger not configured." });
+    const tdsNatureId = eb.TdsNatureGLHeadId;
+    if (tdsAmount > 0.5 && !tdsNatureId) {
+      return res.status(422).json({ error: `TDS Nature system ledger not configured for ${eb.TdsNature || "the selected TDS"} — link a GL head in TDS Master.` });
+    }
+    // Explicit posting structure (per spec):
+    //   Dr Expense Head(s)   (total - TDS)
+    //   Cr Supplier/Creditor (total - TDS)
+    //   Dr TDS Nature A/c     TDS amount   — a distinct GL head per TDS
+    //                                        Nature (194C/194J/...), NOT
+    //                                        lumped into the Expense Head
+    //   Cr TDS Payable A/c    TDS amount
+    // Both sides still sum to totalAmount either way (TDS just moves
+    // between the Expense Head and its own Nature account on the debit
+    // side), so relocating it here doesn't change the voucher's balance.
+    const tdsNatureLeg = tdsAmount > 0
+      ? [{ LHeadId: tdsNatureId, DebitAmount: tdsAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — TDS ${eb.TdsNature || ""} A/c`.trim() }]
+      : [];
+    // Supplier is credited net of TDS; the withheld amount is a separate
+    // liability leg, not part of what's owed to the vendor.
+    const creditLegs = (fullAmount, narrationSuffix = "") => {
+      const tdsShare = fullAmount >= totalAmount - 0.5 ? tdsAmount : Math.round((fullAmount / totalAmount) * tdsAmount * 100) / 100;
+      const supplierShare = Math.round((fullAmount - tdsShare) * 100) / 100;
+      return [
+        { LHeadId: supplierId, DebitAmount: 0, CreditAmount: supplierShare, Narration: `Invoice Posting: ${eb.EDocNo} — ${supplierLabel}${narrationSuffix}` },
+        ...(tdsShare > 0
+          ? [{ LHeadId: tdsPayableId, DebitAmount: 0, CreditAmount: tdsShare, Narration: `Invoice Posting: ${eb.EDocNo} — TDS Payable A/c${narrationSuffix}` }]
+          : []),
+      ];
+    };
     // A direct (TOD) booking must always debit a real Expense Head — the
     // Purchase A/C fallback below is reserved for PO/WO/WO_PO-sourced
     // invoices (where there's no per-invoice head to pick from). The
@@ -4070,42 +4118,56 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // lumped set, so the journal entry itself carries a full per-GRN
     // audit trail instead of only the summary "Combined" total.
     const fmtGrnDate = (d) => d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "";
+    // Same per-group TDS share math creditLegs uses, applied to the debit
+    // side (Expense Head / Purchase / PGRN) instead of the credit side —
+    // TDS moves off the expense-side account into its own Nature account,
+    // it doesn't touch the GST Credit Available leg either way.
+    const tdsShareOf = (fullAmount) =>
+      tdsAmount <= 0 ? 0 : fullAmount >= totalAmount - 0.5 ? tdsAmount : Math.round((fullAmount / totalAmount) * tdsAmount * 100) / 100;
+
     const lines = isGrnLinked
-      ? (perGrn && perGrn.length > 1 ? perGrn : [{ docNo: eb.EDocNo, date: null, baseAmount, taxAmount, totalAmount }])
-          .flatMap((g) => [
-            { LHeadId: pgrnId, DebitAmount: g.baseAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — Provision for Pending GRN (reversal) — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
-            ...(g.taxAmount > 0
-              ? [{ LHeadId: gstCreditId, DebitAmount: g.taxAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` }]
-              : []),
-            { LHeadId: supplierId, DebitAmount: 0, CreditAmount: g.totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — ${supplierLabel} — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
-          ])
+      ? [
+          ...(perGrn && perGrn.length > 1 ? perGrn : [{ docNo: eb.EDocNo, date: null, baseAmount, taxAmount, totalAmount }])
+            .flatMap((g) => {
+              const gTdsShare = tdsShareOf(g.totalAmount);
+              return [
+                { LHeadId: pgrnId, DebitAmount: Math.round((g.baseAmount - gTdsShare) * 100) / 100, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — Provision for Pending GRN (reversal) — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
+                ...(g.taxAmount > 0
+                  ? [{ LHeadId: gstCreditId, DebitAmount: g.taxAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` }]
+                  : []),
+                ...creditLegs(g.totalAmount, ` — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}`),
+              ];
+            }),
+          ...tdsNatureLeg,
+        ]
       : expenseHeadAllocations.length > 0
         ? (() => {
             // Each row's amount is GST-inclusive (it's required to sum to
             // ENetAmount — see ExpenseHeadAllocationEditor). Scale every row
-            // by the invoice's own base/total ratio to get its base-only
-            // debit, and post ONE combined GST Credit Available leg for the
-            // rest — rather than debiting the full inclusive amount to the
-            // Expense Head, which silently absorbed the ITC into the
-            // expense instead of recognizing it as recoverable tax.
-            const baseRatio = totalAmount > 0 ? baseAmount / totalAmount : 1;
+            // by the invoice's own (base - TDS)/total ratio to get its
+            // net debit, and post ONE combined GST Credit Available leg for
+            // the tax, plus ONE combined TDS Nature leg for the TDS —
+            // rather than debiting the full inclusive amount to the
+            // Expense Head, which silently absorbed both into the expense.
+            const netRatio = totalAmount > 0 ? (baseAmount - tdsAmount) / totalAmount : 1;
             const headLegs = expenseHeadAllocations.map((a) => ({
               LHeadId: a.lHeadId,
-              DebitAmount: Math.round(a.amount * baseRatio * 100) / 100,
+              DebitAmount: Math.round(a.amount * netRatio * 100) / 100,
               CreditAmount: 0,
               Narration: `Invoice Posting: ${eb.EDocNo} — ${a.lHeadName}`,
             }));
             // Any rounding leftover from per-row scaling goes to the GST
             // leg (not silently dropped) so the voucher still balances to
             // the paisa against Supplier Payable below.
-            const headBaseSum = headLegs.reduce((s, l) => s + l.DebitAmount, 0);
-            const gstLegAmount = Math.round((totalAmount - headBaseSum) * 100) / 100;
+            const headNetSum = headLegs.reduce((s, l) => s + l.DebitAmount, 0);
+            const gstLegAmount = Math.round((totalAmount - tdsAmount - headNetSum) * 100) / 100;
             return [
               ...headLegs,
               ...(gstLegAmount > 0
                 ? [{ LHeadId: gstCreditId, DebitAmount: gstLegAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available` }]
                 : []),
-              { LHeadId: supplierId, DebitAmount: 0, CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — ${supplierLabel}` },
+              ...tdsNatureLeg,
+              ...creditLegs(totalAmount),
             ];
           })()
         : [
@@ -4113,14 +4175,15 @@ router.post("/:id/post-to-gl", async (req, res) => {
             // Expense Heads tagged, land here. baseAmount/taxAmount were
             // already back-derived from ECgstRate/ESgstRate/EIgstRate above
             // (same as the Expense Head branch) — split the single
-            // Purchase/GL leg the same way instead of folding the ITC into
-            // it, so every non-GRN posting recognizes GST Credit Available
-            // consistently regardless of source type. Tax leg is the
-            // remainder (totalAmount - roundedBase), not independently
-            // rounded, so the two legs always sum exactly to totalAmount.
+            // Purchase/GL leg the same way instead of folding the ITC (and
+            // now TDS) into it, so every non-GRN posting recognizes GST
+            // Credit Available and TDS Nature consistently regardless of
+            // source type. Tax leg is the remainder (totalAmount - TDS -
+            // roundedBase), not independently rounded, so all legs always
+            // sum exactly to totalAmount.
             ...(() => {
-              const baseLeg = Math.round(baseAmount * 100) / 100;
-              const taxLeg = Math.round((totalAmount - baseLeg) * 100) / 100;
+              const baseLeg = Math.round((baseAmount - tdsAmount) * 100) / 100;
+              const taxLeg = Math.round((totalAmount - tdsAmount - baseLeg) * 100) / 100;
               return [
                 { LHeadId: debitLedgerId, DebitAmount: baseLeg, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — ${eb.EGLAccountId ? "GL Account" : "Purchase"}` },
                 ...(taxLeg > 0
@@ -4128,7 +4191,8 @@ router.post("/:id/post-to-gl", async (req, res) => {
                   : []),
               ];
             })(),
-            { LHeadId: supplierId, DebitAmount: 0, CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
+            ...tdsNatureLeg,
+            ...creditLegs(totalAmount),
           ];
 
     // Voucher number only — GL posting is independent of the Journal
@@ -4141,21 +4205,23 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // SourceType='JournalVoucher' if anything ever approved/posted it (a
     // GL-backfill script found exactly this). dbo.GeneralLedgerEntry below
     // (SourceType='InvoicePosting') is the single, independent source of
-    // truth — lockNextDocNumber still reserves a real doc number for the
-    // voucher label shown to the user, it just no longer needs a
-    // JournalVoucher table row to hang off.
-    const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
+    // truth. The voucher number now comes from its own "GL" TypeOfDoc
+    // (migration 312) instead of borrowing "JV" — this was never a real
+    // Journal Voucher, so it shouldn't read like one ("JV-2026-00012").
+    // Uniqueness is tracked directly against GeneralLedgerEntry.VoucherNo,
+    // the actual table these numbers live in.
+    const dtId = await resolveDocTypeId(pool, sql, "GL").catch(() => null);
     const finalDocNo = dtId
       ? await lockNextDocNumber(pool, sql, {
           docTypeId: dtId,
-          tableName: "JournalVoucher",
-          docNoColumn: "JVNo",
+          tableName: "GeneralLedgerEntry",
+          docNoColumn: "VoucherNo",
           issuedBy: userEmail,
         }).catch(() => null)
       : null;
 
     await postVoucher(pool, {
-      voucherNo: finalDocNo || `JV-EXB${ebId}`,
+      voucherNo: finalDocNo || `GL-EXB${ebId}`,
       voucherDate: new Date(),
       sourceType: "InvoicePosting",
       sourceId: ebId,

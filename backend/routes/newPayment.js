@@ -1884,12 +1884,37 @@ router.get("/chain-posting/:expenseRef", async (req, res) => {
         ORDER BY np.PDate ASC, np.PPaymentID ASC
       `);
 
-    // Invoice net payable
+    // Invoice net payable — TDS is withheld at the invoice-posting stage
+    // (its own GL liability leg, see routes/expenseBooking.js post-to-gl),
+    // never actually paid out to the vendor, so it must not show up here
+    // as "still outstanding" cash. invoiceTotal is what the vendor is
+    // actually owed in cash: ENetAmount minus the invoice's own TDSAmount.
     const ebRes = await pool.request()
       .input("EDocNo", sql.NVarChar(100), expenseRef)
-      .query(`SELECT TOP 1 ENetAmount, EAmount FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo`);
+      .query(`
+        SELECT TOP 1 eb.ENetAmount, eb.EAmount, ISNULL(eb.TDSAmount, 0) AS TDSAmount,
+               eb.ESourceType, eb.ESourceId, eb.EName,
+               grn.SupplierID AS GrnSupplierId, grnSup.LHeadName AS GrnSupplierName
+        FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.GoodsReceiptNotes grn ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster grnSup ON grnSup.LHeadId = grn.SupplierID
+        WHERE eb.EDocNo = @EDocNo
+      `);
     const eb = ebRes.recordset[0];
-    const invoiceTotal = parseFloat(eb?.ENetAmount ?? eb?.EAmount ?? 0) || 0;
+    const invoiceGross = parseFloat(eb?.ENetAmount ?? eb?.EAmount ?? 0) || 0;
+    const invoiceTdsAmount = parseFloat(eb?.TDSAmount ?? 0) || 0;
+    const invoiceTotal = Math.max(0, invoiceGross - invoiceTdsAmount);
+    // Same party resolution the invoice posting itself narrates against
+    // (routes/expenseBooking.js post-to-gl's supplierLabel) — GRN's own
+    // SupplierID for GRN-linked invoices, else the booking's own EName —
+    // so this chain view shows the real vendor, not a generic system label.
+    // Some legacy bookings stored EName as a description ("Payment for X")
+    // rather than the bare party name — strip that prefix so only the
+    // vendor's name is appended to the one shared Supplier/Creditor head.
+    const stripPaymentForPrefix = (name) => (name ? name.replace(/^payment for\s+/i, "").trim() : name);
+    const resolvedSupplierName = stripPaymentForPrefix(
+      eb?.ESourceType === "GRN" ? (eb.GrnSupplierName || null) : (eb?.EName || null)
+    );
 
     // GL accounts
     const ledRes = await pool.request().query(`
@@ -1902,7 +1927,10 @@ router.get("/chain-posting/:expenseRef", async (req, res) => {
     `);
     const leds = ledRes.recordset;
     const findLed = (fn) => { const r = leds.find(fn); return r ? { id: r.LHeadId, label: r.LHeadName, code: r.LHeadCode ?? null } : null; };
-    const supplierLed = findLed((l) => l.LHeadName.toLowerCase().includes("supplier") || l.LHeadName.toLowerCase().includes("creditor"));
+    const genericSupplierLed = findLed((l) => l.LHeadName.toLowerCase().includes("supplier") || l.LHeadName.toLowerCase().includes("creditor"));
+    const supplierLed = resolvedSupplierName
+      ? { id: genericSupplierLed?.id ?? null, label: `Supplier/Creditor Payable — ${resolvedSupplierName}`, code: genericSupplierLed?.code ?? null }
+      : genericSupplierLed;
     const bankChargesLed = findLed((l) => l.LHeadName.toLowerCase().includes("bank charge"));
 
     // Check posted status for payment and bounce-charge entries
@@ -1935,7 +1963,14 @@ router.get("/chain-posting/:expenseRef", async (req, res) => {
         : null;
       const pmtAmt = parseFloat(p.PAmount) || 0;
       const bounceCharge = parseFloat(p.BounceCharge) || 0;
-      const tdsAmount = parseFloat(p.TDSAmount) || 0;
+      // Every entry in this chain is against expenseRef (invoice-linked),
+      // so p.TDSAmount here is only the inherited display snapshot (see
+      // resolveInvoiceLinkedTds in services/tds.js) — TDS was already
+      // withheld as its own liability leg on the INVOICE posting, never
+      // re-split on the payment's own GL entry (postPaymentApproval forces
+      // tdsAmount=0 whenever PExpenseRef is set). Match that here so this
+      // chain view doesn't show a TDS Payable leg that was never posted.
+      const tdsAmount = 0;
       const netAmt = Math.max(0, pmtAmt - bounceCharge);
 
       // Always include payment entry — isBounced flag controls frontend postability
@@ -1948,9 +1983,6 @@ router.get("/chain-posting/:expenseRef", async (req, res) => {
         mode: p.PMode,
         isBounced: !!p.IsBounced,
         bounceReason: p.BounceReason ?? null,
-        // TDS (migration 304) — when set, the credit side of this entry
-        // splits into Bank + TDS Payable instead of one lump Bank credit;
-        // the debit (supplier) leg is unaffected.
         tdsAmount,
         accounts: { supplier: supplierLed, bank: bankLed, tdsPayable: tdsAmount > 0 ? { label: "TDS Payable A/c", code: "TDSPAY" } : null },
         isPosted: !!postedMap[p.PPaymentID],
@@ -2097,7 +2129,7 @@ router.get("/:id/posting", async (req, res) => {
       `);
       if (ebRes.recordset.length) {
         const eb = ebRes.recordset[0];
-        supplierName = eb.EName;
+        supplierName = eb.EName ? eb.EName.replace(/^payment for\s+/i, "").trim() : eb.EName;
         const grnTotal = eb.ESourceType === "GRN" && parseFloat(eb.GrnTotalAmount) > 0
           ? parseFloat(eb.GrnTotalAmount)
           : parseFloat(eb.ENetAmount || eb.EAmount || 0);
@@ -2112,9 +2144,16 @@ router.get("/:id/posting", async (req, res) => {
     // determines which specific account the posting actually lands in.
     const { resolvePaymentSupplierHeadId } = require("../services/generalLedger");
     const resolvedSupplierId = await resolvePaymentSupplierHeadId(pool, pmt);
-    const tdsAmount = Number(pmt.TDSAmount) || 0;
+    // Mirrors postPaymentApproval in services/generalLedger.js: for an
+    // invoice-linked payment, pmt.TDSAmount is only an inherited display
+    // snapshot (see resolveInvoiceLinkedTds in services/tds.js) — TDS was
+    // already withheld as its own liability leg when the INVOICE was
+    // posted, so this payment's own GL split must not re-deduct it.
+    const tdsAmount = pmt.PExpenseRef ? 0 : Number(pmt.TDSAmount) || 0;
     const accounts = {
-      supplier: resolvedSupplierId ? { id: resolvedSupplierId, label: "Supplier / Creditor A/c", code: null } : null,
+      supplier: resolvedSupplierId
+        ? { id: resolvedSupplierId, label: supplierName ? `Supplier/Creditor Payable — ${supplierName}` : "Supplier / Creditor A/c", code: null }
+        : null,
       bank: pmt.PBankID ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null } : null,
       // TDS (migration 304) — only present when this payment actually
       // deducted TDS; Dr side (supplier/Expense Head) stays at the full

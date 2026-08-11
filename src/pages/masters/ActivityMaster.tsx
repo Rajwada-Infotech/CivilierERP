@@ -34,6 +34,8 @@ import {
 } from "@/api/activityMasterApi";
 import { getHsn } from "@/api/hsnApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
+import { getCostCenterOptions } from "@/api/costCenterApi";
+import { getLedgerOptions } from "@/api/generalLedgerApi";
 import {
   getActivityItems,
   addActivityItem,
@@ -288,6 +290,16 @@ const ActivityMaster: React.FC = () => {
     queryFn: getHsn,
   });
 
+  // Cost Centre + GL Head options, for Activity-only fields below.
+  const { data: costCenterOptions = [] } = useQuery({
+    queryKey: ["cost-centers-for-activity"],
+    queryFn: getCostCenterOptions,
+  });
+  const { data: glHeadOptions = [] } = useQuery({
+    queryKey: ["gl-heads-for-activity"],
+    queryFn: getLedgerOptions,
+  });
+
   // Activity Master is engineering-side (services), so only SAC-flagged
   // HSN Master rows are offered here — plain HSN (goods) codes are hidden.
   const hsnOptions: { code: string; desc: string }[] = Array.isArray(hsnRaw)
@@ -324,6 +336,10 @@ const ActivityMaster: React.FC = () => {
       belongsTo: item.belongsTo ?? "",
       status: item.is_active,
       hsnCode: item.hsn_code ?? "",
+      costCenterId: item.cost_center_id ?? "",
+      costCenterName: item.cost_center_name ?? "",
+      glHeadId: item.gl_head_id ?? "",
+      glHeadName: item.gl_head_name ?? "",
     };
   });
 
@@ -463,6 +479,88 @@ const ActivityMaster: React.FC = () => {
               },
             },
             {
+              name: "costCenterId",
+              label: "Cost Centre",
+              type: "custom",
+              render: ({ value, onChange, formData }) => {
+                const isActivity = formData?.activityType === "Activity";
+                return (
+                  <div className="flex flex-col gap-1">
+                    <select
+                      value={(value as string) ?? ""}
+                      disabled={!isActivity}
+                      onChange={(e) => onChange(e.target.value)}
+                      className={`w-full text-sm rounded-lg border px-3 py-2.5 transition focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none
+                        ${
+                          !isActivity
+                            ? "border-border bg-muted/40 text-muted-foreground cursor-not-allowed opacity-60"
+                            : "border-border bg-background text-foreground"
+                        }`}
+                    >
+                      <option value="">
+                        {!isActivity
+                          ? "N/A — only for Activity type"
+                          : "Select Cost Centre…"}
+                      </option>
+                      {isActivity &&
+                        costCenterOptions.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.code ? `${c.code} — ${c.label}` : c.label}
+                          </option>
+                        ))}
+                    </select>
+                    {!isActivity && (
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                        <Layers size={10} />
+                        Cost Centre can only be linked to an Activity, not a Group
+                      </p>
+                    )}
+                  </div>
+                );
+              },
+            },
+            {
+              name: "glHeadId",
+              label: "GL Head",
+              type: "custom",
+              render: ({ value, onChange, formData }) => {
+                const isActivity = formData?.activityType === "Activity";
+                return (
+                  <div className="flex flex-col gap-1">
+                    <select
+                      value={(value as string) ?? ""}
+                      disabled={!isActivity}
+                      onChange={(e) => onChange(e.target.value)}
+                      className={`w-full text-sm rounded-lg border px-3 py-2.5 transition focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none
+                        ${
+                          !isActivity
+                            ? "border-border bg-muted/40 text-muted-foreground cursor-not-allowed opacity-60"
+                            : "border-border bg-background text-foreground"
+                        }`}
+                    >
+                      <option value="">
+                        {!isActivity
+                          ? "N/A — only for Activity type"
+                          : "Select GL Head…"}
+                      </option>
+                      {isActivity &&
+                        glHeadOptions.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.code ? `${g.code} — ${g.label}` : g.label}
+                          </option>
+                        ))}
+                    </select>
+                    {!isActivity && (
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                        <Hash size={10} />
+                        GL Head can only be linked to an Activity, not a Group
+                      </p>
+                    )}
+                  </div>
+                );
+              },
+            },
+            {
               name: "status",
               label: "Status",
               type: "toggle",
@@ -475,6 +573,8 @@ const ActivityMaster: React.FC = () => {
             { key: "activityType", label: "Type" },
             { key: "groupName", label: "Group", hideOnMobile: true },
             { key: "hsnCode", label: "SAC", hideOnMobile: true },
+            { key: "costCenterName", label: "Cost Centre", hideOnMobile: true },
+            { key: "glHeadName", label: "GL Head", hideOnMobile: true },
             { key: "status", label: "Status" },
           ]}
           initialData={mappedData}
@@ -672,6 +772,38 @@ const ActivityMaster: React.FC = () => {
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
                       <Hash size={10} />
                       {viewRecord.hsn_code}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic text-sm">
+                      Not assigned
+                    </span>
+                  )}
+                </div>
+              )}
+              {viewRecord.activity_type === 1 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    Cost Centre
+                  </p>
+                  {viewRecord.cost_center_name ? (
+                    <span className="text-sm text-foreground">
+                      {viewRecord.cost_center_name}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic text-sm">
+                      Not assigned
+                    </span>
+                  )}
+                </div>
+              )}
+              {viewRecord.activity_type === 1 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    GL Head
+                  </p>
+                  {viewRecord.gl_head_name ? (
+                    <span className="text-sm text-foreground">
+                      {viewRecord.gl_head_name}
                     </span>
                   ) : (
                     <span className="text-muted-foreground italic text-sm">
