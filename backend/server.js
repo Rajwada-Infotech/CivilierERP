@@ -193,6 +193,7 @@ const ALL_ROUTES = [
   { path: "/api/tc-master", file: "./routes/tcMaster" },
   { path: "/api/transactions", file: "./routes/transactions" },
   { path: "/api/trial-balance", file: "./routes/trialBalance" },
+  { path: "/api/financial-statements", file: "./routes/financialStatements" },
   { path: "/api/balance-enquiry", file: "./routes/balanceEnquiry" },
   { path: "/api/grns", file: "./routes/grns" },
   { path: "/api/vehicle-in-out", file: "./routes/vehicleInOut" },
