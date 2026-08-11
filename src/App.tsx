@@ -147,6 +147,8 @@ const TaskDetail = lazy(() => import("./pages/tasks/TaskDetail"));
 const ContractorMaster = lazy(() => import("./pages/masters/ContractorMaster"));
 const SupplierMaster = lazy(() => import("./pages/masters/SupplierMaster"));
 const CustomerMaster = lazy(() => import("./pages/masters/CustomerMaster"));
+const DependencyMaster = lazy(() => import("./pages/masters/DependencyMaster/DependencyMasterPage"));
+const DependencyMasterFormPage = lazy(() => import("./pages/masters/DependencyMaster/DependencyMasterFormPage"));
 const UnitMaster = lazy(() => import("./pages/admin/masters/UnitMaster"));
 const RoomMaster = lazy(() => import("./pages/admin/masters/RoomMaster"));
 const BlockMaster = lazy(() => import("./pages/admin/masters/BlockMaster"));
@@ -1289,6 +1291,30 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="activity-master">
             <ActivityMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/dependency"
+        element={
+          <ProtectedRoute pageKey="dependency-master">
+            <DependencyMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/dependency/new"
+        element={
+          <ProtectedRoute pageKey="dependency-master">
+            <DependencyMasterFormPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/dependency/:id/edit"
+        element={
+          <ProtectedRoute pageKey="dependency-master">
+            <DependencyMasterFormPage />
           </ProtectedRoute>
         }
       />

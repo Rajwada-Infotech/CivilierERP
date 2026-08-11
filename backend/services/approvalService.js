@@ -684,4 +684,9 @@ module.exports = {
   recordGLPosting,
   writeAuditLog,
   CRM_APPROVER_ROLES,
+  // Canonical module → {table, pk, status} / GL poster maps, reused by the
+  // Amendment engine (services/amendmentEngine.js) so it never drifts from
+  // what the approval workflow itself considers each module's identity.
+  MODULE_MAP,
+  GL_POSTERS,
 };

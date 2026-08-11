@@ -45,6 +45,7 @@ import {
   Wallet,
   CalendarClock,
   Wand2,
+  GitBranch,
 } from "lucide-react";
 import {
   Crown,
@@ -351,6 +352,13 @@ const engineeringSetupItems = [
     path: "/masters/activity",
     color: "text-orange-400",
     pageKey: "activity-master",
+  },
+  {
+    icon: GitBranch,
+    label: "Dependency Master",
+    path: "/masters/dependency",
+    color: "text-cyan-400",
+    pageKey: "dependency-master",
   },
 ];
 

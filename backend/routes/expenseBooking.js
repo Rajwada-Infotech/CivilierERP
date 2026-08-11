@@ -6,7 +6,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, getRecordStatus } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { validateBody } = require("../middleware/validateRequest");
@@ -3104,9 +3104,22 @@ router.put(
     if (!Number.isFinite(numericId) || numericId <= 0)
       return res.status(400).json({ error: "Invalid record id" });
 
+    // Approved invoices no longer hard-block edits (the old behaviour —
+    // guardEdit throwing "Cannot edit an approved record", forcing the user
+    // into a separate free-text Amendment popup). They still edit this
+    // exact form; every field below is validated/computed exactly as a
+    // normal save. Only right before the UPDATE would run, an Approved
+    // record (without the allowPostApproval override right) diverts into a
+    // Pending Amendment instead of writing the row directly — see
+    // isAmendmentFlow below and services/amendments.js proposeAmendment().
+    let isAmendmentFlow = false;
     try {
       const allowPostApproval = await resolveAllowPostApproval(req, "expense-booking");
-      await guardEdit("expense-booking", req.params.id, { allowPostApproval });
+      const currentStatus = await getRecordStatus("expense-booking", numericId);
+      if (currentStatus === "Pending") {
+        return res.status(400).json({ error: "Cannot edit a record that is pending approval. Reject it first." });
+      }
+      isAmendmentFlow = currentStatus === "Approved" && !allowPostApproval;
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -3366,6 +3379,91 @@ router.put(
       if (hasPayTermColPut) putReq.input("PaymentTermIdPut", sql.Int, PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null);
       if (hasDirectItemsColPut) putReq.input("EDirectItemsDataPut", sql.NVarChar(sql.MAX), EDirectItemsDataPut || null);
 
+      // Amendment flow (Approved doc, no allowPostApproval override) — same
+      // resolved values the direct UPDATE below would have written, just
+      // captured as plain JS values (column name → new value) instead of
+      // executed. Deliberately mirrors every .input() call above field for
+      // field. NOTE: this covers the ExpenseBooking row itself only —
+      // Expense Head allocations and EMI schedule sync (below) still apply
+      // immediately even mid-amendment-flow-adoption; a follow-up should
+      // fold those into the same propose/apply cycle.
+      if (isAmendmentFlow) {
+        const resolvedFields = {
+          EName: EName || null,
+          EProjectName,
+          EDocumentType,
+          EDocDate,
+          EAmount: bookingAmount != null && bookingAmount !== "" ? Number(bookingAmount) : 0,
+          ENetAmount: bookingNetAmount != null && bookingNetAmount !== "" ? Math.round(Number(bookingNetAmount) * 100) / 100 : 0,
+          ECgstRate: bookingCgstRate ?? 0,
+          ESgstRate: bookingSgstRate ?? 0,
+          EIgstRate: bookingIgstRate ?? 0,
+          EPaymentType: EPaymentType === "partial" ? "partial" : "full",
+          EPartialAmount: EPartialAmount != null ? Number(EPartialAmount) : null,
+          EDiscountData: EDiscountData ? (typeof EDiscountData === "string" ? EDiscountData : JSON.stringify(EDiscountData)) : null,
+          EDocNo: EDocNo || null,
+          EEmiPayment: EEmiPayment ? 1 : 0,
+          EEmiData: EEmiData ? JSON.stringify(EEmiData) : null,
+          EInstallmentCount: EInstallmentCount || null,
+          EEmiAmount: EEmiAmount || null,
+          EEmiStartDate: EEmiStartDate || null,
+          EReminder: EReminder || null,
+          ERemarks: ERemarks || null,
+          EStatus: EStatus || "Draft",
+          ECompanyId: parseInt(ECompanyId, 10),
+          EDocTypeId: EDocTypeId ? parseInt(EDocTypeId, 10) : null,
+          EFinYear: EFinYear || null,
+          ESourceType: ESourceType || null,
+          ESourceId: ESourceId ? parseInt(ESourceId, 10) : null,
+          EBillingTermId: EBillingTermId ? parseInt(EBillingTermId, 10) : null,
+          EBillingTermName: EBillingTermName || null,
+          EBillingTermsData: EBillingTermsData ? (typeof EBillingTermsData === "string" ? EBillingTermsData : JSON.stringify(EBillingTermsData)) : null,
+          ETCId: ETCId ? parseInt(ETCId, 10) : null,
+          ETCName: ETCName || null,
+          ETCText: ETCText || null,
+          EVendorInvoiceNo: EVendorInvoiceNo || null,
+          EVendorInvoiceDate: EVendorInvoiceDate || null,
+          EAdditionalCharges: EAdditionalCharges ? JSON.stringify(EAdditionalCharges) : null,
+          ECostCenter: ECostCenter || null,
+          EGLAccount: EGLAccount || null,
+          EGLAccountId: EGLAccountId ? parseInt(EGLAccountId, 10) : null,
+          EWorkDoneRef: EWorkDoneRef || null,
+          LHeadId: LHeadId ? parseInt(LHeadId, 10) : null,
+          TDSId: tdsSnapshotPut.TDSId,
+          TDSNature: tdsSnapshotPut.TDSNature,
+          TDSName: tdsSnapshotPut.TDSName,
+          TDSPercentage: tdsSnapshotPut.TDSPercentage,
+          TDSAmount: tdsSnapshotPut.TDSAmount,
+        };
+        if (hasPayTermColPut) resolvedFields.PaymentTermId = PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null;
+        if (hasDirectItemsColPut) resolvedFields.EDirectItemsData = EDirectItemsDataPut || null;
+
+        try {
+          const { proposeAmendment } = require("./amendments");
+          const userEmail = requireUserEmail(req, res);
+          if (!userEmail) return;
+          const ebRow = await pool.request().input("Eid", sql.Int, numericId)
+            .query("SELECT EDocNo, EProjectName, ECompanyId FROM dbo.ExpenseBooking WHERE Eid = @Eid");
+          const eb = ebRow.recordset[0];
+          const amendment = await proposeAmendment({
+            refDocType: "ExpenseBooking",
+            refDocId: numericId,
+            refDocNo: eb?.EDocNo,
+            proposedChanges: resolvedFields,
+            description: `Edit proposed for ${eb?.EDocNo || `#${numericId}`}`,
+            reason: req.body.amendmentReason || null,
+            projectName: eb?.EProjectName,
+            userName: userEmail,
+          });
+          return res.status(202).json({
+            message: "This invoice is already approved — your changes were submitted as a pending amendment awaiting approval.",
+            pending: true,
+            amendment,
+          });
+        } catch (err) {
+          return res.status(err.status || 500).json({ error: err.message || "Failed to submit amendment" });
+        }
+      }
 
       const result = await putReq.query(`
         UPDATE dbo.ExpenseBooking SET

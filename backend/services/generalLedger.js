@@ -722,6 +722,23 @@ async function reverseOnAccountAdjustmentPosting(pool, oaId) {
     `);
 }
 
+/** Generic version of the reversal pattern above, for any (sourceType,
+ * sourceId) pair — used by the Amendment engine (services/amendments.js) to
+ * undo a document's existing posting before reposting it with amended
+ * values. Preserves the audit trail (flips IsReversed rather than
+ * deleting), same as every other reversal in this file. */
+async function reversePostingBySource(pool, sourceType, sourceId) {
+  await pool
+    .request()
+    .input("SourceType", sql.NVarChar(50), sourceType)
+    .input("SourceId", sql.Int, sourceId)
+    .query(`
+      UPDATE dbo.GeneralLedgerEntry
+      SET IsReversed = 1
+      WHERE SourceType = @SourceType AND SourceId = @SourceId AND IsReversed = 0
+    `);
+}
+
 /**
  * Received Payment approved.
  *   Dr Bank ...... cash comes into the bank
@@ -969,4 +986,5 @@ module.exports = {
   postFundTransferApproval,
   postOnAccountAdjustment,
   reverseOnAccountAdjustmentPosting,
+  reversePostingBySource,
 };

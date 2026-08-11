@@ -218,6 +218,7 @@ const ALL_ROUTES = [
   { path: "/api/cheque-leaf", file: "./routes/chequeLeaf" },
   { path: "/api/contractor-category", file: "./routes/contractorCategory" },
   { path: "/api/dependency", file: "./routes/dependency" },
+  { path: "/api/dependency-master", file: "./routes/dependencyMaster" },
   { path: "/api/depreciation-setup", file: "./routes/depreciationSetup" },
   { path: "/api/fixed-assets",       file: "./routes/fixedAssets" },
   { path: "/api/work-progress", file: "./routes/workProgress" },

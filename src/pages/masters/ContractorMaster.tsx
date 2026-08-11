@@ -59,6 +59,45 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CONTRACTOR_TYPE = "C";
+const GST_TYPES = ["Registered", "Unregistered"] as const;
+const GST_STATES = [
+  "Andaman and Nicobar Islands",
+  "Andhra Pradesh",
+  "Arunachal Pradesh",
+  "Assam",
+  "Bihar",
+  "Chandigarh",
+  "Chhattisgarh",
+  "Dadra and Nagar Haveli and Daman and Diu",
+  "Delhi",
+  "Goa",
+  "Gujarat",
+  "Haryana",
+  "Himachal Pradesh",
+  "Jammu and Kashmir",
+  "Jharkhand",
+  "Karnataka",
+  "Kerala",
+  "Ladakh",
+  "Lakshadweep",
+  "Madhya Pradesh",
+  "Maharashtra",
+  "Manipur",
+  "Meghalaya",
+  "Mizoram",
+  "Nagaland",
+  "Odisha",
+  "Puducherry",
+  "Punjab",
+  "Rajasthan",
+  "Sikkim",
+  "Tamil Nadu",
+  "Telangana",
+  "Tripura",
+  "Uttar Pradesh",
+  "Uttarakhand",
+  "West Bengal",
+] as const;
 
 const DEFAULT_CONTRACTOR_CATEGORIES = [
   "Civil",
@@ -76,6 +115,8 @@ interface Contractor {
   LHeadPhone: string | null;
   LHeadEmail: string | null;
   LGST: string | null;
+  LGSTType: string | null;
+  LGSTState: string | null;
   LHeadPan: string | null;
   contractorType: string | null;
   LHeadPaymentTerms: string | null;
@@ -101,6 +142,8 @@ interface ContractorForm {
   LHeadPhone: string;
   LHeadEmail: string;
   LGST: string;
+  LGSTType: string;
+  LGSTState: string;
   LHeadPan: string;
   contractorType: string;
   LHeadPaymentTerms: string;
@@ -117,6 +160,8 @@ const EMPTY_FORM: ContractorForm = {
   LHeadPhone: "",
   LHeadEmail: "",
   LGST: "",
+  LGSTType: "",
+  LGSTState: "",
   LHeadPan: "",
   contractorType: "",
   LHeadPaymentTerms: "",
@@ -421,6 +466,8 @@ const ContractorMaster: React.FC = () => {
       LHeadPhone: item.LHeadPhone || null,
       LHeadEmail: item.LHeadEmail || null,
       LGST: item.LGST || null,
+      LGSTType: item.LGSTType || null,
+      LGSTState: item.LGSTState || null,
       LHeadPan: item.LHeadPan || null,
       contractorType: item.LHeadCategory || null,
       LHeadPaymentTerms: item.LHeadPaymentTerms || null,
@@ -444,13 +491,14 @@ const ContractorMaster: React.FC = () => {
     LHeadPhone: f.LHeadPhone || null,
     LHeadEmail: f.LHeadEmail || null,
     LGST: f.LGST || null,
+    LGSTType: f.LGSTType || null,
     LHeadPan: f.LHeadPan || null,
     LHeadCategory: f.contractorType || null,
     LHeadPaymentTerms: f.LHeadPaymentTerms || null,
     LHeadAddress: f.LHeadAddress || null,
     LHeadStatus: f.LHeadStatus,
     LBranchName: null,
-    LGSTState: null,
+    LGSTState: f.LGSTState || null,
     LCountry: "India",
     LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
@@ -610,6 +658,11 @@ const ContractorMaster: React.FC = () => {
             LHeadPhone: phone,
             LHeadEmail: email,
             LGST: gst,
+            // CSV template has no GST Type column — infer the same way
+            // normalizeGSTType() does elsewhere: a GST number on the row
+            // implies Registered, otherwise Unregistered.
+            LGSTType: gst.trim() ? "Registered" : "Unregistered",
+            LGSTState: "",
             LHeadPan: pan,
             contractorType: contractorType || "",
             LHeadPaymentTerms: paymentTerms,
@@ -662,6 +715,16 @@ const ContractorMaster: React.FC = () => {
   };
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+  /** Same inference SupplierMaster.tsx uses: a NULL LGSTType (row predates
+   *  this field, or was created via the old contractor form with no GST
+   *  Type selector) infers Registered/Unregistered from whether a GST
+   *  number is on file, so editing writes back a real value immediately. */
+  const normalizeGSTType = (t: string | null | undefined, lgst?: string | null): string => {
+    if (t === "Unregistered") return "Unregistered";
+    if (t) return "Registered";
+    return lgst?.trim() ? "Registered" : "Unregistered";
+  };
+
   const startEdit = (c: Contractor) => {
     setEditingId(c.LHeadId);
     setForm({
@@ -670,6 +733,8 @@ const ContractorMaster: React.FC = () => {
       LHeadPhone: c.LHeadPhone ?? "",
       LHeadEmail: c.LHeadEmail ?? "",
       LGST: c.LGST ?? "",
+      LGSTType: normalizeGSTType(c.LGSTType, c.LGST),
+      LGSTState: c.LGSTState ?? "",
       LHeadPan: c.LHeadPan ?? "",
       contractorType: c.contractorType ?? "",
       LHeadPaymentTerms: c.LHeadPaymentTerms ?? "",
@@ -692,6 +757,8 @@ const ContractorMaster: React.FC = () => {
   const handleSave = () => {
     const e: Partial<Record<keyof ContractorForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
+    if (!form.LGSTType) e.LGSTType = true;
+    if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
     if (Object.keys(e).length) {
       setErrors(e);
       return;
@@ -716,7 +783,9 @@ const ContractorMaster: React.FC = () => {
         <tr><td>Contact Person</td><td>${c.LHeadContactPerson || "—"}</td></tr>
         <tr><td>Phone</td><td>${c.LHeadPhone || "—"}</td></tr>
         <tr><td>Email</td><td>${c.LHeadEmail || "—"}</td></tr>
+        <tr><td>GST Type</td><td>${c.LGSTType || "—"}</td></tr>
         <tr><td>GST Number</td><td>${c.LGST || "—"}</td></tr>
+        <tr><td>GST State</td><td>${c.LGSTState || "—"}</td></tr>
         <tr><td>PAN Number</td><td>${c.LHeadPan || "—"}</td></tr>
         <tr><td>Contractor Type</td><td>${c.contractorType || "—"}</td></tr>
         <tr><td>Payment Terms</td><td>${c.LHeadPaymentTerms || "—"}</td></tr>
@@ -1073,23 +1142,75 @@ const ContractorMaster: React.FC = () => {
                   Tax &amp; Payment Details
                 </p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-                {/* GST Number */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-6 gap-y-5">
+                {/* GST Type */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    GST Number
+                    GST Type <span className="text-destructive">*</span>
                   </label>
-                  <input
-                    value={form.LGST}
-                    onChange={(e) =>
+                  <select
+                    value={form.LGSTType}
+                    onChange={(e) => {
+                      const v = e.target.value;
                       setForm((p) => ({
                         ...p,
-                        LGST: e.target.value.toUpperCase(),
-                      }))
-                    }
-                    placeholder="e.g. 27AAPFU0939F1ZV"
-                    maxLength={15}
-                    className={`${inputCls} font-mono`}
+                        LGSTType: v,
+                        LGST: v === "Registered" ? p.LGST : "",
+                      }));
+                      setErrors((p) => ({ ...p, LGSTType: false, LGST: false }));
+                    }}
+                    className={`${inputCls} appearance-none ${errors.LGSTType ? "border-red-400" : ""}`}
+                  >
+                    <option value="" disabled>Select…</option>
+                    {GST_TYPES.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                  {errors.LGSTType && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> Required — determines GST Bill vs Non-GST Bill on invoices
+                    </p>
+                  )}
+                </div>
+
+                {/* GST Number — only when Registered */}
+                {form.LGSTType === "Registered" && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                      GST Number <span className="text-destructive">*</span>
+                    </label>
+                    <input
+                      value={form.LGST}
+                      onChange={(e) => {
+                        setForm((p) => ({
+                          ...p,
+                          LGST: e.target.value.toUpperCase(),
+                        }));
+                        setErrors((p) => ({ ...p, LGST: false }));
+                      }}
+                      placeholder="e.g. 27AAPFU0939F1ZV"
+                      maxLength={15}
+                      className={`${inputCls} font-mono ${errors.LGST ? "border-red-400" : ""}`}
+                    />
+                    {errors.LGST && (
+                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                        <AlertCircle size={11} /> Required
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* GST State */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    GST State
+                  </label>
+                  <TreeDropdown
+                    variant="flat"
+                    value={form.LGSTState}
+                    onChange={(v) => setForm((p) => ({ ...p, LGSTState: v }))}
+                    options={GST_STATES.map((s) => ({ value: s, label: s }))}
+                    placeholder="Select state…"
                   />
                 </div>
 
@@ -1459,11 +1580,13 @@ const ContractorMaster: React.FC = () => {
                   mono: true,
                 },
                 { label: "Email", value: viewRecord.LHeadEmail || "—" },
+                { label: "GST Type", value: viewRecord.LGSTType || "—" },
                 {
                   label: "GST Number",
                   value: viewRecord.LGST || "—",
                   mono: true,
                 },
+                { label: "GST State", value: viewRecord.LGSTState || "—" },
                 {
                   label: "PAN Number",
                   value: viewRecord.LHeadPan || "—",
