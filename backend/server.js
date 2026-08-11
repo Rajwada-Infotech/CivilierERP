@@ -293,6 +293,8 @@ const ALL_ROUTES = [
   { path: "/api/crm/booking-documents", file: "./routes/crmBookingDocuments" },
   { path: "/api/crm/agreements",     file: "./routes/crmAgreements"     },
   { path: "/api/crm/payments",       file: "./routes/crmPayments"       },
+  { path: "/api/crm/money-receipts", file: "./routes/crmMoneyReceipts"  },
+  { path: "/api/crm/invoices",       file: "./routes/crmInvoices"       },
   { path: "/api/crm/handover",       file: "./routes/crmHandover"       },
   { path: "/api/crm/service-tickets",file: "./routes/crmServiceTickets" },
   { path: "/api/crm/cancellations",  file: "./routes/crmCancellations"  },

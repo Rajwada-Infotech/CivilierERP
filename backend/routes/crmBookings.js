@@ -10,7 +10,7 @@ const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
 const { guardAndConvertHold } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
-const { requireActiveBooking, recalculateRemainingMilestones, maybeAutoGenerateBookingInvoice } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
 const { generateInvoicePdf, getInvoicePdfBuffer } = require("../services/invoicePdf");
 const { recalculateBookingGst } = require("../services/crmGst");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
@@ -501,135 +501,58 @@ router.put("/:id/submit", requirePageRight("crm-bookings", "edit"), async (req, 
   }
 });
 
-// Shared readiness gate: both the staff-facing "Book" action
-// (PUT /:id/ready-for-approval) and the admin-facing Approve action
-// (PUT /:id/approve) must agree on what "ready" means, so the two routes
-// can never drift — a booking that passes one but fails the other would be
-// a confusing, unexplainable state for whoever hits the mismatch.
+// Shared readiness gate: both this route's own pre-check and
+// submitForApproval() (crmBookingStageService.js, the actual authoritative
+// gate that performs the transition) must agree on what "ready" means.
+//
+// Previously this checked booking.UnitReviewConfirmed/PlanReviewConfirmed —
+// two standalone self-confirm fields with their own confirm-unit/confirm-plan
+// routes — SEPARATELY from the Data Review checklist's own ProjectUnitRate/
+// PaymentPlanAmounts items, even though both were asserting the same two
+// facts. submitForApproval() already hard-requires the entire 7-item
+// checklist checked before it will do anything, which already guarantees
+// ProjectUnitRate and PaymentPlanAmounts are Checked — so the separate
+// Unit/Plan booleans were pure redundant bookkeeping being kept in sync by
+// firing two API calls per click on the frontend. Checking the checklist
+// directly here removes the second, parallel system entirely: one source of
+// truth (the checklist), one action per fact.
 async function checkBookingApprovalReadiness(pool, id) {
-  const checklist = await pool.request().input("id", sql.Int, id).query(`
-    SELECT b.UnitReviewConfirmed, b.PlanReviewConfirmed,
+  const row = await pool.request().input("id", sql.Int, id).query(`
+    SELECT b.ApplicationId,
            ISNULL(fm.AmountDue, 0) AS FirstMilestoneDue, ISNULL(fm.AmountPaid, 0) AS FirstMilestonePaid
     FROM dbo.CrmBooking b
     OUTER APPLY (SELECT TOP 1 AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) fm
     WHERE b.Id = @id
   `);
-  if (!checklist.recordset.length) return { notFound: true, missing: [] };
-  const row = checklist.recordset[0];
+  if (!row.recordset.length) return { notFound: true, missing: [] };
+  const chk = row.recordset[0];
+
+  const checklistItems = await ensureChecklistRows(pool, chk.ApplicationId, 1);
+  const uncheckedCount = checklistItems.filter((it) => it.CheckStatus !== "Checked").length;
+
   const missing = [];
-  if (!row.UnitReviewConfirmed) missing.push("Unit, Rate & Total Value");
-  if (!row.PlanReviewConfirmed) missing.push("Payment Plan & Token/Booking Amount");
-  if (!(row.FirstMilestoneDue > 0) || row.FirstMilestonePaid < row.FirstMilestoneDue) missing.push("Booking Amount Payment");
+  if (uncheckedCount > 0) missing.push(`Data Review Checklist (${uncheckedCount} item(s) unchecked)`);
+  if (!(chk.FirstMilestoneDue > 0) || chk.FirstMilestonePaid < chk.FirstMilestoneDue) missing.push("Booking Amount Payment");
   return { notFound: false, missing };
 }
 
-// PUT /:id/confirm-unit — first Booking-checklist item: staff explicitly
-// confirms the unit, rate, and total/grand value carried over from the
-// Application are correct. Un-confirmable once already Approved (nothing to
-// re-check after the fact — a correction at that point is a real edit, not
-// a checklist tick).
-router.put("/:id/confirm-unit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  try {
-    const pool = getPool();
-    const activeErr = await requireActiveBooking(pool, id);
-    if (activeErr) return res.status(400).json({ error: activeErr });
-    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Booking not found" });
-    if (cur.recordset[0].Status === "Approved") return res.status(400).json({ error: "Already approved — nothing to confirm" });
+// The Unit/Rate/Total-Value and Payment-Plan self-confirm mechanism
+// (confirm-unit/revert-unit/confirm-plan/revert-plan) has been removed.
+// Those two facts are now asserted exactly once, by the Data Review
+// checklist's own ProjectUnitRate/PaymentPlanAmounts items (see
+// checkBookingApprovalReadiness above and renderChecklistItem in
+// CrmBookingDetail.tsx) — not by a second, parallel set of booking columns
+// kept in sync from the frontend. UnitReviewConfirmed/PlanReviewConfirmed
+// columns are left in place on dbo.CrmBooking (no migration, no data loss)
+// but nothing reads or writes them anymore.
 
-    await pool.request().input("id", sql.Int, id).input("cb", sql.Int, actorId(req)).query(`
-      UPDATE dbo.CrmBooking SET UnitReviewConfirmed = 1, UnitReviewConfirmedBy = @cb, UnitReviewConfirmedAt = SYSDATETIME()
-      WHERE Id = @id
-    `);
-    res.json({ success: true });
-  } catch (e) {
-    console.error("[crm-bookings] confirm-unit error:", e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// PUT /:id/revert-unit — undo a Unit checklist confirmation when something
-// was actually wrong (e.g. rate/value needs correcting) instead of forcing
-// staff to raise a separate change request for what a re-check would catch.
-// Also clears ReadyForApprovalAt so an already-"Book"-ed booking drops back
-// out of the Admin Approval Inbox until it's re-confirmed and re-submitted —
-// otherwise a reverted-but-still-pending booking could sit in the inbox
-// looking ready when it explicitly isn't anymore.
-router.put("/:id/revert-unit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  try {
-    const pool = getPool();
-    const activeErr = await requireActiveBooking(pool, id);
-    if (activeErr) return res.status(400).json({ error: activeErr });
-    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Booking not found" });
-    if (cur.recordset[0].Status === "Approved") return res.status(400).json({ error: "Already approved — cannot revert a confirmed checklist item" });
-
-    await pool.request().input("id", sql.Int, id).query(`
-      UPDATE dbo.CrmBooking SET UnitReviewConfirmed = 0, UnitReviewConfirmedBy = NULL, UnitReviewConfirmedAt = NULL, ReadyForApprovalAt = NULL
-      WHERE Id = @id
-    `);
-    res.json({ success: true });
-  } catch (e) {
-    console.error("[crm-bookings] revert-unit error:", e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// PUT /:id/confirm-plan — second Booking-checklist item: staff explicitly
-// confirms the payment plan and the token/booking-amount figure are correct
-// — this is the number the whole milestone schedule is built from.
-router.put("/:id/confirm-plan", requirePageRight("crm-bookings", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  try {
-    const pool = getPool();
-    const activeErr = await requireActiveBooking(pool, id);
-    if (activeErr) return res.status(400).json({ error: activeErr });
-    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Booking not found" });
-    if (cur.recordset[0].Status === "Approved") return res.status(400).json({ error: "Already approved — nothing to confirm" });
-
-    await pool.request().input("id", sql.Int, id).input("cb", sql.Int, actorId(req)).query(`
-      UPDATE dbo.CrmBooking SET PlanReviewConfirmed = 1, PlanReviewConfirmedBy = @cb, PlanReviewConfirmedAt = SYSDATETIME()
-      WHERE Id = @id
-    `);
-    res.json({ success: true });
-  } catch (e) {
-    console.error("[crm-bookings] confirm-plan error:", e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// PUT /:id/revert-plan — undo a Payment Plan checklist confirmation, same
-// rationale and ReadyForApprovalAt-clearing behavior as revert-unit above.
-router.put("/:id/revert-plan", requirePageRight("crm-bookings", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  try {
-    const pool = getPool();
-    const activeErr = await requireActiveBooking(pool, id);
-    if (activeErr) return res.status(400).json({ error: activeErr });
-    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Booking not found" });
-    if (cur.recordset[0].Status === "Approved") return res.status(400).json({ error: "Already approved — cannot revert a confirmed checklist item" });
-
-    await pool.request().input("id", sql.Int, id).query(`
-      UPDATE dbo.CrmBooking SET PlanReviewConfirmed = 0, PlanReviewConfirmedBy = NULL, PlanReviewConfirmedAt = NULL, ReadyForApprovalAt = NULL
-      WHERE Id = @id
-    `);
-    res.json({ success: true });
-  } catch (e) {
-    console.error("[crm-bookings] revert-plan error:", e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
 
 // PUT /:id/ready-for-approval — staff-facing "Book" action. Re-runs the
 // exact same readiness gate PUT /:id/approve enforces, so a booking can
 // never be marked "ready" and then be surprised by a rejection for the same
 // missing item. Stamps ReadyForApprovalAt (which the Admin Approval Inbox
 // now requires before it will even list a Pending booking — see
-// approvalInbox.js), auto-generates the Booking invoice, and notifies every
+// approvalInbox.js), and notifies every
 // admin/super_admin/marketing_head that a booking is waiting on them.
 router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -648,8 +571,6 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const stageResult = await submitForApproval(pool, id, userEmail, req.user?.role, actor);
-
-    await maybeAutoGenerateBookingInvoice(pool, id, actor);
 
     const booking = await pool.request().input("id", sql.Int, id).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @id");
     const bookingNo = booking.recordset[0]?.BookingNo;
@@ -1003,36 +924,6 @@ router.get("/:id/invoices", requirePageRight("crm-bookings", "view"), async (req
   }
 });
 
-// POST /:id/invoices/force-booking — recovery path only. The Booking
-// invoice is meant to be 100% auto-generated the instant the booking
-// payment clears and staff hit Confirm & Book (maybeAutoGenerateBookingInvoice,
-// called from ready-for-approval below). This route exists purely for the
-// case where that auto-generation somehow didn't fire (e.g. the PDF render
-// failed, or an older booking predates the auto-flow) — it calls the exact
-// same function, which is itself idempotent (no-ops if an invoice already
-// exists, or if the booking amount isn't actually fully paid yet), so this
-// can never create a duplicate or jump ahead of the real payment gate.
-router.post("/:id/invoices/force-booking", requirePageRight("crm-bookings", "edit"), async (req, res) => {
-  try {
-    const pool = getPool();
-    const id = parseInt(req.params.id);
-    const activeErr = await requireActiveBooking(pool, id);
-    if (activeErr) return res.status(400).json({ error: activeErr });
-
-    const existing = await pool.request().input("bid", sql.Int, id)
-      .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Booking'");
-    if (existing.recordset.length) return res.status(400).json({ error: "A Booking invoice already exists for this booking" });
-
-    const result = await maybeAutoGenerateBookingInvoice(pool, id, actorId(req));
-    if (!result) return res.status(400).json({ error: "Cannot generate the Booking invoice yet — the Booking Amount isn't fully paid" });
-
-    res.status(201).json({ success: true, id: result.id, InvoiceNo: result.InvoiceNo });
-  } catch (e) {
-    console.error("[crm-bookings] POST /:id/invoices/force-booking error:", e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
 // POST /:id/invoices — generate a real, permanently-numbered invoice.
 // Visible to the customer in their portal immediately (no separate "send"
 // step — an invoice is a record of a real transaction, not a draft that
@@ -1047,20 +938,9 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    const allowedManualTypes = new Set(["Milestone", "Maintenance", "Other", "OnAccount"]);
+    const allowedManualTypes = new Set(["Booking", "Milestone", "Maintenance", "Other", "OnAccount"]);
     if (!allowedManualTypes.has(type)) {
       return res.status(400).json({ error: "Invoice type is not supported for manual generation" });
-    }
-
-    // Booking-type invoices are 100% system-owned — maybeAutoGenerateBookingInvoice
-    // creates the one-and-only Booking invoice automatically the moment the
-    // booking payment clears and staff hit Confirm & Book (ready-for-approval).
-    // This manual route is for every other invoice (Maintenance, Other, and
-    // any milestone-wise payment after booking) — it never accepts 'Booking'
-    // at all, so there's no window for staff to create or misprice it ahead
-    // of the real, payment-gated auto-generation.
-    if (type === "Booking") {
-      return res.status(400).json({ error: "Booking invoice is generated automatically once the booking payment is confirmed and the booking is submitted via Confirm & Book — it can't be created manually" });
     }
 
     // "Milestone" invoices (Foundation, Superstructure, Slab Casting,
@@ -1094,20 +974,21 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       amount = Number(oaRow.Amount);
       invoiceDate = oaRow.ReceivedDate;
       description = b.Description || `On-account payment received — ${oaRow.ReceiptNo}`;
-    } else if (type === "Milestone") {
+    } else if (type === "Milestone" || type === "Booking") {
       milestoneId = parseInt(b.MilestoneId);
-      if (!milestoneId) return res.status(400).json({ error: "MilestoneId is required for a Milestone invoice" });
+      if (!milestoneId) return res.status(400).json({ error: "MilestoneId is required for a Milestone/Booking invoice" });
       const m = await pool.request().input("mid", sql.Int, milestoneId).input("bid", sql.Int, id).query(`
-        SELECT Id, MilestoneNo, MilestoneName, AmountPaid, Status, PaidDate FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
+        SELECT Id, MilestoneNo, MilestoneName, AmountPaid, Status, PaidDate, DemandStatus FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
       `);
       const mRow = m.recordset[0];
       if (!mRow) return res.status(404).json({ error: "Milestone not found on this booking" });
-      // Milestone #1 ("Booking") is never eligible here — it already gets its
-      // own auto-generated 'Booking' invoice (maybeAutoGenerateBookingInvoice)
-      // the moment the booking payment clears, so letting it through this
-      // route too would double-invoice the exact same money received.
-      if (mRow.MilestoneNo === 1) return res.status(400).json({ error: "The Booking milestone is invoiced automatically — it can't be invoiced again here" });
       if (mRow.Status !== "Paid") return res.status(400).json({ error: `"${mRow.MilestoneName}" is not fully paid yet — an invoice can only be generated once it is` });
+      // No auto-generation anywhere now — every invoice is manual, gated on
+      // the milestone's Demand actually having been raised first (not just
+      // "Pending"), per "proper gate, after completion of the steps".
+      if (mRow.DemandStatus === "Pending") {
+        return res.status(400).json({ error: `A demand must be raised for "${mRow.MilestoneName}" (from the Demands page) before its invoice can be generated` });
+      }
       const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid");
       if (already.recordset.length) return res.status(400).json({ error: `"${mRow.MilestoneName}" already has an invoice` });
       amount = Number(mRow.AmountPaid);

@@ -7,7 +7,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
-const { maybeAutoCreateSalesDeed, maybeAutoGenerateInvoice, maybeAutoCreateBrokerage, requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateSalesDeed, maybeAutoCreateBrokerage, requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
 const { postCrmReceiptToGL, postCrmOnAccountToGL, postCrmOnAccountApplied } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 
@@ -131,7 +131,6 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   const becamePaid = finalCheck.recordset[0]?.Status === "Paid";
   if (becamePaid) {
     await maybeAutoCreateSalesDeed(pool, targetRow.BookingId, actorUserId);
-    await maybeAutoGenerateInvoice(pool, targetRow.BookingId, actorUserId);
   }
 
   return { applied: requested, remaining: remaining - requested, becamePaid, milestoneId, onAccountId };
@@ -232,6 +231,61 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
   }
 });
 
+// Shared demand-raising logic behind POST /:id/demand below — pulled out so
+// the Money Receipt approval flow (crmMoneyReceipts.js) can raise a demand
+// against a booking's milestone the exact same way, per "reuse the existing
+// Demands feature" rather than building a parallel demand concept. Throws
+// (with .status set) on the same conditions the route below used to
+// res.status(...).json(...) on, so callers can handle failures uniformly.
+async function raiseDemandForMilestone(pool, milestoneId, notes) {
+  const m = await pool.request().input("id", sql.Int, milestoneId).query(`
+    SELECT m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, m.Status, m.DemandStatus,
+           b.BookingNo, b.AssignedTo, a.ApplicantName
+    FROM dbo.CrmPaymentMilestone m
+    JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+    JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+    WHERE m.Id = @id
+  `);
+  if (!m.recordset.length) { const e = new Error("Milestone not found"); e.status = 404; throw e; }
+  const row = m.recordset[0];
+  if (row.Status === "Paid" || row.Status === "Waived") {
+    const e = new Error(`This milestone is already ${row.Status.toLowerCase()} — nothing to demand`);
+    e.status = 400;
+    throw e;
+  }
+  if (row.DemandStatus !== "Pending") {
+    const e = new Error(`Cannot raise demand — current status is ${row.DemandStatus}`);
+    e.status = 400;
+    throw e;
+  }
+
+  const balance = (row.AmountDue || 0) - (row.AmountPaid || 0);
+  const demandNo = buildDemandNo(row.BookingNo, row.MilestoneNo);
+  const demandRaisedOn = new Date().toISOString().slice(0, 10);
+  const cleanNotes = (notes || "").trim() || null;
+
+  await pool.request()
+    .input("id", sql.Int, milestoneId)
+    .input("no", sql.NVarChar(60), demandNo)
+    .input("dt", sql.Date, demandRaisedOn)
+    .input("notes", sql.NVarChar(500), cleanNotes)
+    .query(`
+      UPDATE dbo.CrmPaymentMilestone SET
+        DemandStatus = 'Demanded', DemandNo = @no, DemandRaisedOn = @dt,
+        DemandNotes = ISNULL(@notes, DemandNotes),
+        DemandRaisedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+
+  if (row.AssignedTo) {
+    await emitNotification(pool, row.AssignedTo, "payment_demand",
+      "Payment Demand Raised",
+      `${row.ApplicantName} · ${row.BookingNo} — ${row.MilestoneName} demand raised (₹${balance.toLocaleString("en-IN")})`,
+      milestoneId, "payment_milestone");
+  }
+  return { DemandNo: demandNo, DemandRaisedOn: demandRaisedOn };
+}
+
 // POST /:id/demand — raise a payment demand for a milestone: assigns a real
 // DemandNo, moves DemandStatus Pending -> Demanded, and notifies the
 // applicant's assignee. Blocked on an already-fully-paid milestone (nothing
@@ -240,49 +294,10 @@ router.post("/:id/demand", requirePageRight("crm-payments", "edit"), async (req,
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
-    const m = await pool.request().input("id", sql.Int, id).query(`
-      SELECT m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, m.Status, m.DemandStatus,
-             b.BookingNo, b.AssignedTo, a.ApplicantName
-      FROM dbo.CrmPaymentMilestone m
-      JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE m.Id = @id
-    `);
-    if (!m.recordset.length) return res.status(404).json({ error: "Milestone not found" });
-    const row = m.recordset[0];
-    if (row.Status === "Paid" || row.Status === "Waived") {
-      return res.status(400).json({ error: `This milestone is already ${row.Status.toLowerCase()} — nothing to demand` });
-    }
-    if (row.DemandStatus !== "Pending") {
-      return res.status(400).json({ error: `Cannot raise demand — current status is ${row.DemandStatus}` });
-    }
-
-    const balance = (row.AmountDue || 0) - (row.AmountPaid || 0);
-    const demandNo = buildDemandNo(row.BookingNo, row.MilestoneNo);
-    const demandRaisedOn = new Date().toISOString().slice(0, 10);
-    const notes = (req.body?.Notes || "").trim() || null;
-
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("no", sql.NVarChar(60), demandNo)
-      .input("dt", sql.Date, demandRaisedOn)
-      .input("notes", sql.NVarChar(500), notes)
-      .query(`
-        UPDATE dbo.CrmPaymentMilestone SET
-          DemandStatus = 'Demanded', DemandNo = @no, DemandRaisedOn = @dt,
-          DemandNotes = ISNULL(@notes, DemandNotes),
-          DemandRaisedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-
-    if (row.AssignedTo) {
-      await emitNotification(pool, row.AssignedTo, "payment_demand",
-        "Payment Demand Raised",
-        `${row.ApplicantName} · ${row.BookingNo} — ${row.MilestoneName} demand raised (₹${balance.toLocaleString("en-IN")})`,
-        id, "payment_milestone");
-    }
-    res.json({ success: true, DemandNo: demandNo, DemandRaisedOn: demandRaisedOn });
+    const result = await raiseDemandForMilestone(pool, id, req.body?.Notes);
+    res.json({ success: true, ...result });
   } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
     console.error("[crm-payments] POST /:id/demand error:", e.message);
     res.status(500).json({ error: e.message });
   }
@@ -439,6 +454,49 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
     CrmApplicationId: targetRow.ApplicationId,
   }, actorEmail || String(actorUserId));
 
+  // Money Receipt (customer-facing, downloadable PDF, "Pending Approval"
+  // until this same ReceivedPayment is approved) is generated as a direct
+  // byproduct of THIS submission for the Booking Amount (Milestone #1) —
+  // never a separate, re-typed form. One real-world payment, one place it's
+  // entered, one receipt. A rejected/bounced cheque followed by a fresh
+  // submission naturally produces its own new Money Receipt here too — that
+  // IS the "ask for repayment/reissue" flow, no separate bounce mechanism
+  // needed. See getMoneyReceiptStatus in moneyReceiptPdf.js for how its
+  // Pending/Approved/Bounced status is derived live from this RP row rather
+  // than stored independently.
+  if (targetRow.MilestoneNo === 1) {
+    try {
+      const { getNextDocNumber: getNextDocNo } = require("../services/docNumber");
+      const receiptNo = await getNextDocNo(pool, "MR", "MR");
+      const mrResult = await pool.request()
+        .input("no", sql.NVarChar(30), receiptNo)
+        .input("bid", sql.Int, targetRow.BookingId)
+        .input("rpid", sql.Int, rp.RPPaymentID)
+        .input("amt", sql.Decimal(18, 2), amount)
+        .input("mode", sql.NVarChar(30), data.PaymentMode || "Other")
+        .input("chq", sql.NVarChar(50), data.PaymentMode === "Cheque" ? (data.TransactionRef || null) : null)
+        .input("chqDt", sql.Date, data.ChequeDate || null)
+        .input("bank", sql.NVarChar(150), data.DepositBankName || null)
+        .input("ref", sql.NVarChar(150), data.PaymentMode !== "Cheque" ? (data.TransactionRef || null) : null)
+        .input("rcvd", sql.Date, data.ReceivedDate || new Date().toISOString().slice(0, 10))
+        .input("rem", sql.NVarChar(500), data.Notes || null)
+        .input("cb", sql.Int, actorUserId)
+        .query(`
+          INSERT INTO dbo.CrmMoneyReceipt
+            (ReceiptNo, BookingId, ReceivedPaymentId, Amount, PaymentMode, ChequeNo, ChequeDate, BankName, TransactionRef, ReceivedDate, Remarks, Status, CreatedBy, CreatedAt, UpdatedAt)
+          OUTPUT INSERTED.Id
+          VALUES (@no, @bid, @rpid, @amt, @mode, @chq, @chqDt, @bank, @ref, @rcvd, @rem, 'Pending', @cb, SYSDATETIME(), SYSDATETIME())
+        `);
+      const { generateMoneyReceiptPdf } = require("../services/moneyReceiptPdf");
+      await generateMoneyReceiptPdf(pool, mrResult.recordset[0].Id);
+    } catch (mrErr) {
+      // Best-effort, same rule as GL posting/PDF generation elsewhere in this
+      // function — a Money Receipt hiccup must never block the real payment
+      // submission it's documenting.
+      console.error("[crm-payments] Money Receipt auto-generation failed:", mrErr.message);
+    }
+  }
+
   return { submitted: true, ReceivedPaymentId: rp.RPPaymentID, RPDocNo: rp.RPDocNo, bookingId: targetRow.BookingId };
 }
 
@@ -456,8 +514,9 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
 // out of submission order.
 async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmail) {
   const target = await pool.request().input("id", sql.Int, rp.CrmMilestoneId).query(`
-    SELECT Id, BookingId, MilestoneNo, MilestoneName, AmountDue, AmountPaid
-    FROM dbo.CrmPaymentMilestone WHERE Id = @id
+    SELECT m.Id, m.BookingId, m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, b.BookingNo
+    FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+    WHERE m.Id = @id
   `);
   if (!target.recordset.length) throw new ReceiptError("Milestone no longer exists");
   const targetRow = target.recordset[0];
@@ -526,9 +585,38 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
 
     if (rollup.recordset[0]?.Status === "Paid") {
       await maybeAutoCreateSalesDeed(pool, targetRow.BookingId, actorUserId);
-      await maybeAutoGenerateInvoice(pool, targetRow.BookingId, actorUserId);
       if (targetRow.MilestoneNo === 1) {
         await maybeAutoCreateBrokerage(pool, targetRow.BookingId, actorUserId);
+
+        // Booking Amount payment just got approved — this IS the linked
+        // Money Receipt's own approval (its status is derived live from
+        // this ReceivedPayment row, not stored separately, so there's
+        // nothing to flip here). Its PDF is regenerated so a re-download
+        // shows "APPROVED" instead of "PENDING APPROVAL". Milestone #1
+        // itself has nothing left to demand (it's Paid) — what actually
+        // becomes demandable now is the NEXT milestone in the payment
+        // plan, per "after someone approves the payment then a demand
+        // will be generated" — reusing the exact same Demands mechanism,
+        // not a parallel one.
+        try {
+          const { getMoneyReceiptByReceivedPaymentId, generateMoneyReceiptPdf } = require("../services/moneyReceiptPdf");
+          const mr = await getMoneyReceiptByReceivedPaymentId(pool, rp.RPPaymentID);
+          if (mr) await generateMoneyReceiptPdf(pool, mr.Id);
+        } catch (mrErr) {
+          console.error("[crm-payments] Money Receipt PDF regeneration on approval failed:", mrErr.message);
+        }
+        try {
+          const next = await pool.request().input("bid", sql.Int, targetRow.BookingId).query(`
+            SELECT TOP 1 Id, DemandStatus, Status FROM dbo.CrmPaymentMilestone
+            WHERE BookingId = @bid AND MilestoneNo = 2
+          `);
+          const nextRow = next.recordset[0];
+          if (nextRow && nextRow.DemandStatus === "Pending" && nextRow.Status !== "Paid" && nextRow.Status !== "Waived") {
+            await raiseDemandForMilestone(pool, nextRow.Id, `Auto-raised — Booking Amount payment approved for Booking ${targetRow.BookingNo}`);
+          }
+        } catch (demandErr) {
+          console.error("[crm-payments] next-milestone demand auto-raise failed:", demandErr.message);
+        }
       }
       brokerWarning = await warnIfBrokerUnpaid(pool, targetRow.BookingId, actorUserId);
     }
@@ -872,7 +960,6 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
 
     // Auto-flow: a waived milestone can also be the last one outstanding.
     await maybeAutoCreateSalesDeed(pool, result.recordset[0].BookingId, actorId(req));
-    await maybeAutoGenerateInvoice(pool, result.recordset[0].BookingId, actorId(req));
 
     res.json({ success: true, status: "Waived" });
   } catch (e) {
@@ -1009,3 +1096,4 @@ module.exports.applyCrmMilestonePaymentApproval = applyCrmMilestonePaymentApprov
 module.exports.applyCrmOnAccountPaymentApproval = applyCrmOnAccountPaymentApproval;
 module.exports.autoApplyOnAccount = autoApplyOnAccount;
 module.exports.ReceiptError = ReceiptError;
+module.exports.raiseDemandForMilestone = raiseDemandForMilestone;

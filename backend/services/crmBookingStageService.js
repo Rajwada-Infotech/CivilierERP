@@ -159,13 +159,17 @@ async function requireActiveStage(pool, bookingId, stage) {
   return row;
 }
 
-// Staff "Submit for Approval" — Review -> MarketingHeadApproval. The three
-// original review gates (unit/plan confirmed, booking amount paid) must be
-// complete, AND — since the former Application-level Level-1 checklist was
-// merged into this same Review stage — all 7 data-review checklist items
-// (KYC, Project/Unit/Rate, Payment Plan, Bank/Deposit, Broker, Source,
-// Documents) must be Checked too. Stamps ReadyForApprovalAt so the Approval
-// Inbox lists it.
+// Staff "Submit for Approval" — Review -> MarketingHeadApproval. Two gates:
+// all 7 data-review checklist items (KYC, Project/Unit/Rate, Payment Plan,
+// Bank/Deposit, Broker, Source, Documents) must be Checked, and the Booking
+// Amount (Milestone #1) must be fully paid. ProjectUnitRate and
+// PaymentPlanAmounts being Checked already IS "Unit/Rate/Value confirmed"
+// and "Payment Plan confirmed" — the old separate
+// UnitReviewConfirmed/PlanReviewConfirmed columns asserted the exact same
+// two facts a second time, via their own confirm-unit/confirm-plan routes,
+// kept in sync only because the frontend fired both calls on one click.
+// That second system is gone; the checklist is now the only place either
+// fact is recorded. Stamps ReadyForApprovalAt so the Approval Inbox lists it.
 async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
   const row = await requireActiveStage(pool, bookingId, STAGE_REVIEW);
   if (!row) throw Object.assign(new Error("Booking not found"), { status: 404 });
@@ -180,7 +184,7 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
 
   const readiness = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT
-      b.UnitReviewConfirmed, b.PlanReviewConfirmed, b.Status,
+      b.Status,
       ISNULL(fm.AmountDue, 0) AS FirstMilestoneDue,
       ISNULL(fm.AmountPaid, 0) AS FirstMilestonePaid
     FROM dbo.CrmBooking b
@@ -194,14 +198,8 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
     return { ok: true, noop: true, stage: STAGE_CONFIRMED };
   }
 
-  const missing = [];
-  if (!chk.UnitReviewConfirmed) missing.push("Unit, Rate & Total Value");
-  if (!chk.PlanReviewConfirmed) missing.push("Payment Plan & Token/Booking Amount");
   if (!(chk.FirstMilestoneDue > 0) || chk.FirstMilestonePaid < chk.FirstMilestoneDue) {
-    missing.push("Booking Amount Payment");
-  }
-  if (missing.length) {
-    const e = new Error(`Complete the review first — ${missing.join(" and ")} are still pending`);
+    const e = new Error("Complete the review first — Booking Amount Payment is still pending");
     e.status = 400;
     throw e;
   }

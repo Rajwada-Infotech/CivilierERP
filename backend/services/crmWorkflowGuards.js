@@ -379,102 +379,9 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
  * maybeAutoCreateSalesDeed at every call site — both share the exact same
  * trigger condition (all milestones settled).
  */
-async function maybeAutoGenerateInvoice(pool, bookingId, actorUserId) {
-  const existing = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Possession'");
-  if (existing.recordset.length) return null;
-
-  const pendingMilestones = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND Status NOT IN ('Paid', 'Waived')
-  `);
-  if (pendingMilestones.recordset[0]?.Cnt > 0) return null;
-  const hasMilestones = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
-  if (!hasMilestones.recordset[0]?.Cnt) return null;
-
-  const booking = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT BookingNo, AssignedTo, GrandTotal, TotalValue FROM dbo.CrmBooking WHERE Id = @bid");
-  const bookingRow = booking.recordset[0];
-  if (!bookingRow) return null;
-
-  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
-  const amount = bookingRow.GrandTotal || bookingRow.TotalValue || 0;
-  const result = await pool.request()
-    .input("no",   sql.NVarChar(30),  invoiceNo)
-    .input("bid",  sql.Int,           bookingId)
-    .input("amt",  sql.Decimal(18,2), amount)
-    .input("desc", sql.NVarChar(500), "Final settlement — possession of unit")
-    .input("cb",   sql.Int,           actorUserId || null)
-    .query(`
-      INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, Description, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.Id
-      VALUES (@no, @bid, 'Possession', @amt, @desc, @cb, SYSDATETIME())
-    `);
-  const invoiceId = result.recordset[0].Id;
-
-  if (bookingRow.AssignedTo) {
-    await emitNotification(pool, bookingRow.AssignedTo, "crm_invoice_generated",
-      "Possession Invoice Generated",
-      `${invoiceNo} auto-generated for booking ${bookingRow.BookingNo} — all payment milestones are settled.`,
-      invoiceId, "crm_invoice");
-  }
-
-  return { id: invoiceId, InvoiceNo: invoiceNo };
-}
-
-/**
- * Auto-advance step: "AGREEMENT DONE -> INVOICE (receive payment for these
- * agreemental works)" — the moment an agreement reaches Executed (both
- * Senior and Customer approval already landed, per mark-executed's own
- * gate), automatically generate the Agreement-stage invoice, the same way
- * maybeAutoGenerateInvoice() does for the Possession stage. Only fires if
- * the booking's payment plan actually has a milestone named "Agreement..."
- * to invoice — if a custom plan doesn't have one, this deliberately does
- * nothing rather than guessing an amount; staff can still generate it
- * manually from the Booking Detail Invoice tab. Idempotent: no-op if an
- * Agreement-type invoice already exists for the booking.
- */
-async function maybeAutoGenerateAgreementInvoice(pool, bookingId, actorUserId) {
-  const existing = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Agreement'");
-  if (existing.recordset.length) return null;
-
-  const milestone = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone
-    WHERE BookingId = @bid AND MilestoneName LIKE 'Agreement%'
-    ORDER BY MilestoneNo
-  `);
-  if (!milestone.recordset.length) return null;
-
-  const booking = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT BookingNo, AssignedTo FROM dbo.CrmBooking WHERE Id = @bid");
-  const bookingRow = booking.recordset[0];
-  if (!bookingRow) return null;
-
-  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
-  const amount = milestone.recordset[0].AmountDue || 0;
-  const result = await pool.request()
-    .input("no",   sql.NVarChar(30),  invoiceNo)
-    .input("bid",  sql.Int,           bookingId)
-    .input("amt",  sql.Decimal(18,2), amount)
-    .input("desc", sql.NVarChar(500), "Agreement execution charges")
-    .input("cb",   sql.Int,           actorUserId || null)
-    .query(`
-      INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, Description, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.Id
-      VALUES (@no, @bid, 'Agreement', @amt, @desc, @cb, SYSDATETIME())
-    `);
-  const invoiceId = result.recordset[0].Id;
-
-  if (bookingRow.AssignedTo) {
-    await emitNotification(pool, bookingRow.AssignedTo, "crm_invoice_generated",
-      "Agreement Invoice Generated",
-      `${invoiceNo} auto-generated for booking ${bookingRow.BookingNo} — agreement executed.`,
-      invoiceId, "crm_invoice");
-  }
-
-  return { id: invoiceId, InvoiceNo: invoiceNo };
-}
+// Auto-generation of Possession and Agreement invoices was removed — every
+// invoice is now manual-only from the dedicated Invoice page, gated on the
+// relevant Demand having been raised. See routes/crmInvoices.js.
 
 // --- Single-field agreement-date negotiation loop -------------------------
 // Replaces the old two-column (ProposedDateByCompany / ProposedDateByCustomer)
@@ -1068,68 +975,9 @@ async function maybeUnlockBrokerageOnAgreementExecuted(pool, bookingId) {
   `);
 }
 
-// Fires when staff click "Book / Send for Approval" (PUT
-// /:id/ready-for-approval in crmBookings.js) — the moment a booking clears
-// its own checklist and is submitted for admin approval, generate the
-// Booking-stage invoice automatically instead of leaving staff to remember
-// a separate manual step. Idempotent on InvoiceType = 'Booking' so re-
-// notifying admins (a booking bounced back and resubmitted) never creates a
-// second invoice.
-async function maybeAutoGenerateBookingInvoice(pool, bookingId, actorUserId) {
-  const existing = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Booking'");
-  if (existing.recordset.length) return null;
-
-  const booking = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT BookingNo, AssignedTo, BookingAmount FROM dbo.CrmBooking WHERE Id = @bid");
-  const bookingRow = booking.recordset[0];
-  if (!bookingRow || !bookingRow.BookingAmount) return null;
-
-  // Auto-generation is only ever meant to fire for the booking (token)
-  // payment itself, once it's fully paid — not for any milestone-wise
-  // payment that comes after. crmBookings.js's ready-for-approval already
-  // gates on this via checkBookingApprovalReadiness before calling here,
-  // but that's a call-site guarantee, not a data-layer one — re-check the
-  // first milestone directly so this function stays correct even if a
-  // future call site is added without that same gate.
-  const firstMilestone = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT TOP 1 AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
-  `);
-  const fm = firstMilestone.recordset[0];
-  if (!fm || !(fm.AmountDue > 0) || Number(fm.AmountPaid) < Number(fm.AmountDue)) return null;
-
-  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
-  const result = await pool.request()
-    .input("no",   sql.NVarChar(30),  invoiceNo)
-    .input("bid",  sql.Int,           bookingId)
-    .input("amt",  sql.Decimal(18,2), bookingRow.BookingAmount)
-    .input("desc", sql.NVarChar(500), "Booking amount received against unit booking")
-    .input("cb",   sql.Int,           actorUserId || null)
-    .query(`
-      INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, Description, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.Id
-      VALUES (@no, @bid, 'Booking', @amt, @desc, @cb, SYSDATETIME())
-    `);
-  const invoiceId = result.recordset[0].Id;
-
-  // Same best-effort rule as the manual invoice route — a PDF-rendering
-  // problem must never block the booking's own approval submission, which
-  // is what this function runs inside of.
-  try {
-    await generateInvoicePdf(pool, invoiceId);
-  } catch (pdfErr) {
-    console.error("[crmWorkflowGuards] booking invoice PDF generation failed:", pdfErr.message);
-  }
-
-  if (bookingRow.AssignedTo) {
-    await emitNotification(pool, bookingRow.AssignedTo, "crm_invoice_generated",
-      "Booking Invoice Generated",
-      `${invoiceNo} auto-generated for booking ${bookingRow.BookingNo}.`,
-      invoiceId, "crm_invoice");
-  }
-
-  return { id: invoiceId, InvoiceNo: invoiceNo };
-}
+// Auto-generation of the Booking invoice was removed — it's now manual-only
+// from the dedicated Invoice page, gated on the Booking milestone's Demand
+// having been raised. See routes/crmInvoices.js.
 
 /**
  * Loan Processing gate — this stage only exists at all for a booking that
@@ -1163,9 +1011,6 @@ module.exports = {
   maybeAutoCreateAgreement,
   maybeAutoCreateLegalMilestone,
   maybeAutoCreateSalesDeed,
-  maybeAutoGenerateInvoice,
-  maybeAutoGenerateBookingInvoice,
-  maybeAutoGenerateAgreementInvoice,
   maybeAutoCreateBrokerage,
   maybeUnlockBrokerageOnAgreementExecuted,
   proposeAgreementDate,
