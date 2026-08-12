@@ -190,6 +190,13 @@ const Payment: React.FC = () => {
   const [loadingFormChain, setLoadingFormChain] = useState(false);
   // Known totalPaid injected by "Pay Remaining" — overrides stale opt.totalPaid from DB
   const [formKnownTotalPaid, setFormKnownTotalPaid] = useState<number | null>(null);
+  // Same pattern, for TDS: set from the freshly-fetched invoice detail at
+  // selection time (handleExpenseSelect), so the Invoice Balance card and
+  // Payment Breakdown panel read a guaranteed-current value instead of
+  // expenseOptions.find(...).tdsAmount — that list is a react-query cache
+  // fetched once per page load and not necessarily current if the linked
+  // invoice's TDS changed since.
+  const [formKnownTdsAmount, setFormKnownTdsAmount] = useState<number | null>(null);
   // Live remaining from payment-summary (excludes bounced) — used in partial payment panel
   const [formLiveRemaining, setFormLiveRemaining] = useState<number | null>(null);
   // On Account balance for the selected invoice's party
@@ -1179,6 +1186,7 @@ const Payment: React.FC = () => {
       // Reset known total paid unless this is a Pay Remaining call (amountOverride set)
       if (amountOverride == null) setFormKnownTotalPaid(null);
       if (!expenseId) {
+        setFormKnownTdsAmount(null);
         setForm((prev) => ({
           ...prev,
           expenseId: "",
@@ -1197,6 +1205,7 @@ const Payment: React.FC = () => {
 
       const selectedOption = expenseOptions.find((o) => o.id === expenseId);
       if (selectedOption?.type === "emi") {
+        setFormKnownTdsAmount(null);
         const parentDocNo =
           selectedOption.parentDocNo ||
           selectedOption.refNumber?.replace(/-EMI-\d+$/i, "") ||
@@ -1256,6 +1265,15 @@ const Payment: React.FC = () => {
         if (!detail) throw new Error("Not found");
         const parentDocNo = detail.ParentDocNo || detail.EDocNo || "";
         const rootExBDocNo = detail.RootExBDocNo || detail.EDocNo || "";
+        // Freshly-fetched, never from the (possibly stale) expenseOptions
+        // cache — this is what the Invoice Balance card and Payment
+        // Breakdown panel now read via formKnownTdsAmount instead of
+        // re-deriving their own value from expenseOptions.find(...).
+        const freshTdsAmt =
+          (detail as any).TDSAmount != null
+            ? parseFloat(String((detail as any).TDSAmount)) || 0
+            : (selectedOption?.tdsAmount ?? 0);
+        setFormKnownTdsAmount(freshTdsAmt);
         setForm((prev) => ({
           ...prev,
           expenseId,
@@ -1290,10 +1308,9 @@ const Payment: React.FC = () => {
                 ? parseFloat((detail as any).EGrnTotalAmount)
                 : (detail.EAmount ?? null);
             if (fullAmt == null) return fullAmt;
-            const tdsAmt = selectedOption?.tdsAmount ?? 0;
             const paidSoFar = selectedOption?.totalPaid ?? 0;
-            const trueRemaining = Math.max(0, fullAmt - tdsAmt - paidSoFar);
-            return trueRemaining > 0 ? trueRemaining : fullAmt;
+            const trueRemaining = Math.max(0, fullAmt - freshTdsAmt - paidSoFar);
+            return trueRemaining > 0 ? trueRemaining : fullAmt - freshTdsAmt;
           })(),
           docType: detail.DocTypeName || detail.EDocumentType || "",
           // For GRN: baseAmount = pre-tax base (totalBase), rates from DB.
@@ -2796,13 +2813,18 @@ const Payment: React.FC = () => {
                 // approval and on payment changes, so an invoice whose TDS
                 // was added afterward (e.g. via an amendment) can still be
                 // stuck showing its pre-TDS figure.
-                const tdsAmt = opt.tdsAmount ?? 0;
+                const tdsAmt = formKnownTdsAmount ?? opt.tdsAmount ?? 0;
                 const payableAfterTds = Math.max(0, netAmt - tdsAmt);
                 // Use live chain-derived values when available (excludes bounced, subtracts bounce charges).
                 // formLiveRemaining is already TDS-net (see the effect that sets it), so
                 // paid-so-far is payableAfterTds minus it, not netAmt minus it.
                 const livePaid = formLiveRemaining != null ? Math.max(0, payableAfterTds - formLiveRemaining) : null;
-                const paid = livePaid ?? opt.totalPaid ?? 0;
+                // Real cash paid only — TDS is withheld, not paid to the
+                // supplier, so it must never be counted as "Paid" here (it
+                // gets its own card below instead). opt.totalPaid's fallback
+                // path historically folded TDS into the paid figure the
+                // moment it was applied to the invoice; strip it back out.
+                const paid = livePaid ?? Math.max(0, (opt.totalPaid ?? 0) - tdsAmt);
                 const remaining = formLiveRemaining ?? Math.max(0, payableAfterTds - paid);
                 const bStatus = deriveBillStatus(paid, remaining, payableAfterTds);
                 return (
@@ -2821,16 +2843,17 @@ const Payment: React.FC = () => {
                         {bStatus}
                       </span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className={`grid gap-2 ${tdsAmt > 0 ? "grid-cols-4" : "grid-cols-3"}`}>
                       <div className="text-center">
                         <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Invoice Total</p>
-                        <p className="font-mono text-xs font-bold text-foreground">{formatINR(payableAfterTds)}</p>
-                        {tdsAmt > 0 && (
-                          <p className="text-[8px] text-amber-600 dark:text-amber-400 mt-0.5">
-                            less {formatINR(tdsAmt)} TDS
-                          </p>
-                        )}
+                        <p className="font-mono text-xs font-bold text-foreground">{formatINR(netAmt)}</p>
                       </div>
+                      {tdsAmt > 0 && (
+                        <div className="text-center">
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">TDS Deducted</p>
+                          <p className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">{formatINR(tdsAmt)}</p>
+                        </div>
+                      )}
                       <div className="text-center">
                         <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Paid</p>
                         <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">{formatINR(paid)}</p>
@@ -3077,6 +3100,16 @@ const Payment: React.FC = () => {
                       const sgstRate = form.sgstRate ?? 0;
                       const igstRate = form.igstRate ?? 0;
 
+                      // TDS is deducted once, at the invoice — GST math above
+                      // is untouched by it. Resolved fresh from expenseOptions
+                      // (same source the Invoice Balance card above already
+                      // uses correctly) rather than trusting form.tdsAmount,
+                      // which nothing in this form actually sets.
+                      const tdsOpt = expenseOptions.find(
+                        (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
+                      );
+                      const tdsAmt = formKnownTdsAmount ?? tdsOpt?.tdsAmount ?? 0;
+
                       // Parse billing terms — must be an array of term objects.
                       // EDiscountData is a legacy flat discount object {applicable,type,value}
                       // and must NOT be treated as billing terms; skip it if not an array.
@@ -3188,6 +3221,10 @@ const Payment: React.FC = () => {
                       // Net Payable = gross after all term adjustments, rounded to nearest rupee
                       const net = Math.round(gross);
                       const roundOff = net - gross;
+                      // What's actually still payable in cash — TDS was
+                      // already withheld/remitted at the invoice, it's not
+                      // something this payment pays again.
+                      const netAfterTds = Math.max(0, net - tdsAmt);
 
                       const hasGst = cgst + sgst + igst > 0;
                       const hasTerms =
@@ -3480,24 +3517,45 @@ const Payment: React.FC = () => {
                             <Row
                               label="Net Payable"
                               value={formatINR(net)}
-                              bold
-                              large
+                              bold={tdsAmt <= 0}
+                              large={tdsAmt <= 0}
                             />
+
+                            {/* TDS — withheld at the invoice, informational
+                                only here, never something this payment pays
+                                again. */}
+                            {tdsAmt > 0 && (
+                              <>
+                                <Row
+                                  label="TDS Deducted"
+                                  sub="Withheld at invoice — not paid again here"
+                                  value={"− " + formatINR(tdsAmt)}
+                                  color="text-amber-500"
+                                />
+                                <div className="border-t border-border/60 pt-1.5" />
+                                <Row
+                                  label="Amount Payable (After TDS)"
+                                  value={formatINR(netAfterTds)}
+                                  bold
+                                  large
+                                />
+                              </>
+                            )}
 
                             {/* ── Payment calculation chain ── */}
                             {(() => {
                               const entered = Number(form.amount ?? 0);
-                              if (entered <= 0 || Math.abs(entered - net) < 0.01) return null;
+                              if (entered <= 0 || Math.abs(entered - netAfterTds) < 0.01) return null;
 
                               const opt = expenseOptions.find(
                                 (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
                               );
                               const prevOutstanding = resolveOutstanding(
-                                net,
+                                netAfterTds,
                                 formLiveRemaining,
                                 formKnownTotalPaid ?? opt?.totalPaid,
                               );
-                              const alreadyPaid = Math.max(0, net - prevOutstanding);
+                              const alreadyPaid = Math.max(0, netAfterTds - prevOutstanding);
                               const afterThisPayment = Math.max(0, prevOutstanding - entered);
                               const isExact   = Math.abs(entered - prevOutstanding) < 0.01;
                               const isPartial = !isExact && entered < prevOutstanding;
@@ -3515,8 +3573,8 @@ const Payment: React.FC = () => {
                                   {alreadyPaid > 0.01 && (
                                     <>
                                       <div className="flex justify-between items-center text-muted-foreground">
-                                        <span>Net payable</span>
-                                        <span className="font-mono">{formatINR(net)}</span>
+                                        <span>Net payable (after TDS)</span>
+                                        <span className="font-mono">{formatINR(netAfterTds)}</span>
                                       </div>
                                       <div className="flex justify-between items-center text-muted-foreground">
                                         <span>Already paid</span>
