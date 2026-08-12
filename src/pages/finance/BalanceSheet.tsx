@@ -85,16 +85,22 @@ function Signed({ amount, className = "" }: { amount: number; className?: string
   );
 }
 
-// Classify a group name for display badge
+// Classify a group name for display badge.
+// Must stay in sync with the backend's Schedule III heuristics in
+// financialStatements.js so that the frontend subtotals match the
+// backend's ratio figures.
 function classifyGroup(name: string): "current" | "non-current" | "equity" {
   const n = name.toLowerCase();
-  if (n.includes("share capital") || n.includes("reserve") || n.includes("surplus") ||
-      n.includes("equity") || n.includes("profit & loss") || n.includes("profit and loss")) return "equity";
-  if (n.includes("cash") || n.includes("bank") || n.includes("receivable") ||
-      n.includes("inventory") || n.includes("stock") || n.includes("advance") ||
-      n.includes("current") || n.includes("debtor") || n.includes("prepaid") ||
-      n.includes("payable") || n.includes("creditor") || n.includes("short") ||
-      n.includes("overdraft") || n.includes("provision")) return "current";
+  // Equity: Share Capital, Reserves, P&L A/c, Capital Account (partnerships)
+  if (/share.?capital|reserves?\b|surplus|equity|profit.*loss|capital.?account|partner.*capital|proprietor/i.test(n))
+    return "equity";
+  // Long-term / non-current override — prevents "Long-term Provisions" from
+  // being tagged current just because it contains "provision"
+  if (/long.?term|non.?current/i.test(n))
+    return "non-current";
+  // Current: keywords that indicate < 12 months maturity
+  if (/cash|bank|receivable|inventory|stock|advance|prepaid|current|debtor|payable|creditor|short.?term|overdraft|provision/i.test(n))
+    return "current";
   return "non-current";
 }
 

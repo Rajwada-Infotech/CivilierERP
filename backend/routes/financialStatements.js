@@ -118,10 +118,14 @@ router.get("/balance-sheet", async (req, res) => {
     // Net P&L (income - expenses, life-to-date through asOf) rolls into
     // Liabilities as "Profit & Loss A/c" — same as any statutory Balance
     // Sheet, since the ledger has no year-end closing/transfer entry to
-    // Reserves & Surplus yet.
-    const plRes = await pool
+    // Reserves & Surplus yet. We split this into prior years and current year.
+    const asOfDate = new Date(asOf);
+    const fyStartYear = asOfDate.getMonth() >= 3 ? asOfDate.getFullYear() : asOfDate.getFullYear() - 1;
+    const fyStart = fyStartYear + "-04-01";
+
+    const plResPrior = await pool
       .request()
-      .input("asOf", sql.Date, asOf)
+      .input("fyStart", sql.Date, fyStart)
       .input("companyId", sql.Int, companyId)
       .input("projectId", sql.Int, projectId)
       .input("costCenterId", sql.Int, costCenterId).query(`
@@ -132,21 +136,48 @@ router.get("/balance-sheet", async (req, res) => {
         FROM dbo.AccountHeadMaster ahm
         JOIN dbo.GeneralLedgerEntry gle ON gle.LHeadId = ahm.LHeadId
         WHERE ahm.LBelongsTo IS NOT NULL AND gle.IsReversed = 0
-          AND gle.VoucherDate <= @asOf
+          AND gle.VoucherDate < @fyStart
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
           AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
         GROUP BY ahm.LBelongsTo
       `);
 
-    let totalIncome = 0;
-    let totalExpense = 0;
-    for (const r of plRes.recordset) {
-      const root = rootOf(groupMap, r.groupId);
-      if (root === ROOT_IDS.REVENUE) totalIncome += Number(r.credit) - Number(r.debit);
-      if (root === ROOT_IDS.EXPENSES) totalExpense += Number(r.debit) - Number(r.credit);
-    }
-    const netProfit = Math.round((totalIncome - totalExpense) * 100) / 100;
+    const plResCurrent = await pool
+      .request()
+      .input("asOf", sql.Date, asOf)
+      .input("fyStart", sql.Date, fyStart)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
+      .input("costCenterId", sql.Int, costCenterId).query(`
+        SELECT
+          ahm.LBelongsTo AS groupId,
+          ISNULL(SUM(gle.DebitAmount), 0) AS debit,
+          ISNULL(SUM(gle.CreditAmount), 0) AS credit
+        FROM dbo.AccountHeadMaster ahm
+        JOIN dbo.GeneralLedgerEntry gle ON gle.LHeadId = ahm.LHeadId
+        WHERE ahm.LBelongsTo IS NOT NULL AND gle.IsReversed = 0
+          AND gle.VoucherDate >= @fyStart AND gle.VoucherDate <= @asOf
+          AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+          AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+          AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
+        GROUP BY ahm.LBelongsTo
+      `);
+
+    const calcNet = (recordset) => {
+      let income = 0;
+      let expense = 0;
+      for (const r of recordset) {
+        const root = rootOf(groupMap, r.groupId);
+        if (root === ROOT_IDS.REVENUE) income += Number(r.credit) - Number(r.debit);
+        if (root === ROOT_IDS.EXPENSES) expense += Number(r.debit) - Number(r.credit);
+      }
+      return Math.round((income - expense) * 100) / 100;
+    };
+
+    const netProfitPrior = calcNet(plResPrior.recordset);
+    const netProfitCurrent = calcNet(plResCurrent.recordset);
+    const netProfit = Math.round((netProfitPrior + netProfitCurrent) * 100) / 100;
 
     const liabilityGroups = new Map(); // groupId -> { name, heads: [] }
     const assetGroups = new Map();
@@ -187,10 +218,16 @@ router.get("/balance-sheet", async (req, res) => {
       // this schema (they're period accounts, folded into netProfit above).
     }
 
-    if (Math.abs(netProfit) > 0.005) {
+    if (Math.abs(netProfitPrior) > 0.005 || Math.abs(netProfitCurrent) > 0.005) {
       const bucket = liabilityGroups.get("PL") || { groupId: "PL", groupName: "Profit & Loss A/c", heads: [], total: 0 };
-      bucket.heads.push({ id: null, name: "Profit & Loss A/c (life-to-date)", amount: netProfit });
-      bucket.total = Math.round((bucket.total + netProfit) * 100) / 100;
+      if (Math.abs(netProfitPrior) > 0.005) {
+        bucket.heads.push({ id: null, name: "Retained Earnings (Prior Years)", amount: netProfitPrior });
+        bucket.total = Math.round((bucket.total + netProfitPrior) * 100) / 100;
+      }
+      if (Math.abs(netProfitCurrent) > 0.005) {
+        bucket.heads.push({ id: null, name: "Net Profit (Current Period)", amount: netProfitCurrent });
+        bucket.total = Math.round((bucket.total + netProfitCurrent) * 100) / 100;
+      }
       liabilityGroups.set("PL", bucket);
     }
 
@@ -207,12 +244,22 @@ router.get("/balance-sheet", async (req, res) => {
     const { companyName, entityType } = await resolveCompanyType(pool, companyId);
 
     // ── Schedule III classification heuristics (case-insensitive group name) ──
+    // A "long-term" / "non-current" prefix overrides current-keyword matches
+    // so that "Long-term Provisions" stays non-current even though it contains
+    // "provision". Similarly "Loans & Advances (Given)" stays non-current
+    // unless explicitly tagged "Short" or "Current".
+    const isLongTerm = (name) =>
+      /long.?term|non.?current/i.test(name);
     const isCurrentAsset = (name) =>
-      /cash|bank|receivable|inventory|stock|advance|prepaid|current|debtor/i.test(name);
+      !isLongTerm(name) &&
+      /cash|bank|receivable|inventory|stock|(?<!\blong.?term\b.*)advance|prepaid|current|debtor/i.test(name);
     const isInventory = (name) =>
       /inventory|stock|wip|work in progress/i.test(name);
+    const isEquity = (name) =>
+      /share.?capital|reserves?\b|surplus|equity|profit.*loss|capital.?account|partner.*capital|proprietor/i.test(name);
     const isCurrentLiability = (name) =>
-      /payable|creditor|current|short|overdraft|provision/i.test(name);
+      !isLongTerm(name) && !isEquity(name) &&
+      /payable|creditor|current|short.?term|overdraft|(?<!\blong.?term\b.*)provision/i.test(name);
 
     let totalCurrentAssets = 0;
     let totalNonCurrentAssets = 0;
@@ -228,10 +275,18 @@ router.get("/balance-sheet", async (req, res) => {
       }
     }
 
+    // Separate liabilities into Equity / Non-Current Liabilities / Current
+    // Liabilities — critical for correct ratio computation. Previously,
+    // totalEquity was computed as (totalAssets - totalLiabilities) which is
+    // always ~0 when balanced because totalLiabilities already includes
+    // equity groups. Now we sum equity groups directly.
+    let totalEquity = 0;
     let totalCurrentLiabilities = 0;
     let totalNonCurrentLiabilities = 0;
     for (const g of liabilities) {
-      if (isCurrentLiability(g.groupName)) {
+      if (isEquity(g.groupName)) {
+        totalEquity = Math.round((totalEquity + g.total) * 100) / 100;
+      } else if (isCurrentLiability(g.groupName)) {
         totalCurrentLiabilities = Math.round((totalCurrentLiabilities + g.total) * 100) / 100;
       } else {
         totalNonCurrentLiabilities = Math.round((totalNonCurrentLiabilities + g.total) * 100) / 100;
@@ -240,11 +295,13 @@ router.get("/balance-sheet", async (req, res) => {
 
     // ── Financial ratios ──────────────────────────────────────────────────────
     const safeDiv = (n, d) => (Math.abs(d) < 0.005 ? null : Math.round((n / d) * 10000) / 10000);
-    const totalEquity = Math.round((totalAssets - totalLiabilities) * 100) / 100;
+    // Debt = Total Liabilities (all groups) minus Equity (shareholders' funds).
+    // This gives the actual borrowed/owed capital for ratio purposes.
+    const totalDebt = Math.round((totalLiabilities - totalEquity) * 100) / 100;
     const currentRatio = safeDiv(totalCurrentAssets, totalCurrentLiabilities);
     const quickRatio   = safeDiv(totalCurrentAssets - totalInventories, totalCurrentLiabilities);
     const workingCapital = Math.round((totalCurrentAssets - totalCurrentLiabilities) * 100) / 100;
-    const debtToEquity = safeDiv(totalLiabilities, totalEquity);
+    const debtToEquity = safeDiv(totalDebt, totalEquity);
 
     res.json({
       asOf,

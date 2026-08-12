@@ -638,7 +638,7 @@ function ClassicStatement({
               })
             )}
 
-            {/* Net Profit carried forward */}
+            {/* Net Profit carried forward — balancing entry on Dr side */}
             {isProfit && (
               <tr className="border-t border-border">
                 <td className="py-1.5 pr-3 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
@@ -651,20 +651,29 @@ function ClassicStatement({
               </tr>
             )}
 
-            {/* Grand total row */}
+            {/* Net Loss carried forward — balancing entry on Cr side */}
+            {!isProfit && Math.abs(totals.netProfit) > 0.005 && (
+              <tr className="border-t border-border">
+                <td /><td /><td />
+                <td className="border-l border-border/30 pl-4 py-1.5 text-[11px] font-semibold text-red-700 dark:text-red-400">
+                  By Net Loss c/f
+                </td>
+                <td className="py-1.5 text-right text-[11px] font-semibold tabular-nums text-red-700 dark:text-red-400 whitespace-nowrap">
+                  {fmt(Math.abs(totals.netProfit))}
+                </td>
+              </tr>
+            )}
+
+            {/* Grand total row — both sides must match */}
             <tr className="border-t-2 border-double border-foreground/35">
               <td className="py-2 pr-3 text-xs font-bold text-foreground">Total</td>
               <td className="py-2 text-right text-xs font-bold tabular-nums text-foreground whitespace-nowrap">
-                {fmt(isProfit ? totals.income : totals.expenses)}
+                {fmt(Math.max(totals.income, totals.expenses))}
               </td>
               <td />
-              <td className={`border-l border-border/30 pl-4 py-2 text-xs font-bold ${
-                !isProfit ? "text-red-700 dark:text-red-400" : "text-foreground"
-              }`}>
-                {!isProfit ? "By Net Loss c/f" : "Total"}
-              </td>
+              <td className="border-l border-border/30 pl-4 py-2 text-xs font-bold text-foreground">Total</td>
               <td className="py-2 text-right text-xs font-bold tabular-nums text-foreground whitespace-nowrap">
-                {fmt(isProfit ? totals.income : totals.expenses)}
+                {fmt(Math.max(totals.income, totals.expenses))}
               </td>
             </tr>
           </tbody>
