@@ -42,6 +42,7 @@ function bumpTaskCaches() {
   return Promise.all([
     bumpCacheVersion("task-master"),
     bumpCacheVersion("task-master-followup-board"),
+    bumpCacheVersion("task-master-closed-board"),
   ]);
 }
 
@@ -63,7 +64,11 @@ router.get("/", cache("task-master", 60), async (req, res) => {
         t.TypeOfDocId, td.Description AS TypeOfDocLabel,
         t.AssignedTo, au.name AS AssigneeName,
         t.CreatedBy, u.name AS CreatedByName,
-        t.CreatedAt, t.UpdatedAt
+        t.CreatedAt, t.UpdatedAt,
+        t.ParentTaskId, pt.TaskNo AS ParentTaskNo, pt.Subject AS ParentTaskSubject,
+        t.ReminderAt,
+        t.EntryTypeId, et.EntryType AS EntryTypeLabel,
+        t.LinkedTypeOfDocId, ltd.Prefix AS LinkedTypeOfDocPrefix, ltd.Description AS LinkedTypeOfDocLabel
       FROM dbo.TaskMaster t
       LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
@@ -71,6 +76,9 @@ router.get("/", cache("task-master", 60), async (req, res) => {
       LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = t.TypeOfDocId
       LEFT JOIN dbo.users u ON u.id = t.CreatedBy
       LEFT JOIN dbo.users au ON au.id = t.AssignedTo
+      LEFT JOIN dbo.TaskMaster pt ON pt.Id = t.ParentTaskId
+      LEFT JOIN dbo.Entry_Type et ON et.E_Id = t.EntryTypeId
+      LEFT JOIN dbo.TypeOfDoc ltd ON ltd.TypeOfDocId = t.LinkedTypeOfDocId
       WHERE t.IsDeleted = 0
       ORDER BY t.CreatedAt DESC
     `);
@@ -121,16 +129,27 @@ router.get("/followup-board", cache("task-master-followup-board", 30), async (re
         t.Id, t.TaskNo, t.Subject, t.Details, t.Department, t.DueDate,
         t.CaseNumber, t.Priority, t.Status,
         co.name AS CaseCompanyName, pr.name AS CaseProjectName, fy.FName AS CaseFinYearName,
+        t.ParentTaskId, pt.TaskNo AS ParentTaskNo, pt.Subject AS ParentTaskSubject,
+        t.ReminderAt,
         (
-          SELECT TOP 1 f.NextReminderAt
-          FROM dbo.TaskFollowUps f
-          WHERE f.TaskId = t.Id AND f.IsDone = 0 AND f.NextReminderAt IS NOT NULL
-          ORDER BY f.CreatedAt DESC
+          -- Whichever comes sooner: the task's own ReminderAt (set directly
+          -- on the task, no follow-up note required) or the latest open
+          -- follow-up note's NextReminderAt. MIN() over a two-row derived
+          -- table ignores NULLs, so either source alone still works.
+          SELECT MIN(d) FROM (
+            SELECT TOP 1 f.NextReminderAt AS d
+            FROM dbo.TaskFollowUps f
+            WHERE f.TaskId = t.Id AND f.IsDone = 0 AND f.NextReminderAt IS NOT NULL
+            ORDER BY f.CreatedAt DESC
+            UNION ALL
+            SELECT t.ReminderAt
+          ) reminders
         ) AS NextFollowUpAt
       FROM dbo.TaskMaster t
       LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
       LEFT JOIN dbo.FinYear fy ON fy.FId = t.CaseFinYearId
+      LEFT JOIN dbo.TaskMaster pt ON pt.Id = t.ParentTaskId
       WHERE t.IsDeleted = 0 AND t.Status IN ('Active', 'Hold') AND t.DueDate IS NOT NULL
         ${scopeToSelf ? "AND t.AssignedTo = @UserId" : ""}
       ORDER BY t.DueDate ASC
@@ -138,6 +157,40 @@ router.get("/followup-board", cache("task-master-followup-board", 30), async (re
     res.json(result.recordset);
   } catch (err) {
     console.error("[task-master] GET followup-board error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /closed-board — the Follow-Up module's "Close Task" list, same
+// card-friendly shape and same self-scoping rule as /followup-board, just
+// Status = 'Closed' instead of Active/Hold, and no DueDate requirement
+// (a closed task's due date is no longer the point). Sorted by most
+// recently closed first.
+router.get("/closed-board", cache("task-master-closed-board", 30), async (req, res) => {
+  try {
+    const pool = getPool();
+    const scopeToSelf = !FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role);
+    const request = pool.request();
+    if (scopeToSelf) request.input("UserId", sql.Int, req.user?.userId || null);
+    const result = await request.query(`
+      SELECT
+        t.Id, t.TaskNo, t.Subject, t.Details, t.Department, t.DueDate,
+        t.CaseNumber, t.Priority, t.Status,
+        co.name AS CaseCompanyName, pr.name AS CaseProjectName, fy.FName AS CaseFinYearName,
+        t.ParentTaskId, pt.TaskNo AS ParentTaskNo, pt.Subject AS ParentTaskSubject,
+        t.UpdatedAt AS ClosedAt
+      FROM dbo.TaskMaster t
+      LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
+      LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
+      LEFT JOIN dbo.FinYear fy ON fy.FId = t.CaseFinYearId
+      LEFT JOIN dbo.TaskMaster pt ON pt.Id = t.ParentTaskId
+      WHERE t.IsDeleted = 0 AND t.Status = 'Closed'
+        ${scopeToSelf ? "AND t.AssignedTo = @UserId" : ""}
+      ORDER BY t.UpdatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[task-master] GET closed-board error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -160,7 +213,11 @@ router.get("/:id", async (req, res) => {
         t.TypeOfDocId, td.Description AS TypeOfDocLabel,
         t.AssignedTo, au.name AS AssigneeName, au.avatar_url AS AssigneeAvatarUrl,
         t.CreatedBy, u.name AS CreatedByName,
-        t.CreatedAt, t.UpdatedAt
+        t.CreatedAt, t.UpdatedAt,
+        t.ParentTaskId, pt.TaskNo AS ParentTaskNo, pt.Subject AS ParentTaskSubject,
+        t.ReminderAt,
+        t.EntryTypeId, et.EntryType AS EntryTypeLabel,
+        t.LinkedTypeOfDocId, ltd.Prefix AS LinkedTypeOfDocPrefix, ltd.Description AS LinkedTypeOfDocLabel
       FROM dbo.TaskMaster t
       LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
@@ -168,6 +225,9 @@ router.get("/:id", async (req, res) => {
       LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = t.TypeOfDocId
       LEFT JOIN dbo.users u ON u.id = t.CreatedBy
       LEFT JOIN dbo.users au ON au.id = t.AssignedTo
+      LEFT JOIN dbo.TaskMaster pt ON pt.Id = t.ParentTaskId
+      LEFT JOIN dbo.Entry_Type et ON et.E_Id = t.EntryTypeId
+      LEFT JOIN dbo.TypeOfDoc ltd ON ltd.TypeOfDocId = t.LinkedTypeOfDocId
       WHERE t.Id = @Id AND t.IsDeleted = 0
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Task not found" });
@@ -194,7 +254,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
   const {
     Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
     CaseCompanyId, CaseProjectId, CaseFinYearId, CaseDocumentNumber,
-    TypeOfDocId, AssignedTo,
+    TypeOfDocId, AssignedTo, ParentTaskId, ReminderAt, EntryTypeId, LinkedTypeOfDocId,
   } = req.body;
 
   if (!Subject?.trim()) return res.status(400).json({ error: "Subject is required" });
@@ -210,6 +270,22 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
   const createdBy = req.user?.userId || null;
   try {
     const pool = getPool();
+
+    let parentTaskId = null;
+    if (ParentTaskId) {
+      parentTaskId = parseInt(ParentTaskId, 10);
+      const parent = await pool.request().input("Id", sql.Int, parentTaskId)
+        .query("SELECT Id FROM dbo.TaskMaster WHERE Id = @Id AND IsDeleted = 0");
+      if (!parent.recordset.length) return res.status(400).json({ error: "Parent task not found" });
+    }
+
+    let linkedTypeOfDocId = null;
+    if (LinkedTypeOfDocId) {
+      linkedTypeOfDocId = parseInt(LinkedTypeOfDocId, 10);
+      const linkedDoc = await pool.request().input("Id", sql.Int, linkedTypeOfDocId)
+        .query("SELECT TypeOfDocId FROM dbo.TypeOfDoc WHERE TypeOfDocId = @Id AND IsActive = 1");
+      if (!linkedDoc.recordset.length) return res.status(400).json({ error: "Type of Doc not found" });
+    }
 
     // TypeOfDocId is optional — when set, lock the next number through the
     // shared doc-numbering scheme (same one WO/PO/GRN use). Locking commits
@@ -244,17 +320,21 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("CaseDocumentNumber", sql.NVarChar(100), CaseDocumentNumber?.trim() || null)
       .input("TypeOfDocId", sql.Int, TypeOfDocId ? parseInt(TypeOfDocId, 10) : null)
       .input("AssignedTo", sql.Int, AssignedTo ? parseInt(AssignedTo, 10) : null)
+      .input("ParentTaskId", sql.Int, parentTaskId)
+      .input("ReminderAt", sql.DateTime2, ReminderAt || null)
+      .input("EntryTypeId", sql.UniqueIdentifier, EntryTypeId || null)
+      .input("LinkedTypeOfDocId", sql.Int, linkedTypeOfDocId)
       .input("CreatedBy", sql.Int, createdBy)
       .query(`
         INSERT INTO dbo.TaskMaster (
           TaskNo, Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
           CaseCompanyId, CaseProjectId, CaseFinYearId, CaseDocumentNumber, TypeOfDocId, AssignedTo,
-          CreatedBy, CreatedAt
+          ParentTaskId, ReminderAt, EntryTypeId, LinkedTypeOfDocId, CreatedBy, CreatedAt
         )
         VALUES (
           @TaskNo, @Subject, @Details, @Department, @DueDate, @CaseNumber, @Priority, @Status,
           @CaseCompanyId, @CaseProjectId, @CaseFinYearId, @CaseDocumentNumber, @TypeOfDocId, @AssignedTo,
-          @CreatedBy, SYSUTCDATETIME()
+          @ParentTaskId, @ReminderAt, @EntryTypeId, @LinkedTypeOfDocId, @CreatedBy, SYSUTCDATETIME()
         );
         SELECT SCOPE_IDENTITY() AS Id;
       `);
@@ -275,6 +355,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   const {
     Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
     CaseCompanyId, CaseProjectId, CaseFinYearId, CaseDocumentNumber, AssignedTo,
+    ParentTaskId, ReminderAt, EntryTypeId, LinkedTypeOfDocId,
   } = req.body;
 
   if (!Subject?.trim()) return res.status(400).json({ error: "Subject is required" });
@@ -287,12 +368,33 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     return res.status(400).json({ error: `Invalid Status. Must be: ${STATUSES.join(", ")}` });
   }
 
+  const taskId = parseInt(id, 10);
   const updatedBy = req.user?.userId || null;
   try {
     const pool = getPool();
+
+    let parentTaskId = null;
+    if (ParentTaskId) {
+      parentTaskId = parseInt(ParentTaskId, 10);
+      if (parentTaskId === taskId) {
+        return res.status(400).json({ error: "A task cannot be its own parent" });
+      }
+      const parent = await pool.request().input("Id", sql.Int, parentTaskId)
+        .query("SELECT Id FROM dbo.TaskMaster WHERE Id = @Id AND IsDeleted = 0");
+      if (!parent.recordset.length) return res.status(400).json({ error: "Parent task not found" });
+    }
+
+    let linkedTypeOfDocId = null;
+    if (LinkedTypeOfDocId) {
+      linkedTypeOfDocId = parseInt(LinkedTypeOfDocId, 10);
+      const linkedDoc = await pool.request().input("Id", sql.Int, linkedTypeOfDocId)
+        .query("SELECT TypeOfDocId FROM dbo.TypeOfDoc WHERE TypeOfDocId = @Id AND IsActive = 1");
+      if (!linkedDoc.recordset.length) return res.status(400).json({ error: "Type of Doc not found" });
+    }
+
     await pool
       .request()
-      .input("Id", sql.Int, parseInt(id))
+      .input("Id", sql.Int, taskId)
       .input("Subject", sql.NVarChar(255), Subject.trim())
       .input("Details", sql.NVarChar(sql.MAX), Details?.trim() || null)
       .input("Department", sql.NVarChar(100), Department?.trim() || null)
@@ -305,6 +407,10 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("CaseFinYearId", sql.Int, CaseFinYearId ? parseInt(CaseFinYearId) : null)
       .input("CaseDocumentNumber", sql.NVarChar(100), CaseDocumentNumber?.trim() || null)
       .input("AssignedTo", sql.Int, AssignedTo ? parseInt(AssignedTo) : null)
+      .input("ParentTaskId", sql.Int, parentTaskId)
+      .input("ReminderAt", sql.DateTime2, ReminderAt || null)
+      .input("EntryTypeId", sql.UniqueIdentifier, EntryTypeId || null)
+      .input("LinkedTypeOfDocId", sql.Int, linkedTypeOfDocId)
       .input("UpdatedBy", sql.Int, updatedBy)
       .query(`
         UPDATE dbo.TaskMaster SET
@@ -312,7 +418,8 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           DueDate = @DueDate, CaseNumber = @CaseNumber, Priority = @Priority, Status = @Status,
           CaseCompanyId = @CaseCompanyId, CaseProjectId = @CaseProjectId,
           CaseFinYearId = @CaseFinYearId, CaseDocumentNumber = @CaseDocumentNumber,
-          AssignedTo = @AssignedTo,
+          AssignedTo = @AssignedTo, ParentTaskId = @ParentTaskId, ReminderAt = @ReminderAt,
+          EntryTypeId = @EntryTypeId, LinkedTypeOfDocId = @LinkedTypeOfDocId,
           UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);
@@ -349,6 +456,33 @@ router.patch("/:id/status", allowRoles("admin", "super_admin", "dba"), async (re
     res.json({ message: `Task "${existing.recordset[0].TaskNo}" marked ${Status}` });
   } catch (err) {
     console.error("[task-master] PATCH status error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch("/:id/priority", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const { Priority } = req.body;
+  if (!PRIORITIES.includes(Priority)) {
+    return res.status(400).json({ error: `Invalid Priority. Must be: ${PRIORITIES.join(", ")}` });
+  }
+  const updatedBy = req.user?.userId || null;
+  try {
+    const pool = getPool();
+    const existing = await pool.request().input("Id", sql.Int, id)
+      .query("SELECT TaskNo FROM dbo.TaskMaster WHERE Id = @Id AND IsDeleted = 0");
+    if (!existing.recordset.length) return res.status(404).json({ error: "Task not found" });
+    await pool
+      .request()
+      .input("Id", sql.Int, id)
+      .input("Priority", sql.NVarChar(20), Priority)
+      .input("UpdatedBy", sql.Int, updatedBy)
+      .query("UPDATE dbo.TaskMaster SET Priority = @Priority, UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME() WHERE Id = @Id");
+    await bumpTaskCaches();
+    res.json({ message: `Task "${existing.recordset[0].TaskNo}" priority set to ${Priority}` });
+  } catch (err) {
+    console.error("[task-master] PATCH priority error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

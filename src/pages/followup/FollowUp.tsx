@@ -1,9 +1,9 @@
 import React from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { Search, Flame, Clock3, CalendarDays, ArrowRight, ClipboardList, Pause } from "lucide-react";
+import { Search, Flame, Clock3, CalendarDays, ArrowRight, ClipboardList, Pause, Check, ChevronRight, ChevronDown, CornerDownRight, CheckCircle2 } from "lucide-react";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { TaskDrawer } from "@/components/followup/TaskDrawer";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -32,6 +32,9 @@ interface Task {
   CaseProjectName: string | null;
   CaseFinYearName: string | null;
   NextFollowUpAt: string | null;
+  ParentTaskId: number | null;
+  ParentTaskNo: string | null;
+  ParentTaskSubject: string | null;
 }
 
 // Standalone data source — Follow-Up never reads Task Master's cache/shape,
@@ -40,6 +43,17 @@ async function fetchFollowUpBoard(): Promise<Task[]> {
   const res = await fetchWithAuth(`${API}/followup-board`);
   if (!res.ok) throw new Error("Failed to fetch tasks");
   return res.json().catch(() => []);
+}
+
+// Closed tasks live entirely outside the Active/Hold board above (see
+// GET /closed-board in backend/routes/taskMaster.js) — fetched separately
+// here purely for the "Close" tile's count; the full list lives on its own
+// page at /followup/close-tasks (src/pages/followup/ClosedTasks.tsx).
+async function fetchClosedCount(): Promise<number> {
+  const res = await fetchWithAuth(`${API}/closed-board`);
+  if (!res.ok) return 0;
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) ? rows.length : 0;
 }
 
 function startOfDay(d: Date): number {
@@ -73,10 +87,10 @@ const BUCKET_LABELS = {
   onHold: "On Hold",
 } as const;
 
-const PRIORITY_STYLE: Record<string, { classes: string }> = {
-  "Very Important": { classes: "bg-red-500/10 text-red-500 border-red-500/25" },
-  Important: { classes: "bg-amber-500/10 text-amber-600 border-amber-500/25" },
-  Normal: { classes: "" },
+const PRIORITY_COLORS: Record<(typeof PRIORITIES)[number], string> = {
+  "Very Important": "#ef4444",
+  Important: "#22c55e",
+  Normal: "#3b82f6",
 };
 
 function useGlass() {
@@ -100,22 +114,43 @@ function useGlass() {
   return { isDark, glassCard };
 }
 
-const TaskCard: React.FC<{ task: Task; index: number; onClick: () => void }> = ({ task, index, onClick }) => {
+const TaskCard: React.FC<{
+  task: Task;
+  index: number;
+  onClick: () => void;
+  onPriorityChange: (id: number, priority: (typeof PRIORITIES)[number]) => void;
+  depth?: number;
+  hasChildren?: boolean;
+  childCount?: number;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
+}> = ({ task, index, onClick, onPriorityChange, depth = 0, hasChildren = false, childCount = 0, expanded = false, onToggleExpand }) => {
   const { glassCard } = useGlass();
-  const priority = PRIORITY_STYLE[task.Priority] || PRIORITY_STYLE.Normal;
   // A Held task isn't "overdue" in the actionable sense — it's paused — so
   // skip the red urgency styling for anything that isn't Active.
   const overdue = task.Status === "Active" && dueLabel(task.DueDate).includes("overdue");
+  // Nested subtask cards read as a smaller, secondary tier under their
+  // parent — tighter padding/spacing and a size step down on every label.
+  const isChild = depth > 0;
 
   return (
-    <motion.button
-      type="button"
+    <motion.div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, delay: Math.min(index, 8) * 0.03, ease: "easeOut" }}
       whileHover={{ y: -2 }}
-      className="relative w-full text-left rounded-xl p-4 space-y-1.5 group overflow-hidden"
+      className={`relative w-full text-left rounded-xl group overflow-hidden cursor-pointer ${
+        isChild ? "p-2.5 space-y-1" : "p-4 space-y-1.5"
+      }`}
       style={glassCard}
     >
       <div
@@ -123,38 +158,82 @@ const TaskCard: React.FC<{ task: Task; index: number; onClick: () => void }> = (
         style={{ background: overdue ? "#ef4444" : `linear-gradient(to bottom, transparent 10%, ${ACCENT} 30%, ${ACCENT} 70%, transparent 90%)` }}
       />
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest">
+        <span className={`flex items-center gap-1 font-mono text-muted-foreground uppercase tracking-widest ${isChild ? "text-[10px]" : "text-[11px]"}`}>
+          {isChild && <CornerDownRight size={10} className="shrink-0" />}
           {task.TaskNo || "—"}
         </span>
-        <ArrowRight
-          size={13}
-          className="opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all"
-          style={{ color: ACCENT_SOFT }}
-        />
+        <div className="flex items-center gap-1">
+          {hasChildren && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleExpand?.();
+              }}
+              className="p-1 -m-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              title={expanded ? "Collapse subtasks" : "Expand subtasks"}
+            >
+              {expanded ? <ChevronDown size={isChild ? 11 : 13} /> : <ChevronRight size={isChild ? 11 : 13} />}
+              <span className="sr-only">{childCount} subtasks</span>
+            </button>
+          )}
+          <ArrowRight
+            size={isChild ? 11 : 13}
+            className="opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all"
+            style={{ color: ACCENT_SOFT }}
+          />
+        </div>
       </div>
-      <p className="text-sm font-semibold text-foreground truncate">{task.Subject}</p>
-      {task.CaseProjectName && (
+      <p className={`font-semibold text-foreground truncate ${isChild ? "text-xs" : "text-sm"}`}>
+        {task.Subject}
+        {hasChildren && (
+          <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">({childCount})</span>
+        )}
+      </p>
+      {task.CaseProjectName && !isChild && (
         <p className="text-xs text-muted-foreground truncate">{task.CaseProjectName}</p>
       )}
-      <p className={`text-xs font-medium ${overdue ? "text-red-500" : "text-muted-foreground"}`}>
+      <p className={`font-medium ${isChild ? "text-[11px]" : "text-xs"} ${overdue ? "text-red-500" : "text-muted-foreground"}`}>
         {dueLabel(task.DueDate)}
       </p>
-      {task.NextFollowUpAt && (
+      {task.NextFollowUpAt && !isChild && (
         <p className="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-600 border border-amber-500/25">
           Next follow-up · {formatDate(task.NextFollowUpAt)}
         </p>
       )}
-      <div className="flex items-center gap-2 pt-1">
-        {priority.classes && (
-          <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-md border ${priority.classes}`}>
-            {task.Priority}
-          </span>
-        )}
-        {task.CaseNumber && (
+      <div className={`flex items-center pt-1 ${isChild ? "gap-1" : "gap-1.5"}`} onClick={(e) => e.stopPropagation()}>
+        {PRIORITIES.map((p) => {
+          const color = PRIORITY_COLORS[p];
+          const checked = task.Priority === p;
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => onPriorityChange(task.Id, p)}
+              className={`inline-flex items-center gap-1 font-semibold rounded-md border transition-colors ${
+                isChild ? "text-[9px] px-1 py-0.5" : "text-[10px] px-1.5 py-0.5"
+              }`}
+              style={{
+                borderColor: checked ? color : "rgba(148,163,184,0.3)",
+                color: checked ? color : undefined,
+                background: checked ? `${color}1A` : "transparent",
+              }}
+            >
+              <span
+                className={`rounded-[3px] border flex items-center justify-center shrink-0 ${isChild ? "w-2.5 h-2.5" : "w-3 h-3"}`}
+                style={{ borderColor: color, background: checked ? color : "transparent" }}
+              >
+                {checked && <Check size={isChild ? 7 : 9} color="#fff" strokeWidth={3} />}
+              </span>
+              {p}
+            </button>
+          );
+        })}
+        {task.CaseNumber && !isChild && (
           <span className="ml-auto text-[11px] text-muted-foreground font-mono">{task.CaseNumber}</span>
         )}
       </div>
-    </motion.button>
+    </motion.div>
   );
 };
 
@@ -199,6 +278,7 @@ const StatCard: React.FC<{
 
 const FollowUp: React.FC = () => {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { glassCard } = useGlass();
   const [search, setSearch] = React.useState("");
   const [priorityFilter, setPriorityFilter] = React.useState<(typeof PRIORITIES)[number] | null>(null);
@@ -207,6 +287,18 @@ const FollowUp: React.FC = () => {
   const [selectedTaskId, setSelectedTaskId] = React.useState<string | null>(
     searchParams.get("view"),
   );
+
+  // Collapsed by default — a parent card's subtasks only appear nested
+  // beneath it once its chevron is clicked.
+  const [expandedIds, setExpandedIds] = React.useState<Set<number>>(() => new Set());
+  const toggleExpanded = (id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Deep-link support (e.g. from the reminder bell's Follow-Up pill) — open
   // straight to the task the ?view= param names, then drop the param so it
@@ -224,6 +316,12 @@ const FollowUp: React.FC = () => {
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ["followup-board"],
     queryFn: fetchFollowUpBoard,
+    staleTime: 60 * 1000,
+  });
+
+  const { data: closedCount = 0 } = useQuery({
+    queryKey: ["closed-board-count"],
+    queryFn: fetchClosedCount,
     staleTime: 60 * 1000,
   });
 
@@ -254,9 +352,30 @@ const FollowUp: React.FC = () => {
     });
   }, [tasks, search, priorityFilter]);
 
+  // Subtasks nest under their parent's card (click to expand) rather than
+  // appearing as their own top-level cards — so bucketing (which drives the
+  // Overdue/Today/Upcoming/On Hold split) only ever looks at top-level
+  // tasks. A subtask's own due date still shows on its nested card, it just
+  // doesn't independently place it in a bucket.
+  const childrenByParent = React.useMemo(() => {
+    const map = new Map<number, Task[]>();
+    for (const t of filtered) {
+      if (!t.ParentTaskId) continue;
+      const arr = map.get(t.ParentTaskId) ?? [];
+      arr.push(t);
+      map.set(t.ParentTaskId, arr);
+    }
+    return map;
+  }, [filtered]);
+
+  const topLevelFiltered = React.useMemo(
+    () => filtered.filter((t) => !t.ParentTaskId),
+    [filtered],
+  );
+
   const buckets = React.useMemo(() => {
-    const active = filtered.filter((t) => t.Status === "Active" && t.DueDate);
-    const onHold = filtered.filter((t) => t.Status === "Hold" && t.DueDate);
+    const active = topLevelFiltered.filter((t) => t.Status === "Active" && t.DueDate);
+    const onHold = topLevelFiltered.filter((t) => t.Status === "Hold" && t.DueDate);
     const today = startOfDay(new Date());
     const overdue: Task[] = [];
     const dueToday: Task[] = [];
@@ -274,7 +393,7 @@ const FollowUp: React.FC = () => {
       upcoming: upcoming.sort(byDue),
       onHold: onHold.sort(byDue),
     };
-  }, [filtered]);
+  }, [topLevelFiltered]);
 
   const totalActive =
     buckets.overdue.length + buckets.dueToday.length + buckets.upcoming.length + buckets.onHold.length;
@@ -294,6 +413,20 @@ const FollowUp: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ["followup-board"] }),
       queryClient.invalidateQueries({ queryKey: ["followup-task", id] }),
     ]);
+  };
+
+  const handlePriorityChange = async (id: number, priority: (typeof PRIORITIES)[number]) => {
+    const res = await fetchWithAuth(`${API}/${id}/priority`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ Priority: priority }),
+    });
+    if (!res.ok) {
+      toast.error((await res.json().catch(() => ({}))).error || "Failed to update priority");
+      return;
+    }
+    toast.success(`Priority set to ${priority}`);
+    await queryClient.invalidateQueries({ queryKey: ["followup-board"] });
   };
 
   const exportColumns: ExportColumn[] = [
@@ -344,6 +477,7 @@ const FollowUp: React.FC = () => {
         <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mr-1">Priority</span>
         {PRIORITIES.map((p) => {
           const active = priorityFilter === p;
+          const color = PRIORITY_COLORS[p];
           return (
             <button
               key={p}
@@ -352,7 +486,7 @@ const FollowUp: React.FC = () => {
               className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
                 active ? "" : "border-border text-muted-foreground hover:bg-muted"
               }`}
-              style={active ? { background: "rgba(13,148,136,0.16)", borderColor: "rgba(13,148,136,0.45)", color: ACCENT } : undefined}
+              style={active ? { background: `${color}29`, borderColor: `${color}73`, color } : undefined}
             >
               {p}
             </button>
@@ -396,6 +530,15 @@ const FollowUp: React.FC = () => {
           delay={0.2}
           active={bucketFilter === "onHold"}
           onClick={() => setBucketFilter((f) => (f === "onHold" ? null : "onHold"))}
+        />
+        <StatCard
+          label="Close"
+          count={closedCount}
+          icon={CheckCircle2}
+          color="#64748b"
+          delay={0.25}
+          active={false}
+          onClick={() => navigate("/followup/close-tasks")}
         />
       </div>
 
@@ -445,16 +588,16 @@ const FollowUp: React.FC = () => {
       ) : (
         <>
           {(!bucketFilter || bucketFilter === "overdue") && (
-            <TaskGroup title="Overdue" tasks={buckets.overdue} onSelect={setSelectedTaskId} />
+            <TaskGroup title="Overdue" tasks={buckets.overdue} onSelect={setSelectedTaskId} onPriorityChange={handlePriorityChange} childrenByParent={childrenByParent} expandedIds={expandedIds} onToggleExpand={toggleExpanded} />
           )}
           {(!bucketFilter || bucketFilter === "dueToday") && (
-            <TaskGroup title="Today" tasks={buckets.dueToday} onSelect={setSelectedTaskId} />
+            <TaskGroup title="Today" tasks={buckets.dueToday} onSelect={setSelectedTaskId} onPriorityChange={handlePriorityChange} childrenByParent={childrenByParent} expandedIds={expandedIds} onToggleExpand={toggleExpanded} />
           )}
           {(!bucketFilter || bucketFilter === "upcoming") && (
-            <TaskGroup title="Upcoming" tasks={buckets.upcoming} onSelect={setSelectedTaskId} />
+            <TaskGroup title="Upcoming" tasks={buckets.upcoming} onSelect={setSelectedTaskId} onPriorityChange={handlePriorityChange} childrenByParent={childrenByParent} expandedIds={expandedIds} onToggleExpand={toggleExpanded} />
           )}
           {(!bucketFilter || bucketFilter === "onHold") && (
-            <TaskGroup title="On Hold" tasks={buckets.onHold} onSelect={setSelectedTaskId} />
+            <TaskGroup title="On Hold" tasks={buckets.onHold} onSelect={setSelectedTaskId} onPriorityChange={handlePriorityChange} childrenByParent={childrenByParent} expandedIds={expandedIds} onToggleExpand={toggleExpanded} />
           )}
           {bucketFilter && buckets[bucketFilter].length === 0 && (
             <motion.div
@@ -479,11 +622,66 @@ const FollowUp: React.FC = () => {
   );
 };
 
-const TaskGroup: React.FC<{ title: string; tasks: Task[]; onSelect: (id: string) => void }> = ({
-  title,
-  tasks,
-  onSelect,
-}) => {
+// One top-level task plus its (possibly nested) subtasks, expanded/collapsed
+// as a unit — this whole node is a single grid cell so a task's subtree
+// stays visually together instead of scattering across grid columns.
+const TaskNode: React.FC<{
+  task: Task;
+  index: number;
+  depth: number;
+  onSelect: (id: string) => void;
+  onPriorityChange: (id: number, priority: (typeof PRIORITIES)[number]) => void;
+  childrenByParent: Map<number, Task[]>;
+  expandedIds: Set<number>;
+  onToggleExpand: (id: number) => void;
+}> = ({ task, index, depth, onSelect, onPriorityChange, childrenByParent, expandedIds, onToggleExpand }) => {
+  const children = childrenByParent.get(task.Id) ?? [];
+  const hasChildren = children.length > 0;
+  const expanded = expandedIds.has(task.Id);
+
+  return (
+    <div className={depth > 0 ? "pl-4 border-l border-border/50 ml-1" : ""}>
+      <TaskCard
+        task={task}
+        index={index}
+        onClick={() => onSelect(String(task.Id))}
+        onPriorityChange={onPriorityChange}
+        depth={depth}
+        hasChildren={hasChildren}
+        childCount={children.length}
+        expanded={expanded}
+        onToggleExpand={() => onToggleExpand(task.Id)}
+      />
+      {hasChildren && expanded && (
+        <div className="space-y-2 mt-2">
+          {children.map((c, i) => (
+            <TaskNode
+              key={c.Id}
+              task={c}
+              index={i}
+              depth={depth + 1}
+              onSelect={onSelect}
+              onPriorityChange={onPriorityChange}
+              childrenByParent={childrenByParent}
+              expandedIds={expandedIds}
+              onToggleExpand={onToggleExpand}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const TaskGroup: React.FC<{
+  title: string;
+  tasks: Task[];
+  onSelect: (id: string) => void;
+  onPriorityChange: (id: number, priority: (typeof PRIORITIES)[number]) => void;
+  childrenByParent: Map<number, Task[]>;
+  expandedIds: Set<number>;
+  onToggleExpand: (id: number) => void;
+}> = ({ title, tasks, onSelect, onPriorityChange, childrenByParent, expandedIds, onToggleExpand }) => {
   if (tasks.length === 0) return null;
   return (
     <div className="space-y-2.5">
@@ -494,9 +692,19 @@ const TaskGroup: React.FC<{ title: string; tasks: Task[]; onSelect: (id: string)
         <span className="text-[10px] text-muted-foreground">{tasks.length}</span>
         <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, rgba(13,148,136,0.25), transparent)" }} />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 items-start">
         {tasks.map((t, i) => (
-          <TaskCard key={t.Id} task={t} index={i} onClick={() => onSelect(String(t.Id))} />
+          <TaskNode
+            key={t.Id}
+            task={t}
+            index={i}
+            depth={0}
+            onSelect={onSelect}
+            onPriorityChange={onPriorityChange}
+            childrenByParent={childrenByParent}
+            expandedIds={expandedIds}
+            onToggleExpand={onToggleExpand}
+          />
         ))}
       </div>
     </div>
