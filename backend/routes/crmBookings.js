@@ -1046,7 +1046,35 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       }
     }
 
-    const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
+    // Customisable numbering — three ways to land on an InvoiceNo, in order
+    // of precedence:
+    //  1. CustomInvoiceNo — the exact, full number typed by staff (a
+    //     migrated legacy number, a one-off promised reference). Bypasses
+    //     CrmDocNumberSequence entirely — never consumes a counter slot, so
+    //     it can't desync auto-numbering for any other invoice.
+    //  2. InvoicePrefix — staff supply only the prefix (a project's own
+    //     pre-printed stationery series, e.g. "TSTRSD" instead of "INV");
+    //     the number after it still auto-increments, through the exact same
+    //     race-safe getNextDocNumber() sequence every other doc type in this
+    //     app already uses — just keyed to this prefix's own row instead of
+    //     "INV". Sanitized to A-Z0-9 only so it stays a safe DocType key.
+    //  3. Neither — the standard INV-YYYY-NNNNN series (unchanged default).
+    // InvoiceNo's own UNIQUE constraint (migration 185) is still the real,
+    // race-safe guard against a collision in every case.
+    const customNo = String(b.CustomInvoiceNo || "").trim();
+    const rawPrefix = String(b.InvoicePrefix || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+    let invoiceNo;
+    if (customNo) {
+      if (customNo.length > 30) return res.status(400).json({ error: "Custom invoice number must be 30 characters or fewer" });
+      const clash = await pool.request().input("no", sql.NVarChar(30), customNo).query("SELECT Id FROM dbo.CrmInvoice WHERE InvoiceNo = @no");
+      if (clash.recordset.length) return res.status(400).json({ error: `Invoice number "${customNo}" is already in use` });
+      invoiceNo = customNo;
+    } else if (rawPrefix) {
+      if (rawPrefix.length > 10) return res.status(400).json({ error: "Invoice prefix must be 10 characters or fewer" });
+      invoiceNo = await getNextDocNumber(pool, rawPrefix, rawPrefix);
+    } else {
+      invoiceNo = await getNextDocNumber(pool, "INV", "INV");
+    }
     const result = await pool.request()
       .input("no",   sql.NVarChar(30),  invoiceNo)
       .input("bid",  sql.Int,           id)

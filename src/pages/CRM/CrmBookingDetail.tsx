@@ -1472,7 +1472,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   Invoice Generation Pending
                                 </span>
                                 {canEdit && (
-                                  <a href="/crm/invoices" className="px-2.5 py-1 text-xs border border-border rounded-md font-medium hover:bg-muted">
+                                  <a href={`/crm/invoices?bookingId=${bookingId}`} className="px-2.5 py-1 text-xs border border-border rounded-md font-medium hover:bg-muted">
                                     Generate from Invoices page
                                   </a>
                                 )}

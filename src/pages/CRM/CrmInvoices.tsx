@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
@@ -105,21 +106,34 @@ function InvoicePreviewDialog({ invoice, onClose }: { invoice: InvoiceRow; onClo
   );
 }
 
-// Two-step: pick a booking (unless one was already handed in from a group
-// header's own "+ Add Invoice"), then pick what to invoice for it. Mirrors
-// the exact same eligibility rules the Booking page's own (now Booking-
-// Amount-only) dialog used to enforce for everything else: a milestone must
-// be Paid with its Demand raised, an on-account deposit must not already be
-// invoiced — never a freehand amount typed against nothing real. Milestone
-// #1 (the Booking Amount) is deliberately excluded here — that one only
-// ever gets generated from the Booking's own Payment & Invoice tab.
+// Single card, no tabs: one free-text search plus three optional
+// Company/Project/Block narrowing filters, all applied together over the
+// one bookings list — whichever combination the person generating the
+// invoice reaches for (typing a name, or drilling down a project) lands in
+// the same result list. Selecting a booking auto-backfills Company/
+// Project/Block/Unit/Customer and shows its full Payment Plan with each
+// milestone's status right there, so picking what to invoice against means
+// looking at real numbers, not guessing from a bare dropdown. Numbering is
+// three-way: auto (INV-YYYY-NNNNN), a custom prefix that still auto-
+// increments, or one fully custom number.
 function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { initialBookingId: number | null; onClose: () => void; onGenerated: () => void }) {
   const [bookingId, setBookingId] = useState<number | null>(initialBookingId);
   const [bookingSearch, setBookingSearch] = useState("");
-  const [form, setForm] = useState({ InvoiceType: "Milestone", MilestoneId: "", OnAccountPaymentId: "", Amount: "", InvoiceDate: new Date().toLocaleDateString("en-CA"), Description: "" });
+  // Classic drill-down: Company -> Project -> Block. Built entirely from
+  // the already-fetched bookings list (every booking carries its own
+  // CompanyId/ProjectId/BlockId + names) rather than hitting three more
+  // master-data endpoints — one fetch, filtered views over it, combined
+  // with the free-text search rather than switching between them.
+  const [hCompanyId, setHCompanyId] = useState("");
+  const [hProjectId, setHProjectId] = useState("");
+  const [hBlockId, setHBlockId] = useState("");
+  const [form, setForm] = useState({
+    InvoiceType: "Milestone", MilestoneId: "", OnAccountPaymentId: "", Amount: "", InvoiceDate: new Date().toLocaleDateString("en-CA"), Description: "",
+    NumberMode: "auto" as "auto" | "prefix" | "custom", InvoicePrefix: "", CustomInvoiceNo: "",
+  });
   const [saving, setSaving] = useState(false);
 
-  const { data: bookings = [] } = useQuery({
+  const { data: bookings = [], isLoading: bookingsLoading } = useQuery({
     queryKey: ["crm-bookings-for-invoice-picker"],
     queryFn: fetchBookingsForPicker,
     enabled: !bookingId,
@@ -154,20 +168,68 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
     (p: any) => !p.InvoiceId && !existingInvoices.some((inv: any) => inv.OnAccountPaymentId === p.Id)
   );
 
+  // Once this booking's eligibility is known, land on whichever type
+  // actually has something to invoice instead of defaulting to "Milestone"
+  // and showing an empty-state message for a booking that has none.
+  useEffect(() => {
+    if (!booking) return;
+    if (form.InvoiceType === "Milestone" && eligibleMilestones.length === 0 && eligibleOnAccount.length > 0) {
+      setForm((f) => ({ ...f, InvoiceType: "OnAccount" }));
+    } else if (form.InvoiceType === "Milestone" && eligibleMilestones.length === 0 && eligibleOnAccount.length === 0) {
+      setForm((f) => ({ ...f, InvoiceType: "Maintenance" }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking, eligibleMilestones.length, eligibleOnAccount.length]);
+
+  // Distinct-value cascades for the three narrowing filters, each scoped by
+  // whatever's already picked above it — Company first, then only that
+  // company's Projects, then only that project's Blocks. These apply
+  // together with the free-text search below, not instead of it.
+  function distinctBy(list: any[], idKey: string, nameKey: string) {
+    const seen = new Map<string, string>();
+    for (const b of list) {
+      const id = b[idKey];
+      if (id == null || seen.has(String(id))) continue;
+      seen.set(String(id), b[nameKey] || `#${id}`);
+    }
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }
+  const hCompanies = useMemo(() => distinctBy(bookings, "CompanyId", "CompanyName"), [bookings]);
+  const hProjectPool = useMemo(() => hCompanyId ? bookings.filter((b: any) => String(b.CompanyId) === hCompanyId) : bookings, [bookings, hCompanyId]);
+  const hProjects = useMemo(() => distinctBy(hProjectPool, "ProjectId", "ProjectName"), [hProjectPool]);
+  const hBlockPool = useMemo(() => hProjectId ? hProjectPool.filter((b: any) => String(b.ProjectId) === hProjectId) : hProjectPool, [hProjectPool, hProjectId]);
+  const hBlocks = useMemo(() => distinctBy(hBlockPool, "BlockId", "BlockName"), [hBlockPool]);
+
+  // The one result list — free-text search AND the three hierarchy filters
+  // all apply together (search narrows within whatever Company/Project/
+  // Block is picked, not separately from it).
   const filteredBookings = useMemo(() => {
-    if (!bookingSearch.trim()) return bookings.slice(0, 30);
+    let list = hBlockId ? hBlockPool.filter((b: any) => String(b.BlockId) === hBlockId) : hBlockPool;
     const q = bookingSearch.trim().toLowerCase();
-    return bookings.filter((b: any) =>
-      String(b.BookingNo || "").toLowerCase().includes(q) || String(b.ApplicantName || "").toLowerCase().includes(q)).slice(0, 30);
-  }, [bookings, bookingSearch]);
+    if (q) {
+      list = list.filter((b: any) =>
+        String(b.BookingNo || "").toLowerCase().includes(q)
+        || String(b.ApplicantName || "").toLowerCase().includes(q)
+        || String(b.Mobile || "").toLowerCase().includes(q)
+        || String(b.ProjectName || "").toLowerCase().includes(q)
+        || String(b.UnitNo || "").toLowerCase().includes(q));
+    }
+    return list.slice(0, 40);
+  }, [hBlockPool, hBlockId, bookingSearch]);
 
   async function handleGenerate() {
     if (form.InvoiceType === "Milestone" && !form.MilestoneId) { toast.error("Select a milestone"); return; }
     if (form.InvoiceType === "OnAccount" && !form.OnAccountPaymentId) { toast.error("Select an on-account payment"); return; }
     if (!["Milestone", "OnAccount"].includes(form.InvoiceType) && !form.Amount) { toast.error("Amount is required"); return; }
+    if (form.NumberMode === "prefix" && !form.InvoicePrefix.trim()) { toast.error("Enter a prefix, or switch to Auto"); return; }
+    if (form.NumberMode === "custom" && !form.CustomInvoiceNo.trim()) { toast.error("Enter the invoice number, or switch to Auto"); return; }
     setSaving(true);
     try {
-      const body: any = { InvoiceType: form.InvoiceType, Description: form.Description };
+      const body: any = {
+        InvoiceType: form.InvoiceType, Description: form.Description,
+        InvoicePrefix: form.NumberMode === "prefix" ? form.InvoicePrefix.trim() : undefined,
+        CustomInvoiceNo: form.NumberMode === "custom" ? form.CustomInvoiceNo.trim() : undefined,
+      };
       if (form.InvoiceType === "Milestone") body.MilestoneId = parseInt(form.MilestoneId);
       else if (form.InvoiceType === "OnAccount") body.OnAccountPaymentId = parseInt(form.OnAccountPaymentId);
       else { body.Amount = parseFloat(form.Amount); body.InvoiceDate = form.InvoiceDate; }
@@ -187,62 +249,174 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
     }
   }
 
+  // Milestone status pill styling, shared by the payment-plan table below.
+  function milestoneStatusPill(m: any) {
+    if (m.Status === "Paid") return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-emerald-700 bg-emerald-50 border-emerald-200">Paid</span>;
+    if (m.Status === "Waived") return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">Waived</span>;
+    if (Number(m.AmountPaid) > 0) return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">Partially Paid</span>;
+    return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">Pending</span>;
+  }
+  function milestoneIneligibleReason(m: any) {
+    if (Number(m.MilestoneNo) === 1) return "Booking Amount — generated from the Booking page";
+    if (m.Status !== "Paid" && m.Status !== "Waived") return "Not fully paid yet";
+    if (m.DemandStatus === "Pending") return "Demand not raised yet";
+    if (existingInvoices.some((inv: any) => inv.MilestoneId === m.Id)) return "Already invoiced";
+    return null;
+  }
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto thin-scroll">
         <DialogHeader><DialogTitle className="font-heading">Generate Invoice</DialogTitle></DialogHeader>
 
         {!bookingId ? (
-          <div className="space-y-2">
-            <label className="text-xs text-muted-foreground block">Booking</label>
-            <input value={bookingSearch} onChange={(e) => setBookingSearch(e.target.value)}
-              placeholder="Search booking no or applicant..."
-              className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-            <div className="max-h-56 overflow-y-auto rounded-lg border border-border divide-y divide-border">
-              {filteredBookings.map((b: any) => (
-                <button key={b.Id} onClick={() => setBookingId(b.Id)}
-                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-muted flex justify-between items-center">
-                  <span className="font-mono text-xs">{b.BookingNo}</span>
-                  <span className="text-muted-foreground text-xs">{b.ApplicantName}</span>
-                </button>
-              ))}
-              {!filteredBookings.length && <div className="px-3 py-2 text-xs text-muted-foreground">No matches</div>}
+          // Single card: free-text search plus three optional narrowing
+          // filters, all applied together over one result list — no tabs,
+          // no separate "modes" to switch between.
+          <div className="rounded-xl border border-border p-3.5 space-y-3">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input value={bookingSearch} onChange={(e) => setBookingSearch(e.target.value)} autoFocus
+                placeholder="Search by booking no, applicant, mobile, or project..."
+                className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
+            <div className="grid grid-cols-3 gap-2">
+              <select value={hCompanyId} onChange={(e) => { setHCompanyId(e.target.value); setHProjectId(""); setHBlockId(""); }}
+                className="text-xs border border-border rounded-lg px-2 py-1.5 bg-background">
+                <option value="">Company: Any</option>
+                {hCompanies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <select value={hProjectId} onChange={(e) => { setHProjectId(e.target.value); setHBlockId(""); }}
+                className="text-xs border border-border rounded-lg px-2 py-1.5 bg-background">
+                <option value="">Project: Any</option>
+                {hProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <select value={hBlockId} onChange={(e) => setHBlockId(e.target.value)}
+                className="text-xs border border-border rounded-lg px-2 py-1.5 bg-background">
+                <option value="">Block: Any</option>
+                {hBlocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+
+            {bookingsLoading ? (
+              <p className="text-xs text-muted-foreground py-6 text-center">Loading bookings…</p>
+            ) : (
+              <div className="max-h-72 overflow-y-auto thin-scroll rounded-lg border border-border divide-y divide-border">
+                {filteredBookings.map((b: any) => (
+                  <button key={b.Id} onClick={() => setBookingId(b.Id)}
+                    className="w-full text-left px-3 py-2.5 hover:bg-muted/60 flex items-center gap-3 group">
+                    <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                      <Building2 size={15} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-semibold text-primary">{b.BookingNo}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${
+                          b.Status === "Approved" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                            : b.Status === "Rejected" || b.Status === "Cancelled" ? "text-red-700 bg-red-50 border-red-200"
+                            : "text-amber-700 bg-amber-50 border-amber-200"
+                        }`}>{b.Status}</span>
+                      </div>
+                      <div className="text-sm font-medium truncate">{b.ApplicantName}</div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {b.ProjectName || "—"} · Unit {b.UnitNo || "—"}{b.Mobile ? ` · ${b.Mobile}` : ""}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-semibold">{fmtMoney(b.GrandTotal ?? b.TotalValue)}</div>
+                      <div className="text-[10px] text-muted-foreground">{fmtDate(b.BookingDate)}</div>
+                    </div>
+                    <ChevronRight size={14} className="text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </button>
+                ))}
+                {!filteredBookings.length && (
+                  <div className="px-3 py-8 text-center text-xs text-muted-foreground">No bookings match this search / filter combination.</div>
+                )}
+              </div>
+            )}
           </div>
         ) : !booking ? (
           <p className="text-xs text-muted-foreground py-4">Loading booking…</p>
         ) : (
           <div className="space-y-3">
-            <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2">
-              <span className="text-sm font-medium">{booking.BookingNo} — {booking.ApplicantName}</span>
-              {!initialBookingId && (
-                <button onClick={() => setBookingId(null)} className="text-xs text-muted-foreground hover:text-foreground">Change</button>
-              )}
+            {/* Auto-backfilled the moment a booking resolves — Company/
+                Project/Block/Unit/Customer, all read straight off the real
+                booking record, never re-typed. */}
+            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-sm font-semibold text-primary">{booking.BookingNo}</span>
+                {!initialBookingId && (
+                  <button onClick={() => setBookingId(null)} className="text-xs text-muted-foreground hover:text-foreground">Change</button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                <div><span className="text-muted-foreground">Customer</span><div className="font-medium truncate">{booking.ApplicantName}</div></div>
+                <div><span className="text-muted-foreground">Company</span><div className="font-medium truncate">{booking.CompanyName || "—"}</div></div>
+                <div><span className="text-muted-foreground">Project</span><div className="font-medium truncate">{booking.ProjectName || "—"}</div></div>
+                <div><span className="text-muted-foreground">Block / Unit</span><div className="font-medium truncate">{[booking.BlockName, booking.UnitNo].filter(Boolean).join(" / ") || booking.UnitNo || "—"}</div></div>
+              </div>
             </div>
 
-            <select value={form.InvoiceType}
-              onChange={(e) => setForm((f) => ({ ...f, InvoiceType: e.target.value, MilestoneId: "", OnAccountPaymentId: "", Amount: "" }))}
-              className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-              {eligibleMilestones.length > 0 && <option value="Milestone">Milestone Payment</option>}
-              {eligibleOnAccount.length > 0 && <option value="OnAccount">On-Account Payment</option>}
-              <option value="Maintenance">Maintenance</option>
-              <option value="Other">Other</option>
-            </select>
+            {/* Payment Plan, right here — the whole point is seeing real
+                status before picking what to invoice, not guessing from a
+                bare dropdown. Only Paid + Demanded + not-yet-invoiced rows
+                are clickable; everything else shows why it isn't, in place. */}
+            <div className="rounded-lg border border-border overflow-hidden">
+              <div className="px-3 py-1.5 bg-muted/30 border-b border-border text-xs font-semibold flex items-center justify-between">
+                <span>Payment Plan</span>
+                <span className="text-muted-foreground font-normal">Click an eligible milestone to invoice it</span>
+              </div>
+              <div className="max-h-40 overflow-y-auto thin-scroll divide-y divide-border">
+                {milestones.length === 0 ? (
+                  <p className="text-xs text-muted-foreground px-3 py-3">No milestone schedule on this booking.</p>
+                ) : milestones.map((m: any) => {
+                  const reason = milestoneIneligibleReason(m);
+                  const selected = form.InvoiceType === "Milestone" && form.MilestoneId === String(m.Id);
+                  return (
+                    <button key={m.Id} disabled={!!reason}
+                      onClick={() => setForm((f) => ({ ...f, InvoiceType: "Milestone", MilestoneId: String(m.Id), OnAccountPaymentId: "", Amount: "" }))}
+                      className={`w-full text-left px-3 py-1.5 flex items-center justify-between gap-2 text-xs ${
+                        reason ? "opacity-60 cursor-not-allowed" : "hover:bg-muted/50 cursor-pointer"
+                      } ${selected ? "bg-primary/10" : ""}`}>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium">{m.MilestoneNo}. {m.MilestoneName}</span>
+                          {milestoneStatusPill(m)}
+                          {selected && <span className="text-primary font-medium">✓ Selected</span>}
+                        </div>
+                        {reason && <div className="text-[10px] text-muted-foreground">{reason}</div>}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-semibold">{fmtMoney(m.AmountDue)}</div>
+                        <div className="text-[10px] text-muted-foreground">Paid {fmtMoney(m.AmountPaid)}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-            {form.InvoiceType === "Milestone" ? (
-              <>
-                <select value={form.MilestoneId} onChange={(e) => setForm((f) => ({ ...f, MilestoneId: e.target.value }))}
-                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                  <option value="">— Select a paid milestone —</option>
-                  {eligibleMilestones.map((m: any) => (
-                    <option key={m.Id} value={String(m.Id)}>{m.MilestoneName} — {fmtMoney(m.AmountPaid)}</option>
-                  ))}
-                </select>
-                {eligibleMilestones.length === 0 && (
-                  <p className="text-[11px] text-muted-foreground">No paid, demanded milestone is waiting on an invoice for this booking. Raise a demand from the Demands page first.</p>
-                )}
-              </>
-            ) : form.InvoiceType === "OnAccount" ? (
+            {/* Other invoice types — Milestone stays selected via the table
+                above; these are the alternatives when there's nothing (or
+                nothing more) to invoice from the payment plan itself. */}
+            <div className="flex flex-wrap gap-1.5">
+              {eligibleOnAccount.length > 0 && (
+                <button onClick={() => setForm((f) => ({ ...f, InvoiceType: "OnAccount", MilestoneId: "" }))}
+                  className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium ${form.InvoiceType === "OnAccount" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"}`}>
+                  On-Account Payment
+                </button>
+              )}
+              <button onClick={() => setForm((f) => ({ ...f, InvoiceType: "Maintenance", MilestoneId: "" }))}
+                className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium ${form.InvoiceType === "Maintenance" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"}`}>
+                Maintenance
+              </button>
+              <button onClick={() => setForm((f) => ({ ...f, InvoiceType: "Other", MilestoneId: "" }))}
+                className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium ${form.InvoiceType === "Other" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"}`}>
+                Other
+              </button>
+            </div>
+
+            {form.InvoiceType === "OnAccount" && (
               <select value={form.OnAccountPaymentId} onChange={(e) => setForm((f) => ({ ...f, OnAccountPaymentId: e.target.value }))}
                 className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
                 <option value="">— Select an on-account payment —</option>
@@ -250,19 +424,63 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                   <option key={p.Id} value={String(p.Id)}>{p.ReceiptNo} — {fmtMoney(p.Amount)}</option>
                 ))}
               </select>
-            ) : (
-              <>
+            )}
+            {(form.InvoiceType === "Maintenance" || form.InvoiceType === "Other") && (
+              <div className="grid grid-cols-2 gap-2">
                 <input type="number" placeholder="Amount" value={form.Amount}
                   onChange={(e) => setForm((f) => ({ ...f, Amount: e.target.value }))}
                   className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                 <input type="date" value={form.InvoiceDate}
                   onChange={(e) => setForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
                   className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-              </>
+              </div>
             )}
             <input placeholder="Description (optional)" value={form.Description}
               onChange={(e) => setForm((f) => ({ ...f, Description: e.target.value }))}
               className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+
+            {/* Customisable AND prefixed numbering, side by side as one
+                choice: Auto keeps the standard INV-YYYY-NNNNN series (the
+                normal case); Prefix lets staff supply just a prefix (a
+                project's own series) while the number after it still
+                auto-increments through the same safe counter; Custom is a
+                fully manual, exact number for a one-off case (a promised
+                reference, a migrated legacy number). */}
+            <div className="rounded-lg border border-border p-2.5 space-y-2">
+              <div className="flex items-center gap-1.5">
+                {([
+                  { key: "auto", label: "Auto" },
+                  { key: "prefix", label: "Custom Prefix" },
+                  { key: "custom", label: "Exact Number" },
+                ] as const).map((o) => (
+                  <button key={o.key} onClick={() => setForm((f) => ({ ...f, NumberMode: o.key }))}
+                    className={`text-xs px-2.5 py-1 rounded-md border font-medium ${form.NumberMode === o.key ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"}`}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              {form.NumberMode === "auto" && (
+                <p className="text-[11px] text-muted-foreground">Standard series — the next INV-{new Date().getFullYear()}-NNNNN number.</p>
+              )}
+              {form.NumberMode === "prefix" && (
+                <div>
+                  <input placeholder="e.g. TSTRSD" value={form.InvoicePrefix}
+                    onChange={(e) => setForm((f) => ({ ...f, InvoicePrefix: e.target.value.toUpperCase() }))}
+                    className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background font-mono uppercase" maxLength={10} />
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Generates as {form.InvoicePrefix.trim() ? form.InvoicePrefix.trim().toUpperCase() : "PREFIX"}-{new Date().getFullYear()}-NNNNN — its own auto-incrementing series.
+                  </p>
+                </div>
+              )}
+              {form.NumberMode === "custom" && (
+                <div>
+                  <input placeholder="Exact invoice number" value={form.CustomInvoiceNo}
+                    onChange={(e) => setForm((f) => ({ ...f, CustomInvoiceNo: e.target.value }))}
+                    className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background font-mono" maxLength={30} />
+                  <p className="text-[11px] text-muted-foreground mt-1">Used exactly as typed — must be unique across every invoice.</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -283,12 +501,29 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
 
 const CrmInvoices: React.FC = () => {
   const qc = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [type, setType] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [preview, setPreview] = useState<InvoiceRow | null>(null);
   const [genBookingId, setGenBookingId] = useState<number | null | undefined>(undefined); // undefined = closed
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+
+  // Dedicated-usage-area wiring: the Booking page's own Payment & Invoice
+  // tab links here with ?bookingId=X for anything beyond the Booking Amount
+  // invoice (which stays exclusive to that page) — arriving with that param
+  // jumps straight to step two, already scoped to that booking, instead of
+  // making staff search for the booking they just came from.
+  useEffect(() => {
+    const bid = searchParams.get("bookingId");
+    if (bid) {
+      setGenBookingId(parseInt(bid, 10));
+      const next = new URLSearchParams(searchParams);
+      next.delete("bookingId");
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["crm-invoices", type, search],
