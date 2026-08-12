@@ -13,6 +13,18 @@ export type BookingStatus =
 
 export type BillStatus = "Payment Due" | "Partially Paid" | "Paid";
 
+/** One row of a direct booking's multi "Expense Head" tagging (migration
+ *  303, dbo.ExpenseHeadAllocation) — an Expense Head (AccountHeadMaster,
+ *  LHeadType='GL') plus the amount debited to it. `_key` is a stable local
+ *  React key, never persisted. */
+export interface ExpenseHeadAllocationRow {
+  _key: string;
+  lHeadId: number | null;
+  label: string | null;
+  code?: string | null;
+  amount: number;
+}
+
 export type PageView = "list" | "form";
 
 export interface PurchaseOrder {
@@ -155,6 +167,14 @@ export interface ExpenseRecord {
   /** Vendor/supplier invoice date */
   vendorInvoiceDate?: string;
 
+  // ── TDS (Tax Deducted at Source) — snapshot taken at invoice time, never
+  //    re-derived from the TDS master later (rates can change). ─────────────
+  tdsId?: number | null;
+  tdsNature?: string | null;
+  tdsName?: string | null;
+  tdsPercentage?: number | null;
+  tdsAmount?: number;
+
   // ── Expense Allocation (Step 6 spec) ────────────────────────────────────────
   /** Cost Centre / Department for expense allocation */
   costCenter?: string;
@@ -166,6 +186,11 @@ export interface ExpenseRecord {
   glAccountName?: string | null;
   /** Immediate Account Group id the GL account belongs to (for rendering the nested parent tree on view) */
   glAccountGroupId?: number | null;
+  /** Multi "Expense Head" tagging (migration 303, dbo.ExpenseHeadAllocation)
+   *  — a direct/manual booking's amount split across one or more Expense
+   *  Heads instead of the single glAccountId above, which is kept only as
+   *  a legacy fallback for records saved before this existed. */
+  expenseHeadAllocations?: ExpenseHeadAllocationRow[];
   /** Work Done doc reference — auto-populated when source is WO_PO or WORK_DONE */
   workDoneRef?: string;
   /** Additional charges: freight, insurance, etc. JSON array {label, amount} */
@@ -180,6 +205,10 @@ export interface ExpenseRecord {
   totalPaid?: number;
   /** ENetAmount - totalPaid */
   remainingAmount?: number;
+  /** Portion of totalPaid that came from On Account adjustments rather than
+   *  a real cash/bank payment (dbo.OnAccountLedger DEBIT rows) — see
+   *  backend/routes/onAccount.js's POST /apply-adjustment. */
+  onAccountAdjusted?: number;
 
   grnItems?: {
     itemName?: string;

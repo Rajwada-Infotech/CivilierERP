@@ -70,6 +70,7 @@ export function getAmendments(params?: {
   search?: string;
   status?: string;
   refDocType?: string;
+  refDocId?: number;
 }): Promise<PaginatedAmendments> {
   const query = new URLSearchParams();
 
@@ -78,12 +79,25 @@ export function getAmendments(params?: {
   if (params?.search) query.set("search", params.search);
   if (params?.status) query.set("status", params.status);
   if (params?.refDocType) query.set("refDocType", params.refDocType);
+  if (params?.refDocId != null) query.set("refDocId", String(params.refDocId));
 
   const suffix = query.toString();
 
   return requestJson<PaginatedAmendments>(
     suffix ? `${BASE_URL}?${suffix}` : BASE_URL,
   );
+}
+
+/** Whether a specific document already has an Approved amendment against
+ *  it — drives the "Approved & Amended" badge and the post-approval
+ *  Edit→Amend button swap across Finance/Material/Engineering transaction
+ *  pages. */
+export async function getApprovedAmendmentForDoc(
+  refDocType: string,
+  refDocId: number,
+): Promise<Amendment | null> {
+  const res = await getAmendments({ refDocType, refDocId, status: "Approved", pageSize: 1 });
+  return res.data[0] ?? null;
 }
 
 export function getAmendment(id: number): Promise<Amendment> {
@@ -108,6 +122,44 @@ export function updateAmendment(
   return requestJson(`${BASE_URL}/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export interface AmendmentLineChange {
+  Id: number;
+  AmendmentId: number;
+  FieldName: string;
+  FieldLabel: string | null;
+  OldValue: string | null;
+  NewValue: string | null;
+  ChangedBy: string | null;
+  ChangedAt: string;
+}
+
+export interface AmendmentLineChangeInput {
+  FieldName: string;
+  FieldLabel?: string;
+  OldValue?: string;
+  NewValue?: string;
+}
+
+/** Per-field old→new audit trail for an amendment — lets a single amendment
+ *  cover any number of changed fields (item qty, rate, date, etc.), not just
+ *  the single headline Original/Revised value. Only postable while the
+ *  amendment is still in "Draft" (enforced server-side). */
+export function getAmendmentLineChanges(
+  amendmentId: number,
+): Promise<AmendmentLineChange[]> {
+  return requestJson(`${BASE_URL}/${amendmentId}/line-changes`);
+}
+
+export function addAmendmentLineChanges(
+  amendmentId: number,
+  changes: AmendmentLineChangeInput[],
+): Promise<{ success: boolean; count: number }> {
+  return requestJson(`${BASE_URL}/${amendmentId}/line-changes`, {
+    method: "POST",
+    body: JSON.stringify({ changes }),
   });
 }
 

@@ -22,11 +22,13 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { Plus, Trash2, Package } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Plus, Trash2, Package, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "./PickerPrimitives";
 import { fmt } from "./helpers";
+import { getItems, type DbItem } from "@/api/itemMasterApi";
 
 // Types
 
@@ -79,6 +81,110 @@ export function makeDirectLineItem(data: Partial<DirectLineItem>): DirectLineIte
   };
 }
 
+// Themed replacement for a native <input list="..."> datalist — that
+// renders as the browser's own unstyled OS popup (black box, system font),
+// which clashed hard with the app's dark UI. This is a typeable, portalled
+// dropdown matching the same pattern the rest of the app uses for
+// searchable pickers (see payment/components/FilterBar.tsx's VendorCombo).
+function ItemDescriptionCombo({
+  value,
+  onSelect,
+  onChange,
+  items,
+  loading,
+  readOnly,
+}: {
+  value: string;
+  onSelect: (item: DbItem) => void;
+  onChange: (val: string) => void;
+  items: DbItem[];
+  loading: boolean;
+  readOnly?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const updateRect = () => {
+    if (inputRef.current) setRect(inputRef.current.getBoundingClientRect());
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    updateRect();
+    window.addEventListener("scroll", updateRect, true);
+    window.addEventListener("resize", updateRect);
+    return () => {
+      window.removeEventListener("scroll", updateRect, true);
+      window.removeEventListener("resize", updateRect);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (
+        inputRef.current && !inputRef.current.contains(e.target as Node) &&
+        panelRef.current && !panelRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const q = value.trim().toLowerCase();
+  const filtered = q ? items.filter((it) => it.M_Name.toLowerCase().includes(q)) : items;
+
+  const panel = open && rect && !readOnly && createPortal(
+    <div
+      ref={panelRef}
+      style={{ position: "fixed", top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 220), zIndex: 9999 }}
+      className="bg-card border border-border rounded-lg shadow-2xl overflow-hidden"
+    >
+      <div className="max-h-56 overflow-y-auto py-1">
+        {loading ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">Loading service items…</p>
+        ) : filtered.length === 0 ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">
+            {items.length === 0 ? "No service items in Item Master." : "No matches — this will be saved as free text."}
+          </p>
+        ) : (
+          filtered.map((it) => (
+            <button
+              key={it.M_Id}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onSelect(it); setOpen(false); }}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors truncate text-foreground"
+            >
+              {it.M_Name}
+            </button>
+          ))
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+
+  return (
+    <div className="relative">
+      <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/60 pointer-events-none" />
+      <Input
+        ref={inputRef}
+        value={value}
+        readOnly={readOnly}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={loading ? "Loading service items…" : "Item description…"}
+        className="h-8 text-xs border-border/60 bg-transparent pl-6 pr-2"
+      />
+      {panel}
+    </div>
+  );
+}
+
 // Component
 
 interface DirectItemsTableProps {
@@ -95,6 +201,21 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
   const [uomOptions, setUomOptions] = useState<UomOption[]>([]);
   const [uomLoading, setUomLoading] = useState(false);
   const lastUom = useRef<string>("");
+
+  // Item picker — DINV/Other Expenses is a service-driven booking (no
+  // goods, since goods always flow through a GRN first), so only Item
+  // Master rows tagged M_Type='Service' are offered here. Posting these
+  // against GL/cost-center per item is a follow-up, not wired yet.
+  const [serviceItems, setServiceItems] = useState<DbItem[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+
+  useEffect(() => {
+    setItemsLoading(true);
+    getItems()
+      .then((rows) => setServiceItems(rows.filter((it) => it.M_Type === "Service")))
+      .catch(() => setServiceItems([]))
+      .finally(() => setItemsLoading(false));
+  }, []);
 
   useEffect(() => {
     setUomLoading(true);
@@ -198,13 +319,22 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
                 key={item._key}
                 className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_72px_96px_84px_88px_28px] gap-1.5 items-center px-2 py-2 bg-background hover:bg-muted/5 transition-colors"
               >
-                {/* Description */}
-                <Input
+                {/* Description — suggestions limited to Item Master's
+                    Service-type items, typed free text still allowed for
+                    ad-hoc entries not in the master. */}
+                <ItemDescriptionCombo
                   value={item.description}
                   readOnly={readOnly}
-                  onChange={(e) => patch(i, { description: e.target.value })}
-                  placeholder="Item description…"
-                  className="h-8 text-xs border-border/60 bg-transparent px-2"
+                  loading={itemsLoading}
+                  items={serviceItems}
+                  onChange={(val) => patch(i, { description: val })}
+                  onSelect={(it) => {
+                    patch(i, {
+                      description: it.M_Name,
+                      ...(it.M_UOM ? { uom: it.M_UOM } : {}),
+                    });
+                    if (it.M_UOM) lastUom.current = it.M_UOM;
+                  }}
                 />
 
                 {/* Qty */}

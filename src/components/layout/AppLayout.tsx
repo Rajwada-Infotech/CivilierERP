@@ -118,8 +118,8 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
     [navCollapsed],
   );
 
-  // Strip = 64px, NavPanel = 200px, total = 264px
-  const STRIP_W = 64;
+  // Strip = 76px, NavPanel = 200px, total = 276px
+  const STRIP_W = 76;
   const NAV_W = 200;
   const mainML = isMobile
     ? 0

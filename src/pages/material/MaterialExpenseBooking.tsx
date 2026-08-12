@@ -9,6 +9,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useFinYear } from "@/contexts/FinYearContext";
+import { useTds } from "@/contexts/TdsContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -57,11 +58,12 @@ import {
   Building2,
   FolderKanban,
   SlidersHorizontal,
-  Clock,
   ShoppingCart,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { exportToCsv, parseCsv } from "@/lib/export";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
+import { ExportMenu } from "@/components/ExportMenu";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { Field } from "./ExpenseBooking/FormPrimitives";
 import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
@@ -72,6 +74,7 @@ import { ExpenseBookingPreviewModal } from "./ExpenseBookingPreviewModal";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import {
   blankForm,
+  calculateTdsPreview,
   computeBreakdown,
   computeGrnNetWithTerms,
   dbToRecord,
@@ -107,11 +110,12 @@ import { ExpenseBookingStatCards } from "./ExpenseBooking/ExpenseBookingStatCard
 import { BookingListToolbar } from "./ExpenseBooking/BookingListToolbar";
 import { BookingPagination } from "./ExpenseBooking/BookingPagination";
 import { DocSelectorPanel } from "./ExpenseBooking/DocSelectorPanel";
+import { StatusBadge } from "@/components/StatusBadge";
 import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
 import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
 import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
 import { DirectItemsTable } from "./ExpenseBooking/DirectItemsTable";
-import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
+import { ExpenseHeadAllocationEditor } from "./ExpenseBooking/ExpenseHeadAllocationEditor";
 import type {
   CompanyOption,
   ProjectOption,
@@ -128,6 +132,58 @@ import type {
   CostCenterOption,
   DocSelectorProps,
 } from "./ExpenseBooking/types";
+
+// Same effective-net logic the visible table uses (GRN-linked rows recompute
+// from grnTotalAmount + billing terms; everything else falls back to
+// computeBreakdown on the stored basicAmount) — kept in sync so the export
+// never shows a different number than what's on screen.
+// GST-inclusive net, before TDS — computeEffectiveNet() below is what the
+// list/export actually display, net of TDS too.
+function computeGrossNet(rec: any): number {
+  if (rec.eSourceType === "GRN" && rec.grnTotalAmount != null) {
+    const terms =
+      rec.billingTerms && rec.billingTerms.length > 0
+        ? rec.billingTerms
+        : rec.discount
+          ? [rec.discount]
+          : [];
+    return computeGrnNetWithTerms(rec.grnTotalAmount, terms, rec.basicAmount);
+  }
+  const rbd = computeBreakdown(
+    rec.basicAmount,
+    rec.cgstRate,
+    rec.sgstRate,
+    rec.billingTerms && rec.billingTerms.length > 0 ? rec.billingTerms : rec.discount,
+    rec.igstRate ?? 0,
+  );
+  return rec.netAmount ?? rbd.netAmount;
+}
+
+// What the supplier is actually owed in cash — gross net minus TDS withheld
+// at the invoice. Same "TDS is deducted once, everything downstream reads
+// that figure" principle already applied on the Payment page; this is the
+// list/export view's own copy of it.
+function computeEffectiveNet(rec: any): number {
+  const gross = computeGrossNet(rec);
+  const tds = rec.tdsAmount ?? 0;
+  return Math.max(0, gross - tds);
+}
+
+// Mirrors the visible table's column order exactly (Booking Ref → Vendor →
+// Company/Project → Basic Amt → GST → Net Amt → Doc → Status) so the
+// exported file reads the same as the page it came from.
+const INVOICE_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Booking Ref", accessor: (r: any) => r.bookingReference || "—" },
+  { header: "Booking Date", accessor: (r: any) => r.bookingDate || "—" },
+  { header: "Vendor", accessor: (r: any) => r.supplier || "—" },
+  { header: "Company", accessor: (r: any) => r.companyName || "—" },
+  { header: "Project", accessor: (r: any) => r.projectName || "—" },
+  { header: "Basic Amt", accessor: (r: any) => (r.status === "Draft" ? "—" : `Rs. ${fmt(r.basicAmount)}`) },
+  { header: "GST %", accessor: (r: any) => (r.status === "Draft" ? "—" : (r.igstRate ?? 0) > 0 ? `${r.igstRate}%` : `${(r.cgstRate ?? 0) + (r.sgstRate ?? 0)}%`) },
+  { header: "Net Amt", accessor: (r: any) => `Rs. ${fmt(computeEffectiveNet(r))}` },
+  { header: "Doc No", accessor: (r: any) => r.sourceDocNo || r.linkedPODocNo || r.bookingReference || "—" },
+  { header: "Status", accessor: (r: any) => r.status || "—" },
+];
 
 export default function MaterialExpenseBooking() {
   const importFileInputRef = useRef<HTMLInputElement>(null);
@@ -149,6 +205,7 @@ export default function MaterialExpenseBooking() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { finYears } = useFinYear();
+  const { tdsRecords } = useTds();
   const activeFinYears = finYears
     .filter((fy) => fy.status === "Active")
     .sort((a, b) => b.year.localeCompare(a.year));
@@ -215,6 +272,12 @@ export default function MaterialExpenseBooking() {
   const saveInFlight = useRef(false);
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [listSearch, setListSearch] = useState("");
+  // List-view filters — Fin Year + Document Date range. Applied server-side
+  // (see fetchRecords below) since the list is paginated, unlike
+  // statusFilter/listSearch which only ever narrow the current page.
+  const [finYearFilter, setFinYearFilter] = useState("");
+  const [dateFromFilter, setDateFromFilter] = useState("");
+  const [dateToFilter, setDateToFilter] = useState("");
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
   const [liveEmiSchedule, setLiveEmiSchedule] = useState<
@@ -240,16 +303,28 @@ export default function MaterialExpenseBooking() {
   const [contractorHeads, setContractorHeads] = useState<
     { id: number; label: string; paymentTerms: string | null }[]
   >([]);
+  const [brokerHeads, setBrokerHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
+  // TDS eligibility — live-checked against the resolved supplier as the
+  // form is filled (direct/TOD bookings only; see the field's gating
+  // condition below for why). Purely informational until save, where the
+  // backend re-validates everything server-side regardless.
+  const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number } | null>(null);
 
   const isEditing = editingId !== null;
 
   const fetchRecords = useCallback(async (p = 1) => {
     try {
       setLoading(true);
-      const data = await apiFetch(`${API}?page=${p}&limit=${PAGE_SIZE}`);
+      const qs = new URLSearchParams({ page: String(p), limit: String(PAGE_SIZE) });
+      if (finYearFilter) qs.set("finYear", finYearFilter);
+      if (dateFromFilter) qs.set("from", dateFromFilter);
+      if (dateToFilter) qs.set("to", dateToFilter);
+      const data = await apiFetch(`${API}?${qs.toString()}`);
       setRecords((data.data ?? []).map(dbToRecord));
       setTotalPages(data.totalPages ?? 1);
       setTotalRecords(data.total ?? 0);
@@ -261,7 +336,45 @@ export default function MaterialExpenseBooking() {
     } finally {
       setLoading(false);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finYearFilter, dateFromFilter, dateToFilter]);
+
+  // Export must cover every matching record, not just whatever page happens
+  // to be on screen — the list endpoint caps `limit` at 100 server-side, so
+  // this pages through everything (honoring the Fin Year / date filters
+  // server-side, same as the table) and then applies the client-only
+  // filters (statusFilter/listSearch) on top.
+  const fetchAllRecordsForExport = useCallback(async () => {
+    const pageLimit = 100;
+    let all: ExpenseRecord[] = [];
+    let p = 1;
+    let totalPages = 1;
+    const qs = new URLSearchParams({ limit: String(pageLimit) });
+    if (finYearFilter) qs.set("finYear", finYearFilter);
+    if (dateFromFilter) qs.set("from", dateFromFilter);
+    if (dateToFilter) qs.set("to", dateToFilter);
+    do {
+      qs.set("page", String(p));
+      const data = await apiFetch(`${API}?${qs.toString()}`);
+      all = all.concat((data.data ?? []).map(dbToRecord));
+      totalPages = data.totalPages ?? 1;
+      p += 1;
+    } while (p <= totalPages);
+
+    return all.filter((r) => {
+      if (statusFilter && statusFilter !== "All" && r.status !== statusFilter) return false;
+      if (listSearch) {
+        const q = listSearch.toLowerCase();
+        if (
+          !r.bookingReference?.toLowerCase().includes(q) &&
+          !r.supplier?.toLowerCase().includes(q) &&
+          !r.companyName?.toLowerCase().includes(q)
+        )
+          return false;
+      }
+      return true;
+    }) as unknown as Record<string, unknown>[];
+  }, [statusFilter, listSearch, finYearFilter, dateFromFilter, dateToFilter]);
 
   // Deep-link support — Linked Documents panels navigate here as
   // /material/expense-booking?view=<Eid> to open this exact Invoice/booking.
@@ -412,6 +525,17 @@ export default function MaterialExpenseBooking() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.financialYear, selectedTod]);
 
+  // Re-fetch page 1 whenever a list filter changes — skips the very first
+  // render since the mount effect right below already fetches once.
+  const skipFirstFilterFetch = useRef(true);
+  useEffect(() => {
+    if (skipFirstFilterFetch.current) {
+      skipFirstFilterFetch.current = false;
+      return;
+    }
+    fetchRecords(1);
+  }, [finYearFilter, dateFromFilter, dateToFilter, fetchRecords]);
+
   useEffect(() => {
     fetchRecords(1);
     fetchBookedSources();
@@ -458,6 +582,20 @@ export default function MaterialExpenseBooking() {
           paymentTerms: h.LHeadPaymentTerms ?? null,
         }));
         setContractorHeads(heads);
+      })
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    apiFetch("/api/account-head?type=BR")
+      .then((list: any[]) => {
+        const heads = (Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        }));
+        setBrokerHeads(heads);
       })
       .catch((err) => {
         toast.error(
@@ -890,20 +1028,41 @@ export default function MaterialExpenseBooking() {
     setView("form");
   };
 
-  const openAmend = (rec: ExpenseRecord) => {
-    navigate("/material/amendment-menu", {
-      state: {
-        prefill: {
-          tab: "EB",
-          docId: rec.id ?? "",
-          docNo: rec.bookingReference ?? "",
-          supplierName: rec.supplier ?? "",
-          projectName: rec.projectName ?? "",
-          companyName: rec.companyName ?? "",
-          totalAmount: rec.netAmount ?? rec.basicAmount ?? 0,
-        },
-      },
-    });
+  // Single entry point for both "Edit" (Draft/Rejected) and "Amend"
+  // (Approved) — same form either way. The backend PUT /:id route itself
+  // decides which one this actually is: a Draft/Rejected booking updates
+  // directly, an Approved one gets routed into a Pending amendment instead
+  // (see routes/expenseBooking.js, isAmendmentFlow). This replaces the old
+  // openAmend(), which always deep-linked into the separate free-text
+  // Amendment popup regardless of the record's real status.
+  const openEditForm = async (rec: ExpenseRecord) => {
+    if (!rec.id) return;
+    setPreviewRecord(null);
+    _mastersCache.grn = null;
+    fetchMasters();
+    try {
+      const row = await apiFetch(`${API}/${rec.id}`);
+      const loaded = dbToRecord(row);
+      setForm(loaded);
+      // selectedDoc is normally only populated by picking a document in the
+      // panel above (applyDoc) — on edit-load nothing sets it, so isDirect/
+      // isGRN/isPOorWO all silently misclassify and every block gated on
+      // `selectedDoc?.kind === "TOD"` (the TDS field, Direct Items, Expense
+      // Head allocation) vanishes even for a plain Direct/TOD booking. Only
+      // reconstruct it for TOD here — GRN/PO/WORK_DONE edits don't drive any
+      // of those TOD-only blocks and aren't part of this fix.
+      setSelectedDoc(
+        loaded.eSourceType === "TOD"
+          ? { kind: "TOD", docNo: loaded.bookingReference || "", sourceId: loaded.eSourceId ?? 0 }
+          : null,
+      );
+      setEditingId(String(rec.id));
+      setView("form");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to load booking for editing.",
+      );
+    }
   };
 
   const requestDelete = async (id: string) => {
@@ -1030,6 +1189,33 @@ export default function MaterialExpenseBooking() {
             form.igstRate ?? 0,
           );
 
+    // Expense Head allocations (direct/TOD bookings only) — at least one
+    // row is now mandatory (a DINV must always debit a real Expense Head,
+    // never fall back to the generic Purchase A/C, which is reserved for
+    // the PO/GRN flow — see the backend post-to-gl fallback branch) and
+    // rows must add up to the invoice's net amount, same check the backend
+    // re-runs, but catching it here avoids a round trip.
+    if (isDirect && selectedDoc?.kind === "TOD") {
+      if ((form.expenseHeadAllocations?.length ?? 0) === 0) {
+        toast.error("At least one Expense Head is required for this invoice.");
+        return;
+      }
+      const allocSum = Math.round(
+        (form.expenseHeadAllocations ?? []).reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100,
+      ) / 100;
+      const target = Math.round(bd.netAmount * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        toast.error(
+          `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the invoice total (₹${target.toFixed(2)}).`,
+        );
+        return;
+      }
+      if ((form.expenseHeadAllocations ?? []).some((r) => !r.lHeadId)) {
+        toast.error("Every Expense Head row needs a ledger selected.");
+        return;
+      }
+    }
+
     // Partial payment (EMI) — EMI is generated against the remaining balance
     // after the up-front partial amount, not the full net payable.
     const emiBaseAmountForSave =
@@ -1073,7 +1259,7 @@ export default function MaterialExpenseBooking() {
     try {
       if (isEditing) {
         if (!editingId) throw new Error("Missing booking id for update.");
-        await apiFetch(
+        const updateResult = await apiFetch(
           `${API}/${editingId}`,
           {
             method: "PUT",
@@ -1081,7 +1267,20 @@ export default function MaterialExpenseBooking() {
           },
           30000,
         );
-        toast.success("Expense booking updated.");
+        // Editing an already-Approved invoice doesn't update it directly —
+        // the backend routes it into a Pending amendment instead (see
+        // routes/expenseBooking.js PUT /:id, isAmendmentFlow) and responds
+        // 202 rather than the normal 200. Same edit form either way; only
+        // the outcome message differs.
+        if (updateResult?.pending) {
+          toast.success(
+            updateResult.message ||
+              "This invoice is already approved — your changes were submitted as a pending amendment awaiting approval.",
+            { duration: 7000 },
+          );
+        } else {
+          toast.success("Expense booking updated.");
+        }
         setSaved(true);
         await fetchRecords(page);
         fetchBookedSources();
@@ -1196,6 +1395,51 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "WO_PO";
   /** True when the booking is a direct / Other-Expenses (TOD) entry with no linked source doc. */
   const isDirect = !isGRN && !isPOorWO;
+
+  // TDS eligibility — live-checked as the direct/TOD form fills in. Scoped
+  // to direct bookings only: GRN/PO/WORK_DONE-sourced bookings don't carry
+  // a resolved supplier LHeadId client-side to check against (their
+  // supplier only exists as a display label until the source document is
+  // actually saved against) — the backend itself is source-type agnostic,
+  // this is purely a frontend UI gap for a later pass.
+  const tdsSupplierId = (form as any).supplierLHeadId as number | null | undefined;
+  useEffect(() => {
+    if (!isDirect || selectedDoc?.kind !== "TOD" || !tdsSupplierId || !form.companyId) {
+      setTdsEligibility(null);
+      return;
+    }
+    let cancelled = false;
+    const qs = new URLSearchParams({
+      supplierId: String(tdsSupplierId),
+      companyId: String(form.companyId),
+      amount: String(form.basicAmount || 0),
+    });
+    if (form.bookingDate) qs.set("date", form.bookingDate);
+    apiFetch(`${API}/tds-eligibility?${qs.toString()}`)
+      .then((data: any) => {
+        if (!cancelled) setTdsEligibility(data);
+      })
+      .catch(() => {
+        if (!cancelled) setTdsEligibility(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirect, selectedDoc?.kind, tdsSupplierId, form.companyId, form.basicAmount, form.bookingDate]);
+
+  // Keep form.tdsAmount live — it used to only be set once, inside the TDS
+  // <select>'s onChange, so editing the basic amount (or anything else that
+  // moves bd.netAmount) AFTER a TDS record was already picked left the
+  // shown TDS amount frozen at its old value instead of tracking the
+  // invoice in real time.
+  useEffect(() => {
+    if (!form.tdsId || form.tdsPercentage == null) return;
+    const recalculated = calculateTdsPreview(form.basicAmount, form.tdsPercentage);
+    if (recalculated !== form.tdsAmount) set("tdsAmount", recalculated);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.tdsId, form.tdsPercentage, form.basicAmount]);
+
   const { bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds } =
     useMemo(() => {
       const editingIdNum = editingId ? parseInt(editingId, 10) : null;
@@ -1293,8 +1537,16 @@ export default function MaterialExpenseBooking() {
         icon={Receipt}
         action={
           view === "list" ? (
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
+              <ExportMenu
+                data={filteredRecords as unknown as Record<string, unknown>[]}
+                fetchData={fetchAllRecordsForExport}
+                columns={INVOICE_EXPORT_COLUMNS}
+                title="Invoice"
+                filename="invoice"
+                disabled={filteredRecords.length === 0 || !rights.canExport}
+              />
               <button
                 onClick={handleDownloadTemplate}
                 title="Download a blank CSV template"
@@ -1504,39 +1756,41 @@ export default function MaterialExpenseBooking() {
                           />
                         </div>
                       ) : (
-                        <Select value={form.supplier || "__none__"} onValueChange={(val) => {
-                          const name = val === "__none__" ? "" : val;
-                          set("supplier", name);
-                          const head = name
-                            ? supplierHeads.find((s) => s.label === name) ??
-                              contractorHeads.find((c) => c.label === name)
-                            : undefined;
-                          set("supplierLHeadId", head?.id ?? null);
-                          // Other Expenses (TOD) bookings have no source-doc
-                          // label to name themselves after — keep the
-                          // booking name in sync with the chosen supplier.
-                          if (name && selectedDoc?.kind === "TOD") {
-                            set("bookingName", `Payment for ${name}`);
-                          }
-                          if (!name) return;
-                          if (head?.paymentTerms) {
-                            const termStr = head.paymentTerms.trim().toLowerCase();
-                            const match = paymentTermOptions.find(
-                              (t) => t.TermName.trim().toLowerCase() === termStr,
-                            );
-                            // Due Date is derived by the live effect above
-                            // (Vendor Invoice Date + Days) — just set the term here.
-                            if (match) set("paymentTermId", match.Id);
-                          }
-                          if (!form.vendorInvoiceDate) {
-                            set("vendorInvoiceDate", new Date().toISOString().split("T")[0]);
-                          }
-                        }}>
+                        <Select
+                          value={form.supplier || ""}
+                          onValueChange={(name) => {
+                            set("supplier", name);
+                            const head = name
+                              ? supplierHeads.find((s) => s.label === name) ??
+                                contractorHeads.find((c) => c.label === name) ??
+                                brokerHeads.find((b) => b.label === name)
+                              : undefined;
+                            set("supplierLHeadId", head?.id ?? null);
+                            // Other Expenses (TOD) bookings have no source-doc
+                            // label to name themselves after — keep the
+                            // booking name in sync with the chosen supplier.
+                            if (name && selectedDoc?.kind === "TOD") {
+                              set("bookingName", `Payment for ${name}`);
+                            }
+                            if (!name) return;
+                            if (head?.paymentTerms) {
+                              const termStr = head.paymentTerms.trim().toLowerCase();
+                              const match = paymentTermOptions.find(
+                                (t) => t.TermName.trim().toLowerCase() === termStr,
+                              );
+                              // Due Date is derived by the live effect above
+                              // (Vendor Invoice Date + Days) — just set the term here.
+                              if (match) set("paymentTermId", match.Id);
+                            }
+                            if (!form.vendorInvoiceDate) {
+                              set("vendorInvoiceDate", new Date().toISOString().split("T")[0]);
+                            }
+                          }}
+                        >
                           <SelectTrigger className={selectTriggerCls}>
-                            <SelectValue placeholder="Select supplier or contractor" />
+                            <SelectValue placeholder="Select Payable Party" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__none__">— None —</SelectItem>
                             {supplierHeads.length > 0 && (
                               <SelectGroup>
                                 <SelectLabel>Suppliers</SelectLabel>
@@ -1550,6 +1804,14 @@ export default function MaterialExpenseBooking() {
                                 <SelectLabel>Contractors</SelectLabel>
                                 {contractorHeads.map((c) => (
                                   <SelectItem key={`c-${c.id}`} value={c.label}>{c.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            {brokerHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Brokers</SelectLabel>
+                                {brokerHeads.map((b) => (
+                                  <SelectItem key={`b-${b.id}`} value={b.label}>{b.label}</SelectItem>
                                 ))}
                               </SelectGroup>
                             )}
@@ -1647,6 +1909,20 @@ export default function MaterialExpenseBooking() {
                 <>
                   <div className="space-y-3">
                     <SectionHeader label="Document Selection" />
+                    {isEditing ? (
+                      <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border bg-muted/30 text-xs">
+                        <span className="text-muted-foreground shrink-0">Source Document</span>
+                        <span className="font-mono font-semibold text-foreground">
+                          {form.eSourceType && form.eSourceType !== "TOD"
+                            ? form.sourceDocNo || `${form.eSourceType}-${form.poId ?? ""}`
+                            : "Direct Entry"}
+                        </span>
+                        <span className="ml-auto text-[10px] text-muted-foreground italic">
+                          Locked — the source document can't be changed once a booking exists.
+                        </span>
+                      </div>
+                    ) : (
+                      <>
                     <p className="text-[11px] text-muted-foreground -mt-1">
                       Pick a Purchase Order, confirmed Work Done entry, or GRN
                       to auto-fill booking details, or choose a document type
@@ -1726,6 +2002,8 @@ export default function MaterialExpenseBooking() {
                           </span>
                         </div>
                       )}
+                      </>
+                    )}
 
                     <Field
                       label="Booking Reference"
@@ -1850,21 +2128,46 @@ export default function MaterialExpenseBooking() {
                         </SelectContent>
                       </Select>
                     </Field>
-                    {/* GL Account only makes sense for Other Expenses (TOD)
-                        bookings — PO/GRN/WO-linked invoices already resolve
-                        their GL posting from the linked document's own
-                        accounts, so a free-text GL field there is unused and
-                        confusing. */}
-                    {isDirect && selectedDoc?.kind === "TOD" && (
-                      <Field label="GL Account" hint="Posts this invoice's debit leg against the selected ledger head">
-                        <GLAccountSelect
-                          value={form.glAccountId ?? null}
-                          onChange={(id, label) => {
-                            set("glAccountId", id);
-                            set("glAccount", label ?? "");
-                          }}
-                          placeholder="Select GL account..."
-                        />
+                    {/* TDS — only shown once the resolved supplier is
+                        actually TDS-eligible (Supplier/Contractor Master's
+                        TDS Applicable flag). Never mandatory here — the
+                        ₹30k single-bill / ₹1L yearly-cumulative threshold is
+                        only enforced later, at payment time. */}
+                    {isDirect && selectedDoc?.kind === "TOD" && tdsEligibility?.tdsApplicable && (
+                      <Field
+                        label="TDS"
+                        className="sm:col-span-2"
+                        hint={
+                          tdsEligibility.thresholdMet
+                            ? "This supplier/contractor has crossed the TDS threshold — select the applicable TDS"
+                            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} booked this year so far) — optional`
+                        }
+                      >
+                        <div className="flex items-center gap-3">
+                          <select
+                            value={form.tdsId ?? ""}
+                            onChange={(e) => {
+                              const id = e.target.value ? Number(e.target.value) : null;
+                              const rec = tdsRecords.find((t) => Number(t.id) === id);
+                              set("tdsId", id);
+                              set("tdsPercentage", rec?.percentage ?? null);
+                              set("tdsAmount", rec ? calculateTdsPreview(form.basicAmount, rec.percentage) : 0);
+                            }}
+                            className="flex-1 appearance-none pl-3 pr-7 py-2.5 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                          >
+                            <option value="">-- No TDS --</option>
+                            {tdsRecords.filter((t) => t.status).map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name || t.nature} — {t.percentage}%
+                              </option>
+                            ))}
+                          </select>
+                          {form.tdsId && (
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">
+                              TDS ₹{fmt(form.tdsAmount || 0)} · Net ₹{fmt(Math.max(0, bd.netAmount - (form.tdsAmount || 0)))}
+                            </span>
+                          )}
+                        </div>
                       </Field>
                     )}
                   </div>
@@ -1936,6 +2239,32 @@ export default function MaterialExpenseBooking() {
                 />
               )}
 
+              {/* Expense Head allocation — placed here (right after Basic
+                  Amt / GST, before Billing Terms) so its target amount
+                  (bd.netAmount, already resolved from the fields directly
+                  above) is visible on screen the moment the user starts
+                  tagging rows, instead of living earlier in the form where
+                  editing the amount required scrolling down to Basic Amt,
+                  then back up to re-check the running allocation total.
+                  Only makes sense for Other Expenses (TOD) bookings —
+                  PO/GRN/WO-linked invoices already resolve GL posting from
+                  the linked document's own accounts. */}
+              {isDirect && selectedDoc?.kind === "TOD" && (
+                <div className="space-y-3">
+                  <SectionHeader label="Expense Head" />
+                  <Field
+                    label="Allocation"
+                    required
+                    hint="At least one Expense Head is required — split this invoice's debit side across one or more ledger heads, must add up to the net amount above"
+                  >
+                    <ExpenseHeadAllocationEditor
+                      rows={form.expenseHeadAllocations ?? []}
+                      onChange={(rows) => set("expenseHeadAllocations", rows)}
+                      targetAmount={bd.netAmount}
+                    />
+                  </Field>
+                </div>
+              )}
 
               {/* ── 3. Billing Terms ──────────────────────────────────── */}
               <div className="space-y-3">
@@ -2162,6 +2491,13 @@ export default function MaterialExpenseBooking() {
                       onSearchChange={setListSearch}
                       statusFilter={statusFilter}
                       onStatusFilterChange={setStatusFilter}
+                      finYearOptions={finYears.map((fy) => fy.year)}
+                      finYearFilter={finYearFilter}
+                      onFinYearFilterChange={setFinYearFilter}
+                      dateFrom={dateFromFilter}
+                      dateTo={dateToFilter}
+                      onDateFromChange={setDateFromFilter}
+                      onDateToChange={setDateToFilter}
                     />
                   </CardHeader>
                   <CardContent className="p-0">
@@ -2182,7 +2518,7 @@ export default function MaterialExpenseBooking() {
                               : `booking-card-${index}`
                           }
                           rec={rec}
-                          onEdit={() => openAmend(rec)}
+                          onEdit={() => openEditForm(rec)}
                           onPreview={() => openPreview(rec)}
                           onDelete={() => requestDelete(rec.id)}
                           onApprovalSuccess={fetchRecords}
@@ -2235,36 +2571,10 @@ export default function MaterialExpenseBooking() {
                               // For GRN-linked records, recompute from grnTotalAmount + billing terms
                               // with correct pre/post-GST split (avoids stale ENetAmount from DB).
                               // For all others, use computeBreakdown on stored basicAmount.
-                              const effectiveNet = (() => {
-                                if (
-                                  rec.eSourceType === "GRN" &&
-                                  rec.grnTotalAmount != null
-                                ) {
-                                  const terms =
-                                    rec.billingTerms &&
-                                    rec.billingTerms.length > 0
-                                      ? rec.billingTerms
-                                      : rec.discount
-                                        ? [rec.discount]
-                                        : [];
-                                  return computeGrnNetWithTerms(
-                                    rec.grnTotalAmount,
-                                    terms,
-                                    rec.basicAmount,
-                                  );
-                                }
-                                const rbd = computeBreakdown(
-                                  rec.basicAmount,
-                                  rec.cgstRate,
-                                  rec.sgstRate,
-                                  rec.billingTerms &&
-                                    rec.billingTerms.length > 0
-                                    ? rec.billingTerms
-                                    : rec.discount,
-                                  rec.igstRate ?? 0,
-                                );
-                                return rec.netAmount ?? rbd.netAmount;
-                              })();
+                              // Net of TDS too — matches the export column and the Payment
+                              // page's own "Amount Payable (After TDS)" figure, instead of
+                              // showing the pre-TDS gross like this row used to.
+                              const effectiveNet = computeEffectiveNet(rec);
                               return (
                                 <TableRow
                                   key={
@@ -2399,14 +2709,7 @@ export default function MaterialExpenseBooking() {
                                     <ApprovalStatusChain
                                       table="ExpenseBooking"
                                       recordId={rec.id}
-                                      fallback={
-                                        rec.status === "Pending" ? (
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold whitespace-nowrap bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800">
-                                            <Clock size={10} />
-                                            Pending
-                                          </span>
-                                        ) : null
-                                      }
+                                      fallback={<StatusBadge status={rec.status} className="text-[10px] px-2 py-0.5" />}
                                     />
                                   </TableCell>
                                   <TableCell className="py-3">
@@ -2486,6 +2789,22 @@ export default function MaterialExpenseBooking() {
                 cannot be undone.
               </DialogDescription>
             </DialogHeader>
+            {/* Doc numbers are never reused after a delete — the sequence
+                simply continues from its current max, so removing a
+                document permanently leaves a gap (e.g. deleting #6 and #7
+                out of #1-#10 means the next new invoice is #11, not #6). */}
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+              <span>
+                {(() => {
+                  const rec = records.find((r) => r.id === deleteId);
+                  const docNo = rec?.bookingReference;
+                  return docNo
+                    ? `${docNo}'s number will not be reused — it leaves a permanent gap in the document sequence.`
+                    : "This document's number will not be reused — it leaves a permanent gap in the document sequence.";
+                })()}
+              </span>
+            </div>
             <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
               <Button variant="outline" onClick={() => setDeleteId(null)}>
                 Cancel
@@ -2504,7 +2823,7 @@ export default function MaterialExpenseBooking() {
         <ExpenseBookingPreviewModal
           previewRecord={previewRecord}
           onClose={() => setPreviewRecord(null)}
-          onEdit={(record) => openAmend(record)}
+          onEdit={(record) => openEditForm(record)}
         />
 
         {/* Remaining GRN Items — auto-created silently on save */}

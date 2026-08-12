@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { Eye, EyeOff, Truck, Building2, ArrowUpRight } from "lucide-react";
+import { Eye, EyeOff, Truck, Building2, ArrowUpRight, Smartphone } from "lucide-react";
 import {
   motion,
   AnimatePresence,
@@ -866,6 +866,20 @@ export default function Login() {
                 <p className="text-center text-[10px] text-white/20 mt-5">
                   Secure access · Role-based permissions · v{appVersion}
                 </p>
+
+                {/* Get the Android app — moved out of the floating top-right
+                    corner (looked orphaned, unrelated to the sign-in card)
+                    into a plain footer link near the other portal links, so
+                    it's reachable before signing in without competing for
+                    attention with the form itself. */}
+                <button
+                  type="button"
+                  onClick={() => navigate("/download-android-app")}
+                  className="group flex items-center justify-center gap-1.5 mx-auto mt-3 text-[11px] font-medium text-white/35 hover:text-violet-300 transition-colors"
+                >
+                  <Smartphone size={12} className="text-violet-300/70 group-hover:text-violet-300 transition-colors" />
+                  Get the Android app
+                </button>
 
                 {/* Other portals */}
                 <div className="mt-5 pt-5" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>

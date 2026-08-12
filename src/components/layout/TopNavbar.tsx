@@ -46,6 +46,7 @@ import {
   CalendarClock,
   Wand2,
   Percent,
+  GitBranch,
 } from "lucide-react";
 import {
   Crown,
@@ -253,6 +254,13 @@ const financeSetupItems = [
     color: "text-lime-500",
     pageKey: "payment-reason-master",
   },
+  {
+    icon: Users,
+    label: "Customer Master",
+    path: "/masters/customers",
+    color: "text-violet-500",
+    pageKey: "customer-master",
+  },
 ];
 
 const materialSetupItems = [
@@ -346,6 +354,13 @@ const engineeringSetupItems = [
     color: "text-orange-400",
     pageKey: "activity-master",
   },
+  {
+    icon: GitBranch,
+    label: "Dependency Master",
+    path: "/masters/dependency",
+    color: "text-cyan-400",
+    pageKey: "dependency-master",
+  },
 ];
 
 // Activity Master is the shared Engineering master (no separate Civil Work
@@ -406,13 +421,6 @@ const crmSetupItems = [
     path: "/crm/setup/auto-project-setup",
     color: "text-fuchsia-500",
     pageKey: "crm-auto-project-setup",
-  },
-  {
-    icon: Users,
-    label: "Customer Master",
-    path: "/masters/customers",
-    color: "text-violet-500",
-    pageKey: "customer-master",
   },
   {
     icon: Ruler,

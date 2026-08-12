@@ -174,6 +174,26 @@ const expenseBookingBodySchema = z.object({
     (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
     z.number().int().positive().optional(),
   ),
+  // Multi-GL "Expense Head" tagging (migration 303, dbo.ExpenseHeadAllocation)
+  // — a direct/manual booking's amount split across one or more Expense
+  // Heads instead of the single EGLAccountId. Loosely typed here; the route
+  // handler re-validates and coerces via normalizeAllocations().
+  EExpenseHeadAllocations: z
+    .array(
+      z.object({
+        lHeadId: z.coerce.number().int().positive(),
+        amount: z.coerce.number(),
+      }),
+    )
+    .optional(),
+  // TDS (migration 304) — the TDS record picked on this invoice, if the
+  // resolved supplier/contractor is TDS-eligible. Optional at invoice time
+  // (never mandatory here — only enforced later, at payment time, per the
+  // spec). Re-validated and the amount recomputed server-side on save.
+  TDSId: z.preprocess(
+    (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
+    z.number().int().positive().optional(),
+  ),
 });
 
 // PUT /:id — partial update (all fields optional except numeric consistency)

@@ -462,4 +462,152 @@ router.get("/invoice-register", async (req, res) => {
   }
 });
 
+// ── GET /api/reports/tds ──────────────────────────────────────────────────────
+// TDS deduction register (migration 304) — every NewPayment row that
+// actually withheld TDS (TDSAmount > 0), invoice-linked or direct. This is
+// the real "TDS deducted" event: an invoice's own TDSId is only a
+// snapshot/tag until a payment against it actually posts the deduction.
+//
+// Query params:
+//   companyId  – filter by the payment's PCompany
+//   finYearId  – filter by FinYear.FId (resolves to date range on PDate)
+//   dateFrom   – YYYY-MM-DD (applied to PDate)
+//   dateTo     – YYYY-MM-DD
+//   page       – default 1
+//   limit      – default 50, max 200
+router.get("/tds", async (req, res) => {
+  try {
+    const pool = getPool();
+    const page = Math.max(parseInt(req.query.page || "1", 10), 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit || "50", 10), 1), 200);
+    const offset = (page - 1) * limit;
+
+    const { companyId, finYearId, dateFrom, dateTo } = req.query;
+
+    let fyStart = null, fyEnd = null;
+    if (finYearId) {
+      const fy = await pool.request().input("FId", sql.Int, parseInt(finYearId, 10))
+        .query("SELECT FStartDate, FEndDate FROM dbo.FinYear WHERE FId = @FId");
+      if (fy.recordset.length) {
+        fyStart = fy.recordset[0].FStartDate;
+        fyEnd = fy.recordset[0].FEndDate;
+      }
+    }
+
+    const whereParts = ["ISNULL(np.TDSAmount, 0) > 0"];
+    const request = pool.request().input("offset", sql.Int, offset).input("limit", sql.Int, limit);
+
+    if (companyId) {
+      whereParts.push("TRY_CAST(np.PCompany AS INT) = @CompanyId");
+      request.input("CompanyId", sql.Int, parseInt(companyId, 10));
+    }
+    if (dateFrom) {
+      whereParts.push("CAST(np.PDate AS DATE) >= @DateFrom");
+      request.input("DateFrom", sql.Date, dateFrom);
+    } else if (fyStart) {
+      whereParts.push("CAST(np.PDate AS DATE) >= @FYStart");
+      request.input("FYStart", sql.Date, fyStart);
+    }
+    if (dateTo) {
+      whereParts.push("CAST(np.PDate AS DATE) <= @DateTo");
+      request.input("DateTo", sql.Date, dateTo);
+    } else if (fyEnd) {
+      whereParts.push("CAST(np.PDate AS DATE) <= @FYEnd");
+      request.input("FYEnd", sql.Date, fyEnd);
+    }
+
+    const whereSQL = "WHERE " + whereParts.join(" AND ");
+
+    const result = await request.query(`
+      SELECT
+        np.PPaymentID,
+        np.DocNo,
+        CONVERT(VARCHAR(10), np.PDate, 23)                  AS PayDate,
+        ISNULL(pfy.FName, '')                                AS FinYear,
+        ISNULL(ec.name, np.PCompany)                         AS Company,
+        -- Party: linked invoice's resolved supplier, else the direct party.
+        COALESCE(
+          CASE
+            WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
+            WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
+            ELSE grn2_sup.LHeadName
+          END,
+          party_head.LHeadName
+        )                                                    AS PartyName,
+        CASE WHEN np.PExpenseRef IS NOT NULL AND np.PExpenseRef <> '' AND np.ContractId IS NULL
+             THEN 'Invoice' ELSE 'Direct' END                AS PaymentType,
+        np.PExpenseRef                                       AS InvoiceRef,
+        np.TDSNature,
+        np.TDSName,
+        ISNULL(np.TDSPercentage, 0)                          AS TDSPercentage,
+        ISNULL(np.PAmount, 0)                                AS GrossAmount,
+        ISNULL(np.TDSAmount, 0)                              AS TDSAmount,
+        ISNULL(np.PAmount, 0) - ISNULL(np.TDSAmount, 0)      AS NetPaid,
+        COUNT(*) OVER()                                      AS _total
+      FROM dbo.NewPayment np
+      LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
+      LEFT JOIN dbo.enterprise ec ON ec.id = TRY_CAST(np.PCompany AS INT) AND ec.business_type = 'C'
+      LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.GoodsReceiptNotes grn_eb ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.AccountHeadMaster grn_sup ON grn_sup.LHeadId = grn_eb.SupplierID
+      LEFT JOIN dbo.PurchaseOrders po ON eb.ESourceType = 'PO' AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.AccountHeadMaster po_sup ON po_sup.LHeadId = po.SupplierID
+      LEFT JOIN dbo.GoodsReceiptNotes grn2 ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
+      LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
+      LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
+      ${whereSQL}
+      ORDER BY np.PDate DESC, np.PPaymentID DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
+
+    const rows = result.recordset;
+    const total = rows.length > 0 ? parseInt(rows[0]._total) : 0;
+
+    const data = rows.map(({ _total, ...r }) => ({
+      PPaymentID: r.PPaymentID,
+      DocNo: r.DocNo,
+      PayDate: r.PayDate,
+      FinYear: r.FinYear || null,
+      Company: r.Company,
+      PartyName: r.PartyName || null,
+      PaymentType: r.PaymentType,
+      InvoiceRef: r.InvoiceRef || null,
+      TDSNature: r.TDSNature || null,
+      TDSName: r.TDSName || null,
+      TDSPercentage: parseFloat(r.TDSPercentage) || 0,
+      GrossAmount: parseFloat(r.GrossAmount) || 0,
+      TDSAmount: parseFloat(r.TDSAmount) || 0,
+      NetPaid: parseFloat(r.NetPaid) || 0,
+    }));
+
+    // Fresh request for the grand-total row (same filters, whole result
+    // set — not just this page) rather than reusing `request`, which
+    // already has offset/limit bound to this page.
+    const totalsRequest = pool.request();
+    if (companyId) totalsRequest.input("CompanyId", sql.Int, parseInt(companyId, 10));
+    if (dateFrom) totalsRequest.input("DateFrom", sql.Date, dateFrom);
+    else if (fyStart) totalsRequest.input("FYStart", sql.Date, fyStart);
+    if (dateTo) totalsRequest.input("DateTo", sql.Date, dateTo);
+    else if (fyEnd) totalsRequest.input("FYEnd", sql.Date, fyEnd);
+    const totalsRes = await totalsRequest.query(
+      `SELECT ISNULL(SUM(np.TDSAmount), 0) AS TotalTDS, ISNULL(SUM(np.PAmount), 0) AS TotalGross FROM dbo.NewPayment np ${whereSQL}`,
+    );
+
+    return res.json({
+      data,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+      totals: {
+        tdsAmount: parseFloat(totalsRes.recordset?.[0]?.TotalTDS) || 0,
+        grossAmount: parseFloat(totalsRes.recordset?.[0]?.TotalGross) || 0,
+      },
+    });
+  } catch (err) {
+    console.error("TDS report error:", err.message);
+    return res.status(500).json({ error: "Failed to load TDS report" });
+  }
+});
+
 module.exports = router;

@@ -22,7 +22,7 @@ import {
 import { ASSET_CATEGORIES, CATEGORY_ICONS, CATEGORY_COLORS } from "./assetCategories";
 
 // ── constants ─────────────────────────────────────────────────────────────────
-const ASSET_STATUS_OPTIONS = ["Active", "Sold", "Scrapped", "Under Maintenance"] as const;
+const ASSET_STATUS_OPTIONS = ["Pending", "Active", "Sold", "Scrapped", "Under Maintenance"] as const;
 
 // Solid fills for the "Book Value by Category" bar chart — CATEGORY_COLORS
 // are subtle badge tints (bg-x/10), too washed out to read as a bar fill.
@@ -32,6 +32,7 @@ const BAR_PALETTE = [
 ];
 
 const STATUS_COLORS: Record<string, string> = {
+  Pending:             "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400",
   Active:              "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
   Sold:                "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
   Scrapped:            "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
@@ -147,6 +148,19 @@ function SectionHeader({ icon: Icon, children }: { icon: React.ElementType; chil
         <Icon size={14} />
       </span>
       <p className="text-sm font-semibold text-foreground">{children}</p>
+    </div>
+  );
+}
+
+function SubGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 border-b border-border/60 pb-1.5">
+        {label}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 xl:gap-5">
+        {children}
+      </div>
     </div>
   );
 }
@@ -321,6 +335,7 @@ export default function FixedAssetRecord() {
     let totalBookValue = 0;
     let activeCount = 0;
     let soldCount = 0;
+    let pendingCount = 0;
     for (const a of live) {
       totalCost += a.PurchaseCost || 0;
       const dc = a.PurchaseDate && a.DepreciationRate
@@ -329,8 +344,9 @@ export default function FixedAssetRecord() {
       totalBookValue += dc ? dc.bookValue : (a.PurchaseCost || 0);
       if (a.AssetStatus === "Active") activeCount++;
       if (a.AssetStatus === "Sold") soldCount++;
+      if (a.AssetStatus === "Pending") pendingCount++;
     }
-    return { count: live.length, totalCost, totalBookValue, activeCount, soldCount };
+    return { count: live.length, totalCost, totalBookValue, activeCount, soldCount, pendingCount };
   }, [assets]);
 
   // ── book value by category (for the portfolio-style bar chart) ───────────
@@ -563,13 +579,13 @@ export default function FixedAssetRecord() {
         action={
           <div className="flex gap-2">
             <button onClick={() => { resetForm(); setViewMode("list"); }}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg border border-border text-sm font-medium hover:bg-muted transition">
-              <ArrowLeft size={14} /> Back
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+              <ArrowLeft size={13} /> Back
             </button>
             {rights.canEdit && (
               <button onClick={() => goToEdit(d as unknown as FixedAssetListItem)}
-                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white text-sm font-semibold hover:shadow-lg transition">
-                <Pencil size={14} /> Edit
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all">
+                <Pencil size={13} /> Edit
               </button>
             )}
           </div>
@@ -727,12 +743,12 @@ export default function FixedAssetRecord() {
         action={
           <div className="flex gap-2">
             <button onClick={() => { resetForm(); setViewMode("list"); }}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg border border-border text-sm font-medium hover:bg-muted transition">
-              <ArrowLeft size={14} /> Cancel
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+              <ArrowLeft size={13} /> Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white text-sm font-semibold hover:shadow-lg transition disabled:opacity-50">
-              <Check size={14} /> {saving ? "Saving…" : "Save Asset"}
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all disabled:opacity-50">
+              <Check size={13} /> {saving ? "Saving…" : "Save Asset"}
             </button>
           </div>
         }
@@ -742,7 +758,7 @@ export default function FixedAssetRecord() {
           {/* ── Header Info ── */}
           <div className={sectionCls}>
             <SectionHeader icon={FileText}>Header Information</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
               <div>
                 <label className={labelCls}><Calendar size={11} /> Document Date</label>
                 <input type="date" value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
@@ -770,7 +786,7 @@ export default function FixedAssetRecord() {
                   {finYears.map((f) => <option key={f.id} value={f.year}>{f.year}</option>)}
                 </select>
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2 lg:col-span-4">
                 <label className={labelCls}>Remarks</label>
                 <input type="text" value={form.remarks} onChange={(e) => setField("remarks", e.target.value)} placeholder="Optional remarks…" className={inputCls} />
               </div>
@@ -778,10 +794,11 @@ export default function FixedAssetRecord() {
           </div>
 
           {/* ── Asset Details ── */}
-          <div className={sectionCls}>
+          <div className={`${sectionCls} space-y-5`}>
             <SectionHeader icon={Package}>Asset Details</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
-              <div>
+
+            <SubGroup label="Identity">
+              <div className="sm:col-span-2">
                 <label className={labelCls}>Fixed Asset Name *</label>
                 <input type="text" value={form.assetName} onChange={(e) => setField("assetName", e.target.value)} placeholder="e.g. Dell Latitude 5520" className={inputCls} />
               </div>
@@ -800,6 +817,10 @@ export default function FixedAssetRecord() {
                 </div>
               </div>
               <div>
+                <label className={labelCls}><Hash size={11} /> Serial Number</label>
+                <input type="text" value={form.serialNumber} onChange={(e) => setField("serialNumber", e.target.value)} placeholder="Serial / IMEI…" className={inputCls} />
+              </div>
+              <div>
                 <label className={labelCls}>Brand</label>
                 <input type="text" value={form.brand} onChange={(e) => setField("brand", e.target.value)} placeholder="e.g. Dell" className={inputCls} />
               </div>
@@ -807,10 +828,9 @@ export default function FixedAssetRecord() {
                 <label className={labelCls}>Model</label>
                 <input type="text" value={form.model} onChange={(e) => setField("model", e.target.value)} placeholder="e.g. Latitude 5520" className={inputCls} />
               </div>
-              <div>
-                <label className={labelCls}><Hash size={11} /> Serial Number</label>
-                <input type="text" value={form.serialNumber} onChange={(e) => setField("serialNumber", e.target.value)} placeholder="Serial / IMEI…" className={inputCls} />
-              </div>
+            </SubGroup>
+
+            <SubGroup label="Status & Timeline">
               <div>
                 <label className={labelCls}>Status</label>
                 <select value={form.assetStatus} onChange={(e) => setField("assetStatus", e.target.value)} className={inputCls}>
@@ -829,21 +849,28 @@ export default function FixedAssetRecord() {
                 <label className={labelCls}>Purchase Invoice Ref</label>
                 <input type="text" value={form.purchaseInvoiceRef} onChange={(e) => setField("purchaseInvoiceRef", e.target.value)} placeholder="Invoice number…" className={inputCls} />
               </div>
+            </SubGroup>
+
+            <SubGroup label="Cost & Supplier">
+              <div className="relative">
+                <label className={labelCls}><IndianRupee size={11} /> Purchase Cost *</label>
+                <input type="number" min="0" step="0.01" value={form.purchaseCost} onChange={(e) => setField("purchaseCost", e.target.value)} placeholder="0.00"
+                  className={`${inputCls} font-semibold border-emerald-500/30 focus:ring-emerald-500/30 bg-emerald-500/[0.03]`} />
+              </div>
               <div>
+                <label className={labelCls}>Quantity</label>
+                <input type="number" min="1" step="1" value={form.quantity} onChange={(e) => setField("quantity", e.target.value)} className={inputCls} />
+              </div>
+              <div className="sm:col-span-2">
                 <label className={labelCls}>Supplier</label>
                 <select value={form.supplierId} onChange={(e) => setField("supplierId", e.target.value)} className={inputCls}>
                   <option value="">Select supplier…</option>
                   {suppliers.map((s) => <option key={s.LHeadId} value={s.LHeadId}>{s.LHeadName}</option>)}
                 </select>
               </div>
-              <div>
-                <label className={labelCls}><IndianRupee size={11} /> Purchase Cost *</label>
-                <input type="number" min="0" step="0.01" value={form.purchaseCost} onChange={(e) => setField("purchaseCost", e.target.value)} placeholder="0.00" className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>Quantity</label>
-                <input type="number" min="1" step="1" value={form.quantity} onChange={(e) => setField("quantity", e.target.value)} className={inputCls} />
-              </div>
+            </SubGroup>
+
+            <SubGroup label="Assignment">
               <div>
                 <label className={labelCls}><MapPin size={11} /> Location</label>
                 <input type="text" value={form.location} onChange={(e) => setField("location", e.target.value)} placeholder="Office / Site…" className={inputCls} />
@@ -856,13 +883,13 @@ export default function FixedAssetRecord() {
                 <label className={labelCls}><User size={11} /> Custodian / Assigned To</label>
                 <input type="text" value={form.custodian} onChange={(e) => setField("custodian", e.target.value)} placeholder="Employee name…" className={inputCls} />
               </div>
-            </div>
+            </SubGroup>
           </div>
 
           {/* ── Depreciation Details ── */}
           <div className={sectionCls}>
             <SectionHeader icon={TrendingDown}>Depreciation Details</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
               <div>
                 <label className={labelCls}>Depreciation Type</label>
                 <input type="text" value={form.depreciationType} readOnly placeholder="Auto-fetched…"
@@ -969,8 +996,8 @@ export default function FixedAssetRecord() {
       action={
         rights.canCreate && (
           <button onClick={goToCreate}
-            className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white text-sm font-semibold hover:shadow-lg transition">
-            <Plus size={16} /> New Asset
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all">
+            <Plus size={13} /> New Asset
           </button>
         )
       }
@@ -991,8 +1018,11 @@ export default function FixedAssetRecord() {
             </p>
           </div>
           <CardContent className="p-4">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <SummaryCard label="Total Assets" value={fmt(portfolioStats.count)} icon={Boxes} />
+              {portfolioStats.pendingCount > 0 && (
+                <SummaryCard label="Pending" value={fmt(portfolioStats.pendingCount)} color="text-violet-600 dark:text-violet-400" icon={AlertCircle} />
+              )}
               <SummaryCard label="Active" value={fmt(portfolioStats.activeCount)} color="text-emerald-600 dark:text-emerald-400" icon={PlayCircle} />
               <SummaryCard label="Sold" value={fmt(portfolioStats.soldCount)} color="text-amber-600 dark:text-amber-400" icon={IndianRupee} />
             </div>
@@ -1056,7 +1086,7 @@ export default function FixedAssetRecord() {
       {/* ── filters ── */}
       <Card className="border-border shadow-sm mb-5">
         <CardContent className="p-4 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div className="lg:col-span-2">
               <label className={labelCls}>Search</label>
               <div className="relative">
@@ -1085,17 +1115,17 @@ export default function FixedAssetRecord() {
                 {ASSET_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-            <div className="w-full sm:w-48">
+            <div>
               <label className={labelCls}>Financial Year</label>
               <select value={filterFinYear} onChange={(e) => setFilterFinYear(e.target.value)} className={inputCls}>
                 <option value="">All Years</option>
                 {finYears.map((f) => <option key={f.id} value={f.year}>{f.year}</option>)}
               </select>
             </div>
-            <div className="flex items-center gap-3 sm:ml-auto">
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
+            <div className="flex items-center gap-3">
               {(filterCategory || filterStatus || filterFinYear || search) && (
                 <button
                   onClick={() => { setFilterCategory(""); setFilterStatus(""); setFilterFinYear(""); setSearch(""); }}
@@ -1131,7 +1161,7 @@ export default function FixedAssetRecord() {
           <p className="text-sm">No fixed assets found</p>
           {rights.canCreate && (
             <button onClick={goToCreate}
-              className="mt-2 inline-flex items-center gap-1.5 h-8 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium">
+              className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all">
               <Plus size={13} /> Add First Asset
             </button>
           )}
@@ -1227,11 +1257,11 @@ export default function FixedAssetRecord() {
             </div>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setDeleteId(null)}
-                className="h-8 px-3 rounded border border-border text-sm hover:bg-muted transition-colors">
+                className="shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
                 Cancel
               </button>
               <button onClick={() => deleteMut.mutate(deleteId!)} disabled={deleteMut.isPending}
-                className="h-8 px-3 rounded bg-destructive text-white text-sm font-medium disabled:opacity-50">
+                className="shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive transition-all disabled:opacity-50">
                 {deleteMut.isPending ? "Deleting…" : "Delete"}
               </button>
             </div>

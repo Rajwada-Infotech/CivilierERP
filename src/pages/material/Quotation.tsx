@@ -954,7 +954,7 @@ export default function Quotation() {
       {/* Actions */}
       <div className="flex items-center justify-end gap-3">
         <Button type="button" variant="outline" onClick={goToList}>Cancel</Button>
-        <Button type="button" onClick={onSave} disabled={isSaving || !headerIsValid} className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-400 text-white hover:opacity-90 border-0 disabled:opacity-40">
+        <Button type="button" onClick={onSave} disabled={isSaving || !headerIsValid} className="gap-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:opacity-90 border-0 disabled:opacity-40">
           <Save size={14} /> {isSaving ? "Saving…" : "Save as Draft"}
         </Button>
       </div>
@@ -1062,7 +1062,7 @@ ${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status
               </button>
             )}
             {rights.canEdit && r.Status === "Draft" && (
-              <Button type="button" size="sm" onClick={() => sendMutation.mutate(r.QuotationId)} disabled={sendMutation.isPending} className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-400 text-white hover:opacity-90 border-0">
+              <Button type="button" size="sm" onClick={() => sendMutation.mutate(r.QuotationId)} disabled={sendMutation.isPending} className="gap-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:opacity-90 border-0">
                 <Send size={13} /> Send to Suppliers
               </Button>
             )}
@@ -1171,9 +1171,14 @@ ${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status
               disabled={loadingList || !rows.length || !rights.canExport}
             />
             {rights.canCreate && (
-              <Button type="button" onClick={startNew} className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-400 text-white hover:opacity-90 border-0">
-                <Plus size={14} /> New Quotation
-              </Button>
+              <button
+                type="button"
+                onClick={startNew}
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
+              >
+                <Plus size={13} />
+                New Quotation
+              </button>
             )}
           </div>
         ) : undefined

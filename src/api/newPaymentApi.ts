@@ -52,7 +52,13 @@ export const getPayments = async (
   docDate = "",
   date = "",
   dueDate = "",
-  remarks = ""
+  remarks = "",
+  // Payment Date (np.PDate) range — the list view's "Date" filter. Kept
+  // separate from the single-day `docDate`/`date` params above (which match
+  // creation date / exact payment date respectively) since a from/to range
+  // is what the list UI actually exposes.
+  dateFrom = "",
+  dateTo = ""
 ) => {
   const params = new URLSearchParams({
     page: String(page),
@@ -67,6 +73,8 @@ export const getPayments = async (
   if (date) params.set("date", date);
   if (dueDate) params.set("dueDate", dueDate);
   if (remarks) params.set("remarks", remarks);
+  if (dateFrom) params.set("from", dateFrom);
+  if (dateTo) params.set("to", dateTo);
 
   const res = await fetchWithAuth(`${BASE_URL}?${params.toString()}`);
   if (!res.ok)
@@ -165,6 +173,8 @@ export interface PaymentChainInvoice {
   ETotalPaid: number | null;
   ERemainingAmount: number | null;
   EBillStatus: string | null;
+  /** TDS withheld at source, 0 when not applicable. */
+  TDSAmount: number | null;
   ProjectName: string | null;
   PartyName: string | null;
 }

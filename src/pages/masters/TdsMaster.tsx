@@ -1,9 +1,10 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import React, { useRef, useState } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
-import { FileText, Download, Upload, Check, X, Loader2 } from "lucide-react";
+import { FileText, Download, Upload, Check, X, Loader2, AlertTriangle } from "lucide-react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -45,6 +46,13 @@ interface DbTds {
   Name: string | null;
   Percentage: number | null;
   Status: boolean;
+  // GLHeadId (migration 313) — the GL ledger invoice posting debits for
+  // this TDS Nature's own leg (Dr TDS Nature A/c). Posting a TDS-deducted
+  // invoice fails with "TDS Nature system ledger not configured" until
+  // every Nature actually in use here has one linked.
+  GLHeadId: number | null;
+  GLHeadName?: string | null;
+  GLHeadCode?: string | null;
 }
 
 // ─── Payload ──────────────────────────────────────────────────────────────────
@@ -53,6 +61,7 @@ const toPayload = (r: Record<string, unknown>) => ({
   Name: (r.name as string) || null,
   Percentage: r.percentage ? Number(r.percentage) : 0,
   Status: r.status !== false,
+  GLHeadId: r.glHeadId ? Number(r.glHeadId) : null,
 });
 
 // ─── CSV template column mapping ─────────────────────────────────────────────
@@ -107,6 +116,10 @@ const TdsMaster: React.FC = () => {
     name: item.Name || "",
     percentage: item.Percentage ?? "",
     status: item.Status,
+    glHeadId: item.GLHeadId ?? null,
+    glHeadLabel: item.GLHeadName
+      ? `${item.GLHeadName}${item.GLHeadCode ? ` (${item.GLHeadCode})` : ""}`
+      : null,
   }));
 
   const handleDataEvent = async (event: DataChangeEvent) => {
@@ -287,6 +300,14 @@ const TdsMaster: React.FC = () => {
         {String(value || "—")}
       </span>
     ),
+    glHeadLabel: (value) =>
+      value ? (
+        <span className="text-sm text-foreground">{String(value)}</span>
+      ) : (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+          <AlertTriangle size={11} /> Not linked — invoice posting will fail
+        </span>
+      ),
   };
 
   if (isLoading)
@@ -371,6 +392,20 @@ const TdsMaster: React.FC = () => {
               required: true,
             },
             {
+              name: "glHeadId",
+              label: "GL Head (for invoice posting)",
+              type: "custom",
+              required: true,
+              fullWidth: true,
+              render: ({ value, onChange }) => (
+                <GLAccountSelect
+                  value={value ? Number(value) : null}
+                  onChange={(id) => onChange(id)}
+                  placeholder="Select the ledger this TDS Nature posts its debit leg to..."
+                />
+              ),
+            },
+            {
               name: "status",
               label: "Status",
               type: "toggle",
@@ -382,6 +417,7 @@ const TdsMaster: React.FC = () => {
             { key: "nature", label: "Nature" },
             { key: "name", label: "Name" },
             { key: "percentage", label: "Rate (%)" },
+            { key: "glHeadLabel", label: "GL Head" },
             { key: "status", label: "Status" },
           ]}
           columnRenderers={columnRenderers}

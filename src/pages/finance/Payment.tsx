@@ -5,6 +5,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useTds } from "@/contexts/TdsContext";
 import { Button } from "@/components/ui/button";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -26,6 +27,7 @@ import { toast } from "sonner";
 import { formatINR } from "@/utils/formatCurrency";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { EditOrAmendButton } from "@/components/EditOrAmendButton";
 import {
   Banknote,
   CheckCircle2,
@@ -112,6 +114,7 @@ import { ModeInfoBanner } from "./payment/components/ModeInfoBanner";
 import { ChequePanel } from "./payment/components/ChequePanel";
 import { DigitalRefPanel } from "./payment/components/DigitalRefPanel";
 import { CardPanel } from "./payment/components/CardPanel";
+import { ExpenseHeadAllocationEditor } from "@/pages/material/ExpenseBooking/ExpenseHeadAllocationEditor";
 import { getPayableEmis, payLoan, type PayableEmi } from "@/api/loanSanctionApi";
 import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
 import { previewOAAdjustment } from "@/api/onAccountAdjustment";
@@ -121,6 +124,7 @@ import { previewOAAdjustment } from "@/api/onAccountAdjustment";
 const Payment: React.FC = () => {
   const rights = usePageRights("new-payment");
   const { theme } = useTheme();
+  const { tdsRecords } = useTds();
   const isDark = theme !== "light";
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -131,8 +135,25 @@ const Payment: React.FC = () => {
   const [projectFilter, setProjectFilter] = useState("");
   const [finYearFilter, setFinYearFilter] = useState("");
   const [docNumberFilter, setDocNumberFilter] = useState("");
-  const [docDateFilter, setDocDateFilter] = useState("");
+  // Payment Date range (np.PDate) — was a single exact-match date filter,
+  // now a From/To range for a more useful list-view search.
+  const [dateFromFilter, setDateFromFilter] = useState("");
+  const [dateToFilter, setDateToFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  // Direct Expense Payment (migration 303) — a payment mode with no linked
+  // invoice/party, paid straight against one or more Expense Heads instead.
+  const [showExpenseHeadPayment, setShowExpenseHeadPayment] = useState(false);
+  // TDS (migration 304) — live-checked against the chosen Payee/Party for a
+  // direct (no invoice linked) payment. An invoice-linked payment always
+  // inherits its invoice's own snapshot server-side instead — no dropdown.
+  const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number } | null>(null);
+  // Live preview of what an invoice-linked payment will inherit/enforce —
+  // calls the exact same resolver the save itself uses, so this can never
+  // disagree with what actually happens on save.
+  const [invoiceTdsPreview, setInvoiceTdsPreview] = useState<{
+    blocked: boolean; message?: string; eligible: boolean; thresholdMet: boolean;
+    tdsAmount: number; tdsNature?: string | null; tdsName?: string | null; tdsPercentage?: number | null;
+  } | null>(null);
   const PAGE_SIZE = 20;
 
   const [view, setView] = useState<"list" | "form">("list");
@@ -169,6 +190,13 @@ const Payment: React.FC = () => {
   const [loadingFormChain, setLoadingFormChain] = useState(false);
   // Known totalPaid injected by "Pay Remaining" — overrides stale opt.totalPaid from DB
   const [formKnownTotalPaid, setFormKnownTotalPaid] = useState<number | null>(null);
+  // Same pattern, for TDS: set from the freshly-fetched invoice detail at
+  // selection time (handleExpenseSelect), so the Invoice Balance card and
+  // Payment Breakdown panel read a guaranteed-current value instead of
+  // expenseOptions.find(...).tdsAmount — that list is a react-query cache
+  // fetched once per page load and not necessarily current if the linked
+  // invoice's TDS changed since.
+  const [formKnownTdsAmount, setFormKnownTdsAmount] = useState<number | null>(null);
   // Live remaining from payment-summary (excludes bounced) — used in partial payment panel
   const [formLiveRemaining, setFormLiveRemaining] = useState<number | null>(null);
   // On Account balance for the selected invoice's party
@@ -490,6 +518,26 @@ const Payment: React.FC = () => {
         ].join("")
       : "";
 
+    // Direct Expense Payment (migration 303) — paid straight against one
+    // or more Expense Heads, no Party involved.
+    const expenseHeadRows =
+      rec.expenseHeadAllocations && rec.expenseHeadAllocations.length > 0
+        ? rec.expenseHeadAllocations
+            .map((a) => field(a.label ?? "Expense Head", formatINR(a.amount)))
+            .join("")
+        : "";
+
+    // TDS (migration 304)
+    const tdsRows = rec.tdsId
+      ? [
+          field("TDS Nature", rec.tdsNature),
+          field("TDS Name", rec.tdsName),
+          rec.tdsPercentage != null ? field("TDS Rate", `${rec.tdsPercentage}%`) : "",
+          field("TDS Amount", formatINR(rec.tdsAmount || 0)),
+          field("Net Payable", formatINR(Math.max(0, (rec.amount ?? 0) - (rec.tdsAmount || 0)))),
+        ].join("")
+      : "";
+
     const printedAt = new Date().toLocaleString("en-IN", {
       day: "2-digit",
       month: "short",
@@ -566,6 +614,12 @@ const Payment: React.FC = () => {
 
   ${taxRows ? sectionTitle("Tax Details") : ""}
   ${taxRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${taxRows}</tbody></table></div>` : ""}
+
+  ${expenseHeadRows ? sectionTitle(rec.expenseHeadAllocations!.length > 1 ? "Expense Heads" : "Expense Head") : ""}
+  ${expenseHeadRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${expenseHeadRows}</tbody></table></div>` : ""}
+
+  ${tdsRows ? sectionTitle("TDS Details") : ""}
+  ${tdsRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${tdsRows}</tbody></table></div>` : ""}
 
   <!-- Signatories -->
   <div style="display:flex;gap:8px;margin-top:48px;">
@@ -648,7 +702,8 @@ const Payment: React.FC = () => {
       projectFilter,
       finYearFilter,
       docNumberFilter,
-      docDateFilter,
+      dateFromFilter,
+      dateToFilter,
     ],
     queryFn: () =>
       getPayments(
@@ -659,7 +714,12 @@ const Payment: React.FC = () => {
         projectFilter,
         finYearFilter,
         docNumberFilter,
-        docDateFilter,
+        "",
+        "",
+        "",
+        "",
+        dateFromFilter,
+        dateToFilter,
       ),
     staleTime: 0,
   });
@@ -676,6 +736,42 @@ const Payment: React.FC = () => {
 
   // Companies fetched with business_type=C from enterprise table
   const companyOptions = enterprises;
+
+  // TDS eligibility — live-checked against the chosen Payee/Party for a
+  // direct (no invoice linked) payment. Reuses the same generic endpoint
+  // the Invoice form uses (AccountHeadMaster eligibility isn't module-
+  // specific — Payee/Party here is the exact same Supplier/Contractor
+  // master row an Invoice's supplier resolves to).
+  useEffect(() => {
+    if (form.expenseRef || !form.partyId || !form.company) {
+      setTdsEligibility(null);
+      return;
+    }
+    const companyIdNum = companyOptions.find((c) => c.label === form.company)?.id;
+    if (!companyIdNum) {
+      setTdsEligibility(null);
+      return;
+    }
+    let cancelled = false;
+    const qs = new URLSearchParams({
+      supplierId: String(form.partyId),
+      companyId: String(companyIdNum),
+      amount: String(form.amount || 0),
+    });
+    if (form.date) qs.set("date", form.date);
+    fetchWithAuth(`/api/expense-booking/tds-eligibility?${qs.toString()}`)
+      .then((r) => r.json().catch(() => null))
+      .then((data) => {
+        if (!cancelled) setTdsEligibility(data);
+      })
+      .catch(() => {
+        if (!cancelled) setTdsEligibility(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.expenseRef, form.partyId, form.company, form.amount, form.date, companyOptions]);
 
   const { data: projectOptions = [] } = useQuery<
     {
@@ -707,6 +803,37 @@ const Payment: React.FC = () => {
   const totalPages: number = dbData?.totalPages ?? 1;
   const totalRecords: number = dbData?.total ?? 0;
   const records: PaymentRecord[] = dbItems.map(dbToRecord);
+
+  // Export must cover every matching record, not just the current page —
+  // the list endpoint caps `limit` at 100 server-side, so page through
+  // everything under the SAME filters already applied to the visible table.
+  const fetchAllPaymentsForExport = useCallback(async () => {
+    const pageLimit = 100;
+    let all: DbPayment[] = [];
+    let p = 1;
+    let pages = 1;
+    do {
+      const data = await getPayments(
+        p,
+        pageLimit,
+        supplierFilter,
+        companyNameFilter,
+        projectFilter,
+        finYearFilter,
+        docNumberFilter,
+        "",
+        "",
+        "",
+        "",
+        dateFromFilter,
+        dateToFilter,
+      );
+      all = all.concat(Array.isArray(data?.data) ? data.data : []);
+      pages = data?.totalPages ?? 1;
+      p += 1;
+    } while (p <= pages);
+    return all.map(dbToRecord) as unknown as Record<string, unknown>[];
+  }, [supplierFilter, companyNameFilter, projectFilter, finYearFilter, docNumberFilter, dateFromFilter, dateToFilter]);
 
   // Fetch full detail (name + logo + address) for the selected company — used in PDF export
   const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
@@ -743,6 +870,33 @@ const Payment: React.FC = () => {
 
   // ── Contract source ─────────────────────────────────────────────────────────
   const [selectedContract, setSelectedContract] = useState<any | null>(null);
+
+  // TDS — invoice-linked payment. Live preview of exactly what will be
+  // inherited (or what will block the save) once an invoice is picked —
+  // calls the exact same resolver the save itself uses.
+  useEffect(() => {
+    if (!form.expenseRef || selectedContract) {
+      setInvoiceTdsPreview(null);
+      return;
+    }
+    const companyIdNum = companyOptions.find((c) => c.label === form.company)?.id;
+    let cancelled = false;
+    const qs = new URLSearchParams({ expenseRef: form.expenseRef });
+    if (companyIdNum) qs.set("companyId", String(companyIdNum));
+    if (form.date) qs.set("date", form.date);
+    fetchWithAuth(`/api/new-payment/tds-preview?${qs.toString()}`)
+      .then((r) => r.json().catch(() => null))
+      .then((data) => {
+        if (!cancelled) setInvoiceTdsPreview(data);
+      })
+      .catch(() => {
+        if (!cancelled) setInvoiceTdsPreview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.expenseRef, selectedContract, form.company, form.date, companyOptions]);
   const { data: contractOptions = [], isLoading: contractsLoading } = useQuery<any[]>({
     queryKey: ["payment-contracts"],
     queryFn: async () => {
@@ -1032,6 +1186,7 @@ const Payment: React.FC = () => {
       // Reset known total paid unless this is a Pay Remaining call (amountOverride set)
       if (amountOverride == null) setFormKnownTotalPaid(null);
       if (!expenseId) {
+        setFormKnownTdsAmount(null);
         setForm((prev) => ({
           ...prev,
           expenseId: "",
@@ -1050,6 +1205,7 @@ const Payment: React.FC = () => {
 
       const selectedOption = expenseOptions.find((o) => o.id === expenseId);
       if (selectedOption?.type === "emi") {
+        setFormKnownTdsAmount(null);
         const parentDocNo =
           selectedOption.parentDocNo ||
           selectedOption.refNumber?.replace(/-EMI-\d+$/i, "") ||
@@ -1109,6 +1265,15 @@ const Payment: React.FC = () => {
         if (!detail) throw new Error("Not found");
         const parentDocNo = detail.ParentDocNo || detail.EDocNo || "";
         const rootExBDocNo = detail.RootExBDocNo || detail.EDocNo || "";
+        // Freshly-fetched, never from the (possibly stale) expenseOptions
+        // cache — this is what the Invoice Balance card and Payment
+        // Breakdown panel now read via formKnownTdsAmount instead of
+        // re-deriving their own value from expenseOptions.find(...).
+        const freshTdsAmt =
+          (detail as any).TDSAmount != null
+            ? parseFloat(String((detail as any).TDSAmount)) || 0
+            : (selectedOption?.tdsAmount ?? 0);
+        setFormKnownTdsAmount(freshTdsAmt);
         setForm((prev) => ({
           ...prev,
           expenseId,
@@ -1126,8 +1291,15 @@ const Payment: React.FC = () => {
             return matched?.label || String(detail.ECompanyId ?? "");
           })(),
           // If an override is provided (Pay Remaining flow), always use it.
-          // Otherwise use remainingAmount from the options list (reflects partial payments).
-          // Fall back to full invoice amount if remaining is not available.
+          // Otherwise compute what's actually still payable: gross amount,
+          // minus TDS withheld at source, minus whatever's already been
+          // paid. Computed directly from amount/tdsAmount/totalPaid rather
+          // than trusting selectedOption.remainingAmount (ExpenseBooking.
+          // ERemainingAmount) to already be correct — that column is only
+          // refreshed at invoice approval and on payment changes, so an
+          // invoice whose TDS was added afterward (e.g. via an amendment)
+          // could still have it stuck at the pre-TDS figure.
+          // Fall back to full invoice amount if nothing better is available.
           amount: (() => {
             if (amountOverride != null) return amountOverride;
             const fullAmt = detail.ENetAmount
@@ -1135,11 +1307,10 @@ const Payment: React.FC = () => {
               : (detail as any).EGrnTotalAmount
                 ? parseFloat((detail as any).EGrnTotalAmount)
                 : (detail.EAmount ?? null);
-            const remaining = selectedOption?.remainingAmount;
-            if (remaining != null && remaining > 0 && fullAmt != null && remaining < fullAmt) {
-              return remaining;
-            }
-            return fullAmt;
+            if (fullAmt == null) return fullAmt;
+            const paidSoFar = selectedOption?.totalPaid ?? 0;
+            const trueRemaining = Math.max(0, fullAmt - freshTdsAmt - paidSoFar);
+            return trueRemaining > 0 ? trueRemaining : fullAmt - freshTdsAmt;
           })(),
           docType: detail.DocTypeName || detail.EDocumentType || "",
           // For GRN: baseAmount = pre-tax base (totalBase), rates from DB.
@@ -1490,13 +1661,16 @@ const Payment: React.FC = () => {
   }, [form.expenseRef]);
 
   // Once chain data loads, derive the live remaining from chain payments (source of truth).
-  // ENetAmount is the net payable (base + GST + adjustments). BounceCharge is excluded
-  // because it's paid to the bank, not the supplier.
+  // ENetAmount is the net payable (base + GST + adjustments), minus TDS
+  // withheld at source (never actually paid to the supplier — see
+  // backend/utils/syncBillStatus.js for the same formula server-side).
+  // BounceCharge is excluded because it's paid to the bank, not the supplier.
   useEffect(() => {
     if (!formChainData || editingId) return;
     const inv = formChainData.invoice;
     if (!inv) return;
-    const fullAmt = parseFloat(String(inv.ENetAmount ?? inv.EAmount ?? 0)) || 0;
+    const grossAmt = parseFloat(String(inv.ENetAmount ?? inv.EAmount ?? 0)) || 0;
+    const fullAmt = Math.max(0, grossAmt - (parseFloat(String(inv.TDSAmount ?? 0)) || 0));
     if (!fullAmt) return;
     const { totalPaid: paidExcludingBounced, remaining: liveRemaining } =
       computePaymentStatus(fullAmt, formChainData.payments);
@@ -1631,6 +1805,33 @@ const Payment: React.FC = () => {
       return false;
     }
 
+    if ((form.expenseHeadAllocations?.length ?? 0) > 0) {
+      const allocSum = Math.round(
+        (form.expenseHeadAllocations ?? []).reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100,
+      ) / 100;
+      const target = Math.round((form.amount ?? 0) * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        toast.error(
+          `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the payment amount (₹${target.toFixed(2)}).`,
+        );
+        return false;
+      }
+      if ((form.expenseHeadAllocations ?? []).some((r) => !r.lHeadId)) {
+        toast.error("Every Expense Head row needs a ledger selected.");
+        return false;
+      }
+    }
+
+    if (!form.expenseRef && tdsEligibility?.thresholdMet && !form.tdsId) {
+      toast.error("TDS is due on this payment — please select a TDS.");
+      return false;
+    }
+
+    if (form.expenseRef && !selectedContract && invoiceTdsPreview?.blocked) {
+      toast.error(invoiceTdsPreview.message || "TDS is due on this invoice but none was selected — please correct the invoice first.");
+      return false;
+    }
+
     if (isDigitalMode) {
       if (!form.bankId) {
         toast.error("Please select a bank account.");
@@ -1700,6 +1901,18 @@ const Payment: React.FC = () => {
       cardReference: form.cardReference || null,
       cardId: form.cardId ?? null,
       ContractId: form.contractId ? Number(form.contractId) : null,
+      // Direct Expense Payment (migration 303) — pay one or more Expense
+      // Heads straight from the bank instead of a Party/Invoice.
+      EExpenseHeadAllocations:
+        form.expenseHeadAllocations && form.expenseHeadAllocations.length > 0
+          ? form.expenseHeadAllocations
+              .filter((r) => r.lHeadId && r.amount > 0)
+              .map((r) => ({ lHeadId: r.lHeadId, amount: r.amount }))
+          : [],
+      // TDS (migration 304) — only meaningful for a direct (no invoice
+      // linked) payment; ignored server-side for an invoice-linked one,
+      // which always inherits the invoice's own snapshot instead.
+      TDSId: form.tdsId || null,
       // "Keep the balance on his on account" — unchecked means don't let the
       // approve-time hook auto-apply this party's on-account balance.
       oaSkipAutoApply: oaBalance > 0.01 ? !useOnAccountBalance : undefined,
@@ -1805,6 +2018,7 @@ const Payment: React.FC = () => {
               )}
               <ExportMenu
                 data={records as unknown as Record<string, unknown>[]}
+                fetchData={fetchAllPaymentsForExport}
                 columns={EXPORT_COLUMNS}
                 title="Payment Management"
                 filename="payments"
@@ -2273,8 +2487,91 @@ const Payment: React.FC = () => {
                         />
                       </div>
                     </Field>
+                    {/* TDS — only shown once the chosen party is actually
+                        TDS-eligible. Never mandatory to fill here in the
+                        sense of blocking typing — the ₹30k/₹1L threshold is
+                        enforced server-side on save. */}
+                    {tdsEligibility?.tdsApplicable && (
+                      <Field
+                        label="TDS"
+                        hint={
+                          tdsEligibility.thresholdMet
+                            ? "This party has crossed the TDS threshold — select the applicable TDS"
+                            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} paid this year so far) — optional`
+                        }
+                      >
+                        <select
+                          value={form.tdsId ?? ""}
+                          onChange={(e) => {
+                            const id = e.target.value ? Number(e.target.value) : null;
+                            const rec = tdsRecords.find((t) => Number(t.id) === id);
+                            set("tdsId", id);
+                            set("tdsPercentage", rec?.percentage ?? null);
+                            set(
+                              "tdsAmount",
+                              rec ? Math.round(((Number(form.amount) || 0) * rec.percentage) / 100 * 100) / 100 : 0,
+                            );
+                          }}
+                          className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">-- No TDS --</option>
+                          {tdsRecords.filter((t) => t.status).map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name || t.nature} — {t.percentage}%
+                            </option>
+                          ))}
+                        </select>
+                        {!!form.tdsId && (
+                          <p className="text-[11px] text-muted-foreground mt-1">
+                            TDS ₹{(form.tdsAmount || 0).toLocaleString("en-IN")} · Net ₹{Math.max(0, (form.amount || 0) - (form.tdsAmount || 0)).toLocaleString("en-IN")}
+                          </p>
+                        )}
+                      </Field>
+                    )}
                   </div>
                 )}
+
+                {/* Direct Expense Payment (migration 303) — an alternative to
+                    picking a Party above: split the payment across one or
+                    more Expense Heads instead, debited directly with no
+                    counter-party at all (e.g. paying a courier or bank
+                    charge with no invoice/vendor on file). */}
+                {!form.expenseRef && !selectedContract && (() => {
+                  const expanded = showExpenseHeadPayment || (form.expenseHeadAllocations?.length ?? 0) > 0;
+                  return (
+                    <div className="space-y-2">
+                      {!expanded ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowExpenseHeadPayment(true)}
+                          className="text-[11px] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
+                        >
+                          or pay Expense Head(s) directly →
+                        </button>
+                      ) : (
+                        <Field
+                          label="Expense Head"
+                          hint="Pay one or more ledger heads directly — no party required. Must add up to the amount below."
+                        >
+                          <ExpenseHeadAllocationEditor
+                            rows={form.expenseHeadAllocations ?? []}
+                            onChange={(rows) => set("expenseHeadAllocations", rows)}
+                            targetAmount={form.amount ?? 0}
+                          />
+                          {(form.expenseHeadAllocations?.length ?? 0) === 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowExpenseHeadPayment(false)}
+                              className="mt-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              Cancel — pay a Party instead
+                            </button>
+                          )}
+                        </Field>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {form.expenseRef && selectedContract && (
                   <AutoFillBanner
@@ -2289,6 +2586,33 @@ const Payment: React.FC = () => {
                     docNo={form.expenseRef}
                     onClear={clearExpenseLink}
                   />
+                )}
+
+                {/* TDS (migration 304) — invoice-linked payment always
+                    inherits the invoice's own snapshot read-only; this is
+                    a live preview of exactly what will be applied (or what
+                    will block the save) on save, from the same resolver. */}
+                {form.expenseRef && !selectedContract && invoiceTdsPreview?.blocked && (
+                  <div className="flex items-start gap-2.5 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
+                    <AlertCircle size={14} className="text-destructive shrink-0 mt-0.5" />
+                    <p className="text-xs text-destructive">
+                      {invoiceTdsPreview.message || "TDS is due on this invoice but none was selected — please correct the invoice before paying it."}
+                    </p>
+                  </div>
+                )}
+                {form.expenseRef && !selectedContract && !invoiceTdsPreview?.blocked && invoiceTdsPreview?.thresholdMet && (invoiceTdsPreview.tdsAmount ?? 0) > 0 && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3">
+                    <div className="flex items-center gap-2 text-xs text-foreground">
+                      <span>
+                        TDS <span className="font-semibold">{invoiceTdsPreview.tdsName || invoiceTdsPreview.tdsNature}</span>
+                        {invoiceTdsPreview.tdsPercentage != null && <span className="text-muted-foreground"> — {invoiceTdsPreview.tdsPercentage}%</span>}
+                        {" "}(inherited from invoice)
+                      </span>
+                    </div>
+                    <span className="text-xs font-mono text-muted-foreground whitespace-nowrap">
+                      TDS {formatINR(invoiceTdsPreview.tdsAmount)} · Net {formatINR(Math.max(0, (form.amount || 0) - invoiceTdsPreview.tdsAmount))}
+                    </span>
+                  </div>
                 )}
 
                 {form.expenseRef && selectedContract && (
@@ -2481,14 +2805,28 @@ const Payment: React.FC = () => {
                   Math.abs(grnInclTotal - (opt.amount ?? 0)) > 0.01
                     ? grnInclTotal
                     : (opt.amount ?? 0);
+                // TDS withheld at source is never paid to the supplier — the
+                // amount actually payable in cash is netAmt minus it. Computed
+                // directly from opt.tdsAmount rather than trusting
+                // opt.remainingAmount (ExpenseBooking.ERemainingAmount) to
+                // already reflect it: that column is only refreshed at
+                // approval and on payment changes, so an invoice whose TDS
+                // was added afterward (e.g. via an amendment) can still be
+                // stuck showing its pre-TDS figure.
+                const tdsAmt = formKnownTdsAmount ?? opt.tdsAmount ?? 0;
+                const payableAfterTds = Math.max(0, netAmt - tdsAmt);
                 // Use live chain-derived values when available (excludes bounced, subtracts bounce charges).
-                // Fall back to stale DB opt.totalPaid only when chain hasn't loaded yet.
-                const livePaid = formLiveRemaining != null ? Math.max(0, netAmt - formLiveRemaining) : null;
-                const paid = livePaid ?? opt.totalPaid ?? 0;
-                const remaining = formLiveRemaining ?? (opt.remainingAmount != null
-                  ? opt.remainingAmount
-                  : Math.max(0, netAmt - paid));
-                const bStatus = deriveBillStatus(paid, remaining, netAmt);
+                // formLiveRemaining is already TDS-net (see the effect that sets it), so
+                // paid-so-far is payableAfterTds minus it, not netAmt minus it.
+                const livePaid = formLiveRemaining != null ? Math.max(0, payableAfterTds - formLiveRemaining) : null;
+                // Real cash paid only — TDS is withheld, not paid to the
+                // supplier, so it must never be counted as "Paid" here (it
+                // gets its own card below instead). opt.totalPaid's fallback
+                // path historically folded TDS into the paid figure the
+                // moment it was applied to the invoice; strip it back out.
+                const paid = livePaid ?? Math.max(0, (opt.totalPaid ?? 0) - tdsAmt);
+                const remaining = formLiveRemaining ?? Math.max(0, payableAfterTds - paid);
+                const bStatus = deriveBillStatus(paid, remaining, payableAfterTds);
                 return (
                   <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 space-y-2">
                     <div className="flex items-center justify-between">
@@ -2505,11 +2843,17 @@ const Payment: React.FC = () => {
                         {bStatus}
                       </span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className={`grid gap-2 ${tdsAmt > 0 ? "grid-cols-4" : "grid-cols-3"}`}>
                       <div className="text-center">
                         <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Invoice Total</p>
                         <p className="font-mono text-xs font-bold text-foreground">{formatINR(netAmt)}</p>
                       </div>
+                      {tdsAmt > 0 && (
+                        <div className="text-center">
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">TDS Deducted</p>
+                          <p className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">{formatINR(tdsAmt)}</p>
+                        </div>
+                      )}
                       <div className="text-center">
                         <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Paid</p>
                         <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">{formatINR(paid)}</p>
@@ -2756,6 +3100,16 @@ const Payment: React.FC = () => {
                       const sgstRate = form.sgstRate ?? 0;
                       const igstRate = form.igstRate ?? 0;
 
+                      // TDS is deducted once, at the invoice — GST math above
+                      // is untouched by it. Resolved fresh from expenseOptions
+                      // (same source the Invoice Balance card above already
+                      // uses correctly) rather than trusting form.tdsAmount,
+                      // which nothing in this form actually sets.
+                      const tdsOpt = expenseOptions.find(
+                        (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
+                      );
+                      const tdsAmt = formKnownTdsAmount ?? tdsOpt?.tdsAmount ?? 0;
+
                       // Parse billing terms — must be an array of term objects.
                       // EDiscountData is a legacy flat discount object {applicable,type,value}
                       // and must NOT be treated as billing terms; skip it if not an array.
@@ -2867,6 +3221,10 @@ const Payment: React.FC = () => {
                       // Net Payable = gross after all term adjustments, rounded to nearest rupee
                       const net = Math.round(gross);
                       const roundOff = net - gross;
+                      // What's actually still payable in cash — TDS was
+                      // already withheld/remitted at the invoice, it's not
+                      // something this payment pays again.
+                      const netAfterTds = Math.max(0, net - tdsAmt);
 
                       const hasGst = cgst + sgst + igst > 0;
                       const hasTerms =
@@ -3159,24 +3517,45 @@ const Payment: React.FC = () => {
                             <Row
                               label="Net Payable"
                               value={formatINR(net)}
-                              bold
-                              large
+                              bold={tdsAmt <= 0}
+                              large={tdsAmt <= 0}
                             />
+
+                            {/* TDS — withheld at the invoice, informational
+                                only here, never something this payment pays
+                                again. */}
+                            {tdsAmt > 0 && (
+                              <>
+                                <Row
+                                  label="TDS Deducted"
+                                  sub="Withheld at invoice — not paid again here"
+                                  value={"− " + formatINR(tdsAmt)}
+                                  color="text-amber-500"
+                                />
+                                <div className="border-t border-border/60 pt-1.5" />
+                                <Row
+                                  label="Amount Payable (After TDS)"
+                                  value={formatINR(netAfterTds)}
+                                  bold
+                                  large
+                                />
+                              </>
+                            )}
 
                             {/* ── Payment calculation chain ── */}
                             {(() => {
                               const entered = Number(form.amount ?? 0);
-                              if (entered <= 0 || Math.abs(entered - net) < 0.01) return null;
+                              if (entered <= 0 || Math.abs(entered - netAfterTds) < 0.01) return null;
 
                               const opt = expenseOptions.find(
                                 (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
                               );
                               const prevOutstanding = resolveOutstanding(
-                                net,
+                                netAfterTds,
                                 formLiveRemaining,
                                 formKnownTotalPaid ?? opt?.totalPaid,
                               );
-                              const alreadyPaid = Math.max(0, net - prevOutstanding);
+                              const alreadyPaid = Math.max(0, netAfterTds - prevOutstanding);
                               const afterThisPayment = Math.max(0, prevOutstanding - entered);
                               const isExact   = Math.abs(entered - prevOutstanding) < 0.01;
                               const isPartial = !isExact && entered < prevOutstanding;
@@ -3194,8 +3573,8 @@ const Payment: React.FC = () => {
                                   {alreadyPaid > 0.01 && (
                                     <>
                                       <div className="flex justify-between items-center text-muted-foreground">
-                                        <span>Net payable</span>
-                                        <span className="font-mono">{formatINR(net)}</span>
+                                        <span>Net payable (after TDS)</span>
+                                        <span className="font-mono">{formatINR(netAfterTds)}</span>
                                       </div>
                                       <div className="flex justify-between items-center text-muted-foreground">
                                         <span>Already paid</span>
@@ -3605,7 +3984,8 @@ const Payment: React.FC = () => {
                 projectFilter ||
                 finYearFilter ||
                 docNumberFilter ||
-                docDateFilter ||
+                dateFromFilter ||
+                dateToFilter ||
                 supplierFilter
               );
               const clearAll = () => {
@@ -3614,7 +3994,8 @@ const Payment: React.FC = () => {
                 setProjectFilter("");
                 setFinYearFilter("");
                 setDocNumberFilter("");
-                setDocDateFilter("");
+                setDateFromFilter("");
+                setDateToFilter("");
                 setSupplierFilter("");
                 setPage(1);
               };
@@ -3641,7 +4022,8 @@ const Payment: React.FC = () => {
                               projectFilter,
                               finYearFilter,
                               docNumberFilter,
-                              docDateFilter,
+                              dateFromFilter,
+                              dateToFilter,
                               supplierFilter,
                             ].filter(Boolean).length
                           }{" "}
@@ -3811,25 +4193,56 @@ const Payment: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* 5. Document Date */}
+                        {/* 5. Payment Date range */}
                         <div className="space-y-1.5">
                           <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                            <FileText size={10} /> Document Date
+                            <FileText size={10} /> Date From
                           </label>
                           <div className="relative">
                             <input
                               type="date"
-                              value={docDateFilter}
+                              value={dateFromFilter}
+                              max={dateToFilter || undefined}
                               onChange={(e) => {
-                                setDocDateFilter(e.target.value);
+                                setDateFromFilter(e.target.value);
                                 setPage(1);
                               }}
                               className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                             />
-                            {docDateFilter && (
+                            {dateFromFilter && (
                               <button
                                 onClick={() => {
-                                  setDocDateFilter("");
+                                  setDateFromFilter("");
+                                  setPage(1);
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              >
+                                <X size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 5b. Payment Date range — To */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <FileText size={10} /> Date To
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="date"
+                              value={dateToFilter}
+                              min={dateFromFilter || undefined}
+                              onChange={(e) => {
+                                setDateToFilter(e.target.value);
+                                setPage(1);
+                              }}
+                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                            />
+                            {dateToFilter && (
+                              <button
+                                onClick={() => {
+                                  setDateToFilter("");
                                   setPage(1);
                                 }}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
@@ -3943,13 +4356,14 @@ const Payment: React.FC = () => {
                           </button>
                         </span>
                       )}
-                      {docDateFilter && (
+                      {(dateFromFilter || dateToFilter) && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-cyan-500/10 text-cyan-600 border border-cyan-500/20">
                           <FileText size={9} />
-                          Date: {docDateFilter}
+                          Date: {dateFromFilter || "…"} – {dateToFilter || "…"}
                           <button
                             onClick={() => {
-                              setDocDateFilter("");
+                              setDateFromFilter("");
+                              setDateToFilter("");
                               setPage(1);
                             }}
                             className="ml-0.5 hover:text-destructive"
@@ -3994,8 +4408,13 @@ const Payment: React.FC = () => {
 
             {!isLoading && !isError && (
               <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-                {/* Mobile cards */}
-                <div className="sm:hidden divide-y divide-border">
+                {/* Mobile cards — the desktop table switches over at lg
+                    (1024px), not sm (640px): six columns (Payment Purpose,
+                    Doc No, Expense Ref, Amount, Status, Actions) genuinely
+                    don't fit in the 640-1024px range, where the header row
+                    used to render as an illegible squeeze (e.g. "Amount"
+                    and "Status" crowding together with no visible gap). */}
+                <div className="lg:hidden divide-y divide-border">
                   {records.length === 0 && (
                     <div className="text-center py-14 text-muted-foreground text-sm">
                       <AlertCircle
@@ -4076,14 +4495,19 @@ const Payment: React.FC = () => {
                           >
                             <Eye size={12} />
                           </button>
-                          {rights.canEdit && (
-                            <button
-                              onClick={() => openEdit(rec)}
-                              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                            >
-                              <Edit size={12} />
-                            </button>
-                          )}
+                          <EditOrAmendButton
+                            refDocType="Payment"
+                            refDocId={rec.id}
+                            docStatus={rec.status}
+                            docNo={rec.docNo}
+                            projectName={rec.project}
+                            companyName={rec.company}
+                            totalAmount={rec.amount}
+                            amendTab="PAYMENT"
+                            amendMenuPath="/material/amendment-menu"
+                            canEdit={rights.canEdit}
+                            onEdit={() => openEdit(rec)}
+                          />
                           {rights.canDelete && (
                             <button
                               onClick={() => setDeleteId(rec.id)}
@@ -4098,8 +4522,9 @@ const Payment: React.FC = () => {
                   ))}
                 </div>
 
-                {/* Desktop table — compact, no horizontal scroll */}
-                <div className="hidden sm:block">
+                {/* Desktop table — compact, no horizontal scroll. Matches
+                    the lg breakpoint on the mobile-cards wrapper above. */}
+                <div className="hidden lg:block">
                   <table className="w-full text-sm table-fixed">
                     <thead>
                       <tr className="bg-muted/30 border-b border-border">
@@ -4257,14 +4682,19 @@ const Payment: React.FC = () => {
                               >
                                 <Eye size={12} />
                               </button>
-                              {rights.canEdit && (
-                                <button
-                                  onClick={() => openEdit(rec)}
-                                  className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                                >
-                                  <Edit size={12} />
-                                </button>
-                              )}
+                              <EditOrAmendButton
+                                refDocType="Payment"
+                                refDocId={rec.id}
+                                docStatus={rec.status}
+                                docNo={rec.docNo}
+                                projectName={rec.project}
+                                companyName={rec.company}
+                                totalAmount={rec.amount}
+                                amendTab="PAYMENT"
+                                amendMenuPath="/material/amendment-menu"
+                                canEdit={rights.canEdit}
+                                onEdit={() => openEdit(rec)}
+                              />
                               {rights.canDelete && (
                                 <button
                                   onClick={() => setDeleteId(rec.id)}
@@ -4753,7 +5183,13 @@ const Payment: React.FC = () => {
                       : paymentChainData?.invoice?.GrnTotalAmount
                         ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount))
                         : 0;
-                    const displayNet = grnTotal > 0 ? grnTotal : viewingChain.netAmount;
+                    const grossNet = grnTotal > 0 ? grnTotal : viewingChain.netAmount;
+                    // TDS is withheld at source, never paid to the supplier through
+                    // NewPayment — so the amount actually still owed in cash is the
+                    // invoice's net (GST-inclusive, untouched) minus TDS, not the raw
+                    // invoice net itself. GST/netAmount math above is unaffected.
+                    const displayTds = viewingChain.tdsAmount ?? 0;
+                    const displayNet = Math.max(0, grossNet - displayTds);
                     // Exclude bounce charges — they're bank fees, not supplier payments
                     const chainStatus = computePaymentStatus(displayNet, paymentChainData?.payments);
                     const displayTotalPaid = paymentChainData?.payments?.length
@@ -4771,6 +5207,19 @@ const Payment: React.FC = () => {
                           {formatINR(displayNet)}
                         </p>
                       </div>
+                      {displayTds > 0 && (
+                        <>
+                          <div className="w-px h-6 bg-border" />
+                          <div className="flex-1 text-center">
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                              TDS
+                            </p>
+                            <p className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">
+                              {formatINR(displayTds)}
+                            </p>
+                          </div>
+                        </>
+                      )}
                       <div className="w-px h-6 bg-border" />
                       <div className="flex-1 text-center">
                         <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
@@ -4906,6 +5355,49 @@ const Payment: React.FC = () => {
                   </div>
                 ))}
               </div>
+
+              {/* Direct Expense Payment (migration 303) — paid straight
+                  against one or more Expense Heads, no Party involved. */}
+              {viewingRec.expenseHeadAllocations && viewingRec.expenseHeadAllocations.length > 0 && (
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                    Expense Head{viewingRec.expenseHeadAllocations.length > 1 ? "s" : ""}
+                  </p>
+                  {viewingRec.expenseHeadAllocations.map((a) => (
+                    <div key={a._key} className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/50 last:border-b-0">
+                      <span className="text-xs text-foreground truncate">
+                        {a.label}
+                        {a.code ? <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">({a.code})</span> : null}
+                      </span>
+                      <span className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                        {formatINR(a.amount)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* TDS (migration 304) */}
+              {!!viewingRec.tdsId && (
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                    TDS Details
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3">
+                    {[
+                      { label: "TDS Nature", value: viewingRec.tdsNature },
+                      { label: "TDS Name", value: viewingRec.tdsName },
+                      { label: "TDS Rate", value: viewingRec.tdsPercentage != null ? `${viewingRec.tdsPercentage}%` : null },
+                      { label: "TDS Amount", value: formatINR(viewingRec.tdsAmount || 0) },
+                    ].map(({ label, value }) => (
+                      <div key={label}>
+                        <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                        <p className="text-xs font-semibold text-foreground truncate">{value ?? "—"}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               </>
               )}
 
@@ -5077,18 +5569,24 @@ const Payment: React.FC = () => {
                   <Printer size={12} /> Print / PDF
                 </button>
               )}
-              {rights.canEdit && (
-                <button
-                  onClick={() => {
-                    setViewingRec(null);
-                    setViewingChain(null);
-                    openEdit(viewingRec);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
-                >
-                  <Edit size={12} /> Edit
-                </button>
-              )}
+              <EditOrAmendButton
+                refDocType="Payment"
+                refDocId={viewingRec.id}
+                docStatus={viewingRec.status}
+                docNo={viewingRec.docNo}
+                projectName={viewingRec.project}
+                companyName={viewingRec.company}
+                totalAmount={viewingRec.amount}
+                amendTab="PAYMENT"
+                amendMenuPath="/material/amendment-menu"
+                canEdit={rights.canEdit}
+                size="sm"
+                onEdit={() => {
+                  setViewingRec(null);
+                  setViewingChain(null);
+                  openEdit(viewingRec);
+                }}
+              />
               <button
                 onClick={() => {
                   setViewingRec(null);
@@ -5120,6 +5618,21 @@ const Payment: React.FC = () => {
                   undone.
                 </p>
               </div>
+            </div>
+            {/* Doc numbers are never reused after a delete — the sequence
+                simply continues from its current max, so removing a
+                record permanently leaves a gap. */}
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+              <span>
+                {(() => {
+                  const rec = records.find((r) => r.id === deleteId);
+                  const docNo = rec?.docNo;
+                  return docNo
+                    ? `${docNo}'s number will not be reused — it leaves a permanent gap in the document sequence.`
+                    : "This document's number will not be reused — it leaves a permanent gap in the document sequence.";
+                })()}
+              </span>
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button

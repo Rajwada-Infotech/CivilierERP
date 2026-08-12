@@ -114,6 +114,7 @@ interface Supplier {
   LBelongsTo: number | null;
   LHeadStatus: boolean;
   IsTdsApplicable: boolean;
+  TdsLimitApplicable: boolean;
   GroupName: string | null;
   // Auto-generated on create as <SupplierName>@civilier.in — this is the
   // supplier's login username for the Supplier Portal, distinct from
@@ -142,6 +143,9 @@ interface SupplierForm {
   LHeadStatus: boolean;
   LBelongsTo: string;
   isTdsApplicable: boolean;
+  // ON (default): ₹30k single-bill / ₹1L yearly-cumulative threshold gates
+  // TDS deduction. OFF: TDS deducts on every eligible bill unconditionally.
+  tdsLimitApplicable: boolean;
   // Mandatory on create; optional on edit (blank = keep existing password).
   SupplierPassword: string;
 }
@@ -160,6 +164,7 @@ const EMPTY_FORM: SupplierForm = {
   LBelongsTo: "",
   LHeadStatus: true,
   isTdsApplicable: false,
+  tdsLimitApplicable: true,
   SupplierPassword: "",
 };
 
@@ -189,6 +194,10 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   {
     header: "TDS Applicable",
     accessor: (r) => (r.IsTdsApplicable ? "Yes" : "No"),
+  },
+  {
+    header: "TDS Limit",
+    accessor: (r) => (r.TdsLimitApplicable ? "Applied" : "Deduct on every bill"),
   },
 ];
 
@@ -487,6 +496,7 @@ const SupplierMaster: React.FC = () => {
       LBelongsTo: item.LBelongsTo != null ? Number(item.LBelongsTo) : null,
       LHeadStatus: Boolean(item.LHeadStatus),
       IsTdsApplicable: Boolean(item.IsTdsApplicable),
+      TdsLimitApplicable: item.TdsLimitApplicable == null ? true : Boolean(item.TdsLimitApplicable),
       GroupName: item.GroupName ?? null,
       SupplierLoginEmail: item.SupplierLoginEmail ?? null,
     }));
@@ -509,6 +519,7 @@ const SupplierMaster: React.FC = () => {
     LHeadAddress: f.LHeadAddress || null,
     LHeadStatus: f.LHeadStatus,
     IsTdsApplicable: f.isTdsApplicable,
+    TdsLimitApplicable: f.tdsLimitApplicable,
     LBranchName: null,
     LGSTState: f.LGSTState || null,
     LCountry: "India",
@@ -708,7 +719,10 @@ const SupplierMaster: React.FC = () => {
             LHeadAddress: address,
             LBelongsTo: groupId,
             LHeadStatus: isActive,
-            isTdsApplicable: false,
+            // Same service-category rule as the form's dropdown — see its
+            // onChange handler above.
+            isTdsApplicable: category === "Services",
+            tdsLimitApplicable: true,
             SupplierPassword: password,
           };
 
@@ -799,6 +813,7 @@ const SupplierMaster: React.FC = () => {
       LBelongsTo: s.LBelongsTo != null ? String(s.LBelongsTo) : "",
       LHeadStatus: s.LHeadStatus,
       isTdsApplicable: Boolean(s.IsTdsApplicable),
+      tdsLimitApplicable: s.TdsLimitApplicable,
       // Never pre-filled from the existing (hashed) password — blank means
       // "keep current password" on save.
       SupplierPassword: "",
@@ -1090,7 +1105,17 @@ const SupplierMaster: React.FC = () => {
                     variant="flat"
                     value={form.supplierCategory}
                     onChange={(v) =>
-                      setForm((p) => ({ ...p, supplierCategory: v }))
+                      setForm((p) => ({
+                        ...p,
+                        supplierCategory: v,
+                        // TDS mainly attaches to service payments (194C/194J),
+                        // not straight goods purchases — auto-set the toggle
+                        // whenever the category changes to/from "Services".
+                        // "Both" is deliberately excluded (goods+services is
+                        // not auto-enabled). Still a normal toggle below, so
+                        // it can be corrected by hand for any exception.
+                        isTdsApplicable: v === "Services",
+                      }))
                     }
                     options={SUPPLIER_CATEGORIES.map((c) => ({
                       value: c,
@@ -1455,6 +1480,36 @@ const SupplierMaster: React.FC = () => {
                   </span>
                 </span>
               </div>
+
+              {/* TDS Limit — only meaningful once TDS Applicable is on.
+                  ON (default): the ₹30k single-bill / ₹1L yearly-cumulative
+                  threshold gates TDS deduction. OFF: TDS deducts on every
+                  eligible bill unconditionally, no threshold check. */}
+              {form.isTdsApplicable && (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm((p) => ({ ...p, tdsLimitApplicable: !p.tdsLimitApplicable }))
+                    }
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${form.tdsLimitApplicable ? "bg-amber-500" : "bg-muted-foreground/30"}`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.tdsLimitApplicable ? "translate-x-4" : "translate-x-0.5"}`}
+                    />
+                  </button>
+                  <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                    TDS Limit (₹30k / ₹1L threshold) —{" "}
+                    <span
+                      className={
+                        form.tdsLimitApplicable ? "text-amber-600" : "text-foreground"
+                      }
+                    >
+                      {form.tdsLimitApplicable ? "Applied" : "Deduct on every bill"}
+                    </span>
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 

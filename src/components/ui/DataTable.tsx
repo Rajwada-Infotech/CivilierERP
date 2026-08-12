@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   useReactTable,
   getCoreRowModel,
@@ -127,19 +127,46 @@ export function DataTable<TData extends RowData>({
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getRowId,
-    // Reset to page 0 when filter changes
-    autoResetPageIndex: true,
+    // TanStack's own autoResetPageIndex fires on ANY change to `data`
+    // (by reference), not just a real content change — and every caller
+    // of this component passes `data` as a fresh array literal each
+    // render (e.g. `data={records.filter(...)}`), so any unrelated
+    // parent re-render (a scroll-position state update, a sibling
+    // effect, anything) silently bounced the user back to page 1 while
+    // they were browsing page 2/3. Disabled here; the effect below
+    // resets the page only for the cases that should actually reset it
+    // (the filter text itself changing), not on every render.
+    autoResetPageIndex: false,
   });
+
+  // Reset to page 0 only when the search/filter actually changes — not on
+  // every `data` reference change (see autoResetPageIndex comment above).
+  useEffect(() => {
+    setPagination((p) => (p.pageIndex === 0 ? p : { ...p, pageIndex: 0 }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalFilter, columnFilters]);
 
   const { rows } = table.getRowModel();
   const totalFiltered = table.getFilteredRowModel().rows.length;
+
+  // Clamp — but never reset to 0 — if the current page fell out of range
+  // (e.g. a row was deleted and page 3 no longer exists). A same-length
+  // `data` update that's still in range is a no-op, so this doesn't
+  // reproduce the scroll-reset bug the two changes above just fixed.
+  const pageCount = table.getPageCount();
+  useEffect(() => {
+    if (pageCount > 0 && pagination.pageIndex > pageCount - 1) {
+      setPagination((p) => ({ ...p, pageIndex: pageCount - 1 }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageCount]);
 
   return (
     <div className={className}>
       {/* ── Search bar ── */}
       {searchable && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60">
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[11px] font-body text-muted-foreground">
             {loading
               ? "Loading..."
               : `${totalFiltered} record${totalFiltered !== 1 ? "s" : ""}`}
@@ -178,11 +205,18 @@ export function DataTable<TData extends RowData>({
       <div className="hidden lg:block overflow-x-auto thin-scroll">
         {(() => {
           const allCols = table.getAllLeafColumns();
-          const totalSize = allCols.reduce((s, c) => s + (c.columnDef.size ?? 0), 0);
-          const pctOf = (size: number | undefined) =>
-            totalSize > 0 && size ? `${((size / totalSize) * 100).toFixed(2)}%` : undefined;
+          // Percentage widths always squeezed every column into exactly the
+          // container's width, no matter how many/wide the columns were —
+          // a table with a dozen columns just overlapped its own header
+          // text instead of ever scrolling. Pixel widths (default 150,
+          // matching TanStack's own column default) let the table's natural
+          // width exceed the container so the wrapper's overflow-x-auto can
+          // actually kick in; min-width:100% keeps narrow tables filling
+          // the container exactly as before.
+          const totalSize = allCols.reduce((s, c) => s + (c.columnDef.size ?? 150), 0);
+          const widthOf = (size: number | undefined) => size ?? 150;
           return (
-        <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
+        <table className="text-sm font-body" style={{ tableLayout: "fixed", width: totalSize, minWidth: "100%" }}>
           <thead>
             <tr className="border-b border-border bg-muted/30">
               {table.getHeaderGroups().map((hg) =>
@@ -193,7 +227,7 @@ export function DataTable<TData extends RowData>({
                     <th
                       key={header.id}
                       colSpan={header.colSpan}
-                      style={{ width: pctOf(header.column.columnDef.size) }}
+                      style={{ width: widthOf(header.column.columnDef.size) }}
                       className={`px-5 py-3.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none text-left ${
                         canSort
                           ? "cursor-pointer hover:text-foreground transition-colors"
@@ -247,7 +281,7 @@ export function DataTable<TData extends RowData>({
               <tr>
                 <td
                   colSpan={columns.length}
-                  className="px-4 py-10 text-center text-muted-foreground text-sm"
+                  className="px-4 py-10 text-center text-muted-foreground text-sm font-body"
                 >
                   {emptyMessage}
                 </td>
@@ -282,7 +316,7 @@ export function DataTable<TData extends RowData>({
       </div>
 
       {/* ── Cards (mobile + tablet, below lg) ── */}
-      <div className="lg:hidden">
+      <div className="lg:hidden font-body">
         {loading ? (
           <div className="divide-y divide-border">
             {Array.from({ length: skeletonRows }).map((_, i) => (
@@ -343,7 +377,7 @@ export function DataTable<TData extends RowData>({
 
       {/* ── Pagination ── */}
       {paginated && !loading && totalFiltered > 0 && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border-t border-border bg-card/40">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border-t border-border bg-card/40 font-body">
           {/* Page size selector */}
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-xs text-muted-foreground">Rows</span>
@@ -356,7 +390,7 @@ export function DataTable<TData extends RowData>({
                   pageIndex: 0,
                 }))
               }
-              className="text-xs rounded-md bg-muted border border-border px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+              className="text-xs font-body rounded-md bg-muted border border-border px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
             >
               {pageSizeOptions.map((s) => (
                 <option key={s} value={s}>

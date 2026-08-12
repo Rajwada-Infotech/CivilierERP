@@ -670,21 +670,125 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
   }
 });
 
-// ── PUT /:id — edit administrative fields on an already-sanctioned loan ───
-// Deliberately limited to fields that don't touch the amortization schedule
-// or GL postings (LoanDocNo, Purpose, Remarks, and the two Inter-Company
-// bank A/C tags) — the financial core (amount, rate, tenure, type,
-// counterparties) can't be changed after sanction without re-running the
-// EMI schedule and ledger entries, so those stay immutable here.
+// ── PUT /:id — edit an already-sanctioned loan ─────────────────────────────
+// Everything is editable EXCEPT the parties' identity (LoanType,
+// LenderCompanyId/LenderBankId, BorrowerCompanyId/BorrowerCustomerId) —
+// those define WHO the loan is between and can't change after the fact.
+// Financial-core fields (amount, interest, tenure, loan date, due date) DO
+// re-run the amortization schedule and adjust the borrower's On A/C
+// balance, which is only safe while nothing has actually been repaid yet —
+// blocked with a 409 once any EMI/LoanPayment exists. Administrative
+// fields (doc no, purpose, remarks, bank A/C tags) can always be edited.
 router.put("/:id", requirePageRight("loan-sanction", "edit"), async (req, res) => {
   const loanId = parseInt(req.params.id, 10);
   if (!Number.isFinite(loanId)) return res.status(400).json({ error: "Invalid id" });
-  const { loanDocNo, purpose, remarks, lenderBankAccountId, borrowerBankAccountId } = req.body;
+  const {
+    loanDocNo, purpose, remarks, lenderBankAccountId, borrowerBankAccountId,
+    loanDate, amount, hasInterest, interestType, interestRate, tenureMonths, dueDate,
+  } = req.body;
   const updatedBy = req.user?.email || req.user?.name || "system";
 
+  // Financial-core edit only kicks in if the caller actually sent one of
+  // these — the administrative-only edit path (Loan Doc No/Purpose/
+  // Remarks/bank tags) must keep working even after repayment has started.
+  const touchesFinancials =
+    loanDate !== undefined || amount !== undefined || hasInterest !== undefined ||
+    interestType !== undefined || interestRate !== undefined || tenureMonths !== undefined ||
+    dueDate !== undefined;
+
+  const pool = getPool();
+  const tx = new sql.Transaction(pool);
   try {
-    const pool = getPool();
-    const result = await pool.request()
+    await tx.begin();
+
+    const loanRes = await new sql.Request(tx)
+      .input("LoanId", sql.Int, loanId)
+      .query("SELECT LoanId, LoanNo, Amount, BorrowerLHeadId, Status FROM dbo.LoanSanction WHERE LoanId = @LoanId");
+    const loan = loanRes.recordset[0];
+    if (!loan) throw Object.assign(new Error("Loan not found"), { status: 404 });
+
+    if (touchesFinancials) {
+      if (loan.Status === "Closed") {
+        throw Object.assign(new Error("This loan is closed and its terms can no longer be edited."), { status: 409 });
+      }
+      const paidRes = await new sql.Request(tx)
+        .input("LoanId", sql.Int, loanId)
+        .query("SELECT COUNT(*) AS cnt FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId AND IsPaid = 1");
+      if (paidRes.recordset[0].cnt > 0) {
+        throw Object.assign(
+          new Error("This loan already has repayments recorded — amount/interest/tenure/dates can no longer be edited. Only Loan Doc No, Purpose, Remarks, and bank A/C tags can still be changed."),
+          { status: 409 },
+        );
+      }
+
+      const useInterest = hasInterest !== false && hasInterest !== "false";
+      const iType = INTEREST_TYPES.includes(interestType) ? interestType : "CI";
+      const newAmt = parseFloat(amount);
+      if (!newAmt || newAmt <= 0) throw Object.assign(new Error("Amount must be greater than 0"), { status: 400 });
+      const newLoanDate = loanDate || loan.LoanDate;
+      const effectiveRate = useInterest && interestRate != null && interestRate !== "" ? parseFloat(interestRate) : null;
+      const newTenure = tenureMonths != null && tenureMonths !== "" ? parseInt(tenureMonths, 10) : null;
+
+      // Regenerate the schedule from scratch — safe because we already
+      // confirmed nothing is paid yet.
+      await new sql.Request(tx)
+        .input("LoanId", sql.Int, loanId)
+        .query("DELETE FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId");
+      const schedule = buildEmiSchedule(newAmt, effectiveRate || 0, newTenure, newLoanDate, iType, dueDate || null);
+      await insertEmiSchedule(tx, loanId, schedule);
+
+      // Adjust the original sanction CREDIT and the borrower's On A/C
+      // balance by the delta rather than re-deriving it, so any unrelated
+      // activity on that balance since sanction isn't clobbered.
+      const amountDelta = newAmt - Number(loan.Amount);
+      if (amountDelta !== 0) {
+        await new sql.Request(tx)
+          .input("RefId", sql.Int, loanId)
+          .input("NewAmount", sql.Decimal(18, 2), newAmt)
+          .query(`
+            UPDATE TOP (1) dbo.OnAccountLedger
+            SET Amount = @NewAmount
+            WHERE RefType = 'Loan' AND RefId = @RefId AND TxnType = 'CREDIT'
+          `);
+        if (loan.BorrowerLHeadId) {
+          await new sql.Request(tx)
+            .input("PartyId", sql.Int, loan.BorrowerLHeadId)
+            .input("Delta", sql.Decimal(18, 2), amountDelta)
+            .query(`
+              UPDATE dbo.AccountHeadMaster
+              SET OnAccountBalance = ISNULL(OnAccountBalance, 0) + @Delta
+              WHERE LHeadId = @PartyId
+            `);
+        }
+      }
+
+      // If this loan was already posted to GL with the old amount, reverse
+      // that entry — the Posting tab auto-reposts with the new amount the
+      // next time it's opened (same auto-post-on-view flow as sanction).
+      await new sql.Request(tx)
+        .input("SrcId", sql.Int, loanId)
+        .query(`
+          UPDATE dbo.GeneralLedgerEntry SET IsReversed = 1
+          WHERE SourceType = 'LoanPosting' AND SourceId = @SrcId AND IsReversed = 0
+        `);
+
+      await new sql.Request(tx)
+        .input("LoanId", sql.Int, loanId)
+        .input("LoanDate", sql.Date, newLoanDate)
+        .input("Amount", sql.Decimal(18, 2), newAmt)
+        .input("HasInterest", sql.Bit, useInterest ? 1 : 0)
+        .input("InterestType", sql.NVarChar(10), iType)
+        .input("InterestRate", sql.Decimal(5, 2), effectiveRate)
+        .input("TenureMonths", sql.Int, newTenure)
+        .query(`
+          UPDATE dbo.LoanSanction
+          SET LoanDate = @LoanDate, Amount = @Amount, HasInterest = @HasInterest,
+              InterestType = @InterestType, InterestRate = @InterestRate, TenureMonths = @TenureMonths
+          WHERE LoanId = @LoanId
+        `);
+    }
+
+    await new sql.Request(tx)
       .input("LoanId", sql.Int, loanId)
       .input("LoanDocNo", sql.NVarChar(100), loanDocNo || null)
       .input("Purpose", sql.NVarChar(500), purpose || null)
@@ -698,11 +802,13 @@ router.put("/:id", requirePageRight("loan-sanction", "edit"), async (req, res) =
             UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE LoanId = @LoanId
       `);
-    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Loan not found" });
-    await bumpCacheVersion("loan-sanction");
+
+    await tx.commit();
+    await Promise.all([bumpCacheVersion("loan-sanction"), bumpCacheVersion("on-account"), bumpCacheVersion("journal-voucher")]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    await tx.rollback().catch(() => {});
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

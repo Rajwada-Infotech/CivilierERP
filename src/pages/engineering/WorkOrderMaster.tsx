@@ -33,6 +33,7 @@ import {
   AlertCircle,
   Eye,
   PenSquare,
+  FilePenLine,
   Search,
   RefreshCw,
   ChevronLeft,
@@ -69,6 +70,8 @@ import {
   type WOItemOption,
 } from "@/api/workOrderApi";
 import { StatusBadge } from "@/components/StatusBadge";
+import { AmendedBadge } from "@/components/AmendedBadge";
+import { useAmendmentStatus } from "@/hooks/useAmendmentStatus";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getTCRecords } from "@/api/tcMasterApi";
@@ -743,7 +746,7 @@ const MaterialBreakdownModal: React.FC<{
                         </div>
                         {mat.gstRate > 0 && (
                           <div className="mt-1 text-[11px] text-violet-600 dark:text-violet-400 font-medium">
-                            GST {mat.gstRate}% (from HSN) ={" "}
+                            GST {mat.gstRate}% (from SAC) ={" "}
                             {fmt((lineTotal * mat.gstRate) / 100)}
                           </div>
                         )}
@@ -916,9 +919,9 @@ const HsnPopover: React.FC<{
           <span className="truncate text-[11px]">
             {variant === "full"
               ? hasHsn
-                ? `HSN: ${activity.hsnCode} (${activity.hsnGstRate}%)`
-                : "Add HSN / GST"
-              : activity.hsnCode || "HSN"}
+                ? `SAC: ${activity.hsnCode} (${activity.hsnGstRate}%)`
+                : "Add SAC / GST"
+              : activity.hsnCode || "SAC"}
           </span>
         </button>
       </PopoverTrigger>
@@ -932,7 +935,7 @@ const HsnPopover: React.FC<{
         {/* Header */}
         <div className="px-3 py-2 border-b border-border flex items-center justify-between">
           <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-            Select HSN Code
+            Select SAC Code
           </p>
           <button
             type="button"
@@ -969,12 +972,12 @@ const HsnPopover: React.FC<{
               }}
               className="w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition"
             >
-              ✕ Remove HSN
+              ✕ Remove SAC
             </button>
           )}
           {filteredHsn.length === 0 ? (
             <p className="px-3 py-6 text-xs text-center text-muted-foreground">
-              No HSN records found
+              No SAC records found
             </p>
           ) : (
             filteredHsn.map((h) => {
@@ -1504,7 +1507,7 @@ const ActivityGroupCard: React.FC<{
                 "Rate / Unit (Labour)",
                 "Area",
                 "Materials",
-                "HSN / GST",
+                "SAC / GST",
                 "Activity Total",
                 "",
               ].map((h) => (
@@ -1580,6 +1583,7 @@ const WorkOrderDetailPanel: React.FC<{
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [creatingMaterialPO, setCreatingMaterialPO] = useState(false);
   const rights = usePageRights("work-order");
+  const amendmentStatus = useAmendmentStatus("WorkOrder", workOrderId, detail?.Status);
 
   const { status: chainStatus } = useWOChainStatus(workOrderId ?? null);
 
@@ -1750,13 +1754,37 @@ const WorkOrderDetailPanel: React.FC<{
                   );
                 }}
               />
-              {rights.canEdit && (<button
-                onClick={() => onEdit(workOrderId)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 text-primary text-xs font-medium hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
-              >
-                <PenSquare size={12} />
-                Edit
-              </button>)}
+              {rights.canEdit && !amendmentStatus.isApproved && (
+                <button
+                  onClick={() => onEdit(workOrderId)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 text-primary text-xs font-medium hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
+                >
+                  <PenSquare size={12} />
+                  Edit
+                </button>
+              )}
+              {rights.canEdit && amendmentStatus.isApproved && (
+                <button
+                  onClick={() =>
+                    navigate("/engineering/amendment-menu", {
+                      state: {
+                        prefill: {
+                          tab: "WO",
+                          docId: workOrderId,
+                          docNo: detail.DocumentNumber,
+                          projectName: detail.ProjectName,
+                          companyName: detail.CompanyName,
+                          totalAmount: detail.TotalAmount,
+                        },
+                      },
+                    })
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-500/30 text-violet-600 dark:text-violet-400 text-xs font-medium hover:bg-violet-500/5 dark:hover:bg-violet-500/10 transition-colors"
+                >
+                  <FilePenLine size={12} />
+                  Amend
+                </button>
+              )}
               {detail.Status === "Approved" && (
                 <button
                   onClick={() => void handleCreateMaterialPO()}
@@ -1801,6 +1829,7 @@ const WorkOrderDetailPanel: React.FC<{
               {statusCfg.icon}
               {detail.Status || "Draft"}
             </span>
+            {amendmentStatus.isAmended && <AmendedBadge />}
             <span className="font-mono text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
               {detail.DocumentNumber}
             </span>
@@ -2786,16 +2815,20 @@ const WorkOrderEditPanel: React.FC<{
     queryFn: getHsn,
     staleTime: 5 * 60 * 1000,
   });
+  // Work Order is engineering-side (services), so only SAC-flagged HSN
+  // Master rows are offered here — plain HSN (goods) codes are hidden.
   const hsnRecords = Array.isArray(hsnData)
-    ? hsnData.map((h: any) => ({
-        code: h.HCode,
-        shortDesc: h.HShortDescription || h.HCode,
-        description: h.HDescription || "",
-        igstRate: h.HIGST ?? 0,
-        cgstRate: h.HCGST ?? 0,
-        sgstRate: h.HSGST ?? 0,
-        status: !!h.HStatus,
-      }))
+    ? hsnData
+        .filter((h: any) => h.HIsSAC === true)
+        .map((h: any) => ({
+          code: h.HCode,
+          shortDesc: h.HShortDescription || h.HCode,
+          description: h.HDescription || "",
+          igstRate: h.HIGST ?? 0,
+          cgstRate: h.HCGST ?? 0,
+          sgstRate: h.HSGST ?? 0,
+          status: !!h.HStatus,
+        }))
     : [];
   const userId = (currentUser as unknown as { id?: number } | null)?.id ?? 1;
 
@@ -3773,7 +3806,7 @@ const WorkOrderEditPanel: React.FC<{
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 <Receipt size={11} className="text-violet-500" />
-                HSN GST
+                SAC GST
               </span>
               <span className="text-base font-bold text-violet-600 dark:text-violet-400">
                 {fmt(grandHsnGst)}
@@ -3858,16 +3891,20 @@ const WorkOrderMaster: React.FC = () => {
     queryFn: getHsn,
     staleTime: 5 * 60 * 1000,
   });
+  // Work Order is engineering-side (services), so only SAC-flagged HSN
+  // Master rows are offered here — plain HSN (goods) codes are hidden.
   const hsnRecords = Array.isArray(hsnData)
-    ? hsnData.map((h: any) => ({
-        code: h.HCode,
-        shortDesc: h.HShortDescription || h.HCode,
-        description: h.HDescription || "",
-        igstRate: h.HIGST ?? 0,
-        cgstRate: h.HCGST ?? 0,
-        sgstRate: h.HSGST ?? 0,
-        status: !!h.HStatus,
-      }))
+    ? hsnData
+        .filter((h: any) => h.HIsSAC === true)
+        .map((h: any) => ({
+          code: h.HCode,
+          shortDesc: h.HShortDescription || h.HCode,
+          description: h.HDescription || "",
+          igstRate: h.HIGST ?? 0,
+          cgstRate: h.HCGST ?? 0,
+          sgstRate: h.HSGST ?? 0,
+          status: !!h.HStatus,
+        }))
     : [];
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
@@ -4325,7 +4362,7 @@ const WorkOrderMaster: React.FC = () => {
                 <button
                   onClick={handleSave}
                   disabled={saving || loadingDropdowns}
-                  className="gradient-accent flex items-center gap-1.5 font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-60 transition-opacity"
+                  className="gradient-engineering inline-flex items-center gap-1.5 font-heading font-semibold text-white text-xs px-4 py-1.5 rounded-lg disabled:opacity-60 transition-all"
                 >
                   {saving ? (
                     <>
@@ -4997,7 +5034,7 @@ const WorkOrderMaster: React.FC = () => {
                   <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
                     <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                       <Receipt size={11} className="text-violet-500" />
-                      HSN GST
+                      SAC GST
                     </span>
                     <span className="text-base font-bold text-violet-600 dark:text-violet-400">
                       {fmt(grandHsnGst)}
@@ -5028,7 +5065,7 @@ const WorkOrderMaster: React.FC = () => {
               <button
                 onClick={handleSave}
                 disabled={saving || loadingDropdowns}
-                className="gradient-accent flex items-center gap-1.5 font-semibold text-white text-sm px-5 py-2 rounded-lg disabled:opacity-60 transition-opacity"
+                className="gradient-engineering inline-flex items-center gap-1.5 font-heading font-semibold text-white text-xs px-4 py-1.5 rounded-lg disabled:opacity-60 transition-all"
               >
                 {saving ? (
                   <>

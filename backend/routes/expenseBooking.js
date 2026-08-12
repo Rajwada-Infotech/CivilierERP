@@ -6,7 +6,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, getRecordStatus } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { validateBody } = require("../middleware/validateRequest");
@@ -18,9 +18,17 @@ const {
   emiToggleSchema,
   expenseRejectSchema,
 } = require("../validation/expenseBookingSchemas");
+const {
+  normalizeAllocations,
+  sumAllocations,
+  replaceAllocations,
+  getAllocations,
+  getAllocationsForMany,
+} = require("../services/expenseHeadAllocation");
 const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier");
 const { buildDirectExpenseBooking } = require("../services/directExpenseBooking");
 const { computeMultiGRNInvoice } = require("../services/invoiceLinking");
+const { syncBillStatus } = require("../utils/syncBillStatus");
 
 // Base/GST for a single GRN's item lines.
 async function computeSingleGrnBaseTax(pool, grnId) {
@@ -570,6 +578,10 @@ router.get("/options", async (req, res) => {
           -- terms — preferring it here used to silently understate/overstate
           -- the invoice amount for every billing-terms-adjusted booking.
           ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
+          -- TDS withheld at source (0 when not applicable) — the picker
+          -- and payment form both need this to show "what's actually
+          -- payable" (amount − TDS) instead of the gross invoice amount.
+          ISNULL(eb.TDSAmount, 0)         AS tdsAmount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
           ISNULL(e.name, '')              AS companyName,
           ISNULL(eb.EFinYear, '')         AS financialYear,
@@ -805,6 +817,12 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
     const offset = (page - 1) * limit;
+    // List-view filters — Fin Year and a Document Date range. Status counts
+    // (below) intentionally stay unfiltered (global) since they feed the
+    // top status chips, not the table.
+    const finYear = (req.query.finYear || "").toString().trim() || null;
+    const dateFrom = (req.query.from || "").toString().trim() || null;
+    const dateTo = (req.query.to || "").toString().trim() || null;
 
     const hasPaymentTermId = await ebHasPaymentTermId(pool);
     const hasDirectItemsCol = await ebHasDirectItemsData(pool);
@@ -825,7 +843,10 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
       pool
         .request()
         .input("offset", sql.Int, offset)
-        .input("limit", sql.Int, limit).query(`
+        .input("limit", sql.Int, limit)
+        .input("FinYear", sql.NVarChar(20), finYear)
+        .input("DateFrom", sql.Date, dateFrom)
+        .input("DateTo", sql.Date, dateTo).query(`
         SELECT
           eb.Eid, eb.Eid AS id,
           eb.EProjectName, eb.EDocumentType, eb.EDocDate,
@@ -841,11 +862,17 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.ETCId, eb.ETCName, eb.ETCText,
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
           eb.EAdditionalCharges, eb.ECostCenter, eb.EGLAccount, eb.EGLAccountId, eb.EWorkDoneRef,
+          eb.TDSId, eb.TDSNature, eb.TDSName, eb.TDSPercentage, eb.TDSAmount,
           gl.LHeadName AS EGLAccountName, gl.LHeadCode AS EGLAccountCode,
           glGroup.Name AS EGLAccountGroupName, glParentGroup.Name AS EGLAccountParentGroupName,
           ${hasPaymentTermId ? "eb.PaymentTermId," : "CAST(NULL AS INT) AS PaymentTermId,"}
           ${hasDirectItemsCol ? "eb.EDirectItemsData," : "CAST(NULL AS NVARCHAR(MAX)) AS EDirectItemsData,"}
           eb.EBillStatus, eb.ETotalPaid, eb.ERemainingAmount,
+          -- Sum of On Account adjustments applied to this invoice (see
+          -- routes/onAccount.js's POST /apply-adjustment) — already folded
+          -- into ETotalPaid, this exposes just the OA-sourced portion so the
+          -- list can badge "Adjusted" distinctly from a real cash payment.
+          ISNULL(oaAdj.AdjustedAmount, 0) AS EOnAccountAdjusted,
           CASE
             WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + N' — ' + t.Description
             WHEN t.Prefix IS NOT NULL THEN t.Prefix
@@ -905,9 +932,18 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = eb.EGLAccountId
         LEFT JOIN dbo.AccountGroup glGroup ON glGroup.AGId = gl.LBelongsTo
         LEFT JOIN dbo.AccountGroup glParentGroup ON glParentGroup.AGId = glGroup.ParentGroupId
+        LEFT JOIN (
+          SELECT RefDocNo, SUM(Amount) AS AdjustedAmount
+          FROM dbo.OnAccountLedger
+          WHERE TxnType = 'DEBIT' AND RefType = 'Invoice'
+          GROUP BY RefDocNo
+        ) oaAdj ON oaAdj.RefDocNo = eb.EDocNo
         ${ebSupplierList.joins}
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
           AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
+          AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
+          AND (@DateFrom IS NULL OR eb.EDocDate >= @DateFrom)
+          AND (@DateTo IS NULL OR eb.EDocDate <= @DateTo)
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `),
@@ -1010,6 +1046,44 @@ router.get("/grn-gst-data", async (req, res) => {
 });
 
 router.get("/chain-status", handleChainStatus);
+
+// ─── GET /tds-eligibility — live TDS gating for the invoice form ─────────────
+// Called as the user fills in supplier + company + amount, before the
+// booking is ever saved, purely to decide whether to show the TDS dropdown
+// and what the running cumulative figure is. Read-only — never persists
+// anything or requires a TDSId.
+router.get("/tds-eligibility", async (req, res) => {
+  const supplierId = parseInt(req.query.supplierId, 10);
+  const companyId = parseInt(req.query.companyId, 10);
+  const amount = parseFloat(req.query.amount) || 0;
+  const date = req.query.date ? String(req.query.date) : null;
+  if (!supplierId || !companyId) {
+    return res.status(400).json({ error: "supplierId and companyId are required" });
+  }
+  try {
+    const pool = getPool();
+    const { resolveFinYearId, resolveThresholdStatus, SINGLE_BILL_THRESHOLD, YEARLY_CUMULATIVE_THRESHOLD } = require("../services/tds");
+
+    const supRes = await pool.request().input("Id", sql.Int, supplierId)
+      .query("SELECT IsTdsApplicable, ISNULL(TdsLimitApplicable, 1) AS TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id");
+    const tdsApplicable = !!supRes.recordset[0]?.IsTdsApplicable;
+    const tdsLimitApplicable = !!supRes.recordset[0]?.TdsLimitApplicable;
+
+    if (!tdsApplicable) {
+      return res.json({ tdsApplicable: false, thresholdMet: false, cumulativeAmount: 0, singleBillThreshold: SINGLE_BILL_THRESHOLD, yearlyThreshold: YEARLY_CUMULATIVE_THRESHOLD });
+    }
+
+    const finYearId = await resolveFinYearId(pool, sql, date || new Date());
+    const { thresholdMet, cumulativeAmount } = await resolveThresholdStatus(pool, sql, {
+      tdsLimitApplicable, billAmount: amount, partyHeadId: supplierId, companyId, finYearId,
+    });
+
+    res.json({ tdsApplicable: true, thresholdMet, cumulativeAmount, singleBillThreshold: SINGLE_BILL_THRESHOLD, yearlyThreshold: YEARLY_CUMULATIVE_THRESHOLD });
+  } catch (err) {
+    console.error("TDS eligibility error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─── GET /by-source — all expense bookings for a given source (incl. split drafts) ──
 router.get("/by-source", async (req, res) => {
@@ -1289,7 +1363,9 @@ router.get("/:id", async (req, res) => {
       );
     }
 
-    res.json({ ...row, EGrnTotalAmount, ENetAmount: liveENetAmount });
+    const expenseHeadAllocations = await getAllocations(pool, sql, "ExpenseBooking", id);
+
+    res.json({ ...row, EGrnTotalAmount, ENetAmount: liveENetAmount, EExpenseHeadAllocations: expenseHeadAllocations });
   } catch (err) {
     console.error("Get by id error:", err.message);
     res.status(500).json({ error: err.message });
@@ -1558,24 +1634,47 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
       const prefix = rawPrefix.replace(/\d+$/, "");
       const startFrom = typeRow.StartingDocNo ?? 1;
 
-      // Count globally across ALL fin years — fin year is only a suffix
+      // Scope the MAX-sequence lookup to this specific fin year — each fin
+      // year gets its own counter starting back at startFrom (e.g. "01"),
+      // instead of numbering continuing across fin-year boundaries. The
+      // fin year is always the DocNo's trailing "/<finYear>" suffix, so
+      // matching on that suffix needs no schema change. Doc types with no
+      // fin year at all keep the old global-count behaviour.
+      const scopedPrefixPattern = finYear ? `${prefix}%/${finYear}` : `${prefix}%`;
+
+      // The serial is extracted as "however many digits immediately follow
+      // the prefix", NOT a fixed-width substring — a fixed length (the old
+      // SUBSTRING(..., 6) here) silently drops any row whose actual digit
+      // count differs (e.g. a 5-digit number grabs a trailing "/" and
+      // TRY_CAST returns NULL), which understates the true max and can
+      // reset the sequence back to the starting number. PATINDEX finds the
+      // first non-digit character (the appended "/" sentinel guarantees a
+      // match even with no suffix) so this works for any padding width.
       const maxResult = await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId)
-        .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
+        .input("PrefixLen", sql.Int, prefix.length)
+        .input("Prefix", sql.NVarChar(100), scopedPrefixPattern).query(`
+          SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
           FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
+          CROSS APPLY (SELECT SUBSTRING(DocNo, @PrefixLen + 1, 30) AS afterPrefix) a
+          CROSS APPLY (SELECT CASE WHEN PATINDEX('%[0-9]%', a.afterPrefix) = 0 THEN ''
+                                    ELSE SUBSTRING(a.afterPrefix, PATINDEX('%[0-9]%', a.afterPrefix), 30) END AS remainder) t
           WHERE TypeOfDocId = @TypeOfDocId
             AND DocNo LIKE @Prefix
         `);
 
-      // Also check ExpenseBooking across ALL fin years
+      // Also check ExpenseBooking, scoped to the same fin year
       const ebMaxResult = await transaction
         .request()
         .input("EDocTypeId2", sql.Int, typeId)
-        .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
+        .input("Prefix2Len", sql.Int, prefix.length)
+        .input("Prefix2", sql.NVarChar(100), scopedPrefixPattern).query(`
+          SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
           FROM dbo.ExpenseBooking WITH (UPDLOCK, HOLDLOCK)
+          CROSS APPLY (SELECT SUBSTRING(EDocNo, @Prefix2Len + 1, 30) AS afterPrefix) a
+          CROSS APPLY (SELECT CASE WHEN PATINDEX('%[0-9]%', a.afterPrefix) = 0 THEN ''
+                                    ELSE SUBSTRING(a.afterPrefix, PATINDEX('%[0-9]%', a.afterPrefix), 30) END AS remainder) t
           WHERE EDocTypeId = @EDocTypeId2
             AND EDocNo LIKE @Prefix2
         `);
@@ -1650,6 +1749,16 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
         throw err;
       }
     }
+
+    // The doc-number reservation loop above INSERTed/claimed its row in
+    // DocNumberSequence keyed by the un-prefixed value — keep that exact
+    // string for the RecordId back-patch below. Prepending "ExB/" onto
+    // `finalDocNo` for display/storage on ExpenseBooking.EDocNo used to
+    // also change what the back-patch searched for, so the UPDATE never
+    // matched any row, RecordId stayed NULL forever, and every subsequent
+    // booking's reservation loop treated the row as an abandoned ghost
+    // reservation and reclaimed the SAME number instead of incrementing.
+    const reservedDocNo = finalDocNo;
 
     // Prepend ExB/ prefix to every expense booking doc number
     if (finalDocNo && !finalDocNo.startsWith("ExB/")) {
@@ -1781,10 +1890,10 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
 
     const newExpenseId = insertResult.recordset[0]?.NewId;
 
-    if (finalDocNo && newExpenseId) {
+    if (reservedDocNo && newExpenseId) {
       await transaction
         .request()
-        .input("DocNo", sql.NVarChar(100), finalDocNo)
+        .input("DocNo", sql.NVarChar(100), reservedDocNo)
         .input("RecordId", sql.Int, parseInt(newExpenseId, 10)).query(`
           UPDATE dbo.DocNumberSequence
           SET RecordId = @RecordId
@@ -1856,6 +1965,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     // Contract Master (Migration 177) — see services/contractLedger.js
     ContractId,
     LHeadId,
+    EExpenseHeadAllocations,
+    TDSId,
   } = req.body;
 
   // EProjectName, EDocumentType, EDocDate and ECompanyId are NOT NULL columns
@@ -2085,7 +2196,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
 
     // For direct invoices (TOD or no linked source), amounts and the
     // supplier link come from the request body — see buildDirectExpenseBooking.
-    if (bookingAmount == null) {
+    const isDirectBooking = bookingAmount == null;
+    if (isDirectBooking) {
       const direct = buildDirectExpenseBooking({
         EAmount: EAmountBody,
         ENetAmount: ENetAmountBody,
@@ -2103,6 +2215,25 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       bookingIgstRate = direct.bookingIgstRate;
     }
 
+    // Multi Expense Head tagging — only meaningful for a direct booking
+    // (GRN/PO/WO_PO/WORK_DONE-sourced bookings still post to the system
+    // Purchase ledger, unaffected). When provided, replaces the single
+    // EGLAccountId dropdown: each row is its own future Dr leg, and
+    // together they must add up to exactly what's owed to the supplier
+    // (bookingNetAmount) since that's the Cr side of the same voucher.
+    const expenseHeadAllocations = isDirectBooking ? normalizeAllocations(EExpenseHeadAllocations) : [];
+    if (expenseHeadAllocations.length > 0) {
+      const allocSum = sumAllocations(expenseHeadAllocations);
+      const target = Math.round((Number(bookingNetAmount) || 0) * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        await transaction.rollback();
+        return res.status(400).json({
+          error: `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the invoice total (₹${target.toFixed(2)}).`,
+        });
+      }
+    }
+
+    let isDinvDocType = false;
     if (EDocTypeId) {
       const typeId = parseInt(EDocTypeId, 10);
       const finYear = (EFinYear || "").toString().trim();
@@ -2110,7 +2241,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       const typeResult = await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId).query(`
-          SELECT Prefix, FullPrefix, StartingDocNo
+          SELECT Prefix, FullPrefix, StartingDocNo, DocNoPrefix
           FROM dbo.TypeOfDoc
           WHERE TypeOfDocId = @TypeOfDocId AND IsActive = 1
         `);
@@ -2123,28 +2254,56 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           .json({ error: "Selected document type not found or inactive." });
       }
 
+      // Direct Expense Booking (DINV) numbers are meant to stand on their
+      // own — DocNoPrefix already reads "DINV", so stacking the generic
+      // "INV/" module prefix on top ("INV/DINV000001/...") was redundant.
+      isDinvDocType = typeRow.DocNoPrefix === "DINV";
+
       const rawPrefix = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
       const prefix = rawPrefix.replace(/\d+$/, "");
       const startFrom = typeRow.StartingDocNo ?? 1;
 
-      // Count globally across ALL fin years — fin year is only a suffix
+      // Scope the MAX-sequence lookup to this specific fin year — each fin
+      // year gets its own counter starting back at startFrom (e.g. "01"),
+      // instead of numbering continuing across fin-year boundaries. The
+      // fin year is always the DocNo's trailing "/<finYear>" suffix, so
+      // matching on that suffix needs no schema change. Doc types with no
+      // fin year at all keep the old global-count behaviour.
+      const scopedPrefixPattern = finYear ? `${prefix}%/${finYear}` : `${prefix}%`;
+
+      // The serial is extracted as "however many digits immediately follow
+      // the prefix", NOT a fixed-width substring — a fixed length (the old
+      // SUBSTRING(..., 6) here) silently drops any row whose actual digit
+      // count differs (e.g. a 5-digit number grabs a trailing "/" and
+      // TRY_CAST returns NULL), which understates the true max and can
+      // reset the sequence back to the starting number. PATINDEX finds the
+      // first non-digit character (the appended "/" sentinel guarantees a
+      // match even with no suffix) so this works for any padding width.
       const maxResult = await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId)
-        .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
+        .input("PrefixLen", sql.Int, prefix.length)
+        .input("Prefix", sql.NVarChar(100), scopedPrefixPattern).query(`
+          SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
           FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
+          CROSS APPLY (SELECT SUBSTRING(DocNo, @PrefixLen + 1, 30) AS afterPrefix) a
+          CROSS APPLY (SELECT CASE WHEN PATINDEX('%[0-9]%', a.afterPrefix) = 0 THEN ''
+                                    ELSE SUBSTRING(a.afterPrefix, PATINDEX('%[0-9]%', a.afterPrefix), 30) END AS remainder) t
           WHERE TypeOfDocId = @TypeOfDocId
             AND DocNo LIKE @Prefix
         `);
 
-      // Also check ExpenseBooking across ALL fin years
+      // Also check ExpenseBooking, scoped to the same fin year
       const ebMaxResult = await transaction
         .request()
         .input("EDocTypeId2", sql.Int, typeId)
-        .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
+        .input("Prefix2Len", sql.Int, prefix.length)
+        .input("Prefix2", sql.NVarChar(100), scopedPrefixPattern).query(`
+          SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
           FROM dbo.ExpenseBooking WITH (UPDLOCK, HOLDLOCK)
+          CROSS APPLY (SELECT SUBSTRING(EDocNo, @Prefix2Len + 1, 30) AS afterPrefix) a
+          CROSS APPLY (SELECT CASE WHEN PATINDEX('%[0-9]%', a.afterPrefix) = 0 THEN ''
+                                    ELSE SUBSTRING(a.afterPrefix, PATINDEX('%[0-9]%', a.afterPrefix), 30) END AS remainder) t
           WHERE EDocTypeId = @EDocTypeId2
             AND EDocNo LIKE @Prefix2
         `);
@@ -2227,9 +2386,48 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       }
     }
 
-    // Prepend INV/ prefix to every expense booking doc number
-    if (finalDocNo && !finalDocNo.startsWith("INV/")) {
+    // The doc-number reservation loop above INSERTed/claimed its row in
+    // DocNumberSequence keyed by the un-prefixed value — keep that exact
+    // string for the RecordId back-patch below. Prepending "INV/" onto
+    // `finalDocNo` for display/storage on ExpenseBooking.EDocNo used to
+    // also change what the back-patch searched for, so the UPDATE never
+    // matched any row, RecordId stayed NULL forever, and every subsequent
+    // booking's reservation loop treated the row as an abandoned ghost
+    // reservation and reclaimed the SAME number instead of incrementing —
+    // e.g. every Direct Expense Booking (DINV) landing on INV/DINV000001.
+    const reservedDocNo = finalDocNo;
+
+    // Prepend INV/ prefix to every expense booking doc number — except
+    // Direct Expense Bookings (DINV), which already carry their own
+    // distinct prefix and don't need the generic "INV/" stacked on top.
+    if (finalDocNo && !isDinvDocType && !finalDocNo.startsWith("INV/")) {
       finalDocNo = `INV/${finalDocNo}`;
+    }
+
+    // TDS (migration 304) — never mandatory at invoice-creation time (the
+    // spec only enforces TDS at payment time, per Section 17); if the form
+    // sent a TDSId (because the supplier was already known to be
+    // TDS-eligible), validate it's Active and snapshot the calculation
+    // against EAmount — the pre-GST taxable base, matching how the payment
+    // side (once it exists) will inherit this exact snapshot rather than
+    // re-deriving it.
+    let tdsSnapshot = { TDSId: null, TDSNature: null, TDSName: null, TDSPercentage: null, TDSAmount: 0 };
+    if (TDSId) {
+      const { calculateTds } = require("../services/tds");
+      const tdsRow = await transaction.request().input("TDSId", sql.Int, parseInt(TDSId, 10))
+        .query("SELECT TDSId, Nature, Name, Percentage, Status FROM dbo.TDSMaster WHERE TDSId = @TDSId");
+      const tds = tdsRow.recordset[0];
+      if (!tds || !tds.Status) {
+        await transaction.rollback();
+        return res.status(400).json({ error: "Selected TDS is not a valid, active TDS record." });
+      }
+      tdsSnapshot = {
+        TDSId: tds.TDSId,
+        TDSNature: tds.Nature,
+        TDSName: tds.Name,
+        TDSPercentage: tds.Percentage,
+        TDSAmount: calculateTds(bookingAmount, tds.Percentage),
+      };
     }
 
     const insertReq = transaction
@@ -2322,7 +2520,12 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
       .input("EGLAccountId", sql.Int, EGLAccountId ? parseInt(EGLAccountId, 10) : null)
       .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null)
       .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
-      .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null);
+      .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null)
+      .input("TDSId", sql.Int, tdsSnapshot.TDSId)
+      .input("TDSNature", sql.NVarChar(200), tdsSnapshot.TDSNature)
+      .input("TDSName", sql.NVarChar(200), tdsSnapshot.TDSName)
+      .input("TDSPercentage", sql.Decimal(5, 2), tdsSnapshot.TDSPercentage)
+      .input("TDSAmount", sql.Decimal(18, 2), tdsSnapshot.TDSAmount);
 
 
     if (hasPayTermCol) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
@@ -2340,7 +2543,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           EBillingTermId, EBillingTermName, EBillingTermsData,
           ETCId, ETCName, ETCText,
           EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
-          ECostCenter, EGLAccount, EGLAccountId, EWorkDoneRef, ContractId, LHeadId
+          ECostCenter, EGLAccount, EGLAccountId, EWorkDoneRef, ContractId, LHeadId,
+          TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount
           ${hasPayTermCol ? ", PaymentTermId" : ""}
           ${hasDirectItemsCol ? ", EDirectItemsData" : ""}
         ) VALUES (
@@ -2354,7 +2558,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
           @EBillingTermId, @EBillingTermName, @EBillingTermsData,
           @ETCId, @ETCName, @ETCText,
           @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
-          @ECostCenter, @EGLAccount, @EGLAccountId, @EWorkDoneRef, @ContractId, @LHeadId
+          @ECostCenter, @EGLAccount, @EGLAccountId, @EWorkDoneRef, @ContractId, @LHeadId,
+          @TDSId, @TDSNature, @TDSName, @TDSPercentage, @TDSAmount
           ${hasPayTermCol ? ", @PaymentTermId" : ""}
           ${hasDirectItemsCol ? ", @EDirectItemsData" : ""}
         );
@@ -2363,10 +2568,10 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
 
     const newExpenseId = insertResult.recordset[0]?.NewId;
 
-    if (finalDocNo && newExpenseId) {
+    if (reservedDocNo && newExpenseId) {
       await transaction
         .request()
-        .input("DocNo", sql.NVarChar(100), finalDocNo)
+        .input("DocNo", sql.NVarChar(100), reservedDocNo)
         .input("RecordId", sql.Int, parseInt(newExpenseId, 10)).query(`
           UPDATE dbo.DocNumberSequence
           SET RecordId = @RecordId
@@ -2382,6 +2587,16 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
         .query(
           "UPDATE dbo.ExpenseBooking SET ELinkedGrnIds = @ELinkedGrnIds WHERE EId = @EId",
         );
+    }
+
+    if (expenseHeadAllocations.length > 0 && newExpenseId) {
+      await replaceAllocations(
+        () => transaction.request(),
+        sql,
+        "ExpenseBooking",
+        parseInt(newExpenseId, 10),
+        expenseHeadAllocations,
+      );
     }
 
     await transaction.commit();
@@ -2438,7 +2653,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
                  @PCreatedAt, @PCreatedBy, @Status)
             `);
           const { syncBillStatus } = require("./newPayment");
-          await syncBillStatus(pool, finalDocNo);
+          await syncBillStatus(pool, sql, finalDocNo);
         }
       }
     }
@@ -2767,19 +2982,38 @@ router.put(
                 const startFrom = typeRow.StartingDocNo ?? 1;
                 const finYear = (parentRow.EFinYear || "").toString().trim();
 
+                // Scope to this fin year — see the matching comment on the
+                // main create-path MAX lookups above for why (each fin year
+                // gets its own counter, restarting at startFrom).
+                const scopedPrefixPattern = finYear ? `${prefix}%/${finYear}` : `${prefix}%`;
+
+                // See the matching comment on the main create-path MAX
+                // lookups above — fixed-width SUBSTRING(...,6) silently
+                // drops rows whose digit count differs and can reset the
+                // sequence. PATINDEX-based extraction works for any width.
                 const maxResult = await pool
                   .request()
                   .input("TypeOfDocId", sql.Int, parentRow.EDocTypeId)
-                  .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
-                  SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
-                  FROM dbo.DocNumberSequence WHERE TypeOfDocId = @TypeOfDocId AND DocNo LIKE @Prefix
+                  .input("PrefixLen", sql.Int, prefix.length)
+                  .input("Prefix", sql.NVarChar(100), scopedPrefixPattern).query(`
+                  SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
+                  FROM dbo.DocNumberSequence
+                  CROSS APPLY (SELECT SUBSTRING(DocNo, @PrefixLen + 1, 30) AS afterPrefix) a
+                  CROSS APPLY (SELECT CASE WHEN PATINDEX('%[0-9]%', a.afterPrefix) = 0 THEN ''
+                                    ELSE SUBSTRING(a.afterPrefix, PATINDEX('%[0-9]%', a.afterPrefix), 30) END AS remainder) t
+                  WHERE TypeOfDocId = @TypeOfDocId AND DocNo LIKE @Prefix
                 `);
                 const ebMaxResult = await pool
                   .request()
                   .input("EDocTypeId2", sql.Int, parentRow.EDocTypeId)
-                  .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
-                  SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
-                  FROM dbo.ExpenseBooking WHERE EDocTypeId = @EDocTypeId2 AND EDocNo LIKE @Prefix2
+                  .input("Prefix2Len", sql.Int, prefix.length)
+                  .input("Prefix2", sql.NVarChar(100), scopedPrefixPattern).query(`
+                  SELECT MAX(TRY_CAST(LEFT(t.remainder, PATINDEX('%[^0-9]%', t.remainder + '/') - 1) AS INT)) AS MaxSeq
+                  FROM dbo.ExpenseBooking
+                  CROSS APPLY (SELECT SUBSTRING(EDocNo, @Prefix2Len + 1, 30) AS afterPrefix) a
+                  CROSS APPLY (SELECT CASE WHEN PATINDEX('%[0-9]%', a.afterPrefix) = 0 THEN ''
+                                    ELSE SUBSTRING(a.afterPrefix, PATINDEX('%[0-9]%', a.afterPrefix), 30) END AS remainder) t
+                  WHERE EDocTypeId = @EDocTypeId2 AND EDocNo LIKE @Prefix2
                 `);
 
                 const combined = Math.max(
@@ -2874,9 +3108,22 @@ router.put(
     if (!Number.isFinite(numericId) || numericId <= 0)
       return res.status(400).json({ error: "Invalid record id" });
 
+    // Approved invoices no longer hard-block edits (the old behaviour —
+    // guardEdit throwing "Cannot edit an approved record", forcing the user
+    // into a separate free-text Amendment popup). They still edit this
+    // exact form; every field below is validated/computed exactly as a
+    // normal save. Only right before the UPDATE would run, an Approved
+    // record (without the allowPostApproval override right) diverts into a
+    // Pending Amendment instead of writing the row directly — see
+    // isAmendmentFlow below and services/amendments.js proposeAmendment().
+    let isAmendmentFlow = false;
     try {
       const allowPostApproval = await resolveAllowPostApproval(req, "expense-booking");
-      await guardEdit("expense-booking", req.params.id, { allowPostApproval });
+      const currentStatus = await getRecordStatus("expense-booking", numericId);
+      if (currentStatus === "Pending") {
+        return res.status(400).json({ error: "Cannot edit a record that is pending approval. Reject it first." });
+      }
+      isAmendmentFlow = currentStatus === "Approved" && !allowPostApproval;
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -2924,6 +3171,7 @@ router.put(
       PaymentTermId: PaymentTermIdPut,
       EDirectItemsData: EDirectItemsDataPut,
       LHeadId,
+      TDSId,
     } = req.body;
 
     // Same NOT NULL columns as POST / — this UPDATE overwrites them
@@ -2967,6 +3215,24 @@ router.put(
       let bookingSgstRate = direct.bookingSgstRate;
       let bookingIgstRate = direct.bookingIgstRate;
 
+      // Multi Expense Head tagging — see the matching comment on POST /.
+      // Validated up front (before the UPDATE runs) since this route isn't
+      // transaction-wrapped — a bad allocation sum should never leave a
+      // half-applied edit.
+      const isDirectBookingPut = ESourceType !== "GRN";
+      const expenseHeadAllocationsPut = isDirectBookingPut
+        ? normalizeAllocations(req.body.EExpenseHeadAllocations)
+        : [];
+      if (expenseHeadAllocationsPut.length > 0) {
+        const allocSum = sumAllocations(expenseHeadAllocationsPut);
+        const target = Math.round((Number(bookingNetAmount) || 0) * 100) / 100;
+        if (Math.abs(allocSum - target) > 0.5) {
+          return res.status(400).json({
+            error: `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the invoice total (₹${target.toFixed(2)}).`,
+          });
+        }
+      }
+
       if (ESourceType === "GRN") {
         const grnId = parseInt(ESourceId, 10);
         if (!Number.isFinite(grnId) || grnId <= 0) {
@@ -2997,6 +3263,27 @@ router.put(
           EBillingTermsData,
           EDiscountData,
         );
+      }
+
+      // TDS (migration 304) — see matching comment on POST /. Re-validated
+      // and recomputed against the (possibly just-recomputed) bookingAmount
+      // on every save, same discipline as create.
+      let tdsSnapshotPut = { TDSId: null, TDSNature: null, TDSName: null, TDSPercentage: null, TDSAmount: 0 };
+      if (TDSId) {
+        const { calculateTds } = require("../services/tds");
+        const tdsRowPut = await pool.request().input("TDSId", sql.Int, parseInt(TDSId, 10))
+          .query("SELECT TDSId, Nature, Name, Percentage, Status FROM dbo.TDSMaster WHERE TDSId = @TDSId");
+        const tdsPut = tdsRowPut.recordset[0];
+        if (!tdsPut || !tdsPut.Status) {
+          return res.status(400).json({ error: "Selected TDS is not a valid, active TDS record." });
+        }
+        tdsSnapshotPut = {
+          TDSId: tdsPut.TDSId,
+          TDSNature: tdsPut.Nature,
+          TDSName: tdsPut.Name,
+          TDSPercentage: tdsPut.Percentage,
+          TDSAmount: calculateTds(bookingAmount, tdsPut.Percentage),
+        };
       }
 
       const putReq = pool
@@ -3086,11 +3373,101 @@ router.put(
         .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
         .input("EGLAccountId", sql.Int, EGLAccountId ? parseInt(EGLAccountId, 10) : null)
         .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null)
-        .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null);
+        .input("LHeadId", sql.Int, LHeadId ? parseInt(LHeadId, 10) : null)
+        .input("TDSId", sql.Int, tdsSnapshotPut.TDSId)
+        .input("TDSNature", sql.NVarChar(200), tdsSnapshotPut.TDSNature)
+        .input("TDSName", sql.NVarChar(200), tdsSnapshotPut.TDSName)
+        .input("TDSPercentage", sql.Decimal(5, 2), tdsSnapshotPut.TDSPercentage)
+        .input("TDSAmount", sql.Decimal(18, 2), tdsSnapshotPut.TDSAmount);
 
       if (hasPayTermColPut) putReq.input("PaymentTermIdPut", sql.Int, PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null);
       if (hasDirectItemsColPut) putReq.input("EDirectItemsDataPut", sql.NVarChar(sql.MAX), EDirectItemsDataPut || null);
 
+      // Amendment flow (Approved doc, no allowPostApproval override) — same
+      // resolved values the direct UPDATE below would have written, just
+      // captured as plain JS values (column name → new value) instead of
+      // executed. Deliberately mirrors every .input() call above field for
+      // field. NOTE: this covers the ExpenseBooking row itself only —
+      // Expense Head allocations and EMI schedule sync (below) still apply
+      // immediately even mid-amendment-flow-adoption; a follow-up should
+      // fold those into the same propose/apply cycle.
+      if (isAmendmentFlow) {
+        const resolvedFields = {
+          EName: EName || null,
+          EProjectName,
+          EDocumentType,
+          EDocDate,
+          EAmount: bookingAmount != null && bookingAmount !== "" ? Number(bookingAmount) : 0,
+          ENetAmount: bookingNetAmount != null && bookingNetAmount !== "" ? Math.round(Number(bookingNetAmount) * 100) / 100 : 0,
+          ECgstRate: bookingCgstRate ?? 0,
+          ESgstRate: bookingSgstRate ?? 0,
+          EIgstRate: bookingIgstRate ?? 0,
+          EPaymentType: EPaymentType === "partial" ? "partial" : "full",
+          EPartialAmount: EPartialAmount != null ? Number(EPartialAmount) : null,
+          EDiscountData: EDiscountData ? (typeof EDiscountData === "string" ? EDiscountData : JSON.stringify(EDiscountData)) : null,
+          EDocNo: EDocNo || null,
+          EEmiPayment: EEmiPayment ? 1 : 0,
+          EEmiData: EEmiData ? JSON.stringify(EEmiData) : null,
+          EInstallmentCount: EInstallmentCount || null,
+          EEmiAmount: EEmiAmount || null,
+          EEmiStartDate: EEmiStartDate || null,
+          EReminder: EReminder || null,
+          ERemarks: ERemarks || null,
+          EStatus: EStatus || "Draft",
+          ECompanyId: parseInt(ECompanyId, 10),
+          EDocTypeId: EDocTypeId ? parseInt(EDocTypeId, 10) : null,
+          EFinYear: EFinYear || null,
+          ESourceType: ESourceType || null,
+          ESourceId: ESourceId ? parseInt(ESourceId, 10) : null,
+          EBillingTermId: EBillingTermId ? parseInt(EBillingTermId, 10) : null,
+          EBillingTermName: EBillingTermName || null,
+          EBillingTermsData: EBillingTermsData ? (typeof EBillingTermsData === "string" ? EBillingTermsData : JSON.stringify(EBillingTermsData)) : null,
+          ETCId: ETCId ? parseInt(ETCId, 10) : null,
+          ETCName: ETCName || null,
+          ETCText: ETCText || null,
+          EVendorInvoiceNo: EVendorInvoiceNo || null,
+          EVendorInvoiceDate: EVendorInvoiceDate || null,
+          EAdditionalCharges: EAdditionalCharges ? JSON.stringify(EAdditionalCharges) : null,
+          ECostCenter: ECostCenter || null,
+          EGLAccount: EGLAccount || null,
+          EGLAccountId: EGLAccountId ? parseInt(EGLAccountId, 10) : null,
+          EWorkDoneRef: EWorkDoneRef || null,
+          LHeadId: LHeadId ? parseInt(LHeadId, 10) : null,
+          TDSId: tdsSnapshotPut.TDSId,
+          TDSNature: tdsSnapshotPut.TDSNature,
+          TDSName: tdsSnapshotPut.TDSName,
+          TDSPercentage: tdsSnapshotPut.TDSPercentage,
+          TDSAmount: tdsSnapshotPut.TDSAmount,
+        };
+        if (hasPayTermColPut) resolvedFields.PaymentTermId = PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null;
+        if (hasDirectItemsColPut) resolvedFields.EDirectItemsData = EDirectItemsDataPut || null;
+
+        try {
+          const { proposeAmendment } = require("./amendments");
+          const userEmail = requireUserEmail(req, res);
+          if (!userEmail) return;
+          const ebRow = await pool.request().input("Eid", sql.Int, numericId)
+            .query("SELECT EDocNo, EProjectName, ECompanyId FROM dbo.ExpenseBooking WHERE Eid = @Eid");
+          const eb = ebRow.recordset[0];
+          const amendment = await proposeAmendment({
+            refDocType: "ExpenseBooking",
+            refDocId: numericId,
+            refDocNo: eb?.EDocNo,
+            proposedChanges: resolvedFields,
+            description: `Edit proposed for ${eb?.EDocNo || `#${numericId}`}`,
+            reason: req.body.amendmentReason || null,
+            projectName: eb?.EProjectName,
+            userName: userEmail,
+          });
+          return res.status(202).json({
+            message: "This invoice is already approved — your changes were submitted as a pending amendment awaiting approval.",
+            pending: true,
+            amendment,
+          });
+        } catch (err) {
+          return res.status(err.status || 500).json({ error: err.message || "Failed to submit amendment" });
+        }
+      }
 
       const result = await putReq.query(`
         UPDATE dbo.ExpenseBooking SET
@@ -3109,7 +3486,8 @@ router.put(
           EVendorInvoiceNo=@EVendorInvoiceNo, EVendorInvoiceDate=@EVendorInvoiceDate,
           EAdditionalCharges=@EAdditionalCharges,
           ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EGLAccountId=@EGLAccountId, EWorkDoneRef=@EWorkDoneRef,
-          LHeadId=@LHeadId
+          LHeadId=@LHeadId,
+          TDSId=@TDSId, TDSNature=@TDSNature, TDSName=@TDSName, TDSPercentage=@TDSPercentage, TDSAmount=@TDSAmount
           ${hasPayTermColPut ? ", PaymentTermId=@PaymentTermIdPut" : ""}
           ${hasDirectItemsColPut ? ", EDirectItemsData=@EDirectItemsDataPut" : ""}
         WHERE Eid = @Eid
@@ -3118,6 +3496,12 @@ router.put(
       if (!result.rowsAffected?.[0]) {
         return res.status(404).json({ error: "Expense booking not found" });
       }
+
+      // Multi Expense Head tagging — always replace wholesale on save. If
+      // the booking is no longer "direct" (switched to a GRN/PO source) or
+      // simply has no allocations this time, this clears out any stale
+      // rows from a previous edit rather than leaving them dangling.
+      await replaceAllocations(() => pool.request(), sql, "ExpenseBooking", numericId, expenseHeadAllocationsPut);
 
       // If EMI is being enabled and a schedule is provided, sync EmiInstallments.
       // Only insert rows that don't already exist (idempotent — safe to call on re-save).
@@ -3299,6 +3683,23 @@ router.put("/:id/approve", requirePageRight("expense-booking", "edit"), async (r
       userEmail,
       req.user?.role,
     );
+
+    // Initialize EBillStatus/ETotalPaid/ERemainingAmount the moment the
+    // invoice is approved — previously these only got set the first time a
+    // payment/adjustment touched the invoice, so a freshly-approved invoice
+    // with no payments yet had EBillStatus=NULL and showed as "Unknown" in
+    // pickers (e.g. the On Account Adjustment invoice list) instead of
+    // "Payment Due".
+    try {
+      const pool = getPool();
+      const docRes = await pool.request().input("Eid", sql.Int, id)
+        .query("SELECT EDocNo FROM dbo.ExpenseBooking WHERE Eid = @Eid");
+      const docNo = docRes.recordset[0]?.EDocNo;
+      if (docNo) await syncBillStatus(pool, sql, docNo);
+    } catch (syncErr) {
+      console.warn("syncBillStatus on invoice approve failed (non-fatal):", syncErr.message);
+    }
+
     await bumpCacheVersion("expense-booking");
     await bumpCacheVersion("expense-booking-options");
     await bumpCacheVersion("expense-booking-source-ids");
@@ -3358,6 +3759,7 @@ router.get("/:id/payment-summary", async (req, res) => {
           eb.ENetAmount, eb.EAmount, eb.ETotalPaid, eb.ERemainingAmount,
           eb.ESourceType, eb.ESourceId, eb.EWorkDoneRef,
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
+          eb.TDSId, eb.TDSNature, eb.TDSName, eb.TDSPercentage, eb.TDSAmount,
           -- GRN info
           grn.GRNNo, grn.GRNID, grn.TotalAmount AS GrnTotalAmount,
           -- PO info via GRN or direct
@@ -3393,6 +3795,12 @@ router.get("/:id/payment-summary", async (req, res) => {
     const netAmount = parseFloat(eb.ENetAmount ?? 0) > 0
       ? parseFloat(eb.ENetAmount)
       : parseFloat(eb.EAmount ?? 0) || 0;
+    // TDS is deducted at source, not paid to the supplier through NewPayment —
+    // so the amount actually still owed in cash is netAmount minus whatever
+    // TDS was withheld, not netAmount itself. GST/netAmount math is untouched
+    // above; this only affects what counts as "payable in cash" below.
+    const tdsAmount = parseFloat(eb.TDSAmount ?? 0) || 0;
+    const payableAfterTds = Math.max(0, Math.round((netAmount - tdsAmount) * 100) / 100);
 
     // Fetch approved payments against this booking, joining BRS to detect bounced cheques
     const payRes = await pool
@@ -3428,7 +3836,11 @@ router.get("/:id/payment-summary", async (req, res) => {
     const totalPaid = payments
       .filter((p) => p.status === 'Approved' && !p.isBounced)
       .reduce((sum, p) => sum + p.amount - p.bounceCharge, 0);
-    const remaining = Math.max(0, Math.round((netAmount - totalPaid) * 100) / 100);
+    // Remaining is measured against what's actually still payable in cash
+    // (net of TDS already withheld), not the gross invoice net amount —
+    // otherwise a fully-settled TDS bill shows a phantom "remaining" equal
+    // to the TDS amount forever.
+    const remaining = Math.max(0, Math.round((payableAfterTds - totalPaid) * 100) / 100);
 
     res.json({
       expenseId: eb.Eid,
@@ -3437,6 +3849,8 @@ router.get("/:id/payment-summary", async (req, res) => {
       billStatus:
         eb.EBillStatus || (payments.length === 0 ? "Payment Due" : null),
       netAmount,
+      tdsAmount,
+      payableAfterTds,
       totalPaid,
       remaining,
       payments,
@@ -3556,19 +3970,23 @@ router.get("/:id/posting", async (req, res) => {
     const ebSupplierPost = expenseBookingSupplierSql("eb", "postprev");
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
       SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
-             eb.ELinkedGrnIds, eb.EGLAccountId,
+             eb.ELinkedGrnIds, eb.EGLAccountId, eb.TDSAmount, eb.TDSId,
+             eb.ECgstRate, eb.ESgstRate, eb.EIgstRate,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
              eb.EName AS SupplierName,
              ${ebSupplierPost.idExpr} AS ResolvedSupplierId,
              ${ebSupplierPost.nameExpr} AS ResolvedSupplierName,
-             gl.LHeadName AS EGLAccountName
+             gl.LHeadName AS EGLAccountName,
+             tm.GLHeadId AS TdsNatureGLHeadId, tm.Nature AS TdsNature
       FROM dbo.ExpenseBooking eb
       LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = eb.EGLAccountId
+      LEFT JOIN dbo.TDSMaster tm ON tm.TDSId = eb.TDSId
       ${ebSupplierPost.joins}
       WHERE eb.Eid = @Eid
     `);
     if (!ebRes.recordset.length) return res.status(404).json({ error: "Not found" });
     const eb = ebRes.recordset[0];
+    const tdsAmount = Math.max(0, Math.round((parseFloat(eb.TDSAmount) || 0) * 100) / 100);
 
     // Determine if GRN-linked
     const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
@@ -3577,8 +3995,16 @@ router.get("/:id/posting", async (req, res) => {
     if (isGrnLinked) {
       ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, resolveGrnIds(eb)));
     } else {
-      totalAmount = parseFloat(eb.ENetAmount||eb.EAmount||0);
-      baseAmount = totalAmount;
+      // Direct (non-GRN) booking: back-derive base/tax from the invoice's
+      // own GST rates against the GST-inclusive ENetAmount — MUST exactly
+      // match the same formula in POST /:id/post-to-gl below, otherwise
+      // this preview shows a different split than what actually gets
+      // posted. (Previously used EAmount directly, which could drift from
+      // the rate-derived base after billing-term adjustments.)
+      totalAmount = parseFloat(eb.ENetAmount || eb.EAmount || 0);
+      const directRatePct = (parseFloat(eb.ECgstRate) || 0) + (parseFloat(eb.ESgstRate) || 0) + (parseFloat(eb.EIgstRate) || 0);
+      baseAmount = directRatePct > 0 ? totalAmount / (1 + directRatePct / 100) : totalAmount;
+      taxAmount = Math.max(0, Math.round((totalAmount - baseAmount) * 100) / 100);
     }
 
     // System ledgers (Purchase, PGRN) plus the invoice's own resolved
@@ -3599,11 +4025,19 @@ router.get("/:id/posting", async (req, res) => {
         ? { id: eb.EGLAccountId, label: eb.EGLAccountName || "GL Account" }
         : find((l)=>l.LHeadName.toLowerCase().includes("purchase")),
       pgrn:      find((l)=>l.LHeadName.toLowerCase().includes("pending")),
-      supplier:  eb.ResolvedSupplierId ? { id: eb.ResolvedSupplierId, label: "Supplier / Creditor A/c" } : null,
+      supplier:  eb.ResolvedSupplierId
+        ? { id: eb.ResolvedSupplierId, label: eb.ResolvedSupplierName ? `Supplier/Creditor Payable — ${eb.ResolvedSupplierName}` : "Supplier/Creditor Payable" }
+        : null,
       // Confirmed input tax credit, recognized once the invoice matches the
       // GRN — distinct from Provisional Credit Available (the GRN-stage
       // provisional estimate, left untouched at invoice time).
       gstCredit: find((l)=>l.LHeadName.toLowerCase().includes("gst credit")),
+      // TDS withheld from the supplier — a separate liability leg, not
+      // part of what's owed to the vendor. Mirrors POST /:id/post-to-gl.
+      tdsPayable: find((l)=>l.LHeadName.toLowerCase().includes("tds payable")),
+      // Distinct GL head per TDS Nature (194C/194J/...) that gets debited
+      // for the TDS amount, separate from the Expense Head itself.
+      tdsNature: eb.TdsNatureGLHeadId ? { id: eb.TdsNatureGLHeadId, label: `TDS ${eb.TdsNature || ""} A/c`.trim() } : null,
     };
 
     // Check if already posted
@@ -3611,15 +4045,22 @@ router.get("/:id/posting", async (req, res) => {
       .query(`SELECT TOP 1 EntryId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='InvoicePosting' AND SourceId=@SrcId AND IsReversed=0`);
     const isPosted = postedRes.recordset.length > 0;
 
+    // Multi Expense Head tagging (migration 303) — for a direct booking
+    // this is now the primary source of the debit-side breakdown; the
+    // single accounts.purchase resolved above stays as the fallback for
+    // any booking that hasn't been re-saved under the new structure yet.
+    const expenseHeadAllocations = isGrnLinked ? [] : await getAllocations(pool, sql, "ExpenseBooking", ebId);
+
     res.json({
       isGrnLinked: !!isGrnLinked,
-      baseAmount, taxAmount, totalAmount,
+      baseAmount, taxAmount, totalAmount, tdsAmount,
       // Per-GRN breakdown (doc no, date, amounts) — only meaningfully
       // multi-row for a combined invoice; a single-GRN invoice still gets
       // a 1-row array so the frontend can render one consistent shape.
       grnBreakdown: perGrn,
       supplierName: eb.SupplierName,
       accounts,
+      expenseHeadAllocations,
       isPosted,
       jvNo: isPosted ? postedRes.recordset[0].VoucherNo : null,
       jvId: isPosted ? postedRes.recordset[0].EntryId : null,
@@ -3643,15 +4084,25 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const ebSupplierPost2 = expenseBookingSupplierSql("eb", "postgl");
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
       SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
-             eb.ELinkedGrnIds, eb.EGLAccountId,
+             eb.ELinkedGrnIds, eb.EGLAccountId, eb.TDSAmount, eb.TDSId,
+             eb.ECgstRate, eb.ESgstRate, eb.EIgstRate,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
-             ${ebSupplierPost2.idExpr} AS ResolvedSupplierId
+             ${ebSupplierPost2.idExpr} AS ResolvedSupplierId,
+             ${ebSupplierPost2.nameExpr} AS ResolvedSupplierName,
+             tm.GLHeadId AS TdsNatureGLHeadId, tm.Nature AS TdsNature
       FROM dbo.ExpenseBooking eb
+      LEFT JOIN dbo.TDSMaster tm ON tm.TDSId = eb.TDSId
       ${ebSupplierPost2.joins}
       WHERE eb.Eid = @Eid
     `);
     if (!ebRes.recordset.length) return res.status(404).json({ error: "Not found" });
     const eb = ebRes.recordset[0];
+    // TDS is withheld from the supplier, not paid out — it's a separate
+    // liability to the tax authority, not part of what's owed to the
+    // vendor. Previously the Supplier/Creditor leg was credited the FULL
+    // invoice amount with no TDS Payable leg at all, silently overstating
+    // the vendor's payable and never recording the TDS liability.
+    const tdsAmount = Math.max(0, Math.round((parseFloat(eb.TDSAmount) || 0) * 100) / 100);
 
     // Check already posted
     const alreadyPosted = await pool.request().input("SrcId", sql.Int, ebId)
@@ -3666,6 +4117,16 @@ router.post("/:id/post-to-gl", async (req, res) => {
       ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, resolveGrnIds(eb)));
     } else {
       totalAmount = parseFloat(eb.ENetAmount||eb.EAmount||0);
+      // Direct (TOD) bookings don't store a separate tax-amount column —
+      // only the GST-inclusive ENetAmount and the rates that produced it —
+      // so back-derive base/tax from the rates, same tolerance-of-rounding
+      // spirit as the GRN path above. Used below to split each Expense
+      // Head row's GST-inclusive amount into a base leg + a combined GST
+      // Credit Available leg, instead of debiting the whole inclusive
+      // amount straight to the Expense Head (which silently ate the ITC).
+      const directRatePct = (parseFloat(eb.ECgstRate) || 0) + (parseFloat(eb.ESgstRate) || 0) + (parseFloat(eb.EIgstRate) || 0);
+      baseAmount = directRatePct > 0 ? totalAmount / (1 + directRatePct / 100) : totalAmount;
+      taxAmount = totalAmount - baseAmount;
     }
 
     // Cost Centre for the posted GL legs — ExpenseBooking only stores a text
@@ -3695,20 +4156,74 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const purchaseId  = findId((l)=>l.LHeadName.toLowerCase().includes("purchase"));
     const pgrnId      = findId((l)=>l.LHeadName.toLowerCase().includes("pending"));
     const gstCreditId = findId((l)=>l.LHeadName.toLowerCase().includes("gst credit"));
+    const tdsPayableId = findId((l)=>l.LHeadName.toLowerCase().includes("tds payable"));
     // "Supplier / Creditor A/c" is the invoice's own resolved supplier —
     // that specific vendor's own AccountHeadMaster row. There's no shared
     // system-generated GL placeholder for this (every vendor has their own
     // ledger), which is why searching IsSystemGenerated=1 rows for it
     // always failed with "Supplier/Creditor system ledger not configured."
     const supplierId = eb.ResolvedSupplierId;
-    // Direct (non-GRN) bookings post their debit leg to the invoice's own
-    // chosen GL Account (General Ledger master) when one was selected on
-    // the form, instead of the generic system "Purchase A/c" ledger.
+    const supplierLabel = eb.ResolvedSupplierName ? `Supplier/Creditor Payable — ${eb.ResolvedSupplierName}` : "Supplier/Creditor Payable";
+    // Multi Expense Head tagging (migration 303) — a direct booking's
+    // amount can now be split across several heads instead of one. When
+    // present, these ARE the debit legs; debitLedgerId (the old single
+    // EGLAccountId/Purchase fallback) is only used when there are none —
+    // an older booking saved before this feature, or one where the user
+    // never tagged anything.
+    const expenseHeadAllocations = isGrnLinked ? [] : await getAllocations(pool, sql, "ExpenseBooking", ebId);
     const debitLedgerId = !isGrnLinked && eb.EGLAccountId ? eb.EGLAccountId : purchaseId;
     if (!supplierId) return res.status(422).json({ error: "Could not resolve this invoice's supplier account." });
     if (isGrnLinked && !pgrnId) return res.status(422).json({ error: "Provision for Pending GRN system ledger not configured." });
     if (isGrnLinked && taxAmount > 0 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
-    if (!isGrnLinked && !debitLedgerId) return res.status(422).json({ error: "Purchase system ledger not configured." });
+    if (!isGrnLinked && taxAmount > 0.5 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
+    if (tdsAmount > 0.5 && !tdsPayableId) return res.status(422).json({ error: "TDS Payable system ledger not configured." });
+    const tdsNatureId = eb.TdsNatureGLHeadId;
+    if (tdsAmount > 0.5 && !tdsNatureId) {
+      return res.status(422).json({ error: `TDS Nature system ledger not configured for ${eb.TdsNature || "the selected TDS"} — link a GL head in TDS Master.` });
+    }
+    // Explicit posting structure (per spec):
+    //   Dr Expense Head(s)   (total - TDS)
+    //   Cr Supplier/Creditor (total - TDS)
+    //   Dr TDS Nature A/c     TDS amount   — a distinct GL head per TDS
+    //                                        Nature (194C/194J/...), NOT
+    //                                        lumped into the Expense Head
+    //   Cr TDS Payable A/c    TDS amount
+    // Both sides still sum to totalAmount either way (TDS just moves
+    // between the Expense Head and its own Nature account on the debit
+    // side), so relocating it here doesn't change the voucher's balance.
+    const tdsNatureLeg = tdsAmount > 0
+      ? [{ LHeadId: tdsNatureId, DebitAmount: tdsAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — TDS ${eb.TdsNature || ""} A/c`.trim() }]
+      : [];
+    // Supplier is credited net of TDS; the withheld amount is a separate
+    // liability leg, not part of what's owed to the vendor.
+    const creditLegs = (fullAmount, narrationSuffix = "") => {
+      const tdsShare = fullAmount >= totalAmount - 0.5 ? tdsAmount : Math.round((fullAmount / totalAmount) * tdsAmount * 100) / 100;
+      const supplierShare = Math.round((fullAmount - tdsShare) * 100) / 100;
+      return [
+        { LHeadId: supplierId, DebitAmount: 0, CreditAmount: supplierShare, Narration: `Invoice Posting: ${eb.EDocNo} — ${supplierLabel}${narrationSuffix}` },
+        ...(tdsShare > 0
+          ? [{ LHeadId: tdsPayableId, DebitAmount: 0, CreditAmount: tdsShare, Narration: `Invoice Posting: ${eb.EDocNo} — TDS Payable A/c${narrationSuffix}` }]
+          : []),
+      ];
+    };
+    // A direct (TOD) booking must always debit a real Expense Head — the
+    // Purchase A/C fallback below is reserved for PO/WO/WO_PO-sourced
+    // invoices (where there's no per-invoice head to pick from). The
+    // frontend already requires at least one Expense Head row before save,
+    // this is the server-side backstop against posting an older/legacy
+    // booking that predates that requirement straight to Purchase A/C.
+    if (!isGrnLinked && eb.ESourceType === "TOD" && expenseHeadAllocations.length === 0) {
+      return res.status(422).json({ error: "This invoice has no Expense Head tagged — edit it and add at least one before posting." });
+    }
+    if (!isGrnLinked && expenseHeadAllocations.length === 0 && !debitLedgerId) return res.status(422).json({ error: "Purchase system ledger not configured." });
+    if (!isGrnLinked && expenseHeadAllocations.length > 0) {
+      const allocSum = Math.round(expenseHeadAllocations.reduce((s, a) => s + a.amount, 0) * 100) / 100;
+      if (Math.abs(allocSum - totalAmount) > 0.5) {
+        return res.status(422).json({
+          error: `Expense Head amounts (₹${allocSum.toFixed(2)}) no longer add up to the invoice total (₹${totalAmount.toFixed(2)}) — re-save the invoice before posting.`,
+        });
+      }
+    }
 
     // GRN-linked: base clears the GRN provision; tax is recognized as
     // confirmed ITC (GST Credit Available) now that an actual invoice
@@ -3718,58 +4233,110 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // lumped set, so the journal entry itself carries a full per-GRN
     // audit trail instead of only the summary "Combined" total.
     const fmtGrnDate = (d) => d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "";
-    const lines = isGrnLinked
-      ? (perGrn && perGrn.length > 1 ? perGrn : [{ docNo: eb.EDocNo, date: null, baseAmount, taxAmount, totalAmount }])
-          .flatMap((g) => [
-            { LHeadId: pgrnId, DebitAmount: g.baseAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — Provision for Pending GRN (reversal) — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
-            ...(g.taxAmount > 0
-              ? [{ LHeadId: gstCreditId, DebitAmount: g.taxAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` }]
-              : []),
-            { LHeadId: supplierId, DebitAmount: 0, CreditAmount: g.totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
-          ])
-      : [
-          { LHeadId: debitLedgerId, DebitAmount: totalAmount, CreditAmount: 0,           Narration: `Invoice Posting: ${eb.EDocNo} — ${eb.EGLAccountId ? "GL Account" : "Purchase"}` },
-          { LHeadId: supplierId,    DebitAmount: 0,           CreditAmount: totalAmount, Narration: `Invoice Posting: ${eb.EDocNo} — Supplier Payable` },
-        ];
+    // Same per-group TDS share math creditLegs uses, applied to the debit
+    // side (Expense Head / Purchase / PGRN) instead of the credit side —
+    // TDS moves off the expense-side account into its own Nature account,
+    // it doesn't touch the GST Credit Available leg either way.
+    const tdsShareOf = (fullAmount) =>
+      tdsAmount <= 0 ? 0 : fullAmount >= totalAmount - 0.5 ? tdsAmount : Math.round((fullAmount / totalAmount) * tdsAmount * 100) / 100;
 
-    const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
-    // lockNextDocNumber takes a single options object, not positional args —
-    // calling it positionally (as this used to) silently failed every time,
-    // leaving VoucherNo as the JV-<id> fallback instead of a real locked doc
-    // number, and the frontend showing "Posted as ." (blank jvNo).
+    const lines = isGrnLinked
+      ? [
+          ...(perGrn && perGrn.length > 1 ? perGrn : [{ docNo: eb.EDocNo, date: null, baseAmount, taxAmount, totalAmount }])
+            .flatMap((g) => {
+              const gTdsShare = tdsShareOf(g.totalAmount);
+              return [
+                { LHeadId: pgrnId, DebitAmount: Math.round((g.baseAmount - gTdsShare) * 100) / 100, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — Provision for Pending GRN (reversal) — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
+                ...(g.taxAmount > 0
+                  ? [{ LHeadId: gstCreditId, DebitAmount: g.taxAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` }]
+                  : []),
+                ...creditLegs(g.totalAmount, ` — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}`),
+              ];
+            }),
+          ...tdsNatureLeg,
+        ]
+      : expenseHeadAllocations.length > 0
+        ? (() => {
+            // Each row's amount is GST-inclusive (it's required to sum to
+            // ENetAmount — see ExpenseHeadAllocationEditor). Scale every row
+            // by the invoice's own (base - TDS)/total ratio to get its
+            // net debit, and post ONE combined GST Credit Available leg for
+            // the tax, plus ONE combined TDS Nature leg for the TDS —
+            // rather than debiting the full inclusive amount to the
+            // Expense Head, which silently absorbed both into the expense.
+            const netRatio = totalAmount > 0 ? (baseAmount - tdsAmount) / totalAmount : 1;
+            const headLegs = expenseHeadAllocations.map((a) => ({
+              LHeadId: a.lHeadId,
+              DebitAmount: Math.round(a.amount * netRatio * 100) / 100,
+              CreditAmount: 0,
+              Narration: `Invoice Posting: ${eb.EDocNo} — ${a.lHeadName}`,
+            }));
+            // Any rounding leftover from per-row scaling goes to the GST
+            // leg (not silently dropped) so the voucher still balances to
+            // the paisa against Supplier Payable below.
+            const headNetSum = headLegs.reduce((s, l) => s + l.DebitAmount, 0);
+            const gstLegAmount = Math.round((totalAmount - tdsAmount - headNetSum) * 100) / 100;
+            return [
+              ...headLegs,
+              ...(gstLegAmount > 0
+                ? [{ LHeadId: gstCreditId, DebitAmount: gstLegAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available` }]
+                : []),
+              ...tdsNatureLeg,
+              ...creditLegs(totalAmount),
+            ];
+          })()
+        : [
+            // PO / WO / WO_PO-linked invoices, and TOD invoices with no
+            // Expense Heads tagged, land here. baseAmount/taxAmount were
+            // already back-derived from ECgstRate/ESgstRate/EIgstRate above
+            // (same as the Expense Head branch) — split the single
+            // Purchase/GL leg the same way instead of folding the ITC (and
+            // now TDS) into it, so every non-GRN posting recognizes GST
+            // Credit Available and TDS Nature consistently regardless of
+            // source type. Tax leg is the remainder (totalAmount - TDS -
+            // roundedBase), not independently rounded, so all legs always
+            // sum exactly to totalAmount.
+            ...(() => {
+              const baseLeg = Math.round((baseAmount - tdsAmount) * 100) / 100;
+              const taxLeg = Math.round((totalAmount - tdsAmount - baseLeg) * 100) / 100;
+              return [
+                { LHeadId: debitLedgerId, DebitAmount: baseLeg, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — ${eb.EGLAccountId ? "GL Account" : "Purchase"}` },
+                ...(taxLeg > 0
+                  ? [{ LHeadId: gstCreditId, DebitAmount: taxLeg, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available` }]
+                  : []),
+              ];
+            })(),
+            ...tdsNatureLeg,
+            ...creditLegs(totalAmount),
+          ];
+
+    // Voucher number only — GL posting is independent of the Journal
+    // Voucher module. This used to ALSO insert a dbo.JournalVoucher header +
+    // JournalVoucherLines row mirroring these exact legs, which meant every
+    // invoice posting silently created a second, duplicate-looking JV that
+    // (a) cluttered the Journal Voucher list with system-generated rows
+    // indistinguishable from real user-entered ones, and (b) would have
+    // double-posted the same accounting event a second time under
+    // SourceType='JournalVoucher' if anything ever approved/posted it (a
+    // GL-backfill script found exactly this). dbo.GeneralLedgerEntry below
+    // (SourceType='InvoicePosting') is the single, independent source of
+    // truth. The voucher number now comes from its own "GL" TypeOfDoc
+    // (migration 312) instead of borrowing "JV" — this was never a real
+    // Journal Voucher, so it shouldn't read like one ("JV-2026-00012").
+    // Uniqueness is tracked directly against GeneralLedgerEntry.VoucherNo,
+    // the actual table these numbers live in.
+    const dtId = await resolveDocTypeId(pool, sql, "GL").catch(() => null);
     const finalDocNo = dtId
       ? await lockNextDocNumber(pool, sql, {
           docTypeId: dtId,
-          tableName: "JournalVoucher",
-          docNoColumn: "JVNo",
+          tableName: "GeneralLedgerEntry",
+          docNoColumn: "VoucherNo",
           issuedBy: userEmail,
         }).catch(() => null)
       : null;
-    const insertHdr = await pool.request()
-      .input("JVNo", sql.NVarChar(100), finalDocNo || null)
-      .input("JVDate", sql.Date, new Date())
-      .input("Narration", sql.NVarChar(500), `Invoice Posting: ${eb.EDocNo}`)
-      .input("CompanyId", sql.Int, eb.CompanyId || null)
-      .input("ProjectId", sql.Int, eb.ProjectId || null)
-      .input("DocTypeId", sql.Int, dtId || null)
-      .input("CreatedBy", sql.NVarChar(150), userEmail)
-      .query(`INSERT INTO dbo.JournalVoucher (JVNo,JVDate,Narration,CompanyId,ProjectId,Status,DocTypeId,CreatedBy) OUTPUT INSERTED.JVID VALUES (@JVNo,@JVDate,@Narration,@CompanyId,@ProjectId,'Approved',@DocTypeId,@CreatedBy)`);
-    const jvId = insertHdr.recordset[0].JVID;
-
-    let sortOrder = 0;
-    for (const line of lines) {
-      await pool.request()
-        .input("JVID", sql.Int, jvId)
-        .input("LHeadId", sql.Int, line.LHeadId)
-        .input("DebitAmount", sql.Decimal(18,2), line.DebitAmount)
-        .input("CreditAmount", sql.Decimal(18,2), line.CreditAmount)
-        .input("Narration", sql.NVarChar(500), line.Narration)
-        .input("SortOrder", sql.Int, ++sortOrder)
-        .query(`INSERT INTO dbo.JournalVoucherLines (JVID,LHeadId,DebitAmount,CreditAmount,Narration,SortOrder) VALUES (@JVID,@LHeadId,@DebitAmount,@CreditAmount,@Narration,@SortOrder)`);
-    }
 
     await postVoucher(pool, {
-      voucherNo: finalDocNo || `JV-${jvId}`,
+      voucherNo: finalDocNo || `GL-EXB${ebId}`,
       voucherDate: new Date(),
       sourceType: "InvoicePosting",
       sourceId: ebId,
@@ -3780,7 +4347,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
       legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
     });
 
-    res.json({ jvId, jvNo: finalDocNo, message: "Posted successfully." });
+    res.json({ jvNo: finalDocNo, message: "Posted successfully." });
   } catch (err) {
     console.error("Invoice post-to-gl error:", err.message);
     res.status(500).json({ error: err.message });

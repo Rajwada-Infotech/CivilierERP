@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { useModule } from "@/contexts/ModuleContext";
 import {
   MasterPage,
@@ -34,6 +34,7 @@ import {
 } from "@/api/activityMasterApi";
 import { getHsn } from "@/api/hsnApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
+import { getLedgerOptions } from "@/api/generalLedgerApi";
 import {
   getActivityItems,
   addActivityItem,
@@ -288,8 +289,17 @@ const ActivityMaster: React.FC = () => {
     queryFn: getHsn,
   });
 
+  // GL Head options, for the Activity-only field below.
+  const { data: glHeadOptions = [] } = useQuery({
+    queryKey: ["gl-heads-for-activity"],
+    queryFn: getLedgerOptions,
+  });
+
+  // Activity Master is engineering-side (services), so only SAC-flagged
+  // HSN Master rows are offered here — plain HSN (goods) codes are hidden.
   const hsnOptions: { code: string; desc: string }[] = Array.isArray(hsnRaw)
     ? (hsnRaw as any[])
+        .filter((h) => h.HIsSAC === true)
         .map((h) => ({
           code: String(h.HCode ?? ""),
           desc: String(h.HShortDescription ?? h.HDescription ?? ""),
@@ -321,6 +331,8 @@ const ActivityMaster: React.FC = () => {
       belongsTo: item.belongsTo ?? "",
       status: item.is_active,
       hsnCode: item.hsn_code ?? "",
+      glHeadId: item.gl_head_id ?? "",
+      glHeadName: item.gl_head_name ?? "",
     };
   });
 
@@ -379,7 +391,7 @@ const ActivityMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", moduleBreadcrumb, "Activity Master"]} />
-      <AdminShell
+      <EngineeringShell
         title="Activity Master"
         subtitle="Manage activity groups and their individual activities across Engineering and Civil Work DPR modules"
         icon={Activity}
@@ -419,7 +431,7 @@ const ActivityMaster: React.FC = () => {
             },
             {
               name: "hsnCode",
-              label: "HSN Code",
+              label: "SAC Code",
               type: "custom",
               render: ({ value, onChange, formData }) => {
                 const isActivity = formData?.activityType === "Activity";
@@ -439,7 +451,7 @@ const ActivityMaster: React.FC = () => {
                       <option value="">
                         {!isActivity
                           ? "N/A — only for Activity type"
-                          : "Select HSN Code…"}
+                          : "Select SAC Code…"}
                       </option>
                       {isActivity &&
                         hsnOptions.map((h) => (
@@ -452,7 +464,48 @@ const ActivityMaster: React.FC = () => {
                     {!isActivity && (
                       <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                         <Hash size={10} />
-                        HSN can only be linked to an Activity, not a Group
+                        SAC can only be linked to an Activity, not a Group
+                      </p>
+                    )}
+                  </div>
+                );
+              },
+            },
+            {
+              name: "glHeadId",
+              label: "GL Head",
+              type: "custom",
+              render: ({ value, onChange, formData }) => {
+                const isActivity = formData?.activityType === "Activity";
+                return (
+                  <div className="flex flex-col gap-1">
+                    <select
+                      value={(value as string) ?? ""}
+                      disabled={!isActivity}
+                      onChange={(e) => onChange(e.target.value)}
+                      className={`w-full text-sm rounded-lg border px-3 py-2.5 transition focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none
+                        ${
+                          !isActivity
+                            ? "border-border bg-muted/40 text-muted-foreground cursor-not-allowed opacity-60"
+                            : "border-border bg-background text-foreground"
+                        }`}
+                    >
+                      <option value="">
+                        {!isActivity
+                          ? "N/A — only for Activity type"
+                          : "Select GL Head…"}
+                      </option>
+                      {isActivity &&
+                        glHeadOptions.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.code ? `${g.code} — ${g.label}` : g.label}
+                          </option>
+                        ))}
+                    </select>
+                    {!isActivity && (
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                        <Hash size={10} />
+                        GL Head can only be linked to an Activity, not a Group
                       </p>
                     )}
                   </div>
@@ -471,7 +524,8 @@ const ActivityMaster: React.FC = () => {
             { key: "shortDesc", label: "Short Desc", hideOnMobile: true },
             { key: "activityType", label: "Type" },
             { key: "groupName", label: "Group", hideOnMobile: true },
-            { key: "hsnCode", label: "HSN", hideOnMobile: true },
+            { key: "hsnCode", label: "SAC", hideOnMobile: true },
+            { key: "glHeadName", label: "GL Head", hideOnMobile: true },
             { key: "status", label: "Status" },
           ]}
           initialData={mappedData}
@@ -589,7 +643,7 @@ const ActivityMaster: React.FC = () => {
           )}
         </div>
       </div>
-      </AdminShell>
+      </EngineeringShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
@@ -663,12 +717,28 @@ const ActivityMaster: React.FC = () => {
               {viewRecord.activity_type === 1 && (
                 <div>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                    HSN Code
+                    SAC Code
                   </p>
                   {viewRecord.hsn_code ? (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
                       <Hash size={10} />
                       {viewRecord.hsn_code}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic text-sm">
+                      Not assigned
+                    </span>
+                  )}
+                </div>
+              )}
+              {viewRecord.activity_type === 1 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    GL Head
+                  </p>
+                  {viewRecord.gl_head_name ? (
+                    <span className="text-sm text-foreground">
+                      {viewRecord.gl_head_name}
                     </span>
                   ) : (
                     <span className="text-muted-foreground italic text-sm">
@@ -779,7 +849,7 @@ const ActivityMaster: React.FC = () => {
             <button
               onClick={handleAddItem}
               disabled={!pickedItemId}
-              className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold bg-primary text-primary-foreground disabled:opacity-40"
+              className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-engineering text-white disabled:opacity-40 transition-all"
             >
               Add
             </button>

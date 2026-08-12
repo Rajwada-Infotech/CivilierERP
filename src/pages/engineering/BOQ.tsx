@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -8,6 +9,8 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { type DbItem } from "@/api/itemMasterApi";
 import { type DbActivity } from "@/api/activityMasterApi";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { AmendedBadge } from "@/components/AmendedBadge";
+import { useAmendmentStatus } from "@/hooks/useAmendmentStatus";
 import {
   FileText,
   Save,
@@ -18,6 +21,7 @@ import {
   RefreshCw,
   X,
   Edit3,
+  FilePenLine,
   Package,
   Settings2,
   Printer,
@@ -1449,7 +1453,7 @@ const FormModal: React.FC<FormModalProps> = ({
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="gradient-accent gap-1.5 font-semibold text-white text-sm px-5 py-2 h-auto"
+              className="gradient-engineering inline-flex items-center gap-1.5 font-heading font-semibold text-white text-xs px-4 py-1.5 rounded-lg h-auto"
             >
               {saving ? (
                 <RefreshCw className="animate-spin" size={14} />
@@ -1741,6 +1745,8 @@ const DetailModal: React.FC<DetailModalProps> = ({
 }) => {
   const [lineTab, setLineTab] = useState<"items" | "activities">("items");
   const [acting, setActing] = useState(false);
+  const navigate = useNavigate();
+  const amendmentStatus = useAmendmentStatus("BOQ", record.BoqID, record.Status);
 
   const doDelete = async () => {
     if (!window.confirm("Delete this BOQ and all its items/activities?"))
@@ -1826,6 +1832,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
               {record.BoqNo || record.DocNo}
             </span>
             <ApprovalStatusChain table="BOQ" recordId={record.BoqID} />
+            {amendmentStatus.isAmended && <AmendedBadge />}
           </div>
 
           {/* Right-side actions */}
@@ -1859,6 +1866,30 @@ const DetailModal: React.FC<DetailModalProps> = ({
                   Submit for Approval <Send size={12} className="ml-1.5" />
                 </Button>
               </>
+            )}
+            {record.Status === "Approved" && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={acting}
+                onClick={() =>
+                  navigate("/engineering/amendment-menu", {
+                    state: {
+                      prefill: {
+                        tab: "BOQ",
+                        docId: record.BoqID,
+                        docNo: record.BoqNo || record.DocNo,
+                        projectName: record.ProjectName,
+                        companyName: record.CompanyName,
+                        totalAmount: record.TotalAmount,
+                      },
+                    },
+                  })
+                }
+                className="text-violet-600 dark:text-violet-400 hover:bg-violet-500/10"
+              >
+                <FilePenLine size={13} className="mr-1.5" /> Amend
+              </Button>
             )}
           </div>
         </div>
@@ -2002,6 +2033,29 @@ const DetailModal: React.FC<DetailModalProps> = ({
                   submitOnly
                 />
               </>
+            )}
+            {record.Status === "Approved" && (
+              <Button
+                variant="secondary"
+                disabled={acting}
+                onClick={() =>
+                  navigate("/engineering/amendment-menu", {
+                    state: {
+                      prefill: {
+                        tab: "BOQ",
+                        docId: record.BoqID,
+                        docNo: record.BoqNo || record.DocNo,
+                        projectName: record.ProjectName,
+                        companyName: record.CompanyName,
+                        totalAmount: record.TotalAmount,
+                      },
+                    },
+                  })
+                }
+                className="text-violet-600 dark:text-violet-400 hover:bg-violet-500/10"
+              >
+                <FilePenLine size={14} className="mr-1.5" /> Amend
+              </Button>
             )}
           </div>
         </div>
@@ -2553,15 +2607,15 @@ export default function BOQ() {
                 Refresh
               </button>
               {rights.canCreate && (
-                <Button
+                <button
                   onClick={() => {
                     setEditRecord(null);
                     setShowForm(true);
                   }}
-                  className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+                  className="gradient-engineering inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white text-xs px-4 py-1.5 rounded-lg transition-all"
                 >
-                  <Plus size={15} /> New BOQ
-                </Button>
+                  <Plus size={13} /> New BOQ
+                </button>
               )}
             </div>
           }
@@ -2626,7 +2680,7 @@ export default function BOQ() {
                     key={s}
                     variant={filterStatus === s ? "default" : "outline"}
                     size="sm"
-                    className={`h-8 rounded-full text-xs font-semibold${filterStatus === s ? " gradient-accent text-white border-0" : ""}`}
+                    className={`h-8 rounded-full text-xs font-semibold${filterStatus === s ? " gradient-engineering text-white border-0" : ""}`}
                     onClick={() => {
                       setFilterStatus(s);
                       setPage(1);

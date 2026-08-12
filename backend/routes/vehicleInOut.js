@@ -401,8 +401,18 @@ router.get("/pending-summary", async (req, res) => {
             WHERE vi.POItemId = poi.Id AND v.Status NOT IN ('Rejected', 'Deleted')
           ), 0) AS ReceivedQty
         FROM dbo.PurchaseOrderItems poi
-        JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = poi.ItemId
-        WHERE im.M_Type = 'Goods'
+        LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = poi.ItemId
+        -- Exclude Service lines (nothing physical for a vehicle to deliver)
+        -- rather than requiring M_Type = 'Goods' exactly. Most real item
+        -- catalog rows are tagged 'SubGroup'/'Group' (their catalog-tree
+        -- category, not "Goods" vs "Service") or have no Item_Master_Group
+        -- match at all, so an exact 'Goods' filter silently excluded almost
+        -- every real PO's items from this CTE — which meant it never
+        -- appeared in ItemAgg below, so pending-summary (and therefore the
+        -- Vehicle In/Out PO picker) reported it as having nothing pending
+        -- and hid it entirely, even freshly-approved POs no vehicle had
+        -- ever received against.
+        WHERE ISNULL(im.M_Type, '') <> 'Service'
       ),
       ItemAgg AS (
         SELECT

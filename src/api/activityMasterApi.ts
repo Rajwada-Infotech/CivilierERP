@@ -19,6 +19,8 @@ export interface DbActivity {
   updated_at: string | null;
   belongsTo: string | null; // nvarchar(200) — stores group_id as string, NULL for Groups
   hsn_code: string | null; // nvarchar(50) — linked HSN code, only for Activities
+  gl_head_id: number | null; // FK → AccountHeadMaster.LHeadId, only for Activities
+  gl_head_name: string | null;
 }
 
 export interface ActivityPayload {
@@ -29,6 +31,7 @@ export interface ActivityPayload {
   is_active: boolean;
   belongsTo: string | null; // nvarchar(200) — NULL for Groups, String(group_id) for Activities
   hsn_code: string | null; // nvarchar(50) — NULL for Groups, optional for Activities
+  gl_head_id: number | null; // NULL for Groups, optional for Activities
 }
 
 export interface ApiResponse {
@@ -57,6 +60,9 @@ export const toPayload = (
     is_active: r.status !== false,
     belongsTo: isGroup ? null : groupId ? String(groupId) : null, // NULL for Group, "id" string for Activity
     hsn_code: isGroup ? null : (r.hsnCode as string) || null, // NULL for Group, optional for Activity
+    // Custom-render select (see ActivityMaster.tsx) hands back the raw id
+    // as a string via onChange — parse it, don't cast, or "" is coerced to 0.
+    gl_head_id: isGroup ? null : r.glHeadId ? Number(r.glHeadId) : null,
   };
 };
 

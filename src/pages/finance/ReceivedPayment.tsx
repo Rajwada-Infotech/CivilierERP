@@ -2,6 +2,7 @@ import React from "react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,21 +71,27 @@ import { formatINR } from "@/utils/formatCurrency";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { usePageRights } from "@/hooks/usePageRights";
+import { EditOrAmendButton } from "@/components/EditOrAmendButton";
+import { AmendedBadge } from "@/components/AmendedBadge";
+import { useAmendmentStatus } from "@/hooks/useAmendmentStatus";
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
+// Mirrors the visible table's own column order (Doc No → Date → Fin Year →
+// Company → Project → Customer → Mode → Deposit Bank → Amount → Status)
+// so the export reads like the page it came from.
 const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Doc No", accessor: "docNo" },
-  { header: "Received From", accessor: "receivedFrom" },
-  { header: "Customer", accessor: "customerName" },
-  { header: "Project", accessor: "projectName" },
-  { header: "Company", accessor: "companyName" },
-  { header: "Mode", accessor: "mode" },
   { header: "Date", accessor: "docDate" },
+  { header: "Fin Year", accessor: (r) => String((r as any).finYear || "—") },
+  { header: "Company", accessor: "companyName" },
+  { header: "Project", accessor: "projectName" },
+  { header: "Customer", accessor: (r) => String(r.customerName || r.receivedFrom || "—") },
+  { header: "Mode", accessor: "mode" },
+  { header: "Deposit Bank", accessor: "depositBankName" },
   { header: "Amount", accessor: (r) => formatINR(Number(r.amount || 0)) },
-  { header: "Bank", accessor: "depositBankName" },
-  { header: "Transaction / Cheque Ref", accessor: (r) => String(r.transactionId || r.checkNumber || "") },
   { header: "Status", accessor: "status" },
+  { header: "Transaction / Cheque Ref", accessor: (r) => String(r.transactionId || r.checkNumber || "") },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -306,40 +313,6 @@ function CustomerCombobox({
 
 // ─── Empty State ──────────────────────────────────────────────────────────────
 
-// ─── Status Badge ─────────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: string }) {
-  if (status === "Draft")
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-muted text-muted-foreground border border-border">
-        Draft
-      </span>
-    );
-  if (status === "Pending")
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 animate-pulse" />
-        Pending
-      </span>
-    );
-  if (status === "Approved")
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20">
-        ✓ Approved
-      </span>
-    );
-  if (status === "Rejected")
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
-        ✕ Rejected
-      </span>
-    );
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-muted text-muted-foreground border border-border">
-      {status}
-    </span>
-  );
-}
-
 function EmptyState() {
   return (
     <div className="text-center py-14 text-muted-foreground text-sm">
@@ -373,6 +346,11 @@ export default function ReceivedPaymentPage() {
   );
   const [viewingPayment, setViewingPayment] = useState<ReceivedPayment | null>(
     null,
+  );
+  const viewingAmendmentStatus = useAmendmentStatus(
+    "ReceivedPayment",
+    viewingPayment?.id,
+    viewingPayment?.status,
   );
   const PAGE_SIZE = 20;
 
@@ -1096,14 +1074,20 @@ export default function ReceivedPaymentPage() {
                                 <Printer size={13} />
                               </button>
                             )}
-                            {rights.canEdit && p.status === "Draft" && (
-                              <button
-                                onClick={() => openEdit(p)}
-                                title="Edit"
-                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-blue-500 hover:bg-blue-500/10 transition-colors"
-                              >
-                                <Pencil size={13} />
-                              </button>
+                            {(p.status === "Draft" || p.status === "Approved") && (
+                              <EditOrAmendButton
+                                refDocType="ReceivedPayment"
+                                refDocId={p.id}
+                                docStatus={p.status}
+                                docNo={p.docNo}
+                                projectName={p.projectName}
+                                companyName={p.companyName}
+                                totalAmount={p.amount}
+                                amendTab="RECEIVED_PAYMENT"
+                                amendMenuPath="/material/amendment-menu"
+                                canEdit={rights.canEdit}
+                                onEdit={() => openEdit(p)}
+                              />
                             )}
                             {p.status === "Draft" && (
                               <button
@@ -1190,13 +1174,20 @@ export default function ReceivedPaymentPage() {
                             <Printer size={13} />
                           </button>
                         )}
-                        {rights.canEdit && p.status === "Draft" && (
-                          <button
-                            onClick={() => openEdit(p)}
-                            className="p-1.5 text-muted-foreground/50 hover:text-blue-500"
-                          >
-                            <Pencil size={13} />
-                          </button>
+                        {(p.status === "Draft" || p.status === "Approved") && (
+                          <EditOrAmendButton
+                            refDocType="ReceivedPayment"
+                            refDocId={p.id}
+                            docStatus={p.status}
+                            docNo={p.docNo}
+                            projectName={p.projectName}
+                            companyName={p.companyName}
+                            totalAmount={p.amount}
+                            amendTab="RECEIVED_PAYMENT"
+                            amendMenuPath="/material/amendment-menu"
+                            canEdit={rights.canEdit}
+                            onEdit={() => openEdit(p)}
+                          />
                         )}
                         {p.status === "Draft" && (
                           <button
@@ -1905,6 +1896,9 @@ export default function ReceivedPaymentPage() {
 
             {/* Footer */}
             <div className="px-5 py-3 border-t border-border bg-muted/10 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {viewingAmendmentStatus.isAmended && <AmendedBadge />}
+              </div>
               <p className="text-[10px] text-muted-foreground">
                 Created{" "}
                 {viewingPayment.createdAt
@@ -1947,6 +1941,22 @@ export default function ReceivedPaymentPage() {
                     <SendHorizontal size={12} /> Submit
                   </button>
                 </div>
+              )}
+              {viewingPayment.status === "Approved" && rights.canEdit && (
+                <EditOrAmendButton
+                  refDocType="ReceivedPayment"
+                  refDocId={viewingPayment.id}
+                  docStatus={viewingPayment.status}
+                  docNo={viewingPayment.docNo}
+                  projectName={viewingPayment.projectName}
+                  companyName={viewingPayment.companyName}
+                  totalAmount={viewingPayment.amount}
+                  amendTab="RECEIVED_PAYMENT"
+                  amendMenuPath="/material/amendment-menu"
+                  canEdit={rights.canEdit}
+                  size="sm"
+                  onEdit={() => {}}
+                />
               )}
             </div>
           </div>

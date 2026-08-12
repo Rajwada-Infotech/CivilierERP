@@ -49,6 +49,12 @@ export function blankForm(): Omit<PaymentRecord, "id"> {
     supplierContact: "",
     contractId: "",
     partyId: null,
+    expenseHeadAllocations: [],
+    tdsId: null,
+    tdsNature: null,
+    tdsName: null,
+    tdsPercentage: null,
+    tdsAmount: 0,
   };
 }
 
@@ -104,5 +110,19 @@ export function dbToRecord(item: DbPayment): PaymentRecord {
     billingTermsData: null,
     contractId: String((item as { ContractId?: number }).ContractId ?? ""),
     partyId: (item as any).PPartyId ?? null,
+    expenseHeadAllocations: Array.isArray((item as any).EExpenseHeadAllocations)
+      ? (item as any).EExpenseHeadAllocations.map((a: any) => ({
+          _key: `eha-${a.allocationId}`,
+          lHeadId: a.lHeadId ?? null,
+          label: a.lHeadName ?? null,
+          code: a.lHeadCode ?? null,
+          amount: Number(a.amount) || 0,
+        }))
+      : [],
+    tdsId: (item as any).TDSId ?? null,
+    tdsNature: (item as any).TDSNature ?? null,
+    tdsName: (item as any).TDSName ?? null,
+    tdsPercentage: (item as any).TDSPercentage != null ? Number((item as any).TDSPercentage) : null,
+    tdsAmount: (item as any).TDSAmount != null ? Number((item as any).TDSAmount) : 0,
   };
 }

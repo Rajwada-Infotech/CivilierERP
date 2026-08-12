@@ -1318,7 +1318,7 @@ export default function DailyProgressReport() {
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="group flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-muted transition-all duration-200 active:scale-90 disabled:opacity-60"
+              className="group flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-all duration-200 active:scale-90 disabled:opacity-50"
             >
               <RefreshCw
                 size={13}
@@ -1331,7 +1331,7 @@ export default function DailyProgressReport() {
               <button
                 onClick={handleCSV}
                 disabled={!data}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all disabled:opacity-40 font-heading font-medium"
               >
                 <FileSpreadsheet size={13} className="text-emerald-600" />
                 CSV
@@ -1342,7 +1342,7 @@ export default function DailyProgressReport() {
               <button
                 onClick={handlePDF}
                 disabled={!data}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 font-medium shadow-sm"
+                className="gradient-engineering inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-heading font-semibold text-white rounded-lg disabled:opacity-40 transition-all"
               >
                 <Printer size={13} />
                 Print / PDF

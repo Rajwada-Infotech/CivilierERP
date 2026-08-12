@@ -65,7 +65,7 @@ interface Item {
   itemName: string;
   description: string;
   shortCode: string;
-  itemType: "Service" | "Goods" | "";
+  itemType: "Service" | "Goods" | "Fixed Asset" | "";
   hsnCode: string;
   cgst: number;
   sgst: number;
@@ -148,7 +148,7 @@ const CSV_HEADERS = {
   uomCode: "UOM",
   hsnCode: "HSN Code",
   defaultSupplier: "Default Supplier",
-  glLedger: "GL Ledger",
+  glLedger: "GL Account",
   costCentre: "Cost Centre",
   description: "Description",
 } as const;
@@ -381,9 +381,12 @@ const ItemMaster: React.FC = () => {
         }))
     : [];
 
+  // Item Master is the material-module (goods) master, so only plain HSN
+  // codes are offered here — SAC-flagged (services) codes are reserved for
+  // the engineering module's Activity Master / Work Order.
   const hsnCodes: HsnCode[] = Array.isArray(dbHsn)
     ? dbHsn
-        .filter((h: any) => h.HStatus !== false)
+        .filter((h: any) => h.HStatus !== false && h.HIsSAC !== true)
         .map((h: any) => ({
           code: h.HCode || "",
           description: h.HShortDescription || h.HDescription || "",
@@ -437,9 +440,9 @@ const ItemMaster: React.FC = () => {
     }),
   );
 
-  // GL Ledger master options — mirrors what GLAccountSelect fetches
+  // GL Account master options — mirrors what GLAccountSelect fetches
   // internally, but this page also needs the raw list itself to resolve a
-  // "GL Ledger" name/code typed in a CSV import row (GLAccountSelect only
+  // "GL Account" name/code typed in a CSV import row (GLAccountSelect only
   // exposes a picker UI, not a lookup API).
   const { data: dbGlAccounts = [] } = useQuery({
     queryKey: ["gl-accounts-for-item-master"],
@@ -719,10 +722,12 @@ const ItemMaster: React.FC = () => {
               ? "Service"
               : itemTypeRaw.toLowerCase() === "goods"
                 ? "Goods"
-                : "";
+                : itemTypeRaw.toLowerCase() === "fixed asset"
+                  ? "Fixed Asset"
+                  : "";
           if (!itemType)
             throw new Error(
-              `Item Type must be "Goods" or "Service" (got "${itemTypeRaw}")`,
+              `Item Type must be "Goods", "Service", or "Fixed Asset" (got "${itemTypeRaw}")`,
             );
 
           if (!itemGroupRaw) throw new Error("Item Group is required");
@@ -757,7 +762,7 @@ const ItemMaster: React.FC = () => {
             defaultSupplierId = matchedSupplier.value;
           }
 
-          // GL Ledger tag is optional — match by label or code.
+          // GL Account tag is optional — match by label or code.
           let glHeadId = "";
           if (glLedgerRaw) {
             const matchedGl = (Array.isArray(dbGlAccounts) ? dbGlAccounts : []).find(
@@ -766,7 +771,7 @@ const ItemMaster: React.FC = () => {
                 (g.code ?? "").toLowerCase() === glLedgerRaw.toLowerCase(),
             );
             if (!matchedGl)
-              throw new Error(`GL Ledger "${glLedgerRaw}" was not found`);
+              throw new Error(`GL Account "${glLedgerRaw}" was not found`);
             glHeadId = String(matchedGl.id);
           }
 
@@ -872,6 +877,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "shortCode",
       header: "Short Code",
+      size: 100,
       cell: ({ row }) => (
         <span className="font-mono font-medium text-primary">
           {row.original.shortCode}
@@ -881,6 +887,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "itemName",
       header: "Item Name",
+      size: 170,
       cell: ({ row }) => (
         <span className="font-medium">{row.original.itemName}</span>
       ),
@@ -888,6 +895,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "description",
       header: "Description",
+      size: 240,
       cell: ({ row }) => (
         <span className="text-muted-foreground text-sm">
           {row.original.description || "-"}
@@ -897,6 +905,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "itemType",
       header: "Type",
+      size: 110,
       cell: ({ row }) => {
         const type = row.original.itemType;
         if (!type) return <span className="text-muted-foreground">-</span>;
@@ -905,7 +914,9 @@ const ItemMaster: React.FC = () => {
             className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
               type === "Service"
                 ? "bg-blue-500/10 text-blue-600"
-                : "bg-green-500/10 text-green-600"
+                : type === "Fixed Asset"
+                  ? "bg-violet-500/10 text-violet-600"
+                  : "bg-green-500/10 text-green-600"
             }`}
           >
             {type}
@@ -916,6 +927,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "belongsTo",
       header: "Group",
+      size: 150,
       cell: ({ row }) => {
         const group = itemGroups.find((g) => g.id === row.original.belongsTo);
         return (
@@ -928,6 +940,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "uomCode",
       header: "UOM",
+      size: 130,
       cell: ({ row }) => {
         const uomRaw = Array.isArray(dbUoms)
           ? (dbUoms as any[]).find(
@@ -945,6 +958,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "defaultSupplierId",
       header: "Default Supplier",
+      size: 160,
       cell: ({ row }) => {
         const sup = supplierOptions.find(
           (s) => s.value === row.original.defaultSupplierId,
@@ -958,7 +972,8 @@ const ItemMaster: React.FC = () => {
     },
     {
       accessorKey: "glHeadId",
-      header: "GL Ledger",
+      header: "GL Account",
+      size: 150,
       cell: ({ row }) => (
         <span className="text-sm text-muted-foreground">
           {dbItems?.find((i) => i.M_Id === row.original._id)?.GLHeadName || "-"}
@@ -968,6 +983,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "costCenterId",
       header: "Cost Centre",
+      size: 150,
       cell: ({ row }) => {
         const cc = costCenterOptions.find(
           (c) => c.value === row.original.costCenterId,
@@ -980,6 +996,7 @@ const ItemMaster: React.FC = () => {
     {
       accessorKey: "hsnCode",
       header: "HSN",
+      size: 90,
       cell: ({ row }) => (
         <span className="font-mono text-sm">{row.original.hsnCode || "-"}</span>
       ),
@@ -987,6 +1004,7 @@ const ItemMaster: React.FC = () => {
     {
       id: "tax",
       header: "CGST / SGST / IGST",
+      size: 160,
       cell: ({ row }) => {
         const { cgst, sgst, igst } = row.original;
         const hasRate = cgst > 0 || sgst > 0 || igst > 0;
@@ -1002,6 +1020,7 @@ const ItemMaster: React.FC = () => {
     {
       id: "actions",
       header: "Actions",
+      size: 140,
       cell: ({ row }) => {
         const id = row.original._id;
         const isConfirming = deleteConfirmId === id;
@@ -1260,6 +1279,7 @@ const ItemMaster: React.FC = () => {
                 <option value="">Select type...</option>
                 <option value="Service">Service</option>
                 <option value="Goods">Goods</option>
+                <option value="Fixed Asset">Fixed Asset</option>
               </select>
             </Field>
             {/* HSN Code */}
@@ -1295,12 +1315,12 @@ const ItemMaster: React.FC = () => {
                 ))}
               </select>
             </Field>
-            {/* GL Ledger tag — the account this item's spend is booked under */}
-            <Field label="GL Ledger">
+            {/* GL Account tag — the account this item's spend is booked under */}
+            <Field label="GL Account">
               <GLAccountSelect
                 value={form.glHeadId ? parseInt(form.glHeadId, 10) : null}
                 onChange={(id) => set("glHeadId", id ? String(id) : "")}
-                placeholder="— No GL ledger tag —"
+                placeholder="— No GL account tag —"
               />
             </Field>
             {/* Cost Centre tag — auto-fills the Cost Centre when this item is

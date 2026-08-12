@@ -1,4 +1,6 @@
 // ─── Types shared across the Payment page and its sub-components ──────────────
+import type { ExpenseHeadAllocationRow } from "@/pages/material/ExpenseBooking/types";
+export type { ExpenseHeadAllocationRow };
 
 export interface DbPayment {
   PPaymentID: number;
@@ -89,6 +91,9 @@ export interface ExpenseOption {
   partyName?: string;
   partyId?: number | null;
   amount?: number;
+  /** TDS withheld at source on this invoice, 0 when not applicable —
+   * amount − tdsAmount is what's actually payable in cash. */
+  tdsAmount?: number;
   companyId?: number | null;
   companyName?: string;
   financialYear?: string;
@@ -187,6 +192,20 @@ export interface PaymentRecord {
   // linked GRN/PO/WorkDone. Stored as PPartyId on NewPayment so resolvePartyFromRef
   // can derive it for On Account credit logic.
   partyId: number | null;
+  // Direct Expense Payment (migration 303, dbo.ExpenseHeadAllocation) — pay
+  // one or more Expense Heads straight from the bank instead of a Party.
+  // When set (non-empty), this takes priority over partyId at posting time.
+  expenseHeadAllocations: ExpenseHeadAllocationRow[];
+  // TDS (migration 304) — snapshot taken at payment time. For an
+  // invoice-linked payment this is inherited read-only from the invoice's
+  // own snapshot (never user-chosen here); for a direct payment it's
+  // user-selected. Either way the backend always re-derives/re-validates
+  // it, this is just what got persisted.
+  tdsId: number | null;
+  tdsNature: string | null;
+  tdsName: string | null;
+  tdsPercentage: number | null;
+  tdsAmount: number;
 }
 
 export const PAYMENT_MODES = [
@@ -207,6 +226,11 @@ export interface ChainSummary {
   status: string | null;
   billStatus: string | null;
   netAmount: number;
+  /** TDS withheld at source on this invoice (0 when not applicable) —
+   * deducted from netAmount before computing what's actually still payable. */
+  tdsAmount: number;
+  /** netAmount − tdsAmount, floored at 0 — what's actually payable in cash. */
+  payableAfterTds: number;
   totalPaid: number;
   remaining: number;
   payments: {

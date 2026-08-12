@@ -43,6 +43,7 @@ import {
   ShieldCheck,
   CalendarClock,
   Wand2,
+  GitBranch,
 } from "lucide-react";
 import {
   Bank,
@@ -314,6 +315,13 @@ const financeSetupItems: SetupItem[] = [
     color: "text-lime-500",
     pageKey: "payment-reason-master",
   },
+  {
+    icon: Users,
+    label: "Customer Master",
+    path: "/masters/customers",
+    color: "text-violet-500",
+    pageKey: "customer-master",
+  },
 ];
 
 const materialSetupItems: SetupItem[] = [
@@ -399,6 +407,13 @@ const engineeringSetupItems: SetupItem[] = [
     color: "text-orange-400",
     pageKey: "activity-master",
   },
+  {
+    icon: GitBranch,
+    label: "Dependency Master",
+    path: "/masters/dependency",
+    color: "text-cyan-400",
+    pageKey: "dependency-master",
+  },
 ];
 
 const salesAutomationSetupItems: SetupItem[] = [
@@ -448,13 +463,6 @@ const crmSetupItems: SetupItem[] = [
     path: "/crm/setup/auto-project-setup",
     color: "text-fuchsia-500",
     pageKey: "crm-auto-project-setup",
-  },
-  {
-    icon: Users,
-    label: "Customer Master",
-    path: "/masters/customers",
-    color: "text-violet-500",
-    pageKey: "customer-master",
   },
   {
     icon: Ruler,

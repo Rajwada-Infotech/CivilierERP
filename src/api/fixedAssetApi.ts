@@ -21,7 +21,7 @@ export interface FixedAssetListItem {
   Department: string | null;
   Custodian: string | null;
   DepreciationRate: number | null;
-  AssetStatus: "Active" | "Sold" | "Scrapped" | "Under Maintenance";
+  AssetStatus: "Pending" | "Active" | "Sold" | "Scrapped" | "Under Maintenance";
   SellingPrice: number | null;
   Status: string;
   CompanyId: number | null;

@@ -307,10 +307,9 @@ router.post(
         .input("RoleId", sql.Int, assignedRoleId)
         .input("can_accept_tickets", sql.Bit, can_accept_tickets ? 1 : 0)
         .input("password", sql.NVarChar, hashed).query(`
-          INSERT INTO dbo.users (name, email, password, RoleId, role, created_datetime, discontinue, can_accept_tickets)
+          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets)
           VALUES (
             @name, @email, @password, @RoleId,
-            (SELECT RName FROM dbo.Role WHERE RId = @RoleId),
             GETDATE(), 0, @can_accept_tickets
           )
         `);

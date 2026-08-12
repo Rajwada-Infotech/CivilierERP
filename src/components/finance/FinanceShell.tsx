@@ -101,8 +101,15 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
           }}
         />
 
-        <div className="relative z-10 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <div className="flex items-center gap-3">
+        {/* flex-row only kicks in at lg — below that, a wide action cluster
+            (several labeled buttons) has nowhere to go but to steal width
+            from the title block, which has no explicit basis and so
+            shrinks toward its word-wrap minimum, squeezing the subtitle
+            down to one or two words per line. Stacking through the whole
+            sm/md range sidesteps that; the action row's own flex-wrap
+            still lets its buttons wrap sensibly once it has full width. */}
+        <div className="relative z-10 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3 min-w-0">
             {/* Icon badge */}
             <div
               className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
@@ -117,7 +124,7 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
                 : <Landmark size={16} style={{ color: "#818cf8" }} />
               }
             </div>
-            <div>
+            <div className="min-w-0">
               <h1
                 className="text-base font-heading font-bold"
                 style={{ color: isDark ? "#e0e7ff" : "#3730a3" }}
@@ -131,7 +138,7 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
               )}
             </div>
           </div>
-          {action && <div className="shrink-0">{action}</div>}
+          {action && <div className="w-full lg:w-auto lg:shrink-0">{action}</div>}
         </div>
       </motion.div>
 

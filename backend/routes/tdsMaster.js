@@ -10,7 +10,15 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 router.get("/", cache("tds-master", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query("SELECT * FROM dbo.TDSMaster");
+    // GLHeadId alone isn't enough for the frontend to show which ledger a
+    // record is linked to without a second round-trip — join the head's own
+    // name/code in directly, same pattern as every other *Name convenience
+    // column already returned elsewhere in this codebase.
+    const result = await pool.request().query(`
+      SELECT tm.*, ahm.LHeadName AS GLHeadName, ahm.LHeadCode AS GLHeadCode
+      FROM dbo.TDSMaster tm
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = tm.GLHeadId
+    `);
     res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -18,18 +26,19 @@ router.get("/", cache("tds-master", 300), async (req, res) => {
 });
 
 router.post("/", requirePageRight("tds-master", "create"), async (req, res) => {
-  const { Nature, Name, Percentage, Status } = req.body;
+  const { Nature, Name, Percentage, Status, GLHeadId } = req.body;
   try {
     const pool = getPool();
     await pool
       .request()
       .input("Nature", sql.NVarChar, Nature || null)
       .input("Name", sql.NVarChar, Name || null)
-      .input("Percentage", sql.Decimal(5, 2), Percentage || null)
+      .input("Percentage", sql.Decimal(5, 2), Percentage ?? null)
       .input("Status", sql.Bit, Status ? 1 : 0)
+      .input("GLHeadId", sql.Int, GLHeadId || null)
       .input("CreatedAt", sql.DateTime, new Date()).query(`
-        INSERT INTO dbo.TDSMaster (Nature, Name, Percentage, Status, CreatedAt)
-        VALUES (@Nature, @Name, @Percentage, @Status, @CreatedAt)
+        INSERT INTO dbo.TDSMaster (Nature, Name, Percentage, Status, GLHeadId, CreatedAt)
+        VALUES (@Nature, @Name, @Percentage, @Status, @GLHeadId, @CreatedAt)
       `);
     await bumpCacheVersion("tds-master");
 
@@ -40,7 +49,7 @@ router.post("/", requirePageRight("tds-master", "create"), async (req, res) => {
 });
 
 router.put("/:id", requirePageRight("tds-master", "edit"), async (req, res) => {
-  const { Nature, Name, Percentage, Status } = req.body;
+  const { Nature, Name, Percentage, Status, GLHeadId } = req.body;
   try {
     const pool = getPool();
     await pool
@@ -48,12 +57,13 @@ router.put("/:id", requirePageRight("tds-master", "edit"), async (req, res) => {
       .input("TDSId", sql.Int, req.params.id)
       .input("Nature", sql.NVarChar, Nature || null)
       .input("Name", sql.NVarChar, Name || null)
-      .input("Percentage", sql.Decimal(5, 2), Percentage || null)
+      .input("Percentage", sql.Decimal(5, 2), Percentage ?? null)
       .input("Status", sql.Bit, Status ? 1 : 0)
+      .input("GLHeadId", sql.Int, GLHeadId || null)
       .input("UpdatedAt", sql.DateTime, new Date()).query(`
         UPDATE dbo.TDSMaster SET
           Nature=@Nature, Name=@Name, Percentage=@Percentage,
-          Status=@Status, UpdatedAt=@UpdatedAt
+          Status=@Status, GLHeadId=@GLHeadId, UpdatedAt=@UpdatedAt
         WHERE TDSId=@TDSId
       `);
     await bumpCacheVersion("tds-master");

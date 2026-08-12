@@ -112,7 +112,20 @@ function expenseBookingSupplierSql(ebAlias, suffix) {
                  END
           END`;
 
-  return { joins, nameExpr, idExpr, gstRegisteredExpr };
+  // Whether the resolved supplier/contractor has TDS switched on
+  // (AccountHeadMaster.IsTdsApplicable) — same CASE shape as
+  // gstRegisteredExpr above, walked across every possible source type.
+  // Returns 1/0, or NULL when no supplier/contractor row resolved at all.
+  const tdsApplicableExpr = `
+          CASE
+            WHEN ${ebAlias}.ESourceType = 'GRN' AND ${ebAlias}.ESourceId IS NOT NULL THEN ${grnSuppT}.IsTdsApplicable
+            WHEN ${ebAlias}.ESourceType IN ('PO','WO_PO') THEN ${poSuppT}.IsTdsApplicable
+            WHEN ${ebAlias}.ESourceType = 'WORK_DONE' THEN ${wdSuppT}.IsTdsApplicable
+            WHEN ${ebAlias}.ESourceType = 'WO' THEN ${woSuppT}.IsTdsApplicable
+            ELSE ${directSuppT}.IsTdsApplicable
+          END`;
+
+  return { joins, nameExpr, idExpr, gstRegisteredExpr, tdsApplicableExpr };
 }
 
 module.exports = { expenseBookingSupplierSql };

@@ -11,6 +11,7 @@ import {
 } from "@/api/accountHeadApi";
 import { getAccountGroups } from "@/api/accountApi";
 import { getContractorCategoryOptions } from "@/api/contractorCategoryApi";
+import { getVendorPaymentTermOptions } from "@/api/vendorPaymentTermApi";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
@@ -58,6 +59,45 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CONTRACTOR_TYPE = "C";
+const GST_TYPES = ["Registered", "Unregistered"] as const;
+const GST_STATES = [
+  "Andaman and Nicobar Islands",
+  "Andhra Pradesh",
+  "Arunachal Pradesh",
+  "Assam",
+  "Bihar",
+  "Chandigarh",
+  "Chhattisgarh",
+  "Dadra and Nagar Haveli and Daman and Diu",
+  "Delhi",
+  "Goa",
+  "Gujarat",
+  "Haryana",
+  "Himachal Pradesh",
+  "Jammu and Kashmir",
+  "Jharkhand",
+  "Karnataka",
+  "Kerala",
+  "Ladakh",
+  "Lakshadweep",
+  "Madhya Pradesh",
+  "Maharashtra",
+  "Manipur",
+  "Meghalaya",
+  "Mizoram",
+  "Nagaland",
+  "Odisha",
+  "Puducherry",
+  "Punjab",
+  "Rajasthan",
+  "Sikkim",
+  "Tamil Nadu",
+  "Telangana",
+  "Tripura",
+  "Uttar Pradesh",
+  "Uttarakhand",
+  "West Bengal",
+] as const;
 
 const DEFAULT_CONTRACTOR_CATEGORIES = [
   "Civil",
@@ -75,6 +115,8 @@ interface Contractor {
   LHeadPhone: string | null;
   LHeadEmail: string | null;
   LGST: string | null;
+  LGSTType: string | null;
+  LGSTState: string | null;
   LHeadPan: string | null;
   contractorType: string | null;
   LHeadPaymentTerms: string | null;
@@ -82,6 +124,8 @@ interface Contractor {
   LBelongsTo: number | null;
   LHeadStatus: boolean;
   GroupName: string | null;
+  isTdsApplicable: boolean;
+  tdsLimitApplicable: boolean;
 }
 
 interface AccountGroup {
@@ -98,12 +142,16 @@ interface ContractorForm {
   LHeadPhone: string;
   LHeadEmail: string;
   LGST: string;
+  LGSTType: string;
+  LGSTState: string;
   LHeadPan: string;
   contractorType: string;
   LHeadPaymentTerms: string;
   LHeadAddress: string;
   LBelongsTo: number | "";
   LHeadStatus: boolean;
+  isTdsApplicable: boolean;
+  tdsLimitApplicable: boolean;
 }
 
 const EMPTY_FORM: ContractorForm = {
@@ -112,12 +160,20 @@ const EMPTY_FORM: ContractorForm = {
   LHeadPhone: "",
   LHeadEmail: "",
   LGST: "",
+  LGSTType: "",
+  LGSTState: "",
   LHeadPan: "",
   contractorType: "",
   LHeadPaymentTerms: "",
   LHeadAddress: "",
   LBelongsTo: "",
   LHeadStatus: true,
+  // Contractor payments almost always fall under Section 194C — default a
+  // new contractor to TDS-applicable rather than making every contractor
+  // opt in by hand. Still a normal toggle, so it can be switched off for
+  // the rare contractor this doesn't apply to.
+  isTdsApplicable: true,
+  tdsLimitApplicable: true,
 };
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
@@ -372,6 +428,15 @@ const ContractorMaster: React.FC = () => {
     staleTime: 10 * 60 * 1000,
   });
 
+  // Sourced from Payment Term Master so the value stored here exactly
+  // matches a VendorPaymentTerm.Description — the invoice page auto-fills
+  // its Payment Terms field by matching this text against that master.
+  const { data: paymentTermOptions } = useQuery({
+    queryKey: ["vendor-payment-term-options"],
+    queryFn: getVendorPaymentTermOptions,
+    staleTime: 5 * 60 * 1000,
+  });
+
   const accountGroups: AccountGroup[] = useMemo(() => {
     if (!Array.isArray(groupsData)) return [];
     return (groupsData as any[])
@@ -401,6 +466,8 @@ const ContractorMaster: React.FC = () => {
       LHeadPhone: item.LHeadPhone || null,
       LHeadEmail: item.LHeadEmail || null,
       LGST: item.LGST || null,
+      LGSTType: item.LGSTType || null,
+      LGSTState: item.LGSTState || null,
       LHeadPan: item.LHeadPan || null,
       contractorType: item.LHeadCategory || null,
       LHeadPaymentTerms: item.LHeadPaymentTerms || null,
@@ -408,6 +475,8 @@ const ContractorMaster: React.FC = () => {
       LBelongsTo: item.LBelongsTo != null ? Number(item.LBelongsTo) : null,
       LHeadStatus: Boolean(item.LHeadStatus),
       GroupName: item.GroupName ?? null,
+      isTdsApplicable: Boolean(item.IsTdsApplicable),
+      tdsLimitApplicable: item.TdsLimitApplicable == null ? true : Boolean(item.TdsLimitApplicable),
     }));
   }, [rawData]);
 
@@ -422,16 +491,19 @@ const ContractorMaster: React.FC = () => {
     LHeadPhone: f.LHeadPhone || null,
     LHeadEmail: f.LHeadEmail || null,
     LGST: f.LGST || null,
+    LGSTType: f.LGSTType || null,
     LHeadPan: f.LHeadPan || null,
     LHeadCategory: f.contractorType || null,
     LHeadPaymentTerms: f.LHeadPaymentTerms || null,
     LHeadAddress: f.LHeadAddress || null,
     LHeadStatus: f.LHeadStatus,
     LBranchName: null,
-    LGSTState: null,
+    LGSTState: f.LGSTState || null,
     LCountry: "India",
     LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
+    IsTdsApplicable: f.isTdsApplicable,
+    TdsLimitApplicable: f.tdsLimitApplicable,
   });
 
   const createMut = useMutation({
@@ -586,12 +658,19 @@ const ContractorMaster: React.FC = () => {
             LHeadPhone: phone,
             LHeadEmail: email,
             LGST: gst,
+            // CSV template has no GST Type column — infer the same way
+            // normalizeGSTType() does elsewhere: a GST number on the row
+            // implies Registered, otherwise Unregistered.
+            LGSTType: gst.trim() ? "Registered" : "Unregistered",
+            LGSTState: "",
             LHeadPan: pan,
             contractorType: contractorType || "",
             LHeadPaymentTerms: paymentTerms,
             LHeadAddress: address,
             LBelongsTo: groupId,
             LHeadStatus: isActive,
+            isTdsApplicable: true,
+            tdsLimitApplicable: true,
           };
 
           await addRecord(buildPayload(rowForm), CONTRACTOR_TYPE);
@@ -636,6 +715,16 @@ const ContractorMaster: React.FC = () => {
   };
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+  /** Same inference SupplierMaster.tsx uses: a NULL LGSTType (row predates
+   *  this field, or was created via the old contractor form with no GST
+   *  Type selector) infers Registered/Unregistered from whether a GST
+   *  number is on file, so editing writes back a real value immediately. */
+  const normalizeGSTType = (t: string | null | undefined, lgst?: string | null): string => {
+    if (t === "Unregistered") return "Unregistered";
+    if (t) return "Registered";
+    return lgst?.trim() ? "Registered" : "Unregistered";
+  };
+
   const startEdit = (c: Contractor) => {
     setEditingId(c.LHeadId);
     setForm({
@@ -644,12 +733,16 @@ const ContractorMaster: React.FC = () => {
       LHeadPhone: c.LHeadPhone ?? "",
       LHeadEmail: c.LHeadEmail ?? "",
       LGST: c.LGST ?? "",
+      LGSTType: normalizeGSTType(c.LGSTType, c.LGST),
+      LGSTState: c.LGSTState ?? "",
       LHeadPan: c.LHeadPan ?? "",
       contractorType: c.contractorType ?? "",
       LHeadPaymentTerms: c.LHeadPaymentTerms ?? "",
       LHeadAddress: c.LHeadAddress ?? "",
       LBelongsTo: c.LBelongsTo ?? "",
       LHeadStatus: c.LHeadStatus,
+      isTdsApplicable: c.isTdsApplicable,
+      tdsLimitApplicable: c.tdsLimitApplicable,
     });
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -664,6 +757,8 @@ const ContractorMaster: React.FC = () => {
   const handleSave = () => {
     const e: Partial<Record<keyof ContractorForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
+    if (!form.LGSTType) e.LGSTType = true;
+    if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
     if (Object.keys(e).length) {
       setErrors(e);
       return;
@@ -688,7 +783,9 @@ const ContractorMaster: React.FC = () => {
         <tr><td>Contact Person</td><td>${c.LHeadContactPerson || "—"}</td></tr>
         <tr><td>Phone</td><td>${c.LHeadPhone || "—"}</td></tr>
         <tr><td>Email</td><td>${c.LHeadEmail || "—"}</td></tr>
+        <tr><td>GST Type</td><td>${c.LGSTType || "—"}</td></tr>
         <tr><td>GST Number</td><td>${c.LGST || "—"}</td></tr>
+        <tr><td>GST State</td><td>${c.LGSTState || "—"}</td></tr>
         <tr><td>PAN Number</td><td>${c.LHeadPan || "—"}</td></tr>
         <tr><td>Contractor Type</td><td>${c.contractorType || "—"}</td></tr>
         <tr><td>Payment Terms</td><td>${c.LHeadPaymentTerms || "—"}</td></tr>
@@ -1045,23 +1142,75 @@ const ContractorMaster: React.FC = () => {
                   Tax &amp; Payment Details
                 </p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-                {/* GST Number */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-6 gap-y-5">
+                {/* GST Type */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    GST Number
+                    GST Type <span className="text-destructive">*</span>
                   </label>
-                  <input
-                    value={form.LGST}
-                    onChange={(e) =>
+                  <select
+                    value={form.LGSTType}
+                    onChange={(e) => {
+                      const v = e.target.value;
                       setForm((p) => ({
                         ...p,
-                        LGST: e.target.value.toUpperCase(),
-                      }))
-                    }
-                    placeholder="e.g. 27AAPFU0939F1ZV"
-                    maxLength={15}
-                    className={`${inputCls} font-mono`}
+                        LGSTType: v,
+                        LGST: v === "Registered" ? p.LGST : "",
+                      }));
+                      setErrors((p) => ({ ...p, LGSTType: false, LGST: false }));
+                    }}
+                    className={`${inputCls} appearance-none ${errors.LGSTType ? "border-red-400" : ""}`}
+                  >
+                    <option value="" disabled>Select…</option>
+                    {GST_TYPES.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                  {errors.LGSTType && (
+                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                      <AlertCircle size={11} /> Required — determines GST Bill vs Non-GST Bill on invoices
+                    </p>
+                  )}
+                </div>
+
+                {/* GST Number — only when Registered */}
+                {form.LGSTType === "Registered" && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                      GST Number <span className="text-destructive">*</span>
+                    </label>
+                    <input
+                      value={form.LGST}
+                      onChange={(e) => {
+                        setForm((p) => ({
+                          ...p,
+                          LGST: e.target.value.toUpperCase(),
+                        }));
+                        setErrors((p) => ({ ...p, LGST: false }));
+                      }}
+                      placeholder="e.g. 27AAPFU0939F1ZV"
+                      maxLength={15}
+                      className={`${inputCls} font-mono ${errors.LGST ? "border-red-400" : ""}`}
+                    />
+                    {errors.LGST && (
+                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                        <AlertCircle size={11} /> Required
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* GST State */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    GST State
+                  </label>
+                  <TreeDropdown
+                    variant="flat"
+                    value={form.LGSTState}
+                    onChange={(v) => setForm((p) => ({ ...p, LGSTState: v }))}
+                    options={GST_STATES.map((s) => ({ value: s, label: s }))}
+                    placeholder="Select state…"
                   />
                 </div>
 
@@ -1084,7 +1233,8 @@ const ContractorMaster: React.FC = () => {
                   />
                 </div>
 
-                {/* Payment Terms */}
+                {/* Payment Terms — sourced from Payment Term Master so the
+                    invoice page can auto-fill by an exact text match */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Payment Terms
@@ -1092,9 +1242,9 @@ const ContractorMaster: React.FC = () => {
                   <div className="relative">
                     <CreditCard
                       size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10"
                     />
-                    <input
+                    <select
                       value={form.LHeadPaymentTerms}
                       onChange={(e) =>
                         setForm((p) => ({
@@ -1102,9 +1252,15 @@ const ContractorMaster: React.FC = () => {
                           LHeadPaymentTerms: e.target.value,
                         }))
                       }
-                      placeholder="e.g. Net 30"
-                      className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                    />
+                      className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
+                    >
+                      <option value="">— No payment term —</option>
+                      {(paymentTermOptions ?? []).map((t) => (
+                        <option key={t.id} value={t.label}>
+                          {t.label} ({t.days} days)
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>
@@ -1134,6 +1290,61 @@ const ContractorMaster: React.FC = () => {
                 </span>
               </span>
             </div>
+
+            {/* TDS Applicable */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  setForm((p) => ({ ...p, isTdsApplicable: !p.isTdsApplicable }))
+                }
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${form.isTdsApplicable ? "bg-amber-500" : "bg-muted-foreground/30"}`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.isTdsApplicable ? "translate-x-4" : "translate-x-0.5"}`}
+                />
+              </button>
+              <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                TDS Applicable —{" "}
+                <span
+                  className={
+                    form.isTdsApplicable ? "text-amber-600" : "text-foreground"
+                  }
+                >
+                  {form.isTdsApplicable ? "Yes" : "No"}
+                </span>
+              </span>
+            </div>
+
+            {/* TDS Limit — only meaningful once TDS Applicable is on.
+                ON (default): the ₹30k single-bill / ₹1L yearly-cumulative
+                threshold gates TDS deduction. OFF: TDS deducts on every
+                eligible bill unconditionally, no threshold check. */}
+            {form.isTdsApplicable && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((p) => ({ ...p, tdsLimitApplicable: !p.tdsLimitApplicable }))
+                  }
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${form.tdsLimitApplicable ? "bg-amber-500" : "bg-muted-foreground/30"}`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.tdsLimitApplicable ? "translate-x-4" : "translate-x-0.5"}`}
+                  />
+                </button>
+                <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                  TDS Limit (₹30k / ₹1L threshold) —{" "}
+                  <span
+                    className={
+                      form.tdsLimitApplicable ? "text-amber-600" : "text-foreground"
+                    }
+                  >
+                    {form.tdsLimitApplicable ? "Applied" : "Deduct on every bill"}
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Card footer — actions */}
@@ -1369,11 +1580,13 @@ const ContractorMaster: React.FC = () => {
                   mono: true,
                 },
                 { label: "Email", value: viewRecord.LHeadEmail || "—" },
+                { label: "GST Type", value: viewRecord.LGSTType || "—" },
                 {
                   label: "GST Number",
                   value: viewRecord.LGST || "—",
                   mono: true,
                 },
+                { label: "GST State", value: viewRecord.LGSTState || "—" },
                 {
                   label: "PAN Number",
                   value: viewRecord.LHeadPan || "—",
@@ -1396,6 +1609,8 @@ const ContractorMaster: React.FC = () => {
                         )?.name ?? "—")
                       : "—",
                 },
+                { label: "TDS Applicable", value: viewRecord.isTdsApplicable ? "Yes" : "No" },
+                { label: "TDS Limit", value: viewRecord.isTdsApplicable ? (viewRecord.tdsLimitApplicable ? "Applied" : "Deduct on every bill") : "—" },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value, mono }) => (
                 <div key={label}>

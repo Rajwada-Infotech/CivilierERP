@@ -10,13 +10,32 @@
 // Posting starts capturing from 2026-06-28 — no historical backfill.
 
 const { sql } = require("../db");
+const { autoCreateFixedAssetsFromGRN } = require("./fixedAssetAutoAlloc");
 
 // ── System GL account names (seeded by migration 125) ───────────────────────
 const GL_ACCOUNTS = {
   PURCHASE: "Purchase A/c",
   PENDING_GRN_PROVISION: "PROVISION FOR PENDING GRN A/C",
   PROVISIONAL_CREDIT: "Provisional Credit Available",
+  // Singleton pooled "advance to supplier/contractor" head (migration 178,
+  // AccountGroup wiring in 230) — was seeded but never actually posted to
+  // until postOnAccountAdjustment/postPaymentApproval below.
+  ON_ACCOUNT: "Company On Account A/c",
 };
+
+/** Same "advance / on account" Payment Reason match used by newPayment.js's
+ * standalone-advance OnAccountLedger hook — kept identical so GL posting and
+ * the OA-balance side-effect always agree on what counts as an advance. */
+function isAdvancePaymentReason(paymentName) {
+  const reasonNorm = (paymentName || "").trim().toLowerCase();
+  return (
+    reasonNorm.includes("advance") ||
+    reasonNorm.includes("on a/c") ||
+    reasonNorm.includes("on ac") ||
+    reasonNorm.includes("on-account") ||
+    reasonNorm.includes("on account")
+  );
+}
 
 // Small in-process cache — these are fixed system accounts, id never changes
 // once seeded, so there's no need to hit the DB on every posting call.
@@ -203,6 +222,16 @@ async function postGRNApproval(pool, grnId, userEmail) {
           VALUES (@ItemID, @Qty, @UOM, 'IN', 'GRN', @RefID, @DocNo, @GodownID, GETDATE())
         `);
     }
+  }
+
+  // Fixed-asset-tagged items (Item Master M_Type='Fixed Asset') get a
+  // Pending Fixed Asset Record row the moment they're physically received —
+  // regardless of whether this GRN ends up postable to GL below (e.g. a
+  // free/zero-value receipt still received a real, trackable asset).
+  try {
+    await autoCreateFixedAssetsFromGRN(pool, grnId, userEmail);
+  } catch (err) {
+    console.error(`[postGRNApproval] fixed-asset auto-allocation failed for GRN ${grnId} (non-fatal):`, err.message);
   }
 
   const baseAmount = items.reduce(
@@ -498,7 +527,8 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     .input("PPaymentID", sql.Int, paymentId)
     .query(`
       SELECT PPaymentID, PAmount, PDate, PBankID, PExpenseRef, DocNo,
-             PCompany, PProject, ContractId, PPartyId
+             PCompany, PProject, ContractId, PPartyId, PPaymentName,
+             ISNULL(TDSAmount, 0) AS TDSAmount
       FROM dbo.NewPayment
       WHERE PPaymentID = @PPaymentID
     `);
@@ -511,7 +541,90 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   if (amount <= 0)
     return { posted: false, reason: `Payment ${paymentId} amount is ${amount} (<= 0)` };
 
-  const supplierHeadId = await resolvePaymentSupplierHeadId(pool, payment);
+  const companyId = parseInt(payment.PCompany, 10);
+  const projectId = parseInt(payment.PProject, 10);
+  const docNo = payment.DocNo || `PMT-${paymentId}`;
+
+  // TDS (migration 304) — when set, the credit side splits into Bank (net
+  // of TDS) + TDS Payable; every debit-side branch below (Expense Head
+  // allocations, standalone advance, or a normal supplier payment) keeps
+  // debiting its full, un-reduced amount — only the credit legs change.
+  //
+  // Invoice-linked payments (PExpenseRef set) are the one exception: TDS
+  // was already carved out as its own liability leg when the INVOICE
+  // itself was posted (see routes/expenseBooking.js post-to-gl). The
+  // payment's own TDSAmount here is only an inherited display/eligibility
+  // snapshot (tds.js's resolveInvoiceLinkedTds — "Section 8, read-only
+  // inheritance, not re-selected") — applying it to the payment's own GL
+  // split too would post a SECOND TDS Payable credit for the same amount,
+  // double-counting the liability. Only a standalone/contract payment
+  // (no linked invoice, TDS never deducted anywhere else yet) should
+  // actually split TDS out of its own posting.
+  const tdsAmount = payment.PExpenseRef ? 0 : Number(payment.TDSAmount) || 0;
+  if (tdsAmount > amount) {
+    return { posted: false, reason: `Payment ${paymentId}: TDS amount (₹${tdsAmount}) exceeds the payment amount (₹${amount}) — data issue, re-save the payment.` };
+  }
+  let tdsPayableHeadId = null;
+  if (tdsAmount > 0) {
+    const { GL_ACCOUNTS: TDS_GL_ACCOUNTS } = require("./tds");
+    tdsPayableHeadId = await getGLHeadId(pool, TDS_GL_ACCOUNTS.TDS_PAYABLE);
+    if (!tdsPayableHeadId) {
+      return { posted: false, reason: `Payment ${paymentId}: TDS Payable system ledger not configured.` };
+    }
+  }
+  const bankAndTdsLegs = (bankId, bankNarration, tdsNarration) => [
+    { lHeadId: bankId, credit: amount - tdsAmount, narration: bankNarration },
+    ...(tdsAmount > 0 ? [{ lHeadId: tdsPayableHeadId, credit: tdsAmount, narration: tdsNarration }] : []),
+  ];
+
+  // Direct Expense Payment (migration 303, dbo.ExpenseHeadAllocation) — pays
+  // one or more Expense Heads straight from the bank, with no invoice,
+  // contract, or party involved at all. When present, these ARE the debit
+  // legs; the whole supplier/party/advance resolution below is skipped
+  // entirely (there is no counter-party to resolve).
+  const { getAllocations } = require("./expenseHeadAllocation");
+  const allocations = await getAllocations(pool, sql, "NewPayment", paymentId);
+  if (allocations.length > 0) {
+    const allocSum = Math.round(allocations.reduce((s, a) => s + a.amount, 0) * 100) / 100;
+    if (Math.abs(allocSum - amount) > 0.5) {
+      return {
+        posted: false,
+        reason: `Payment ${paymentId}: Expense Head amounts (₹${allocSum.toFixed(2)}) no longer add up to the payment amount (₹${amount.toFixed(2)}) — re-save the payment before approving.`,
+      };
+    }
+    await postVoucher(pool, {
+      voucherNo: docNo,
+      voucherDate: payment.PDate,
+      sourceType: "NewPayment",
+      sourceId: paymentId,
+      companyId: Number.isFinite(companyId) ? companyId : null,
+      projectId: Number.isFinite(projectId) ? projectId : null,
+      createdBy: userEmail,
+      legs: [
+        ...allocations.map((a) => ({
+          lHeadId: a.lHeadId,
+          debit: a.amount,
+          narration: `${docNo} — ${a.lHeadName} (direct expense payment)`,
+        })),
+        ...bankAndTdsLegs(payment.PBankID, `${docNo} — direct expense payment`, `${docNo} — TDS Payable`),
+      ],
+    });
+    return { posted: true };
+  }
+
+  // A standalone advance/on-account payment (no invoice, no contract — see
+  // newPayment.js's matching OnAccountLedger CREDIT hook) is booked as an
+  // advance ASSET, not a reduction of what we owe the party — so its Dr leg
+  // goes to the pooled "Company On Account A/c" head instead of the party's
+  // own payable head. Everything else (a real invoice payment) keeps
+  // debiting the party head as before.
+  const isStandaloneAdvance =
+    !payment.PExpenseRef && !payment.ContractId && payment.PPartyId &&
+    isAdvancePaymentReason(payment.PPaymentName);
+
+  const supplierHeadId = isStandaloneAdvance
+    ? await getGLHeadId(pool, GL_ACCOUNTS.ON_ACCOUNT)
+    : await resolvePaymentSupplierHeadId(pool, payment);
 
   if (!supplierHeadId)
     return {
@@ -520,10 +633,6 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
         ? `Payment ${paymentId}: could not resolve supplier from expense ref "${payment.PExpenseRef}"`
         : `Payment ${paymentId}: no PExpenseRef/ContractId/PPartyId, cannot resolve counter-account`,
     };
-
-  const companyId = parseInt(payment.PCompany, 10);
-  const projectId = parseInt(payment.PProject, 10);
-  const docNo = payment.DocNo || `PMT-${paymentId}`;
 
   await postVoucher(pool, {
     voucherNo: docNo,
@@ -537,16 +646,97 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
       {
         lHeadId: supplierHeadId,
         debit: amount,
-        narration: `${docNo} — payment made`,
+        narration: isStandaloneAdvance
+          ? `${docNo} — advance / on account payment`
+          : `${docNo} — payment made`,
       },
-      {
-        lHeadId: payment.PBankID,
-        credit: amount,
-        narration: `${docNo} — payment made`,
-      },
+      ...bankAndTdsLegs(payment.PBankID, `${docNo} — payment made`, `${docNo} — TDS Payable`),
     ],
   });
   return { posted: true };
+}
+
+/**
+ * On Account Adjustment — applies a party's existing advance balance against
+ * an invoice's outstanding payable. Pure internal transfer, no cash/bank
+ * account involved (per explicit spec — replaces the old "Dummy Bank"
+ * synthetic-payment mechanism entirely):
+ *
+ *   Dr <party's own head>            (reduces what we owe them — Payable)
+ *   Cr Company On Account A/c        (reduces the pooled advance asset)
+ *
+ * sourceId is the OnAccountLedger.OAId row this settles, so hasPosting()
+ * guards each individual adjustment idempotently.
+ */
+async function postOnAccountAdjustment(pool, {
+  oaId,
+  partyHeadId,
+  amount,
+  expenseRef,
+  voucherDate,
+  companyId = null,
+  projectId = null,
+  createdBy = null,
+}) {
+  if (await hasPosting(pool, "OnAccountAdjustment", oaId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const onAccountHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ON_ACCOUNT);
+  const voucherNo = `OA-ADJ-${expenseRef}-${oaId}`;
+
+  await postVoucher(pool, {
+    voucherNo,
+    voucherDate,
+    sourceType: "OnAccountAdjustment",
+    sourceId: oaId,
+    companyId,
+    projectId,
+    createdBy,
+    legs: [
+      {
+        lHeadId: partyHeadId,
+        debit: amount,
+        narration: `${voucherNo} — On Account adjusted against invoice ${expenseRef}`,
+      },
+      {
+        lHeadId: onAccountHeadId,
+        credit: amount,
+        narration: `${voucherNo} — On Account adjusted against invoice ${expenseRef}`,
+      },
+    ],
+  });
+  return { posted: true, voucherNo };
+}
+
+/** Reverse a previously-posted On Account Adjustment voucher (deleting the
+ * adjustment) — flips IsReversed so Trial Balance/hasPosting stop counting
+ * it, without deleting the audit row itself. */
+async function reverseOnAccountAdjustmentPosting(pool, oaId) {
+  await pool
+    .request()
+    .input("OAId", sql.Int, oaId)
+    .query(`
+      UPDATE dbo.GeneralLedgerEntry
+      SET IsReversed = 1
+      WHERE SourceType = 'OnAccountAdjustment' AND SourceId = @OAId AND IsReversed = 0
+    `);
+}
+
+/** Generic version of the reversal pattern above, for any (sourceType,
+ * sourceId) pair — used by the Amendment engine (services/amendments.js) to
+ * undo a document's existing posting before reposting it with amended
+ * values. Preserves the audit trail (flips IsReversed rather than
+ * deleting), same as every other reversal in this file. */
+async function reversePostingBySource(pool, sourceType, sourceId) {
+  await pool
+    .request()
+    .input("SourceType", sql.NVarChar(50), sourceType)
+    .input("SourceId", sql.Int, sourceId)
+    .query(`
+      UPDATE dbo.GeneralLedgerEntry
+      SET IsReversed = 1
+      WHERE SourceType = @SourceType AND SourceId = @SourceId AND IsReversed = 0
+    `);
 }
 
 /**
@@ -794,4 +984,7 @@ module.exports = {
   postReceivedPaymentApproval,
   postJournalVoucherApproval,
   postFundTransferApproval,
+  postOnAccountAdjustment,
+  reverseOnAccountAdjustmentPosting,
+  reversePostingBySource,
 };

@@ -77,17 +77,25 @@ export const IFSC_BANK_MAP: Record<string, string> = {
 
 // ─── Export columns ──────────────────────────────────────────────────────────
 
+// Company / Project lead so exports can be filtered/grouped by entity at a
+// glance, then follows the visible desktop table's own column order
+// (Payment Purpose → Doc No → Expense Ref → Amount → Status), appending the
+// supplementary detail fields the compact table doesn't have room for.
 export const EXPORT_COLUMNS: ExportColumn[] = [
-  { header: "Doc No", accessor: "docNo" },
-  { header: "Payment Purpose", accessor: "paymentName" },
-  { header: "Paid To", accessor: "paidTo" },
-  { header: "Expense Ref", accessor: "expenseRef" },
-  { header: "Project", accessor: "project" },
   { header: "Company", accessor: "company" },
+  { header: "Project", accessor: "project" },
+  { header: "Payment Purpose", accessor: "paymentName" },
+  { header: "Doc No", accessor: "docNo" },
+  { header: "Expense Ref", accessor: "expenseRef" },
+  { header: "Amount", accessor: (r: any) => formatINR(Number(r.amount || 0)) },
+  // displayStatus (Cheque Cancelled / Bounced / Cleared / Issued / …) is
+  // the real, currently-shown status — the raw `status` field is only the
+  // underlying approval state (Approved/Pending/Rejected), which is why a
+  // cancelled or bounced cheque still exported as "Approved" before.
+  { header: "Status", accessor: (r: any) => r.displayStatus || r.status || "—" },
+  { header: "Paid To", accessor: "paidTo" },
   { header: "Mode", accessor: "mode" },
   { header: "Date", accessor: "date" },
-  { header: "Amount", accessor: (r: any) => formatINR(Number(r.amount || 0)) },
   { header: "Bank", accessor: "bankName" },
   { header: "Cheque No", accessor: "chequeNo" },
-  { header: "Status", accessor: "status" },
 ];

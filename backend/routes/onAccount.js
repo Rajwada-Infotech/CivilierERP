@@ -10,6 +10,7 @@ const { applyBillingTermsToAmount } = require("../utils/billingTerms");
 const { buildGrnGstData }           = require("../utils/buildGrnGstData");
 const { syncBillStatus }            = require("../utils/syncBillStatus");
 const { getOAAdjustmentsForInvoice } = require("../utils/oaAdjustments");
+const { postOnAccountAdjustment, reverseOnAccountAdjustmentPosting } = require("../services/generalLedger");
 
 router.use(requireAuth);
 // Every route below previously had ONLY requireAuth (i.e. "is logged in",
@@ -20,6 +21,14 @@ router.use(requireAuth);
 // for this screen.
 
 const PARTY_LABEL = { S: "Supplier", C: "Contractor", A: "Customer" };
+
+// Informational only — an On Account Adjustment is a pure internal transfer
+// (Dr the party's own head / Cr the pooled On Account head, see
+// postOnAccountAdjustment in generalLedger.js); no bank/cheque is ever
+// actually consumed, so this is stored purely as a label on the ledger row
+// ("how did the original advance arrive"), not validated against any
+// cheque-book/bank-account state the way Payment/Fund Transfer do.
+const VALID_OA_MODES = ["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "UPI", "RTGS", "IMPS", "Card"];
 
 // ── GET /balance/:partyId — running balance for a party ───────────────────
 // Reads the materialized AccountHeadMaster.OnAccountBalance column — kept in
@@ -257,9 +266,18 @@ router.get("/invoices-for-party/:partyId", requirePageRight("on-account-adjustme
 // CreatedBy/TxnDate/Notes (visible via GET /report), and is logged here too
 // for fast incident-response grep.
 router.post("/apply-adjustment", requirePageRight("on-account-adjustment", "create"), async (req, res) => {
-  const { expenseRef, amount, paymentDocNo, paymentId, partyId: bodyPartyId } = req.body;
+  const {
+    expenseRef, amount, paymentDocNo, paymentId, partyId: bodyPartyId,
+    // Mode — informational only (see VALID_OA_MODES comment above); stored
+    // as a label on the ledger row, never validated against a real
+    // bank/cheque book. Defaults to "Cash" so existing callers (mobile app)
+    // that never send this keep behaving exactly as before.
+    mode: modeRaw,
+  } = req.body;
+  const mode = modeRaw || "Cash";
   const createdBy = req.user?.email || "system";
   if (!expenseRef || !amount || amount <= 0) return res.status(400).json({ error: "expenseRef and amount required" });
+  if (!VALID_OA_MODES.includes(mode)) return res.status(400).json({ error: "Invalid payment Mode." });
   try {
     const pool = getPool();
 
@@ -283,85 +301,124 @@ router.post("/apply-adjustment", requirePageRight("on-account-adjustment", "crea
     const balance = parseFloat(balRes.recordset[0]?.balance ?? 0);
     if (balance <= 0) return res.status(400).json({ error: "No On Account balance available" });
 
-    const applyAmt = Math.min(amount, balance);
-
-    // Get invoice details for companyId/projectId
+    // Get invoice details for companyId/projectId, and — critically — how
+    // much is actually still owed. This endpoint only ever checked the
+    // PARTY's on-account balance, never the INVOICE's own remaining amount,
+    // so once an invoice was fully paid by one adjustment, nothing stopped
+    // it being "applied" again and again against the same already-settled
+    // invoice as long as the party still had leftover OA balance — each
+    // call created its own OnAccountLedger debit + synthetic Dummy Bank
+    // payment, which is exactly how the same invoice ends up with a wall of
+    // identical duplicate "On Account Adjustment" entries.
     const ebRes = await pool.request().input("EDocNo", sql.NVarChar(100), expenseRef).query(`
-      SELECT TOP 1 ECompanyId, TRY_CAST(EProjectName AS INT) AS ProjectId FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo
+      SELECT TOP 1 ECompanyId, TRY_CAST(EProjectName AS INT) AS ProjectId,
+             ENetAmount, EAmount, ETotalPaid, ERemainingAmount, EBillStatus
+      FROM dbo.ExpenseBooking WHERE EDocNo = @EDocNo
     `);
     const eb = ebRes.recordset[0];
+    let invoiceRemainingCap = null;
+    if (eb) {
+      const netAmount = parseFloat(eb.ENetAmount ?? 0) > 0 ? parseFloat(eb.ENetAmount) : (parseFloat(eb.EAmount ?? 0) || 0);
+      const totalPaid = parseFloat(eb.ETotalPaid ?? 0) || 0;
+      const invoiceRemaining = eb.ERemainingAmount != null ? parseFloat(eb.ERemainingAmount) : Math.max(0, netAmount - totalPaid);
+      if (eb.EBillStatus === "Paid" || invoiceRemaining <= 0) {
+        return res.status(400).json({ error: "This invoice is already fully paid — no further On Account adjustment is needed." });
+      }
+      invoiceRemainingCap = invoiceRemaining;
+    }
 
-    await pool.request()
+    const applyAmt = Math.min(amount, balance, invoiceRemainingCap ?? amount);
+    const adjustmentDocNo = `OA-ADJ-${expenseRef}-${Date.now()}`;
+    const txnDate = new Date();
+
+    const ledgerInsert = await pool.request()
       .input("PartyId",     sql.Int,           party.partyId)
       .input("PartyType",   sql.NVarChar(20),  PARTY_LABEL[party.partyType] ?? party.partyType)
-      .input("TxnDate",     sql.Date,          new Date())
+      .input("TxnDate",     sql.Date,          txnDate)
       .input("TxnType",     sql.NVarChar(10),  "DEBIT")
       .input("Amount",      sql.Decimal(18,2), applyAmt)
       .input("RefType",     sql.NVarChar(30),  "Invoice")
       .input("RefDocNo",    sql.NVarChar(100), expenseRef)
       .input("RefId",       sql.Int,           paymentId ?? null)
       .input("AdjRefDocNo", sql.NVarChar(100), paymentDocNo ?? null)
+      .input("AdjustmentDocNo", sql.NVarChar(100), adjustmentDocNo)
+      .input("Mode",        sql.NVarChar(30),  mode)
       .input("CompanyId",   sql.Int,           eb?.ECompanyId ?? null)
       .input("ProjectId",   sql.Int,           eb?.ProjectId ?? null)
       .input("Notes",       sql.NVarChar(500), `On Account adjusted for invoice ${expenseRef}`)
       .input("CreatedBy",   sql.NVarChar(150), createdBy)
       .query(`
         INSERT INTO dbo.OnAccountLedger
-          (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,AdjRefDocNo,CompanyId,ProjectId,Notes,CreatedBy)
+          (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,AdjRefDocNo,AdjustmentDocNo,Mode,CompanyId,ProjectId,Notes,CreatedBy)
+        OUTPUT INSERTED.OAId
         VALUES
-          (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@AdjRefDocNo,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+          (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@AdjRefDocNo,@AdjustmentDocNo,@Mode,@CompanyId,@ProjectId,@Notes,@CreatedBy);
         UPDATE dbo.AccountHeadMaster
           SET OnAccountBalance = OnAccountBalance - @Amount
           WHERE LHeadId = @PartyId;
       `);
+    const oaId = ledgerInsert.recordset[0].OAId;
 
-    // Route the adjustment through the same payment-tracking system every
-    // real vendor payment uses (see expenseBooking.js's contract-advance
-    // auto-allocation for the same "Dummy Bank" convention) — a synthetic
-    // Approved NewPayment row + syncBillStatus, so the invoice's own
-    // ETotalPaid/ERemainingAmount/EBillStatus reflect this adjustment
-    // everywhere (Payment page, invoice list, etc.) instead of only the
-    // party's OA balance knowing about it.
-    const dummyBank = await pool.request().query(
-      "SELECT TOP 1 LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = 'DUMMY-BANK' AND Status = 'Approved'",
-    );
-    if (dummyBank.recordset.length) {
-      const syntheticDocNo = `OA-ADJ-${expenseRef}-${Date.now()}`;
-      await pool.request()
-        .input("PPaymentName", sql.VarChar, `On Account Adjustment (${expenseRef})`)
-        .input("PMode", sql.VarChar, "Cash")
-        .input("PAmount", sql.Decimal(18, 2), applyAmt)
-        .input("PDocType", sql.VarChar, "On Account Adjustment")
-        .input("PDate", sql.Date, new Date())
-        .input("PBankID", sql.Int, dummyBank.recordset[0].LHeadId)
-        .input("PBankName", sql.VarChar, dummyBank.recordset[0].LHeadName)
-        .input("PProject", sql.VarChar, eb?.ProjectId != null ? String(eb.ProjectId) : "")
-        // PCompany feeds the Payment Register / new-payment list's
-        // ISNULL(ec.name, np.PCompany) resolution (TRY_CAST(np.PCompany AS
-        // INT) = enterprise.id) — this was previously hardcoded to "", so
-        // synthetic OA-adjustment payments always showed a blank Company
-        // there even though the invoice's company was already looked up
-        // above for the OnAccountLedger entry.
-        .input("PCompany", sql.VarChar, eb?.ECompanyId != null ? String(eb.ECompanyId) : "")
-        .input("PExpenseRef", sql.NVarChar(100), expenseRef)
-        .input("DocNo", sql.NVarChar(100), syntheticDocNo)
-        .input("PCreatedAt", sql.DateTime, new Date())
-        .input("PCreatedBy", sql.NVarChar(100), createdBy)
-        .input("Status", sql.NVarChar(20), "Approved").query(`
-          INSERT INTO dbo.NewPayment
-            (PPaymentName, PMode, PAmount, PDocType, PDate, PBankID, PBankName,
-             PProject, PCompany, PExpenseRef, DocNo,
-             PCreatedAt, PCreatedBy, Status)
-          VALUES
-            (@PPaymentName, @PMode, @PAmount, @PDocType, @PDate, @PBankID, @PBankName,
-             @PProject, @PCompany, @PExpenseRef, @DocNo,
-             @PCreatedAt, @PCreatedBy, @Status)
-        `);
-      await syncBillStatus(pool, sql, expenseRef);
+    // Direct GL voucher — pure internal transfer (Dr the party's own
+    // payable head / Cr the pooled "Company On Account A/c" head), no bank
+    // account touched. Replaces the old synthetic Dummy-Bank NewPayment.
+    await postOnAccountAdjustment(pool, {
+      oaId,
+      partyHeadId: party.partyId,
+      amount: applyAmt,
+      expenseRef,
+      voucherDate: txnDate,
+      companyId: eb?.ECompanyId ?? null,
+      projectId: eb?.ProjectId ?? null,
+      createdBy,
+    });
+
+    // No NewPayment row is created anymore — syncBillStatus reads the
+    // OnAccountLedger DEBIT directly (see utils/syncBillStatus.js) — so
+    // ETotalPaid/ERemainingAmount/EBillStatus stay correct without it.
+    await syncBillStatus(pool, sql, expenseRef);
+
+    console.log(`[on-account] apply-adjustment: ${createdBy} applied ₹${applyAmt} from party ${party.partyId} onto invoice ${expenseRef} (${adjustmentDocNo})`);
+    res.json({ applied: applyAmt, remainingBalance: Math.max(0, balance - applyAmt) });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /adjustment/:oaId — reverse a previously-applied adjustment ──────
+// Restores the party's on-account balance, reverses the GL voucher, and
+// re-syncs the invoice's bill status — the full undo of POST /apply-adjustment.
+router.delete("/adjustment/:oaId", requirePageRight("on-account-adjustment", "create"), async (req, res) => {
+  const oaId = parseInt(req.params.oaId, 10);
+  if (!oaId) return res.status(400).json({ error: "Invalid adjustment id" });
+  try {
+    const pool = getPool();
+    const row = await pool.request().input("OAId", sql.Int, oaId).query(`
+      SELECT PartyId, Amount, RefDocNo, TxnType, RefType
+      FROM dbo.OnAccountLedger WHERE OAId = @OAId
+    `);
+    if (!row.recordset.length) return res.status(404).json({ error: "Adjustment not found" });
+    const { PartyId, Amount, RefDocNo, TxnType, RefType } = row.recordset[0];
+    if (TxnType !== "DEBIT" || RefType !== "Invoice") {
+      return res.status(400).json({ error: "Only invoice-adjustment entries can be reversed here." });
     }
 
-    console.log(`[on-account] apply-adjustment: ${createdBy} applied ₹${applyAmt} from party ${party.partyId} onto invoice ${expenseRef}`);
-    res.json({ applied: applyAmt, remainingBalance: Math.max(0, balance - applyAmt) });
+    await reverseOnAccountAdjustmentPosting(pool, oaId);
+
+    await pool.request()
+      .input("OAId", sql.Int, oaId)
+      .input("PartyId", sql.Int, PartyId)
+      .input("Amount", sql.Decimal(18, 2), Amount)
+      .query(`
+        DELETE FROM dbo.OnAccountLedger WHERE OAId = @OAId;
+        UPDATE dbo.AccountHeadMaster
+          SET OnAccountBalance = ISNULL(OnAccountBalance, 0) + @Amount
+          WHERE LHeadId = @PartyId;
+      `);
+
+    if (RefDocNo) await syncBillStatus(pool, sql, RefDocNo);
+
+    res.json({ message: "Adjustment reversed" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

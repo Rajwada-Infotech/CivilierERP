@@ -429,6 +429,17 @@ const Users = () => {
   const activeCount = allUsers.filter((u) => !u.discontinue).length;
   const inactiveCount = allUsers.filter((u) => u.discontinue).length;
 
+  // Supplier Master auto-creates a login (role='supplier', LinkedLHeadId ->
+  // the ledger head) for portal access — see accountHeadMaster.js. Those
+  // aren't manually-managed system users, so keep them in their own section
+  // instead of mixed in with the normally-created ones.
+  const supplierUsers = allUsers.filter(
+    (u) => (u.roleName ?? "").trim().toLowerCase() === "supplier",
+  );
+  const normalUsers = allUsers.filter(
+    (u) => (u.roleName ?? "").trim().toLowerCase() !== "supplier",
+  );
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Admin", "Users"]} />
@@ -486,14 +497,42 @@ const Users = () => {
         ))}
       </div>
 
-      {/* ── Users table ── */}
+      {/* ── Normal users table ── */}
+      <div className="flex items-center gap-2 mt-2">
+        <UsersIcon size={15} className="text-primary" />
+        <h3 className="font-heading font-semibold text-sm text-foreground">
+          System Users
+        </h3>
+        <span className="text-xs text-muted-foreground">({normalUsers.length})</span>
+      </div>
       <div className="glass rounded-xl overflow-hidden">
         <DataTable
-          data={allUsers}
+          data={normalUsers}
           columns={columns}
           loading={isLoading}
           searchPlaceholder="Search users…"
           emptyMessage="No users added yet."
+          defaultPageSize={25}
+        />
+      </div>
+
+      {/* ── Supplier Master portal users table ── */}
+      <div className="flex items-center gap-2 mt-4">
+        <ShieldCheck size={15} className="text-primary" />
+        <h3 className="font-heading font-semibold text-sm text-foreground">
+          Supplier Portal Users
+        </h3>
+        <span className="text-xs text-muted-foreground">
+          ({supplierUsers.length}) — auto-created from Supplier Master
+        </span>
+      </div>
+      <div className="glass rounded-xl overflow-hidden">
+        <DataTable
+          data={supplierUsers}
+          columns={columns}
+          loading={isLoading}
+          searchPlaceholder="Search suppliers…"
+          emptyMessage="No supplier portal logins yet."
           defaultPageSize={25}
         />
       </div>

@@ -1,7 +1,10 @@
 import React from "react";
-import { Eye, Edit, Trash2, CreditCard, Clock } from "lucide-react";
+import { Eye, Trash2, CreditCard } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { AmendedBadge } from "@/components/AmendedBadge";
+import { useAmendmentStatus } from "@/hooks/useAmendmentStatus";
+import { EditOrAmendButton } from "@/components/EditOrAmendButton";
 import { computeBreakdown, computeGrnNetWithTerms, fmt } from "./helpers";
 import type { ExpenseRecord } from "./types";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -25,6 +28,7 @@ export function RecordCard({
   canEdit = true,
   canDelete = true,
 }: Props) {
+  const amendmentStatus = useAmendmentStatus("ExpenseBooking", rec.id, rec.status);
   const effectiveNet = (() => {
     if (rec.eSourceType === "GRN" && rec.grnTotalAmount != null) {
       const terms =
@@ -46,6 +50,9 @@ export function RecordCard({
     return rec.netAmount && rec.netAmount > 0 ? rec.netAmount : rbd.netAmount;
   })();
 
+  const adjustedAmount = rec.onAccountAdjusted ?? 0;
+  const isFullyAdjusted = adjustedAmount > 0 && adjustedAmount >= effectiveNet;
+
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-3">
       {/* Header row */}
@@ -63,8 +70,17 @@ export function RecordCard({
             </p>
           )}
         </div>
-        <StatusBadge status={rec.status} />
+        <div className="flex items-center gap-1.5 shrink-0">
+          {amendmentStatus.isAmended && <AmendedBadge />}
+          <StatusBadge status={rec.status} />
+        </div>
       </div>
+
+      {adjustedAmount > 0 && (
+        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-semibold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 w-fit">
+          Adjusted {isFullyAdjusted ? "(Full)" : "(Partial)"} · ₹{fmt(adjustedAmount)}
+        </div>
+      )}
 
       {/* Detail grid */}
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
@@ -116,14 +132,7 @@ export function RecordCard({
             table="ExpenseBooking"
             recordId={rec.id}
             compact
-            fallback={
-              rec.status === "Pending" ? (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold whitespace-nowrap bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800">
-                  <Clock size={10} />
-                  Pending
-                </span>
-              ) : null
-            }
+            fallback={<StatusBadge status={rec.status} className="text-[10px] px-2 py-0.5" />}
           />
           <div className="flex items-center gap-1">
             <ApprovalActions
@@ -141,16 +150,20 @@ export function RecordCard({
             >
               <Eye size={14} />
             </button>
-            {canEdit && (
-              <button
-                type="button"
-                onClick={onEdit}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted border border-transparent hover:border-border transition-colors"
-                title="Edit / Amend"
-              >
-                <Edit size={14} />
-              </button>
-            )}
+            <EditOrAmendButton
+              refDocType="ExpenseBooking"
+              refDocId={rec.id}
+              docStatus={rec.status}
+              docNo={rec.bookingReference}
+              projectName={rec.projectName}
+              companyName={rec.companyName}
+              totalAmount={rec.netAmount ?? undefined}
+              amendTab="EB"
+              amendMenuPath="/material/amendment-menu"
+              canEdit={canEdit}
+              onEdit={onEdit}
+              reuseEditForm
+            />
             {canDelete && (
               <button
                 type="button"

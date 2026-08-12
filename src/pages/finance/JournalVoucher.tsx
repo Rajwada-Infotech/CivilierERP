@@ -2,6 +2,7 @@ import React from "react";
 import { useState, useEffect, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import {
@@ -264,13 +265,13 @@ export default function JournalVoucher() {
               <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
             </button>
             {rights.canCreate && (
-              <button
+              <Button
                 onClick={() => setDialogOpen(true)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg gradient-accent text-white text-sm font-semibold transition-all"
+                className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg gradient-accent transition-all"
               >
-                <Plus size={14} />
-                New Journal Voucher
-              </button>
+                <Plus size={13} />
+                <span className="hidden sm:inline">New Journal Voucher</span>
+              </Button>
             )}
           </div>
         }
@@ -529,13 +530,13 @@ export default function JournalVoucher() {
 
       {/* ── New JV Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
-        <DialogContent className="max-w-2xl p-0 gap-0 overflow-hidden">
-          <DialogHeader className="px-5 py-4 border-b border-border">
+        <DialogContent className="max-w-2xl p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden">
+          <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-border bg-gradient-to-br from-primary/5 via-transparent to-transparent">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+              <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 ring-1 ring-primary/20">
                 <Scale size={15} className="text-primary" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <DialogTitle className="text-sm font-semibold">New Journal Voucher</DialogTitle>
                 <DialogDescription className="text-[11px] mt-0.5">
                   Debit total must equal credit total before saving.
@@ -544,9 +545,9 @@ export default function JournalVoucher() {
             </div>
           </DialogHeader>
 
-          <div className="px-5 py-4 space-y-4">
+          <div className="px-4 sm:px-5 py-4 space-y-4 flex-1 min-h-0 overflow-y-auto">
             {/* Header fields */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Company *</label>
                 <Select
@@ -590,91 +591,94 @@ export default function JournalVoucher() {
               </div>
             </div>
 
-            {/* Lines */}
+            {/* Lines — horizontally scrollable on narrow screens rather than
+                squeezing the Account Head column unreadably thin. */}
             <div className="rounded-xl border border-border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/40 border-b border-border">
-                  <tr>
-                    <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Account Head</th>
-                    <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground w-32">Debit</th>
-                    <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground w-32">Credit</th>
-                    <th className="w-10" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {lines.map((line, idx) => (
-                    <tr key={line._id} className="group hover:bg-muted/20">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[480px]">
+                  <thead className="bg-muted/40 border-b border-border">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Account Head</th>
+                      <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground w-28 sm:w-32">Debit</th>
+                      <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground w-28 sm:w-32">Credit</th>
+                      <th className="w-10" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {lines.map((line, idx) => (
+                      <tr key={line._id} className="group hover:bg-muted/20">
+                        <td className="px-3 py-2">
+                          <Select
+                            value={line.LHeadId ? String(line.LHeadId) : ""}
+                            onValueChange={(v) => updateLine(idx, { LHeadId: parseInt(v, 10) })}
+                          >
+                            <SelectTrigger className="h-8 text-xs border-0 bg-transparent focus:ring-0 focus:ring-offset-0 px-0">
+                              <SelectValue placeholder="Select account…" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(groupedLedgerOptions).map(([type, opts]) => (
+                                <SelectGroup key={type}>
+                                  <SelectLabel className="text-[10px] uppercase tracking-widest">
+                                    {LHEAD_TYPE_LABEL[type] || type}
+                                  </SelectLabel>
+                                  {opts.map((opt) => (
+                                    <SelectItem key={opt.id} value={String(opt.id)} className="text-xs">{opt.label}</SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="px-3 py-2">
+                          <Input
+                            type="number"
+                            placeholder="0.00"
+                            value={line.DebitAmount || ""}
+                            onChange={(e) => {
+                              const v = parseFloat(e.target.value) || 0;
+                              updateLine(idx, v !== 0 ? { DebitAmount: v, CreditAmount: 0 } : { DebitAmount: v });
+                            }}
+                            className="h-8 text-xs text-right border-0 bg-transparent focus-visible:ring-0 px-0"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <Input
+                            type="number"
+                            placeholder="0.00"
+                            value={line.CreditAmount || ""}
+                            onChange={(e) => {
+                              const v = parseFloat(e.target.value) || 0;
+                              updateLine(idx, v !== 0 ? { CreditAmount: v, DebitAmount: 0 } : { CreditAmount: v });
+                            }}
+                            className="h-8 text-xs text-right border-0 bg-transparent focus-visible:ring-0 px-0"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <button
+                            disabled={lines.length <= 2}
+                            onClick={() => removeLine(idx)}
+                            className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="border-t border-border bg-muted/20">
+                    <tr>
                       <td className="px-3 py-2">
-                        <Select
-                          value={line.LHeadId ? String(line.LHeadId) : ""}
-                          onValueChange={(v) => updateLine(idx, { LHeadId: parseInt(v, 10) })}
-                        >
-                          <SelectTrigger className="h-8 text-xs border-0 bg-transparent focus:ring-0 focus:ring-offset-0 px-0">
-                            <SelectValue placeholder="Select account…" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(groupedLedgerOptions).map(([type, opts]) => (
-                              <SelectGroup key={type}>
-                                <SelectLabel className="text-[10px] uppercase tracking-widest">
-                                  {LHEAD_TYPE_LABEL[type] || type}
-                                </SelectLabel>
-                                {opts.map((opt) => (
-                                  <SelectItem key={opt.id} value={String(opt.id)} className="text-xs">{opt.label}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-3 py-2">
-                        <Input
-                          type="number"
-                          placeholder="0.00"
-                          value={line.DebitAmount || ""}
-                          onChange={(e) => {
-                            const v = parseFloat(e.target.value) || 0;
-                            updateLine(idx, v !== 0 ? { DebitAmount: v, CreditAmount: 0 } : { DebitAmount: v });
-                          }}
-                          className="h-8 text-xs text-right border-0 bg-transparent focus-visible:ring-0 px-0"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <Input
-                          type="number"
-                          placeholder="0.00"
-                          value={line.CreditAmount || ""}
-                          onChange={(e) => {
-                            const v = parseFloat(e.target.value) || 0;
-                            updateLine(idx, v !== 0 ? { CreditAmount: v, DebitAmount: 0 } : { CreditAmount: v });
-                          }}
-                          className="h-8 text-xs text-right border-0 bg-transparent focus-visible:ring-0 px-0"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <button
-                          disabled={lines.length <= 2}
-                          onClick={() => removeLine(idx)}
-                          className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                        >
-                          <Trash2 size={11} />
+                        <button onClick={addLine} className="flex items-center gap-1 text-xs text-primary hover:underline">
+                          <Plus size={11} /> Add line
                         </button>
                       </td>
+                      <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-foreground">{formatINR(totals.debit)}</td>
+                      <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-foreground">{formatINR(totals.credit)}</td>
+                      <td />
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot className="border-t border-border bg-muted/20">
-                  <tr>
-                    <td className="px-3 py-2">
-                      <button onClick={addLine} className="flex items-center gap-1 text-xs text-primary hover:underline">
-                        <Plus size={11} /> Add line
-                      </button>
-                    </td>
-                    <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-foreground">{formatINR(totals.debit)}</td>
-                    <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-foreground">{formatINR(totals.credit)}</td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
+                  </tfoot>
+                </table>
+              </div>
             </div>
 
             {/* Balance indicator */}
@@ -687,10 +691,10 @@ export default function JournalVoucher() {
                 : "border-border bg-muted/20 text-muted-foreground"
             )}>
               {totals.balanced
-                ? <CheckCircle2 size={13} />
+                ? <CheckCircle2 size={13} className="shrink-0" />
                 : totals.debit > 0 || totals.credit > 0
-                ? <AlertCircle size={13} />
-                : <Scale size={13} />}
+                ? <AlertCircle size={13} className="shrink-0" />
+                : <Scale size={13} className="shrink-0" />}
               {totals.balanced
                 ? `Balanced — ${formatINR(totals.debit)} each side`
                 : totals.debit > 0 || totals.credit > 0
@@ -699,18 +703,18 @@ export default function JournalVoucher() {
             </div>
           </div>
 
-          <DialogFooter className="px-5 py-3.5 border-t border-border">
+          <DialogFooter className="shrink-0 px-4 sm:px-5 py-3.5 border-t border-border bg-muted/20">
             <button
               onClick={() => { setDialogOpen(false); resetForm(); }}
               disabled={saving}
-              className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
+              className="w-full sm:w-auto px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={submit}
               disabled={saving || !totals.balanced}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg gradient-accent text-white text-sm font-semibold transition-all disabled:opacity-50"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2 rounded-lg gradient-accent text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-50"
             >
               {saving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
               {saving ? "Saving…" : "Save & Submit"}
