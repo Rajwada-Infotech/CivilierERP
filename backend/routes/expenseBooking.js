@@ -596,7 +596,12 @@ router.get("/options", async (req, res) => {
             COALESCE(proj.name, eb.EProjectName, ''),
             N' (₹',
             CAST(CAST(
-              ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
+              -- Net of TDS — TDS is withheld at source and never actually
+              -- payable, so the label must not advertise the gross figure.
+              CASE WHEN ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) - ISNULL(eb.TDSAmount, 0) < 0
+                   THEN 0
+                   ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) - ISNULL(eb.TDSAmount, 0)
+              END
             AS BIGINT) AS NVARCHAR(20)),
             ')'
           ) AS label
