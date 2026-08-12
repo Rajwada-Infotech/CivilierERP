@@ -590,20 +590,14 @@ router.get("/options", async (req, res) => {
           ISNULL(eb.ETotalPaid, 0)        AS totalPaid,
           ISNULL(eb.ERemainingAmount, ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)))
                                           AS remainingAmount,
+          -- No amount baked in here — the frontend already derives the
+          -- TDS-net payable figure once from amount/tdsAmount and renders
+          -- it itself; duplicating that math into this string invited it
+          -- to drift out of sync (as the gross-amount version here did).
           CONCAT(
             ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))),
             N' — ',
-            COALESCE(proj.name, eb.EProjectName, ''),
-            N' (₹',
-            CAST(CAST(
-              -- Net of TDS — TDS is withheld at source and never actually
-              -- payable, so the label must not advertise the gross figure.
-              CASE WHEN ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) - ISNULL(eb.TDSAmount, 0) < 0
-                   THEN 0
-                   ELSE ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) - ISNULL(eb.TDSAmount, 0)
-              END
-            AS BIGINT) AS NVARCHAR(20)),
-            ')'
+            COALESCE(proj.name, eb.EProjectName, '')
           ) AS label
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.enterprise e ON e.id = eb.ECompanyId
@@ -757,6 +751,10 @@ router.get("/options", async (req, res) => {
       supplierName: r.supplierName || "",
       partyId: r.supplierId || null,
       amount: parseFloat(r.amount) || 0,
+      tdsAmount: parseFloat(r.tdsAmount) || 0,
+      totalPaid: parseFloat(r.totalPaid) || 0,
+      remainingAmount: parseFloat(r.remainingAmount) || 0,
+      billStatus: r.billStatus || "",
       companyId: r.companyId || null,
       companyName: r.companyName || "",
       financialYear: r.financialYear || "",
