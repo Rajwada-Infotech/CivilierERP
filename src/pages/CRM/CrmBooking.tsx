@@ -350,31 +350,31 @@ const CrmBooking: React.FC = () => {
     }
   };
 
-  // Unit change is a rare, authorized-only action (admin/super_admin/
-  // marketing_head, enforced server-side) — a lightweight prompt flow
-  // matches the other one-off actions on this page rather than a full
-  // dialog for something this infrequent.
-  const handleChangeUnit = async (b: any) => {
-    const options = (units as any[])
-      .filter((u: any) => u.IsActive && u.Id !== b.UnitId)
-      .map((u: any) => `${u.Id}: ${u.ProjectName} — ${u.BlockName} — ${u.UnitName}`)
-      .join("\n");
-    const newUnitId = window.prompt(`Enter the new Unit ID for ${b.BookingNo}:\n\n${options}`);
-    if (!newUnitId) return;
-    const reason = window.prompt("Reason for changing the unit (required):");
-    if (!reason?.trim()) { toast.error("Reason is required"); return; }
+  const [unitChangeBooking, setUnitChangeBooking] = useState<any | null>(null);
+  const [unitChangeNewId, setUnitChangeNewId] = useState("");
+  const [unitChangeReason, setUnitChangeReason] = useState("");
+  const [unitChangeSaving, setUnitChangeSaving] = useState(false);
+
+  const handleChangeUnit = async () => {
+    if (!unitChangeNewId) { toast.error("Select a unit"); return; }
+    if (!unitChangeReason.trim()) { toast.error("Reason is required"); return; }
+    setUnitChangeSaving(true);
     try {
-      const res = await fetchWithAuth(`${API}/${b.Id}/change-unit`, {
+      const res = await fetchWithAuth(`${API}/${unitChangeBooking.Id}/change-unit`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ NewUnitId: parseInt(newUnitId), Reason: reason.trim() }),
+        body: JSON.stringify({ NewUnitId: parseInt(unitChangeNewId), Reason: unitChangeReason.trim() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success(`Unit changed to ${data.unitNo}`);
+      setUnitChangeBooking(null);
+      setUnitChangeNewId(""); setUnitChangeReason("");
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
     } catch (e: any) {
       toast.error(e.message);
+    } finally {
+      setUnitChangeSaving(false);
     }
   };
 
@@ -524,7 +524,7 @@ const CrmBooking: React.FC = () => {
                 {b.Status !== "Cancelled" && canEdit && (
                   <>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => handleChangeUnit(b)} className="gap-2 text-rose-600 focus:text-rose-600">
+                    <DropdownMenuItem onClick={() => { setUnitChangeBooking(b); setUnitChangeNewId(""); setUnitChangeReason(""); }} className="gap-2 text-rose-600 focus:text-rose-600">
                       <Repeat size={14} /> Change Unit
                     </DropdownMenuItem>
                   </>
@@ -845,6 +845,46 @@ const CrmBooking: React.FC = () => {
             if (appFilter) navigate("/crm/bookings", { replace: true });
           }}
         />
+      )}
+
+      {unitChangeBooking && (
+        <Dialog open onOpenChange={(o) => !o && setUnitChangeBooking(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="font-heading flex items-center gap-2">
+                <Repeat size={16} className="text-rose-500" /> Change Unit — {unitChangeBooking.BookingNo}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">New Unit</label>
+                <select value={unitChangeNewId} onChange={(e) => setUnitChangeNewId(e.target.value)}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <option value="">— Select unit —</option>
+                  {(units as any[])
+                    .filter((u: any) => u.IsActive && u.Id !== unitChangeBooking.UnitId)
+                    .map((u: any) => (
+                      <option key={u.Id} value={u.Id}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Reason *</label>
+                <textarea value={unitChangeReason} onChange={(e) => setUnitChangeReason(e.target.value)}
+                  rows={3} placeholder="Reason for changing the unit..."
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={() => setUnitChangeBooking(null)}
+                  className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={handleChangeUnit} disabled={unitChangeSaving || !unitChangeNewId || !unitChangeReason.trim()}
+                  className="px-4 py-1.5 text-sm bg-rose-500 text-white rounded-lg font-medium hover:bg-rose-600 disabled:opacity-40">
+                  {unitChangeSaving ? "Changing..." : "Change Unit"}
+                </button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </SalesAutoShell>
   );

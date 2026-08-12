@@ -116,7 +116,7 @@ router.post("/", requirePageRight("crm-cancellations", "create"), async (req, re
         return res.status(400).json({ error: "DeductionPercent must be a number between 0 and 100" });
       }
     }
-    const deductionAmt = Math.round(totalPaid * deductionPct) / 100;
+    const deductionAmt = Math.round(totalPaid * deductionPct / 100 * 100) / 100;
     const refundAmt = Math.max(0, totalPaid - deductionAmt);
     const cancellationNo = await getNextDocNumber(pool, "CXL", "CXL");
 
@@ -229,7 +229,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       `);
     const freshTotalPaid = freshPaidRes.recordset[0].TotalPaid || 0;
     if (Math.abs(freshTotalPaid - Number(staleAmountPaid || 0)) >= 1) {
-      const deductionAmt = Math.round(freshTotalPaid * deductionPct) / 100;
+      const deductionAmt = Math.round(freshTotalPaid * deductionPct / 100 * 100) / 100;
       const refundAmt = Math.max(0, freshTotalPaid - deductionAmt);
       const note = `[Auto-recomputed at approval] Paid amount changed from ₹${Number(staleAmountPaid || 0).toLocaleString("en-IN")} to ₹${freshTotalPaid.toLocaleString("en-IN")} since the request was filed — refund figures updated accordingly.`;
       await pool.request()

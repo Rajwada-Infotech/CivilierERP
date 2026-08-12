@@ -144,6 +144,21 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
   const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
   const handleSave = async () => {
+    if (form.Mobile?.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
+      toast.error("Mobile must be exactly 10 digits"); return;
+    }
+    if (form.PanNo?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
+      toast.error("PAN must be in format ABCDE1234F"); return;
+    }
+    if (form.AadhaarNo?.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
+      toast.error("Aadhaar must be exactly 12 digits"); return;
+    }
+    if (form.Email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.Email.trim())) {
+      toast.error("Please enter a valid email address"); return;
+    }
+    if (form.PermanentPincode?.trim() && !/^\d{6}$/.test(form.PermanentPincode.trim())) {
+      toast.error("Pincode must be exactly 6 digits"); return;
+    }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${customer.Id}`, {
@@ -372,6 +387,24 @@ const CrmCustomers: React.FC = () => {
     if (!form.CustomerName.trim() || !form.Mobile.trim() || !form.PanNo.trim() || !form.PermanentAddress.trim()) {
       toast.error("Customer Name, Mobile, PAN and Permanent Address are required");
       return;
+    }
+    if (!/^\d{10}$/.test(form.Mobile.trim())) {
+      toast.error("Mobile must be exactly 10 digits"); return;
+    }
+    if (form.AltMobile.trim() && !/^\d{10}$/.test(form.AltMobile.trim())) {
+      toast.error("Alternate mobile must be exactly 10 digits"); return;
+    }
+    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
+      toast.error("PAN must be in format ABCDE1234F"); return;
+    }
+    if (form.AadhaarNo.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
+      toast.error("Aadhaar must be exactly 12 digits"); return;
+    }
+    if (form.Email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.Email.trim())) {
+      toast.error("Please enter a valid email address"); return;
+    }
+    if (form.PermanentPincode.trim() && !/^\d{6}$/.test(form.PermanentPincode.trim())) {
+      toast.error("Pincode must be exactly 6 digits"); return;
     }
     setSaving(true);
     try {

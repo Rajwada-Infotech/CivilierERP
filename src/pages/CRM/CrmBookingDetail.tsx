@@ -309,6 +309,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     staleTime: 15_000,
   });
   const [reviewingAmendmentId, setReviewingAmendmentId] = useState<number | null>(null);
+  const [reasonDialog, setReasonDialog] = useState<{
+    title: string; label: string; required: boolean;
+    onConfirm: (reason: string) => Promise<void>;
+  } | null>(null);
 
   // Bank/KYC/Nominee — same shape and API as CrmApplication.tsx's own bank
   // form (both read/write the one CrmCustomerBankDetail row keyed by
@@ -402,20 +406,24 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
-  const handleRejectAmendment = async (id: number) => {
-    const notes = window.prompt("Reason for rejecting this amendment (optional):") || "";
-    setReviewingAmendmentId(id);
-    try {
-      const res = await fetchWithAuth(`${AMEND_API}/${id}/reject`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Notes: notes || undefined }) });
-      const resData = await res.json();
-      if (!res.ok) throw new Error(resData.error);
-      toast.success("Amendment rejected");
-      invalidateCharges();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setReviewingAmendmentId(null);
-    }
+  const handleRejectAmendment = (id: number) => {
+    setReasonDialog({
+      title: "Reject Amendment", label: "Reason for rejection (optional)", required: false,
+      onConfirm: async (notes) => {
+        setReviewingAmendmentId(id);
+        try {
+          const res = await fetchWithAuth(`${AMEND_API}/${id}/reject`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Notes: notes || undefined }) });
+          const resData = await res.json();
+          if (!res.ok) throw new Error(resData.error);
+          toast.success("Amendment rejected");
+          invalidateCharges();
+        } catch (e: any) {
+          toast.error(e.message);
+        } finally {
+          setReviewingAmendmentId(null);
+        }
+      },
+    });
   };
 
   // New parking allotments are only ever created from the Application

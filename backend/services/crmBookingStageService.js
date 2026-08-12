@@ -30,6 +30,7 @@
 const { sql } = require("../db");
 const { transition: approvalTransition } = require("./approvalService");
 const { ensureChecklistRows } = require("./crmApplicationChecklist");
+const { ensurePortalUser } = require("./crmPortalProvision");
 
 const STAGE_REVIEW = "Review";
 const STAGE_MARKETING = "MarketingHeadApproval";
@@ -258,6 +259,25 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
   const actionWord = confirmedNow ? "Confirmed" : "StageApproved";
   await logStageAction(pool, bookingId, nextStage, actionWord, null, userId);
 
+  // Portal provisioning fires the instant booking is confirmed — the customer
+  // gets access to track their application, upload documents, and view
+  // invoices right away, not only after the agreement is auto-created later.
+  // Guarded separately so a portal hiccup never blocks the approval itself.
+  let portalInfo = null;
+  if (confirmedNow) {
+    try {
+      const appRow = await pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid");
+      const applicationId = appRow.recordset[0]?.ApplicationId;
+      if (applicationId) {
+        portalInfo = await ensurePortalUser(pool, applicationId);
+      }
+    } catch (e) {
+      console.error("[crmBookingStageService] portal provisioning on confirm failed:", e.message);
+      portalInfo = { created: false, error: e.message };
+    }
+  }
+
   return {
     ok: true,
     stage: nextStage,
@@ -265,6 +285,7 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
     level: result.level,
     totalLevels: result.totalLevels,
     confirmed: confirmedNow,
+    portal: portalInfo,
   };
 }
 
