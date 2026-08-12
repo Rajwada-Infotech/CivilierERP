@@ -144,7 +144,7 @@ function KpiCard({
 }: {
   label: string;
   amount: number;
-  icon: React.FC<{ size?: number; className?: string }>;
+  icon: React.ElementType;
   variant?: "profit" | "loss" | "neutral" | "accent";
   subtitle?: string;
 }) {
