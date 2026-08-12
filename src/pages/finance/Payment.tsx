@@ -853,7 +853,7 @@ const Payment: React.FC = () => {
     staleTime: 5 * 60_000,
   });
 
-  const { data: expenseOptions = [] } = useQuery<ExpenseOption[]>({
+  const { data: expenseOptions = [], refetch: refetchExpenseOptions } = useQuery<ExpenseOption[]>({
     queryKey: ["expense-options-payment", oaAdjustCtx?.partyId ?? null],
     queryFn: async () => {
       const url = oaAdjustCtx?.partyId
@@ -866,6 +866,14 @@ const Payment: React.FC = () => {
       return normaliseExpenseOptions(items);
     },
     staleTime: 0,
+    // staleTime: 0 only means "eligible to refetch" — it does NOT force a
+    // refetch on its own once this query has already run once in this tab.
+    // This list backs the invoice picker (amount, remainingAmount, TDS) and
+    // the Invoice Balance / Payment Breakdown cards; without this, all three
+    // can silently show whatever an invoice's numbers were the first time
+    // this page happened to fetch them, even after real edits (TDS applied,
+    // payments made) change the true remainingAmount server-side.
+    refetchOnMount: "always",
   });
 
   // ── Contract source ─────────────────────────────────────────────────────────
@@ -1079,8 +1087,15 @@ const Payment: React.FC = () => {
     setLoanPaymentDetailsOpen(false);
     setFormLiveRemaining(null);
     setFormKnownTotalPaid(null);
+    setFormKnownTdsAmount(null);
     setView("form");
     window.scrollTo({ top: 0, behavior: "smooth" });
+    // The invoice picker (amount, remainingAmount, TDS) reads from this
+    // list — this page's query mounts once and never remounts as the user
+    // toggles list/form internally, so staleTime/refetchOnMount alone won't
+    // catch edits made to an invoice since this page was first opened.
+    // Force it current every time a fresh payment form is opened.
+    refetchExpenseOptions();
   };
 
   const openEdit = (rec: PaymentRecord) => {
@@ -1088,6 +1103,7 @@ const Payment: React.FC = () => {
     clearLoanEmiLink();
     setLoanPaymentDetailsOpen(false);
     setEditingId(rec.id);
+    refetchExpenseOptions();
     const { id, ...rest } = rec;
     const matchedOption = rest.expenseRef
       ? expenseOptions.find(
