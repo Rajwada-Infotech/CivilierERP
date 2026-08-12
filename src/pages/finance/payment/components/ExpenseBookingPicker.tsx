@@ -251,22 +251,20 @@ export function ExpenseBookingPicker({
                     </div>
                     {(() => {
                       // o.amount is the invoice's gross net amount (pre-TDS).
-                      // o.remainingAmount is what's actually still payable —
-                      // already net of TDS withheld at source, and of any
-                      // partial payment already made — so it's the more
-                      // honest headline figure whenever it's the smaller of
-                      // the two. Previously this always showed the gross
-                      // amount here, so a TDS invoice with zero payments yet
-                      // (not "Partial", so the "· X left" sub-label never
-                      // rendered either) showed the pre-TDS figure with no
-                      // indication anywhere in the row that TDS applies.
+                      // TDS is withheld at source, so it's never actually
+                      // payable — net it out unconditionally before
+                      // comparing against remainingAmount (which itself may
+                      // or may not already be TDS-net depending on when the
+                      // row was last synced).
+                      const payable =
+                        o.amount != null ? Math.max(0, o.amount - (o.tdsAmount ?? 0)) : o.amount;
                       const displayAmt =
                         o.remainingAmount != null &&
                         o.remainingAmount > 0 &&
-                        o.amount != null &&
-                        o.remainingAmount < o.amount
+                        payable != null &&
+                        o.remainingAmount < payable
                           ? o.remainingAmount
-                          : o.amount;
+                          : payable;
                       return (
                         displayAmt != null && (
                           <span className="shrink-0 text-[11px] font-mono font-semibold text-foreground/70 mt-0.5">₹{displayAmt.toLocaleString("en-IN")}</span>
