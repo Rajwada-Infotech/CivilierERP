@@ -999,46 +999,51 @@ const CrmApplication: React.FC = () => {
   };
 
   const convertedColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "ApplicationNo", header: "App No", size: 110,
+    { accessorKey: "ApplicationNo", header: "App No", size: 120,
       cell: (i) => (
         <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">
           {i.getValue() as string}
         </span>
       ) },
-    { accessorKey: "ApplicantName", header: "Applicant", size: 160,
+    {/* Mobile folded into this cell — same rationale/pattern as
+       inProcessColumns above. Sizes across this set are generous (sum
+       ~1420px) so table-layout:fixed fills a normal desktop card
+       edge-to-edge instead of bunching columns on the left. */
+      accessorKey: "ApplicantName", header: "Applicant", size: 210,
       cell: (i) => (
         <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
-          {i.row.original.LeadUid && <div className="text-xs text-muted-foreground">Lead: {i.row.original.LeadUid}</div>}
+          <div className="text-xs text-muted-foreground">
+            {i.row.original.Mobile}
+            {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
+          </div>
         </div>
       ) },
-    { accessorKey: "Mobile", header: "Mobile", size: 110,
-      cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-muted-foreground">{i.getValue() as string}</span> },
-    { accessorKey: "BookingNo", header: "Booking", size: 140,
+    { accessorKey: "BookingNo", header: "Booking", size: 190,
       cell: (i) => (
         <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
           <div className="font-mono text-xs font-semibold text-foreground">{i.row.original.BookingNo}</div>
           <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-green-600 bg-green-50 border-green-200">{i.row.original.BookingStatus}</span>
         </div>
       ) },
-    { id: "unitProject", header: "Unit / Project", size: 140, enableSorting: false,
+    { id: "unitProject", header: "Unit / Project", size: 220, enableSorting: false,
       cell: (i) => (
         <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">
           {[i.row.original.BookingProjectName, i.row.original.BookingUnitNo].filter(Boolean).join(" · ") || "—"}
         </span>
       ) },
-    { accessorKey: "BookingTotalValue", header: "Value", size: 110,
+    { accessorKey: "BookingTotalValue", header: "Value", size: 150,
       cell: (i) => {
         const val = i.row.original.BookingGrandTotal ?? i.row.original.BookingTotalValue;
         return <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs font-medium">{val ? `₹${Number(val).toLocaleString("en-IN")}` : "—"}</span>;
       } },
-    { accessorKey: "BookingDate", header: "Booked On", size: 110,
+    { accessorKey: "BookingDate", header: "Booked On", size: 130,
       cell: (i) => (
         <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
           {i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}
         </span>
       ) },
-    { id: "actions", header: "", size: 180, enableSorting: false,
+    { id: "actions", header: "", size: 200, enableSorting: false,
       cell: (i) => (
         <div className="flex items-center gap-3 flex-wrap">
           <button onClick={() => navigate(`/crm/bookings?applicationId=${i.row.original.Id}`)}
@@ -1050,22 +1055,30 @@ const CrmApplication: React.FC = () => {
   ];
 
   const inProcessColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "ApplicationNo", header: "App No", size: 110,
+    { accessorKey: "ApplicationNo", header: "App No", size: 120,
       cell: (i) => (
         <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
           {i.getValue() as string}
         </span>
       ) },
-    { accessorKey: "ApplicantName", header: "Applicant", size: 160,
+    {/* Mobile folded into this cell (as a second line, same pattern used on
+       CrmLeads/CrmCustomers) instead of its own column — one less dedicated
+       column for a value that's rarely scanned on its own, freeing real
+       width back to the columns people actually compare row-to-row. Sizes
+       across this whole set are generous (sum ~1420px) so table-layout:fixed
+       fills a normal desktop card edge-to-edge instead of leaving the
+       columns bunched on the left with dead space after Date. */
+      accessorKey: "ApplicantName", header: "Applicant", size: 220,
       cell: (i) => (
         <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
-          {i.row.original.LeadUid && <div className="text-xs text-muted-foreground">Lead: {i.row.original.LeadUid}</div>}
+          <div className="text-xs text-muted-foreground">
+            {i.row.original.Mobile}
+            {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
+          </div>
         </div>
       ) },
-    { accessorKey: "Mobile", header: "Mobile", size: 110,
-      cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-muted-foreground">{i.getValue() as string}</span> },
-    { id: "interestedProject", header: "Interested Project", size: 160, enableSorting: false,
+    { id: "interestedProject", header: "Interested Project", size: 220, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
         const typeBit = [r.BhkPreference, r.PropertyType].filter(Boolean).join(" · ") || r.UnitTypeFromMaster || "";
@@ -1075,7 +1088,7 @@ const CrmApplication: React.FC = () => {
           </span>
         );
       } },
-    { accessorKey: "Source", header: "Source", size: 130,
+    { accessorKey: "Source", header: "Source", size: 170,
       cell: (i) => (
         <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">
           <div>{i.row.original.Source || "—"}</div>
@@ -1084,19 +1097,19 @@ const CrmApplication: React.FC = () => {
           </div>
         </div>
       ) },
-    { accessorKey: "RatePerSqFt", header: "Rate", size: 100,
+    { accessorKey: "RatePerSqFt", header: "Rate", size: 130,
       cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">{i.row.original.RatePerSqFt ? `₹${Number(i.row.original.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span> },
-    { accessorKey: "AssigneeName", header: "Assigned To", size: 110,
+    { accessorKey: "AssigneeName", header: "Assigned To", size: 140,
       cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-sm">{(i.getValue() as string) || "—"}</span> },
-    { accessorKey: "Status", header: "Status", size: 100,
+    { accessorKey: "Status", header: "Status", size: 110,
       cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
-    { accessorKey: "CreatedAt", header: "Date", size: 100,
+    { accessorKey: "CreatedAt", header: "Date", size: 110,
       cell: (i) => (
         <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
           {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
         </span>
       ) },
-    { id: "actions", header: "", size: 180, enableSorting: false,
+    { id: "actions", header: "", size: 200, enableSorting: false,
       cell: (i) => {
         const a = i.row.original;
         const canResume = activeStage === "InProcess" && isResumeEditable(a);
@@ -1233,7 +1246,17 @@ const CrmApplication: React.FC = () => {
       {/* ── Stage tabs + filters + table, one continuous card instead of
           loose elements each carrying their own spacing/borders. ── */}
       <div className="rounded-xl overflow-hidden" style={glassStyle}>
-        <div className="flex items-center gap-1 px-3 pt-2.5 overflow-x-auto border-b" style={{ borderColor }}>
+        {/* overflow-x-auto alone was silently promoting overflow-y from its
+            default "visible" to "auto" too (CSS overflow spec: an axis left
+            visible force-computes to auto once the other axis isn't visible)
+            — any sub-pixel height overflow from the icon/badge buttons then
+            popped a real, native vertical scrollbar on this row. That was
+            the actual "scroller" bug, not the status <select> (which was a
+            separate, already-fixed issue) or any page/dialog layout
+            overflow. overflow-y-hidden pins the vertical axis so only
+            intentional horizontal scrolling (narrow screens, many stages)
+            can ever occur here. */}
+        <div className="flex items-center gap-1 px-3 pt-2.5 overflow-x-auto overflow-y-hidden border-b" style={{ borderColor }}>
           {STAGES.map((stg) => {
             const Icon = stageIcon[stg];
             const active = activeStage === stg;
