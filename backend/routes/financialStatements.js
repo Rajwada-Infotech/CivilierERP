@@ -204,18 +204,117 @@ router.get("/balance-sheet", async (req, res) => {
     const totalLiabilities = Math.round(liabilities.reduce((s, g) => s + g.total, 0) * 100) / 100;
     const totalAssets = Math.round(assets.reduce((s, g) => s + g.total, 0) * 100) / 100;
 
+    const { companyName, entityType } = await resolveCompanyType(pool, companyId);
+
+    // ── Schedule III classification heuristics (case-insensitive group name) ──
+    const isCurrentAsset = (name) =>
+      /cash|bank|receivable|inventory|stock|advance|prepaid|current|debtor/i.test(name);
+    const isInventory = (name) =>
+      /inventory|stock|wip|work in progress/i.test(name);
+    const isCurrentLiability = (name) =>
+      /payable|creditor|current|short|overdraft|provision/i.test(name);
+
+    let totalCurrentAssets = 0;
+    let totalNonCurrentAssets = 0;
+    let totalInventories = 0;
+    for (const g of assets) {
+      if (isCurrentAsset(g.groupName)) {
+        totalCurrentAssets = Math.round((totalCurrentAssets + g.total) * 100) / 100;
+        if (isInventory(g.groupName)) {
+          totalInventories = Math.round((totalInventories + g.total) * 100) / 100;
+        }
+      } else {
+        totalNonCurrentAssets = Math.round((totalNonCurrentAssets + g.total) * 100) / 100;
+      }
+    }
+
+    let totalCurrentLiabilities = 0;
+    let totalNonCurrentLiabilities = 0;
+    for (const g of liabilities) {
+      if (isCurrentLiability(g.groupName)) {
+        totalCurrentLiabilities = Math.round((totalCurrentLiabilities + g.total) * 100) / 100;
+      } else {
+        totalNonCurrentLiabilities = Math.round((totalNonCurrentLiabilities + g.total) * 100) / 100;
+      }
+    }
+
+    // ── Financial ratios ──────────────────────────────────────────────────────
+    const safeDiv = (n, d) => (Math.abs(d) < 0.005 ? null : Math.round((n / d) * 10000) / 10000);
+    const totalEquity = Math.round((totalAssets - totalLiabilities) * 100) / 100;
+    const currentRatio = safeDiv(totalCurrentAssets, totalCurrentLiabilities);
+    const quickRatio   = safeDiv(totalCurrentAssets - totalInventories, totalCurrentLiabilities);
+    const workingCapital = Math.round((totalCurrentAssets - totalCurrentLiabilities) * 100) / 100;
+    const debtToEquity = safeDiv(totalLiabilities, totalEquity);
+
     res.json({
       asOf,
+      companyName,
+      entityType,
       liabilities,
       assets,
       totals: { liabilities: totalLiabilities, assets: totalAssets },
       balanced: Math.abs(totalLiabilities - totalAssets) < 0.5,
+      netProfit,
+      ratios: {
+        currentRatio,
+        quickRatio,
+        workingCapital,
+        debtToEquity,
+        totalCurrentAssets,
+        totalNonCurrentAssets,
+        totalCurrentLiabilities,
+        totalNonCurrentLiabilities,
+        totalEquity,
+      },
     });
   } catch (err) {
     console.error("[GET /financial-statements/balance-sheet]", err);
     res.status(500).json({ error: err.message });
   }
 });
+
+// Company types that are body-corporates governed by Schedule III of the
+// Companies Act, 2013 (Division II format: Revenue from Operations / Other
+// Income → Total Income; a fixed set of expense lines → Total Expenses;
+// Profit Before Tax; Tax Expense; Profit After Tax). LLPs voluntarily follow
+// the same structured presentation in practice even though they're taxed
+// like a partnership. Everything else (Partnership, Proprietorship, or no
+// company selected/unknown type) gets the classic Trading & Profit and Loss
+// Account format instead — a partnership firm's P&L never carries a "Tax
+// Expense" line inside the account itself (provision for tax and partner
+// appropriation happen in a separate P&L Appropriation Account this ledger
+// has no data model for), so forcing Schedule III labels on it would be
+// actively wrong, not just cosmetically different.
+const SCHEDULE_III_TYPES = new Set(["Private Limited", "Public Limited", "OPC", "Section 8", "LLP"]);
+
+// dbo.AccountGroup ids directly under EXPENSES (root 4) / REVENUE (root 3) —
+// this chart of accounts was already seeded along Schedule III lines, so
+// classification is a direct id lookup, not a name-keyword guess.
+const SCH3_REVENUE_OPS = 15;
+const SCH3_OTHER_INCOME = new Set([16, 17]); // 17 = system-generated income
+const SCH3_EXPENSE_SECTIONS = [
+  { key: "projectExpenses", label: "Project & Construction Expenses", groupIds: [18, 19] },
+  { key: "costOfMaterials", label: "Cost of Materials Consumed", groupIds: [21] },
+  { key: "purchaseStockInTrade", label: "Purchase of Stock-in-Trade", groupIds: [22] },
+  { key: "stockChanges", label: "Changes in Inventories of Stock-in-Trade", groupIds: [23] },
+  { key: "employeeBenefits", label: "Employee Benefits Expense", groupIds: [24] },
+  { key: "financeCosts", label: "Finance Costs", groupIds: [25] },
+  { key: "depreciation", label: "Depreciation and Amortization Expense", groupIds: [26] },
+  { key: "otherExpenses", label: "Other Expenses", groupIds: [27, 42, 20] },
+  { key: "exceptionalItems", label: "Exceptional Items", groupIds: [28] },
+  { key: "extraordinaryItems", label: "Extraordinary Items", groupIds: [29] },
+];
+const SCH3_TAX_GROUP = 30; // Tax Expense (Current Tax 43 / Deferred Tax 44 underneath)
+
+async function resolveCompanyType(pool, companyId) {
+  if (!companyId) return { companyName: null, entityType: null };
+  const r = await pool
+    .request()
+    .input("id", sql.Int, companyId)
+    .query("SELECT name, entity_type FROM dbo.enterprise WHERE id = @id AND business_type = 'C'");
+  const row = r.recordset[0];
+  return { companyName: row?.name || null, entityType: row?.entity_type || null };
+}
 
 // ── GET /profit-loss?from=&to=&companyId=&projectId=&costCenterId= ─────────
 router.get("/profit-loss", async (req, res) => {
@@ -230,6 +329,10 @@ router.get("/profit-loss", async (req, res) => {
     const costCenterId = req.query.costCenterId ? parseInt(req.query.costCenterId, 10) : null;
 
     const groupMap = await loadGroups(pool);
+    const { companyName, entityType } = await resolveCompanyType(pool, companyId);
+    // No single company selected → default to the structured Schedule III
+    // view, the more broadly useful default across a multi-company org.
+    const presentation = !entityType || SCHEDULE_III_TYPES.has(entityType) ? "structured" : "classic";
 
     const headsRes = await pool
       .request()
@@ -263,6 +366,27 @@ router.get("/profit-loss", async (req, res) => {
       g.total = Math.round((g.total + head.amount) * 100) / 100;
     };
 
+    // Walk a group's ancestor chain and return the nearest ancestor id that
+    // is itself a direct child of the EXPENSES/REVENUE root — i.e. the
+    // Schedule-III bucket id (18–30) a leaf group like "Indirect Expenses"
+    // (42, parented under 27 Other Expenses) rolls up into.
+    function scheduleBucketOf(groupId) {
+      let cur = groupMap.get(Number(groupId));
+      let hops = 0;
+      while (cur && hops < 20) {
+        if (cur.parentId === ROOT_IDS.REVENUE || cur.parentId === ROOT_IDS.EXPENSES) return cur.id;
+        if (cur.parentId == null) return null;
+        cur = groupMap.get(cur.parentId);
+        hops++;
+      }
+      return null;
+    }
+
+    const revenueOps = { heads: [], total: 0 };
+    const otherIncome = { heads: [], total: 0 };
+    const expenseSections = SCH3_EXPENSE_SECTIONS.map((s) => ({ ...s, heads: [], total: 0 }));
+    const taxExpense = { heads: [], total: 0 };
+
     for (const h of headsRes.recordset) {
       const debit = Number(h.debit) || 0;
       const credit = Number(h.credit) || 0;
@@ -275,10 +399,30 @@ router.get("/profit-loss", async (req, res) => {
         const net = Math.round((credit - debit) * 100) / 100;
         if (Math.abs(net) < 0.005) continue;
         pushHead(incomeGroups, gid, groupName, { id: h.id, name: h.name, amount: net });
+
+        if (presentation === "structured") {
+          const bucket = scheduleBucketOf(gid);
+          const target = bucket === SCH3_REVENUE_OPS ? revenueOps : otherIncome;
+          target.heads.push({ id: h.id, name: h.name, amount: net });
+          target.total = Math.round((target.total + net) * 100) / 100;
+        }
       } else if (root === ROOT_IDS.EXPENSES) {
         const net = Math.round((debit - credit) * 100) / 100;
         if (Math.abs(net) < 0.005) continue;
         pushHead(expenseGroups, gid, groupName, { id: h.id, name: h.name, amount: net });
+
+        if (presentation === "structured") {
+          const bucket = scheduleBucketOf(gid);
+          if (bucket === SCH3_TAX_GROUP) {
+            taxExpense.heads.push({ id: h.id, name: h.name, amount: net });
+            taxExpense.total = Math.round((taxExpense.total + net) * 100) / 100;
+          } else {
+            const section = expenseSections.find((s) => s.groupIds.includes(bucket));
+            const target = section || expenseSections[expenseSections.length - 1];
+            target.heads.push({ id: h.id, name: h.name, amount: net });
+            target.total = Math.round((target.total + net) * 100) / 100;
+          }
+        }
       }
     }
 
@@ -293,12 +437,73 @@ router.get("/profit-loss", async (req, res) => {
     const totalExpenses = Math.round(expenses.reduce((s, g) => s + g.total, 0) * 100) / 100;
     const netProfit = Math.round((totalIncome - totalExpenses) * 100) / 100;
 
+    let statement = null;
+    if (presentation === "structured") {
+      const nonZeroSections = expenseSections.filter((s) => Math.abs(s.total) > 0.005);
+      const totalRevenue = Math.round((revenueOps.total + otherIncome.total) * 100) / 100;
+      const totalExpensesExclTax = Math.round(
+        nonZeroSections.reduce((s, sec) => s + sec.total, 0) * 100,
+      ) / 100;
+      const profitBeforeTax = Math.round((totalRevenue - totalExpensesExclTax) * 100) / 100;
+      const profitAfterTax = Math.round((profitBeforeTax - taxExpense.total) * 100) / 100;
+
+      // Helper: sum section totals by key
+      const secTotal = (...keys) =>
+        Math.round(
+          nonZeroSections
+            .filter((s) => keys.includes(s.key))
+            .reduce((sum, s) => sum + s.total, 0) * 100,
+        ) / 100;
+
+      // Gross Profit: Revenue from Ops minus direct production/project costs.
+      // For construction/real-estate: projectExpenses + costOfMaterials + stockChanges + purchaseStockInTrade
+      const directCosts = secTotal(
+        "projectExpenses",
+        "costOfMaterials",
+        "purchaseStockInTrade",
+        "stockChanges",
+      );
+      const grossProfit = Math.round((revenueOps.total - directCosts) * 100) / 100;
+
+      // EBITDA: PBT + Finance Costs + Depreciation & Amortisation
+      const financeCostsTotal = secTotal("financeCosts");
+      const depreciationTotal = secTotal("depreciation");
+      const ebitda = Math.round((profitBeforeTax + financeCostsTotal + depreciationTotal) * 100) / 100;
+
+      // Profit Before Exceptional Items: PBT + Exceptional Items (add back the exceptional/extraordinary)
+      const exceptionalTotal = secTotal("exceptionalItems", "extraordinaryItems");
+      const profitBeforeExceptional = Math.round((profitBeforeTax + exceptionalTotal) * 100) / 100;
+
+      statement = {
+        revenueFromOperations: revenueOps,
+        otherIncome,
+        totalRevenue,
+        expenseSections: nonZeroSections,
+        totalExpensesExclTax,
+        grossProfit,
+        ebitda,
+        profitBeforeExceptional,
+        profitBeforeTax,
+        taxExpense,
+        profitAfterTax,
+        // Breakdown helpers for the frontend KPI bar
+        directCosts,
+        financeCostsTotal,
+        depreciationTotal,
+        exceptionalTotal,
+      };
+    }
+
     res.json({
       from,
       to,
+      companyName,
+      entityType,
+      presentation,
       income,
       expenses,
       totals: { income: totalIncome, expenses: totalExpenses, netProfit },
+      statement,
     });
   } catch (err) {
     console.error("[GET /financial-statements/profit-loss]", err);
