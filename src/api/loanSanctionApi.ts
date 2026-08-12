@@ -113,6 +113,10 @@ export interface PayableEmi {
   LoanNo: string;
   LoanType: LoanType;
   BorrowerName: string;
+  /** Company-only borrower name — null when the borrower is a customer, not one of our own companies. */
+  BorrowerCompanyName: string | null;
+  /** Lender is always a company — who repayment actually goes to. */
+  LenderName: string | null;
   IsOverdue: boolean;
 }
 

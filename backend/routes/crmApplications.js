@@ -29,9 +29,9 @@ const APP_SELECT = `
     a.InterestedProject, a.InterestedUnit, a.PropertyType, a.BhkPreference,
     a.Source, a.PlatformId, a.CampaignId, a.AdId, a.ChannelPartnerId,
     a.AssignedTo, a.AssignedBy, a.Status, a.Notes, a.CurrentStep,
-    a.RatePerSqFt, a.DateOfApply, a.PaymentPlanId, a.TokenType, a.TokenValue, a.BookingAmount, a.PaymentMode,
+    a.RatePerSqFt, a.DateOfApply, a.PaymentPlanId, a.TokenType, a.TokenValue, a.BookingAmount, a.PaymentMode, a.DepositBankId,
     a.ReferredByApplicationId, a.IsActive, a.CreatedAt, a.UpdatedAt,
-    a.BrokerId, a.BrokerageRatePercent, a.BrokerageSplitEnabled, brk.LHeadName AS BrokerName,
+    a.BrokerId, a.BrokerageRatePercent, a.BrokeragePaymentPlan, brk.LHeadName AS BrokerName,
     (
       SELECT TOP 1 CAST(Note AS NVARCHAR(MAX))
       FROM dbo.ApprovalAuditLog
@@ -376,6 +376,11 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       }
     }
 
+    const BROKERAGE_PLANS = ["OneTime", "TwoPart", "AgreementOnly"];
+    if (b.BrokeragePaymentPlan !== undefined && b.BrokeragePaymentPlan !== null && !BROKERAGE_PLANS.includes(b.BrokeragePaymentPlan)) {
+      return res.status(400).json({ error: `BrokeragePaymentPlan must be one of ${BROKERAGE_PLANS.join(", ")}` });
+    }
+
     await pool.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.ApplicantName || null)
@@ -407,7 +412,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("ub",   sql.Int,           actor)
       .input("brkid", sql.Int,          b.BrokerId ? parseInt(b.BrokerId) : null)
       .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
-      .input("brksplit", sql.Bit,       b.BrokerageSplitEnabled !== undefined ? (b.BrokerageSplitEnabled ? 1 : 0) : null)
+      .input("brkplan", sql.NVarChar(20), b.BrokeragePaymentPlan || null)
       // Wizard resume progress. Clamped to the 1-6 step range the frontend
       // stepper actually has; CurrentStep only ever moves forward (see the
       // CASE below) — it tracks the furthest point reached, not merely the
@@ -432,7 +437,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           PaymentMode = ISNULL(@pmode, PaymentMode),
           DepositBankId = ISNULL(@dbid, DepositBankId),
           BrokerId = ISNULL(@brkid, BrokerId), BrokerageRatePercent = ISNULL(@brkpct, BrokerageRatePercent),
-          BrokerageSplitEnabled = ISNULL(@brksplit, BrokerageSplitEnabled),
+          BrokeragePaymentPlan = ISNULL(@brkplan, BrokeragePaymentPlan),
           -- AssignedTo/AssignedBy are intentionally never accepted here — set
           -- once at creation (the filer becomes the assignee) and locked;
           -- reassignment goes through the existing lead-transfer flow instead.
@@ -465,32 +470,20 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
   }
 });
 
-// PUT /:id/submit — Rejected -> Pending (a real resubmit) via approvalTransition;
-// otherwise a no-op. POST / itself already inserts new Applications straight into
-// 'Pending' (see createCrmApplicationRecord), so a fresh Application filed through
-// the wizard is already "in the queue" by the time staff reach Step 4 — the no-op
-// branch below is what actually runs for every normal creation; the Draft->Pending
-// transition this route was originally written for is unreachable in practice since
-// nothing creates a CrmApplication as Draft anymore.
-//
-// This is also where the Booking now gets created — there is no separate
-// Application-approval step anymore (see crmEntityCreation.js's relaxed
-// gate): the moment staff submit the Application, a Booking is created
-// straight away if a Unit was picked, and the frontend navigates directly
-// to that Booking's page. Booking Approval and Broker Approval are what
-// actually go through review from here — both fire off the Booking itself
-// (crmBookings.js's ready-for-approval, and crmWorkflowGuards.js's
-// maybeAutoCreateBrokerage, triggered inside createCrmBookingRecord's own
-// Milestone #1 auto-receipt sync) — never blocks the submit itself if
-// booking creation fails (e.g. the unit got taken by someone else in the
-// interim); staff can retry via the "Create Booking" button on the
-// Applications list, the same fallback path this always had.
-// PUT /:id/submit — sends the Application into verification. This is now
-// ONLY a submit — it no longer auto-creates a Booking (see PUT /:id/approve
-// and POST /:id/create-booking below). Draft/Rejected -> Pending, handled
-// generically by approvalTransition; Rejected -> Pending is this route's
-// resubmit-after-revert path (see PUT /:id/reject), and is exactly how the
-// verification loop closes.
+// PUT /:id/submit — sends the Application into verification AND, the moment
+// that succeeds, creates its Booking straight away (if a Unit was picked in
+// Step 1) — there is no separate Application-approval gate anymore. Staff
+// never click a distinct "Approve" for the Application; the real review/
+// approval work (Level-1 data review, then Marketing Head, then Director)
+// all happens on the Booking itself from here on (see crmBookingStageService.js).
+// Booking creation is best-effort/non-blocking here — the response reports
+// bookingId/bookingNo when it succeeds so the frontend can jump straight
+// there; a failure (e.g. the unit got taken by someone else in the interim)
+// never fails the submit itself, staff can retry via the "Create Booking"
+// fallback button on the Applications list (POST /:id/create-booking).
+// Draft/Rejected -> Pending, handled generically by approvalTransition; the
+// no-op branch below runs for every normal first-time submit since POST /
+// already inserts new Applications straight into 'Pending'.
 router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
@@ -548,60 +541,66 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
       console.error("[crm-applications] auto-hold on submit failed:", holdErr.message);
     }
 
-    res.json({ success: true, status: result.newStatus });
+    // Auto-create the Booking the moment submit succeeds — no separate
+    // "wait for Application approval, then click Create Booking" step
+    // anymore. Best-effort: a real conflict here (unit taken in the
+    // interim, no payment plan resolvable, etc.) is reported back but
+    // never fails the submit itself — staff retry via the "Create Booking"
+    // fallback button, same as before.
+    let booking = null;
+    let bookingError = null;
+    const already = await pool.request().input("aid", sql.Int, id)
+      .query("SELECT TOP 1 Id, BookingNo FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1");
+    if (already.recordset.length) {
+      booking = { id: already.recordset[0].Id, BookingNo: already.recordset[0].BookingNo };
+    } else {
+      const app = await pool.request().input("id", sql.Int, id).query(`
+        SELECT PreferredUnitId, RatePerSqFt, PaymentPlanId, DateOfApply,
+               TokenType, TokenValue, BookingAmount, PaymentMode, DepositBankId,
+               AssignedTo, Notes, BrokerId, BrokerageRatePercent, BrokeragePaymentPlan
+        FROM dbo.CrmApplication WHERE Id = @id
+      `);
+      const a = app.recordset[0];
+      if (a?.PreferredUnitId) {
+        try {
+          const created = await createCrmBookingRecord(pool, {
+            ApplicationId: id, UnitId: a.PreferredUnitId, RatePerSqFt: a.RatePerSqFt,
+            PaymentPlanId: a.PaymentPlanId, BookingDate: a.DateOfApply,
+            TokenType: a.TokenType, TokenValue: a.TokenValue, BookingAmount: a.BookingAmount,
+            PaymentMode: a.PaymentMode, DepositBankId: a.DepositBankId,
+            AssignedTo: a.AssignedTo, Notes: a.Notes,
+            BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokeragePaymentPlan: a.BrokeragePaymentPlan,
+          }, actor);
+          booking = { id: created.id, BookingNo: created.BookingNo };
+        } catch (bkErr) {
+          console.error("[crm-applications] auto-create-booking on submit failed:", bkErr.message);
+          bookingError = bkErr.message;
+        }
+      }
+    }
+
+    res.json({ success: true, status: result.newStatus, bookingId: booking?.id || null, bookingNo: booking?.BookingNo || null, bookingError });
   } catch (e) {
     console.error("[crm-applications] submit error:", e.message);
     res.status(e.status || 400).json({ error: e.message });
   }
 });
 
-// PUT /:id/approve — the level-1 (and beyond, if LevelsData grows) human
-// verification gate. Reaching full "Approved" here means the Application is
-// registered — real, checked data — but still has no Booking (see
-// POST /:id/create-booking). admin/super_admin/marketing_head only, enforced
-// inside approvalTransition.
-router.put("/:id/approve", requirePageRight("crm-applications", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  try {
-    const userEmail = requireUserEmail(req, res);
-    if (!userEmail) return;
-    const result = await approvalTransition("crm-applications", id, "Approved", userEmail, req.user?.role);
-    res.json({ success: true, status: result.newStatus, level: result.level, totalLevels: result.totalLevels });
-  } catch (e) {
-    console.error("[crm-applications] approve error:", e.message);
-    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
-  }
-});
+// Applications no longer have their own separate approve/reject cycle or
+// Level-1 checklist — both retired. The moment an Application is Submitted
+// (Pending), its Booking is auto-created (see PUT /:id/submit above) and
+// ALL real review/approval happens there instead: the same 7 checklist
+// items that used to gate this Application's own Approve now gate the
+// Booking's "Review" stage, followed by Marketing Head then Director
+// approval (see crmBookingStageService.js, crmBookings.js). An Application
+// simply stays Pending once submitted — its Booking's own WorkflowStage is
+// the real state to watch from here on.
 
-// PUT /:id/reject — this IS "revert to fill/re-check" from the verifier's
-// side, not a dead end: approvalTransition's generic engine already allows
-// Rejected -> Pending (see PUT /:id/submit above), so the applicant edits
-// (PUT /:id, still open — Rejected isn't in the changingUnitSelection lock
-// list) and resubmits, and the loop repeats until level 1 clears. A reason
-// is mandatory — the whole point of this gate is the verifier telling the
-// preparer exactly what to fix, not a silent bounce.
-router.put("/:id/reject", requirePageRight("crm-applications", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  try {
-    const userEmail = requireUserEmail(req, res);
-    if (!userEmail) return;
-    if (!req.body?.note?.trim()) {
-      return res.status(400).json({ error: "A reason is required so the preparer knows what to fix" });
-    }
-    const result = await approvalTransition("crm-applications", id, "Rejected", userEmail, req.user?.role, req.body.note);
-    res.json({ success: true, status: result.newStatus });
-  } catch (e) {
-    console.error("[crm-applications] reject error:", e.message);
-    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
-  }
-});
-
-// POST /:id/create-booking — staff-facing, manual, only once the Application
-// is registered (Status='Approved'). This is the ONLY path that creates a
-// Booking now — see createCrmBookingRecord's own Status==='Approved' gate in
-// crmEntityCreation.js. Deliberately not automatic: registration and booking
-// are two different people's work (verification vs. the booking-page
-// checklist), and stapling them together hid exactly that boundary before.
+// POST /:id/create-booking — staff-facing fallback/retry. Bookings are
+// normally auto-created the instant an Application is submitted (see
+// PUT /:id/submit above); this route exists for the case that auto-create
+// failed (unit taken in the interim, plan unresolved, etc.) and staff need
+// to retry by hand once the underlying issue is fixed.
 router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
@@ -611,14 +610,11 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
     const app = await pool.request().input("id", sql.Int, id).query(`
       SELECT Status, PreferredUnitId, RatePerSqFt, PaymentPlanId, DateOfApply, TokenType, TokenValue,
              BookingAmount, PaymentMode, AssignedTo, Notes, DepositBankId,
-             BrokerId, BrokerageRatePercent, BrokerageSplitEnabled
+             BrokerId, BrokerageRatePercent, BrokeragePaymentPlan
       FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1
     `);
     if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
     const a = app.recordset[0];
-    if (a.Status !== "Approved") {
-      return res.status(400).json({ error: `Application must be registered (Approved) before a Booking can be created — current status: ${a.Status}` });
-    }
     if (!a.PreferredUnitId) {
       return res.status(400).json({ error: "This application has no preferred unit selected" });
     }
@@ -629,7 +625,7 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
       TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
       DepositBankId: a.DepositBankId,
       AssignedTo: a.AssignedTo, Notes: a.Notes,
-      BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokerageSplitEnabled: a.BrokerageSplitEnabled,
+      BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokeragePaymentPlan: a.BrokeragePaymentPlan,
     }, actor);
 
     // Same SA-lead sync that used to live inside submit — still the one

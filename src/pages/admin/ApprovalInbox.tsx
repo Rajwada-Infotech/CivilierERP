@@ -34,6 +34,7 @@ import {
   Eye,
   FileText,
   Landmark,
+  UserCheck,
 } from "lucide-react";
 import type { ApprovalTable } from "@/components/ApprovalStatusChain";
 import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
@@ -183,6 +184,15 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/fund-transfer",
     label: "Fund Transfers",
   },
+  // crm-applications deliberately has no entry here anymore — Applications
+  // no longer have their own approve/reject cycle (see approvalInbox.js's
+  // aggregator query, and crmApplications.js), so the backend never emits a
+  // crm-applications row for this inbox to render in the first place.
+  //
+  // crm-bookings' navPath opens the real Booking detail dialog (CrmBooking.tsx
+  // /CrmBookingDetail.tsx) via its existing "?view=" deep link — the merged
+  // Data Review checklist + Marketing Head/Director approve-reject UI all
+  // live there now, not on a separate dedicated screen.
   "crm-bookings": {
     icon: Home,
     color: "text-orange-500 bg-orange-500/10",
@@ -269,6 +279,7 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
 export const CRM_MODULES = new Set(["crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
 export const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
+const CRM_BOOKING_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "director"];
 // Agreement Date and Sales Deed Director approval are narrower, separate
 // gates — super_admin only, "for now" per instruction, unlike the rest of
 // the CRM modules above. The backend enforces this independently via
@@ -290,6 +301,15 @@ export const RESTRICTED_MODULES = new Set([
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
 
+// Modules whose one-click Approve is either guaranteed to fail without a
+// review step first (crm-bookings' Data Review checklist gate) or whose
+// approved amount is only ever editable before approval (crm-brokerage) —
+// see the reviewInstead comment below for the full reasoning per module.
+const REVIEW_INSTEAD_LABEL: Record<string, string> = {
+  "crm-bookings": "Open Booking",
+  "crm-brokerage": "Review & Approve",
+};
+
 // Modules whose page already supports a "?view=<RecordId>" deep link that
 // auto-opens that exact record's own preview/view modal on load (see the
 // `searchParams.get("view")` effect in each page). Modules not listed here
@@ -301,12 +321,22 @@ const VIEW_PARAM_MODULES = new Set([
   "payments",
   "vehicle-in-out",
   "material-requests",
+  "crm-brokerage",
 ]);
 
 // Builds the URL to open a given inbox item directly in its module's own
 // preview mode, instead of dumping the user on a blank list page to hunt
 // for the record themselves.
 export function openInModulePath(item: InboxItem, navPath: string): string {
+  // crm-bookings' navPath (/crm/bookings) opens the real Booking detail
+  // dialog via its existing "?view=" deep link — same convention
+  // VIEW_PARAM_MODULES below uses, just listed explicitly here since it's
+  // CRM-specific rather than shared with the generic modules.
+  if (item.Module === "crm-bookings") {
+    return `${navPath}?view=${item.RecordId}`;
+  }
+  // crm-agreements/crm-agreement-date use "?id=" (opens the read-only detail
+  // dialog directly via CrmApplication.tsx-style searchParams.get("id") effects).
   if (item.Module === "crm-agreements" || item.Module === "crm-agreement-date") {
     return `${navPath}?id=${item.RecordId}`;
   }
@@ -579,8 +609,26 @@ const InboxRow: React.FC<{
         actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
         approverRoles={
           SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
+          : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
           : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
           : undefined
+        }
+        // crm-applications'/crm-bookings' own PUT /:id/approve routes 400
+        // until every Level-1/Level-2 checklist item is ticked — a one-click
+        // Approve here can never succeed on its own, it can only ever
+        // produce the "Complete the Level-X verification checklist..."
+        // error toast. crm-brokerage's approve CAN succeed one-click (no
+        // checklist gate), but the computed amount is meant to be reviewed
+        // — and is only ever editable — before approval (see crmBrokerage.js
+        // PUT /:id "can only be customized before approval"), so a blind
+        // one-click Approve here skips the one chance to catch/adjust a
+        // wrong figure. All three swap the Approve button for a direct
+        // hand-off to their own review screen instead. Reject is untouched
+        // for all of them — no checklist/review gate applies to rejecting.
+        reviewInstead={
+          REVIEW_INSTEAD_LABEL[item.Module] && cfg?.navPath
+            ? { label: REVIEW_INSTEAD_LABEL[item.Module], onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
+            : undefined
         }
         restricted={RESTRICTED_MODULES.has(item.Module)}
         onSuccess={(action) => {
@@ -590,7 +638,13 @@ const InboxRow: React.FC<{
           onActionDone();
         }}
       />
-      {cfg?.navPath && (
+      {/* The separate "open in preview" arrow is redundant for any module
+          with a reviewInstead button while Pending — that button above
+          already does the exact same navigation. Once it leaves Pending
+          (Approved/Rejected/Cancelled), reviewInstead isn't rendered above,
+          so the arrow comes back as the only way to open the record from
+          this row. */}
+      {cfg?.navPath && !(REVIEW_INSTEAD_LABEL[item.Module] && item.Status === "Pending") && (
         <button
           onClick={() => navigate(openInModulePath(item, cfg.navPath))}
           className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"

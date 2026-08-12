@@ -141,8 +141,19 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
         LEFT JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = b.PaymentPlanId
         WHERE b.Id = @bid
       `),
+      // Address columns added for the "Communication address confirmed"
+      // checklist item (welcome-checklist.js's PersonalContact section) —
+      // this call-context route used to only carry Name/Mobile/Email/PAN,
+      // so that item had no data anywhere on the page to actually check
+      // against. Current* wins when set (the customer's real mailing
+      // address); falls back to the permanent Address/City/State/Pincode
+      // otherwise, same precedence CrmCustomers.tsx's own display uses.
       pool.request().input("bid", sql.Int, bookingId).query(`
-        SELECT c.CustomerName, c.Mobile, c.Email, c.PanNo
+        SELECT c.CustomerName, c.Mobile, c.Email, c.PanNo,
+               ISNULL(NULLIF(LTRIM(RTRIM(c.CurrentAddress)), ''), c.Address) AS Address,
+               ISNULL(NULLIF(LTRIM(RTRIM(c.CurrentCity)), ''), c.City) AS City,
+               ISNULL(NULLIF(LTRIM(RTRIM(c.CurrentState)), ''), c.State) AS State,
+               ISNULL(NULLIF(LTRIM(RTRIM(c.CurrentPincode)), ''), c.Pincode) AS Pincode
         FROM dbo.CrmCustomer c
         JOIN dbo.CrmApplication a ON a.CustomerId = c.Id
         JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id

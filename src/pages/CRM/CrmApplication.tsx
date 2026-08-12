@@ -33,6 +33,9 @@ const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"
 
 const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled", "Expired"];
 const DOC_TYPES = ["IdentityProof", "AddressProof", "PhotoID", "IncomeProof", "Other"];
+// Applications no longer have their own verification checklist or approval
+// cycle at all — that logic merged into the Booking's own "Review" workflow
+// stage (see CrmBookingDetail.tsx / crmBookingStageService.js).
 
 const statusColor: Record<string, string> = {
   Draft:     "text-muted-foreground bg-muted/50 border-border",
@@ -50,7 +53,7 @@ const EMPTY_FORM = {
   Source: "", PlatformId: "", CampaignId: "", AdId: "", ChannelPartnerId: "",
   // ViaBroker is UI-only (never sent to the backend) — it just toggles the
   // broker sub-block; BrokerId being set is what actually matters server-side.
-  ViaBroker: false, BrokerId: "", BrokerageRatePercent: "", BrokerageSplitEnabled: false,
+  ViaBroker: false, BrokerId: "", BrokerageRatePercent: "", BrokeragePaymentPlan: "OneTime",
   Notes: "",
   // Payment Details (Step 6/Details) — these columns already existed on
   // CrmApplication and were already read by handleCreateBooking's retry
@@ -142,6 +145,16 @@ async function fetchPaymentPlans(): Promise<any[]> {
 // Block -> Unit cascade (see crmEntityCreation.js's getApplicablePaymentPlans).
 async function fetchBlockPlanTags(): Promise<any[]> {
   try { const r = await fetchWithAuth("/api/block-master"); return r.ok ? r.json() : []; } catch { return []; }
+}
+
+// Admin-editable commission tiers (dbo.CrmBrokerageRateTier, see
+// crmBrokerageRateTiers.js / CrmBrokerageRateTiers.tsx) — this is only a
+// staff-facing preview of the same fallback rate the server itself applies
+// (tierBrokeragePercent in crmWorkflowGuards.js) when no explicit override
+// is typed; it's never used to compute what actually gets saved.
+type RateTier = { MinDealValue: number; MaxDealValue: number | null; RatePercent: number; IsActive: boolean };
+async function fetchBrokerageRateTiers(): Promise<RateTier[]> {
+  try { const r = await fetchWithAuth("/api/crm/brokerage-rate-tiers"); return r.ok ? r.json() : []; } catch { return []; }
 }
 
 // Same shape CrmPaymentPlans.tsx already parses off the list endpoint's
@@ -266,6 +279,16 @@ const CrmApplication: React.FC = () => {
   // shown, so this can't be unlocked at all past that point (see the
   // Project/Unit tree JSX).
   const [unitLocked, setUnitLocked] = useState(false);
+  // Same lock/Edit pattern as the Project/Unit tree above, applied to the
+  // Payment Details block (Token Amount, Payment Mode, Cheque/Transaction
+  // Ref, Deposited-To bank). Without this, resuming an already-submitted
+  // (Pending) application left every one of those fields sitting wide open
+  // and re-editable with zero friction — an easy way to accidentally
+  // overwrite a figure the customer already confirmed and create a
+  // mismatch between what Finance approved and what's actually on file.
+  // Gated by the same canEditUnitSelection (Draft/Pending only) — once
+  // Approved, no Edit control renders and this can't be unlocked at all.
+  const [paymentLocked, setPaymentLocked] = useState(false);
 
   // (No more planLocked/auto-fetch state — Unit Master no longer has a
   // single "default" plan to silently apply; Payment Plan is always an
@@ -328,6 +351,7 @@ const CrmApplication: React.FC = () => {
   const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 30_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["crm-brokers-dropdown"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
+  const { data: rateTiers = [] } = useQuery({ queryKey: ["crm-brokerage-rate-tiers"], queryFn: fetchBrokerageRateTiers, staleTime: 5 * 60_000 });
   const { data: blockPlanTags = [] } = useQuery({ queryKey: ["crm-app-block-plan-tags"], queryFn: fetchBlockPlanTags, staleTime: 5 * 60_000 });
   const { data: crmGstRates } = useGstRates();
   // Same queryKey ParkingSelectionStep (Step 2) uses for this applicationId
@@ -472,7 +496,20 @@ const CrmApplication: React.FC = () => {
   // application with a blank (optional) Notes field would incorrectly show
   // Resume, while other field combinations could just as easily fail to show
   // it on a genuinely incomplete one. Status is the real answer; stop guessing.
-  const isResumeEditable = (app: any) => !!app && (app.Status === "Draft" || app.Status === "Pending");
+  //
+  // BUG FIX: Status alone isn't enough — a Booking is auto-attempted the
+  // moment an Application is submitted (see PUT /:id/submit), and Status
+  // stays 'Pending' on the Application even after that Booking exists and
+  // is later Approved (Status only ever moves to 'Approved'/'Rejected' via
+  // the Application's own, now-mostly-vestigial transitions). Without also
+  // checking Stage, a fully Converted application (real Booking, possibly
+  // already Approved) still shows Resume — reopening the wizard and
+  // resubmitting tries to book the SAME unit a second time, which the
+  // backend correctly rejects with "This unit is already booked", but the
+  // button should never have been offered in the first place. Stage is
+  // computed server-side from whether a live Booking exists (see APP_SELECT
+  // in crmApplications.js) and is the actual source of truth here.
+  const isResumeEditable = (app: any) => !!app && app.Stage !== "Converted" && (app.Status === "Draft" || app.Status === "Pending");
 
   // Same Draft/Pending gate as isResumeEditable, applied inside the open
   // wizard rather than at the Resume button: null status means a brand-new
@@ -496,7 +533,14 @@ const CrmApplication: React.FC = () => {
   // real Booking's own Cancellation Request flow is the only path from there,
   // so this never shows for an Approved application. The button itself is
   // just a convenience gate; the backend re-checks and is the real guard.
-  const canCancelApplication = (app: any) => !!app && !["Approved", "Cancelled", "Expired"].includes(app.Status);
+  //
+  // BUG FIX: same Stage gap as isResumeEditable above — Status can still
+  // read 'Pending' on an already-Converted application (real Booking exists,
+  // possibly Approved), which incorrectly offered "Cancel Application" here
+  // too, alongside Resume, for a record that isn't cancellable through this
+  // flow anymore — its Booking's own Cancellation Request is the only real
+  // path once converted.
+  const canCancelApplication = (app: any) => !!app && app.Stage !== "Converted" && !["Approved", "Cancelled", "Expired"].includes(app.Status);
 
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.
@@ -614,11 +658,35 @@ const CrmApplication: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPlanBookingAmount]);
 
-  // Preview only — under 1Cr -> 2%, 1Cr and above -> 1%. The real, final
-  // percentage/amount is computed server-side off the Booking's actual
-  // TotalValue once one exists (see maybeAutoCreateBrokerage in
-  // crmWorkflowGuards.js); this just gives staff a rate hint at intake time.
-  const brokerageTierDefault = computedTotal >= 10000000 ? 1 : 2;
+  // Preview only, driven by the real editable tiers (rateTiers, above) —
+  // the real, final percentage/amount is computed server-side off the
+  // Booking's actual TotalValue once one exists (tierBrokeragePercent in
+  // crmWorkflowGuards.js reads the same table); this just gives staff a
+  // rate hint at intake time. Falls back to 2% if tiers haven't loaded yet
+  // or none are configured, matching the server's own fallback.
+  const activeTiers = useMemo(() =>
+    (rateTiers as RateTier[]).filter((t) => t.IsActive).sort((a, b) => a.MinDealValue - b.MinDealValue),
+    [rateTiers]
+  );
+  const brokerageTierDefault = useMemo(() => {
+    const match = [...activeTiers].reverse().find((t) =>
+      computedTotal >= Number(t.MinDealValue) && (t.MaxDealValue == null || computedTotal < Number(t.MaxDealValue))
+    );
+    return match ? Number(match.RatePercent) : 2;
+  }, [activeTiers, computedTotal]);
+  const brokerageTierPreviewText = useMemo(() => {
+    if (!activeTiers.length) return `${brokerageTierDefault}%`;
+    const cr = (v: number) => `₹${(v / 10000000).toFixed(v % 10000000 === 0 ? 0 : 2)}Cr`;
+    const parts = activeTiers.map((t) => {
+      const range = Number(t.MinDealValue) === 0
+        ? `< ${cr(Number(t.MaxDealValue))}`
+        : t.MaxDealValue == null
+        ? `≥ ${cr(Number(t.MinDealValue))}`
+        : `${cr(Number(t.MinDealValue))}–${cr(Number(t.MaxDealValue))}`;
+      return `${range} → ${t.RatePercent}%`;
+    });
+    return `${brokerageTierDefault}% (${parts.join(", ")})`;
+  }, [activeTiers, brokerageTierDefault]);
 
   const resetWizard = () => {
     setForm({ ...EMPTY_FORM });
@@ -629,6 +697,7 @@ const CrmApplication: React.FC = () => {
     // A brand-new application starts with no status of its own.
     setWizardAppStatus(null);
     setUnitLocked(false);
+    setPaymentLocked(false);
   };
 
   // Deep-link from CrmLeads.tsx's "View Application" link (a converted lead
@@ -685,7 +754,7 @@ const CrmApplication: React.FC = () => {
         ViaBroker: !!app.BrokerId,
         BrokerId: app.BrokerId ? String(app.BrokerId) : "",
         BrokerageRatePercent: app.BrokerageRatePercent != null ? String(app.BrokerageRatePercent) : "",
-        BrokerageSplitEnabled: !!app.BrokerageSplitEnabled,
+        BrokeragePaymentPlan: ["OneTime", "TwoPart", "AgreementOnly"].includes(app.BrokeragePaymentPlan) ? app.BrokeragePaymentPlan : "OneTime",
         Notes: app.Notes || "",
         TokenType: app.TokenType || "Percentage",
         TokenValue: app.TokenValue != null ? String(app.TokenValue) : "",
@@ -706,6 +775,13 @@ const CrmApplication: React.FC = () => {
       // Edit is always available here in practice; canEditUnitSelection
       // below still gates it defensively in case that ever changes.
       setUnitLocked(hasProject);
+      // Same idea as the Project/Unit lock just above: if a token
+      // amount/payment mode was already captured on a previous visit to
+      // this step, default to showing it read-only — Edit unlocks it for a
+      // genuine correction. A brand-new application that's never reached
+      // Details yet has nothing to protect, so it opens unlocked.
+      const hasPaymentData = !!app.TokenValue || !!app.PaymentMode;
+      setPaymentLocked(hasPaymentData);
       // CurrentStep is the furthest step this application actually reached
       // (persisted by saveApplicationFields on every "Next" — see
       // handleCreateAndNext/handleBankDetailsNext/handleCoApplicantNext/
@@ -758,7 +834,7 @@ const CrmApplication: React.FC = () => {
         ChannelPartnerId: form.ChannelPartnerId || null,
         BrokerId: form.ViaBroker && form.BrokerId ? parseInt(form.BrokerId) : null,
         BrokerageRatePercent: form.ViaBroker && form.BrokerageRatePercent !== "" ? form.BrokerageRatePercent : null,
-        BrokerageSplitEnabled: form.ViaBroker ? !!form.BrokerageSplitEnabled : false,
+        BrokeragePaymentPlan: form.ViaBroker ? form.BrokeragePaymentPlan : "OneTime",
       };
 
       if (applicationId) {
@@ -983,7 +1059,7 @@ const CrmApplication: React.FC = () => {
           TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
           DepositBankId: a.DepositBankId,
           AssignedTo: a.AssignedTo, Notes: a.Notes,
-          BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokerageSplitEnabled: a.BrokerageSplitEnabled,
+          BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokeragePaymentPlan: a.BrokeragePaymentPlan,
         }),
       });
       const data = await res.json();
@@ -997,7 +1073,6 @@ const CrmApplication: React.FC = () => {
       setCreatingBookingId(null);
     }
   };
-
   const convertedColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "App No", size: 120,
       cell: (i) => (
@@ -1194,7 +1269,7 @@ const CrmApplication: React.FC = () => {
                 210px cell) was what made this column look broken. */}
             {activeStage === "InProcess" && a.Status === "Pending" && (
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <Clock size={10} /> Pending admin approval
+                <Clock size={10} /> Submitted — booking not yet created
               </span>
             )}
             {activeStage !== "InProcess" && !canCancelApplication(a) && (
@@ -1667,8 +1742,24 @@ const CrmApplication: React.FC = () => {
                         <p className="text-[11px] text-muted-foreground -mt-1.5">
                           Only fill in the override if this specific deal needs a custom commission rate — otherwise the default above applies.
                         </p>
+
+                        <div>
+                          <label className={labelCls}>Payout Plan</label>
+                          <select value={form.BrokeragePaymentPlan}
+                            onChange={(e) => setForm((f) => ({ ...f, BrokeragePaymentPlan: e.target.value }))}
+                            className={inputCls}>
+                            <option value="OneTime">One-time — full commission once Booking Amount is paid</option>
+                            <option value="TwoPart">Two-part — half on Booking Amount, half on Agreement Executed</option>
+                            <option value="AgreementOnly">Agreement-only — full commission on Agreement Executed</option>
+                          </select>
+                        </div>
+
                         <p className="text-[11px] text-muted-foreground">
-                          Commission is paid out one milestone at a time, following the same schedule as the customer's own payments — unlocking as each milestone is paid.
+                          {form.BrokeragePaymentPlan === "TwoPart"
+                            ? "Half the commission is released as soon as the Booking Amount is paid; the other half is held until the Agreement is Executed."
+                            : form.BrokeragePaymentPlan === "AgreementOnly"
+                            ? "The full commission is held until the Agreement is Executed — nothing is released at booking."
+                            : "The full commission is released as soon as the Booking Amount is paid — no further tranches."}
                         </p>
                       </div>
                     )}
@@ -1796,9 +1887,35 @@ const CrmApplication: React.FC = () => {
                   wrote them until now. Kept here on Details (not a new step,
                   not folded into Bank/KYC) since it belongs with the final
                   review right before Submit, once Project/Unit is known and
-                  the bank picker can be project-scoped. */}
+                  the bank picker can be project-scoped.
+
+                  Locked (read-only-styled, disabled) once a figure is
+                  already saved here — same Edit-to-unlock pattern as the
+                  Project/Unit tree above, and for the same reason: this is
+                  money already confirmed with the customer, not something
+                  that should be one stray click away from being silently
+                  overwritten every time the wizard is reopened. Stays
+                  editable (Edit always available) through Draft/Pending;
+                  once Approved, canEditUnitSelection goes false and the
+                  Edit control disappears for good. */}
               <div className="rounded-lg border border-border p-3 space-y-2.5">
-                <label className="text-xs font-semibold text-foreground block">Payment Details</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-foreground block">Payment Details</label>
+                  {!!applicationId && (
+                    canEditUnitSelection ? (
+                      paymentLocked && (
+                        <button type="button" onClick={() => setPaymentLocked(false)}
+                          className="text-xs text-primary hover:underline shrink-0">
+                          Edit
+                        </button>
+                      )
+                    ) : (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
+                        <Lock size={11} /> Locked ({wizardAppStatus})
+                      </span>
+                    )
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>Token Type</label>
@@ -1808,7 +1925,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Token (Booking) Amount (₹)</label>
-                    <input type="number" value={form.TokenValue}
+                    <input type="number" value={form.TokenValue} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                       onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))}
                       placeholder={selectedPlanBookingAmount ? String(selectedPlanBookingAmount) : undefined}
                       className={inputCls} />
@@ -1823,7 +1940,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Payment Mode</label>
-                    <select value={form.PaymentMode}
+                    <select value={form.PaymentMode} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                       onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value, ChequeNo: "", ChequeDate: "", TransactionRef: "" }))}
                       className={inputCls}>
                       <option value="">Select</option>
@@ -1840,13 +1957,13 @@ const CrmApplication: React.FC = () => {
                     <>
                       <div>
                         <label className={labelCls}>Cheque Number</label>
-                        <input type="text" value={form.ChequeNo}
+                        <input type="text" value={form.ChequeNo} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                           onChange={(e) => setForm((f) => ({ ...f, ChequeNo: e.target.value }))}
                           className={inputCls} />
                       </div>
                       <div>
                         <label className={labelCls}>Cheque Date</label>
-                        <input type="date" value={form.ChequeDate}
+                        <input type="date" value={form.ChequeDate} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                           onChange={(e) => setForm((f) => ({ ...f, ChequeDate: e.target.value }))}
                           className={inputCls} />
                       </div>
@@ -1857,7 +1974,7 @@ const CrmApplication: React.FC = () => {
                       <label className={labelCls}>
                         {form.PaymentMode === "Home Loan" ? "Loan Disbursement Ref" : form.PaymentMode === "Other" ? "Reference / Details" : "Transaction Ref / UTR"}
                       </label>
-                      <input type="text" value={form.TransactionRef}
+                      <input type="text" value={form.TransactionRef} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                         onChange={(e) => setForm((f) => ({ ...f, TransactionRef: e.target.value }))}
                         className={inputCls} />
                     </div>
@@ -1866,7 +1983,8 @@ const CrmApplication: React.FC = () => {
                     <label className={labelCls}>
                       Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}{bankOptions.length > 0 ? " *" : ""}
                     </label>
-                    <select value={form.DepositBankId} onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
+                    <select value={form.DepositBankId} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
+                      onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
                       className={inputCls}>
                       <option value="">— Select company bank —</option>
                       {(bankOptions as any[]).map((b: any) => (
@@ -1883,9 +2001,10 @@ const CrmApplication: React.FC = () => {
                   rows={4} className={`${inputCls} resize-none`} />
               </div>
               <p className="text-xs text-muted-foreground">
-                This application is <span className="font-medium text-foreground">Pending</span> admin approval.
-                Only an admin/super admin can approve or reject it. Approval creates the Booking as Pending — the
+                Submitting creates the Booking immediately — there's no separate admin approval step. The
                 payment plan, booking amount and payment itself are all handled on the Booking page from there.
+                If the unit is unavailable at the moment of submit, the Application still saves as Pending and
+                you can retry booking creation from the list.
               </p>
             </div>
           )}
@@ -2125,6 +2244,9 @@ const CrmApplication: React.FC = () => {
                   {a.BrokerName && (
                     <div className="pt-2 border-t border-border text-xs">
                       <span className="text-muted-foreground">Broker:</span> {a.BrokerName} {a.BrokerageRatePercent != null && `(${a.BrokerageRatePercent}%)`}
+                      {a.BrokeragePaymentPlan && a.BrokeragePaymentPlan !== "OneTime" && (
+                        <span className="text-muted-foreground"> · {a.BrokeragePaymentPlan === "TwoPart" ? "Two-part payout" : "Agreement-only payout"}</span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2139,6 +2261,11 @@ const CrmApplication: React.FC = () => {
                     </div>
                   </div>
                 </div>
+
+                {/* No separate Application-level verification anymore — the
+                    Application's own checklist merged into its Booking's
+                    "Review" workflow stage (see CrmBookingDetail.tsx). The
+                    "Linked Booking" card below is where that now lives. */}
 
                 {booking && (
                   <div className="rounded-xl border border-border p-4 space-y-2">

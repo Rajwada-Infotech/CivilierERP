@@ -271,6 +271,26 @@ router.get("/", async (req, res) => {
         LEFT JOIN dbo.enterprise ep ON ep.id = mr.ProjectId
         ORDER BY mr.CreatedAt DESC
       `),
+
+      // ── GRN value — daily totals, last 14 days ─────────────────────────
+      safeQuery(`
+        SELECT
+          CAST(GRNDate AS DATE)   AS Day,
+          ISNULL(SUM(TotalAmount), 0) AS Amount
+        FROM dbo.GoodsReceiptNotes
+        WHERE CAST(GRNDate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+        GROUP BY CAST(GRNDate AS DATE)
+      `),
+
+      // ── PO value — daily totals, last 14 days ──────────────────────────
+      safeQuery(`
+        SELECT
+          CAST(PODate AS DATE)    AS Day,
+          ISNULL(SUM(TotalAmount), 0) AS Amount
+        FROM dbo.PurchaseOrders
+        WHERE CAST(PODate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+        GROUP BY CAST(PODate AS DATE)
+      `),
     ]);
 
     const it = itemStats?.recordset[0] ?? {};
@@ -282,6 +302,26 @@ router.get("/", async (req, res) => {
     const um = uomStats?.recordset[0] ?? {};
     const mi = materialIssueStats?.recordset[0] ?? {};
     const mr = materialRequestStats?.recordset[0] ?? {};
+
+    // Zero-fill all 14 days — the GROUP BY queries above only return days
+    // that actually had a GRN/PO, so gaps would otherwise break the line.
+    const grnByDay = new Map(
+      (grnTimeline?.recordset ?? []).map((r) => [r.Day.toISOString().slice(0, 10), parseFloat(r.Amount)]),
+    );
+    const poByDay = new Map(
+      (poTimeline?.recordset ?? []).map((r) => [r.Day.toISOString().slice(0, 10), parseFloat(r.Amount)]),
+    );
+    const timeline = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      timeline.push({
+        date: key,
+        grn: grnByDay.get(key) ?? 0,
+        po: poByDay.get(key) ?? 0,
+      });
+    }
 
     const responseObj = {
       items: {
@@ -347,6 +387,7 @@ router.get("/", async (req, res) => {
       },
       recentIssues: recentIssues?.recordset ?? [],
       recentRequests: recentRequests?.recordset ?? [],
+      timeline,
     };
 
     try {

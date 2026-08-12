@@ -22,6 +22,7 @@ import {
   BadgeDollarSign,
   CheckCircle2,
   Clock,
+  TrendingUp,
 } from "lucide-react";
 import {
   PieChart,
@@ -29,6 +30,12 @@ import {
   Cell,
   Tooltip,
   ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Legend,
 } from "recharts";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -70,6 +77,7 @@ interface FinanceDashboardData {
   };
   recentPaymentsMade: RecentPaymentMade[];
   recentPaymentsReceived: RecentPaymentReceived[];
+  timeline: { date: string; made: number; received: number }[];
 }
 
 interface RecentPaymentMade {
@@ -214,6 +222,102 @@ const DonutCard: React.FC<{
   );
 };
 
+interface TrendSeries {
+  key: string;
+  name: string;
+  color: string;
+}
+
+const TrendCard: React.FC<{
+  title: string;
+  icon: React.ElementType;
+  accentColor: string;
+  data: { date: string; [key: string]: number | string }[];
+  series: TrendSeries[];
+  isDark: boolean;
+  glassStyle: React.CSSProperties;
+}> = ({ title, icon: Icon, accentColor, data, series, isDark, glassStyle }) => {
+  const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
+  return (
+    <div className="rounded-xl overflow-hidden" style={glassStyle}>
+      <div
+        className="flex items-center gap-2 px-4 py-3 border-b"
+        style={{
+          borderColor: isDark ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.12)",
+        }}
+      >
+        <div
+          className="w-5 h-5 rounded-md flex items-center justify-center"
+          style={{ background: `${accentColor}26` }}
+        >
+          <Icon size={11} style={{ color: accentColor }} />
+        </div>
+        <span
+          className="text-xs font-heading font-semibold"
+          style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
+        >
+          {title}
+        </span>
+      </div>
+      <div className="p-4">
+        {!hasData ? (
+          <div className="text-center text-muted-foreground py-10 text-sm">
+            No activity in the last 14 days
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke={isDark ? "rgba(148,163,184,0.12)" : "rgba(100,116,139,0.15)"}
+                vertical={false}
+              />
+              <XAxis
+                dataKey="date"
+                tickFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
+                axisLine={false}
+                tickLine={false}
+                interval={Math.max(0, Math.floor(data.length / 6) - 1)}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
+                axisLine={false}
+                tickLine={false}
+                width={40}
+                tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
+              />
+              <Tooltip
+                labelFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                formatter={(value: number, name: string) => [fmt(value), name]}
+                contentStyle={{
+                  background: isDark ? "rgba(15,17,26,0.95)" : "rgba(255,255,255,0.95)",
+                  border: `1px solid ${accentColor}30`,
+                  borderRadius: 8,
+                  fontSize: 12,
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
+              {series.map((s) => (
+                <Line
+                  key={s.key}
+                  type="monotone"
+                  dataKey={s.key}
+                  name={s.name}
+                  stroke={s.color}
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const StatCardSkeleton = () => (
   <div className="rounded-xl overflow-hidden border border-border/40 bg-card/40 backdrop-blur-sm p-4">
     <div className="flex items-start justify-between mb-3">
@@ -246,6 +350,7 @@ const EMPTY_DATA: FinanceDashboardData = {
   banks: { totalCount: 0, activeCount: 0 },
   recentPaymentsMade: [],
   recentPaymentsReceived: [],
+  timeline: [],
 };
 
 /** Normalise whatever shape the backend returns into the new shape. */
@@ -268,6 +373,7 @@ function normalise(raw: any): FinanceDashboardData {
     banks: raw.banks ?? EMPTY_DATA.banks,
     recentPaymentsMade: raw.recentPaymentsMade ?? raw.recentPayments ?? [],
     recentPaymentsReceived: raw.recentPaymentsReceived ?? [],
+    timeline: raw.timeline ?? [],
   };
 }
 
@@ -450,6 +556,20 @@ const FinanceDashboard = () => {
                 { name: "Cheques Inactive", value: data?.cheques.inactiveCount ?? 0, color: "#f59e0b66" },
                 { name: "Cards Active", value: data?.cards.activeCount ?? 0, color: "#8b5cf6" },
                 { name: "Cards Inactive", value: data?.cards.inactiveCount ?? 0, color: "#8b5cf666" },
+              ]}
+            />
+          </div>
+          <div className="mt-4">
+            <TrendCard
+              title="Payments — Last 14 Days"
+              icon={TrendingUp}
+              accentColor="#6366f1"
+              isDark={isDark}
+              glassStyle={tableGlass}
+              data={data?.timeline ?? []}
+              series={[
+                { key: "made", name: "Made", color: "#f43f5e" },
+                { key: "received", name: "Received", color: "#10b981" },
               ]}
             />
           </div>
