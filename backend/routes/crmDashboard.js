@@ -13,7 +13,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const [apps, bookings, payments, tickets, cancellations, legal, noc, deeds, handovers] = await Promise.all([
+    const [apps, bookings, payments, tickets, cancellations, legal, noc, deeds, handovers, monthlyTrend] = await Promise.all([
       pool.request().query(`
         SELECT Status, COUNT(*) AS Count FROM dbo.CrmApplication WHERE IsActive = 1 GROUP BY Status
       `),
@@ -47,6 +47,35 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       pool.request().query(`
         SELECT Status, COUNT(*) AS Count FROM dbo.CrmHandover GROUP BY Status
       `),
+      // Last 6 months — applications/bookings created and payments actually
+      // collected in each month, for the dashboard's trend line chart.
+      // Correlated subqueries per month row (only 6 rows) rather than a
+      // GROUP BY + date-spine join — cheap either way at this row count,
+      // and keeps each month's window an explicit, obviously-correct
+      // half-open range instead of relying on FORMAT()-based grouping.
+      pool.request().query(`
+        ;WITH Months AS (
+          SELECT DATEFROMPARTS(YEAR(m.d), MONTH(m.d), 1) AS MonthStart
+          FROM (VALUES
+            (DATEADD(MONTH, -5, SYSDATETIME())),
+            (DATEADD(MONTH, -4, SYSDATETIME())),
+            (DATEADD(MONTH, -3, SYSDATETIME())),
+            (DATEADD(MONTH, -2, SYSDATETIME())),
+            (DATEADD(MONTH, -1, SYSDATETIME())),
+            (SYSDATETIME())
+          ) AS m(d)
+        )
+        SELECT
+          FORMAT(mo.MonthStart, 'MMM yyyy') AS MonthLabel,
+          (SELECT COUNT(*) FROM dbo.CrmApplication a
+            WHERE a.IsActive = 1 AND a.CreatedAt >= mo.MonthStart AND a.CreatedAt < DATEADD(MONTH, 1, mo.MonthStart)) AS Applications,
+          (SELECT COUNT(*) FROM dbo.CrmBooking b
+            WHERE b.IsActive = 1 AND b.CreatedAt >= mo.MonthStart AND b.CreatedAt < DATEADD(MONTH, 1, mo.MonthStart)) AS Bookings,
+          (SELECT ISNULL(SUM(pm.AmountPaid), 0) FROM dbo.CrmPaymentMilestone pm
+            WHERE pm.PaidDate >= mo.MonthStart AND pm.PaidDate < DATEADD(MONTH, 1, mo.MonthStart)) AS Collected
+        FROM Months mo
+        ORDER BY mo.MonthStart
+      `),
     ]);
 
     res.json({
@@ -59,6 +88,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       noc: noc.recordset,
       salesDeeds: deeds.recordset,
       handovers: handovers.recordset,
+      monthlyTrend: monthlyTrend.recordset,
     });
   } catch (e) {
     console.error("[crm-dashboard] GET error:", e.message);
