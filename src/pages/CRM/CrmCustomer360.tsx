@@ -6,7 +6,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Search, Phone, FileText, Home, MessageSquare, Wrench, ArrowLeft,
   IndianRupee, Receipt, Wallet, Users2, ChevronDown, ChevronUp, ChevronRight, User,
-  CalendarClock, ExternalLink,
+  CalendarClock, ExternalLink, Activity
 } from "lucide-react";
 
 const API = "/api/crm/customer-360";
@@ -27,6 +27,66 @@ async function fetchCustomer360(mobile: string): Promise<any> {
 
 const fmt = (n: number | null | undefined) => n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
 const dt = (v: any) => v ? String(v).slice(0, 10) : "—";
+
+const CustomerTimeline: React.FC<{ data: any }> = ({ data }) => {
+  const events: any[] = [];
+  
+  if (data.calls) {
+    data.calls.forEach((c: any) => {
+      if (c.CallTime) events.push({ id: `call-${c.Id}`, date: new Date(c.CallTime), type: "Call", title: c.Outcome, desc: c.Remarks, icon: Phone, color: "text-blue-500" });
+    });
+  }
+  if (data.serviceTickets) {
+    data.serviceTickets.forEach((t: any) => {
+      if (t.CreatedAt) events.push({ id: `ticket-${t.Id}`, date: new Date(t.CreatedAt), type: "Ticket", title: `[${t.TicketNo}] ${t.Category}`, desc: t.Subject, icon: Wrench, color: "text-orange-500" });
+    });
+  }
+  if (data.bookings) {
+    data.bookings.forEach((b: any) => {
+      if (b.CreatedAt) events.push({ id: `bk-${b.Id}`, date: new Date(b.CreatedAt), type: "Booking", title: `Booking ${b.BookingNo}`, desc: `${b.ProjectName} · ${b.UnitNo}`, icon: Home, color: "text-green-500" });
+      if (b.receipts) {
+        b.receipts.forEach((r: any) => {
+          if (r.ReceivedDate) events.push({ id: `rc-${r.Id}`, date: new Date(r.ReceivedDate), type: "Receipt", title: `Receipt ${r.ReceiptNo}`, desc: `${fmt(r.Amount)} via ${r.PaymentMode || 'transfer'}`, icon: Receipt, color: "text-emerald-600" });
+        });
+      }
+      if (b.invoices) {
+        b.invoices.forEach((i: any) => {
+          if (i.InvoiceDate) events.push({ id: `inv-${i.Id}`, date: new Date(i.InvoiceDate), type: "Invoice", title: `Invoice ${i.InvoiceNo}`, desc: `${fmt(i.Amount)} for ${i.InvoiceType}`, icon: FileText, color: "text-purple-500" });
+        });
+      }
+      if (b.HasCancellation > 0 && b.UpdatedAt) {
+        events.push({ id: `cx-${b.Id}`, date: new Date(b.UpdatedAt), type: "Cancellation", title: `Booking Cancelled`, desc: `Booking ${b.BookingNo} cancelled`, icon: Wrench, color: "text-red-500" });
+      }
+    });
+  }
+  
+  events.sort((a, b) => b.date.getTime() - a.date.getTime());
+  
+  if (events.length === 0) return <div className="text-sm text-muted-foreground p-4 text-center">No timeline events found.</div>;
+  
+  return (
+    <div className="relative border-l border-border ml-3 mt-4 space-y-6 pb-4">
+      {events.map(ev => {
+        const Icon = ev.icon;
+        return (
+          <div key={ev.id} className="relative pl-6">
+            <span className="absolute -left-3 top-1 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background">
+              <Icon size={12} className={ev.color} />
+            </span>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold">{ev.title}</span>
+                <span className="text-xs text-muted-foreground bg-muted/30 px-1.5 py-0.5 rounded">{ev.type}</span>
+              </div>
+              <span className="text-xs text-muted-foreground mt-0.5">{ev.date.toLocaleString()}</span>
+              {ev.desc && <p className="text-sm mt-1">{ev.desc}</p>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
 
 const CrmCustomer360: React.FC = () => {
   const navigate = useNavigate();
@@ -170,6 +230,10 @@ const CrmCustomer360: React.FC = () => {
                   ))}
                 </Section>
               )}
+              
+              <Section icon={Activity} title="Interactive Timeline">
+                <CustomerTimeline data={data} />
+              </Section>
 
               {data.bookings?.length > 0 && (
                 <Section icon={Home} title={`Bookings & Ledger (${data.bookings.length})`}>

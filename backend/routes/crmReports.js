@@ -371,4 +371,51 @@ router.get("/construction-updates", requirePageRight("crm-construction-updates",
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// 21. Aging Analysis — overdue payment buckets
+router.get("/aging-analysis", requirePageRight("crm-payments", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      SELECT b.BookingNo, a.ApplicantName, a.Mobile,
+        m.MilestoneName, CAST(m.DueDate AS DATE) AS DueDate,
+        (m.AmountDue - m.AmountPaid) AS Balance,
+        DATEDIFF(DAY, m.DueDate, SYSDATETIME()) AS DaysOverdue,
+        CASE
+          WHEN DATEDIFF(DAY, m.DueDate, SYSDATETIME()) <= 30 THEN '0-30 Days'
+          WHEN DATEDIFF(DAY, m.DueDate, SYSDATETIME()) BETWEEN 31 AND 60 THEN '31-60 Days'
+          WHEN DATEDIFF(DAY, m.DueDate, SYSDATETIME()) BETWEEN 61 AND 90 THEN '61-90 Days'
+          ELSE '90+ Days'
+        END AS AgingBucket
+      FROM dbo.CrmPaymentMilestone m
+      JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE m.Status = 'Pending' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
+      ORDER BY DaysOverdue DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 22. Inventory Status — units availability matrix
+router.get("/inventory-status", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      SELECT 
+        ep.name AS ProjectName,
+        u.UnitType,
+        COUNT(u.Id) AS TotalUnits,
+        SUM(CASE WHEN bk.Id IS NOT NULL THEN 1 ELSE 0 END) AS BookedUnits,
+        SUM(CASE WHEN bk.Id IS NULL THEN 1 ELSE 0 END) AS AvailableUnits
+      FROM dbo.UnitMaster u
+      LEFT JOIN dbo.enterprise ep ON ep.id = u.ProjectId
+      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status != 'Cancelled'
+      WHERE u.IsActive = 1
+      GROUP BY ep.name, u.UnitType
+      ORDER BY ep.name, u.UnitType
+    `);
+    res.json(r.recordset);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;

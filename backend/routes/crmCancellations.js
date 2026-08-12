@@ -95,7 +95,11 @@ router.post("/", requirePageRight("crm-cancellations", "create"), async (req, re
     }
 
     const paidRes = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT ISNULL(SUM(AmountPaid), 0) AS TotalPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+      .query(`
+        SELECT 
+          (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid) +
+          (SELECT ISNULL(SUM(BalanceAmount), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS TotalPaid
+      `);
     const totalPaid = paidRes.recordset[0].TotalPaid || 0;
 
     // Default 10% cancellation charge if the requester doesn't override it.
@@ -218,7 +222,11 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
     const { BookingId: bookingId, AmountPaidTillDate: staleAmountPaid, DeductionPercent: deductionPct, Notes: existingNotes } = before.recordset[0];
 
     const freshPaidRes = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT ISNULL(SUM(AmountPaid), 0) AS TotalPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+      .query(`
+        SELECT 
+          (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid) +
+          (SELECT ISNULL(SUM(BalanceAmount), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS TotalPaid
+      `);
     const freshTotalPaid = freshPaidRes.recordset[0].TotalPaid || 0;
     if (Math.abs(freshTotalPaid - Number(staleAmountPaid || 0)) >= 1) {
       const deductionAmt = Math.round(freshTotalPaid * deductionPct) / 100;
@@ -260,6 +268,18 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       "Application cancelled — its booking was cancelled", actorId(req));
 
     await releaseAllParkingForBooking(pool, bookingId);
+
+    // Orphaned Brokerage Clawback
+    // Void any pending brokerage tranches for this cancelled booking, and flag paid ones for clawback.
+    await pool.request().input("bid", sql.Int, bookingId).query(`
+      UPDATE dbo.CrmBrokerageMaster 
+      SET Status = 'Voided', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided due to booking cancellation.'
+      WHERE BookingId = @bid AND Status = 'Pending';
+      
+      UPDATE dbo.CrmBrokerageMaster 
+      SET Status = 'Clawback Required', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Clawback required due to booking cancellation.'
+      WHERE BookingId = @bid AND Status = 'Paid';
+    `);
 
     // guardAndConvertHold() closes the Unit's hold to 'Converted' the moment
     // a Booking is created from it — but if an Active hold on this same unit
