@@ -2,9 +2,10 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTheme } from "@/contexts/ThemeContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
@@ -234,6 +235,8 @@ const CrmApplication: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { currentUser } = useAuth();
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [activeStage, setActiveStage] = useState<Stage>("InProcess");
@@ -1188,13 +1191,24 @@ const CrmApplication: React.FC = () => {
       } },
   ];
 
+  const glassStyle: React.CSSProperties = {
+    background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
+    border: isDark ? "1px solid rgba(245,158,11,0.15)" : "1px solid rgba(245,158,11,0.18)",
+    backdropFilter: "blur(16px) saturate(150%)",
+    WebkitBackdropFilter: "blur(16px) saturate(150%)",
+    boxShadow: isDark
+      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+      : "0 4px 24px rgba(245,158,11,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+  };
+  const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
+
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Applications"
       subtitle="Every detail captured once, here — Bookings is review-only from this point on"
       action={
         <button onClick={() => { resetWizard(); setDialogOpen(true); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
+          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
           <Plus size={14} /> New Application
         </button>
       }
@@ -1207,61 +1221,63 @@ const CrmApplication: React.FC = () => {
           { label: "Not Converted", value: stageCounts.NotConverted, dot: "bg-red-400" },
           { label: "Conversion Rate", value: `${conversionRate}%`, dot: "bg-violet-500" },
         ].map(({ label, value, dot }) => (
-          <div key={label} className="rounded-xl border border-border bg-card p-4">
-            <div className={`w-2 h-2 rounded-full ${dot} mb-3`} />
-            <p className="text-2xl font-bold font-heading text-foreground leading-none">{value}</p>
+          <div key={label} className="rounded-xl p-3.5" style={glassStyle}>
+            <div className={`w-2 h-2 rounded-full ${dot} mb-2.5`} />
+            <p className="text-xl font-bold font-heading text-foreground leading-none">{value}</p>
             <p className="text-[11px] text-muted-foreground mt-1">{label}</p>
           </div>
         ))}
       </div>
 
-      {/* ── Stage tabs ── */}
-      <div className="flex items-center gap-1.5 border-b border-border">
-        {STAGES.map((stg) => {
-          const Icon = stageIcon[stg];
-          const active = activeStage === stg;
-          return (
-            <button key={stg} onClick={() => setActiveStage(stg)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                active ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}>
-              <Icon size={14} /> {stageLabel[stg]}
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
-                {stageCounts[stg]}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Filters */}
-      <div className="flex gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-48">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, mobile, app no..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+      {/* ── Stage tabs + filters + table, one continuous card instead of
+          loose elements each carrying their own spacing/borders. ── */}
+      <div className="rounded-xl overflow-hidden" style={glassStyle}>
+        <div className="flex items-center gap-1 px-3 pt-2.5 overflow-x-auto border-b" style={{ borderColor }}>
+          {STAGES.map((stg) => {
+            const Icon = stageIcon[stg];
+            const active = activeStage === stg;
+            return (
+              <button key={stg} onClick={() => setActiveStage(stg)}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-medium border-b-2 -mb-px transition-colors shrink-0 ${
+                  active ? "border-amber-500 text-amber-600 dark:text-amber-400" : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}>
+                <Icon size={14} /> {stageLabel[stg]}
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${active ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-muted text-muted-foreground"}`}>
+                  {stageCounts[stg]}
+                </span>
+              </button>
+            );
+          })}
         </div>
-        {activeStage !== "Converted" && (
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
-            <option value="All">All Statuses</option>
-            {STATUSES.map((s) => <option key={s}>{s}</option>)}
-          </select>
-        )}
-      </div>
 
-      {/* ── Table — sortable via DataTable; filtering stays the purpose-built
-          search box + status/stage controls above, so DataTable's own global
-          search is disabled to avoid a second, redundant search box. ── */}
-      <DataTable
-        data={filtered}
-        columns={activeStage === "Converted" ? convertedColumns : inProcessColumns}
-        searchable={false}
-        loading={isLoading}
-        emptyMessage={activeStage === "Converted" ? "No converted applications yet" : activeStage === "NotConverted" ? "No rejected/cancelled applications" : "No applications in process"}
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
+        <div className="flex gap-3 flex-wrap items-center px-3.5 py-3 border-b" style={{ borderColor }}>
+          <div className="relative flex-1 min-w-48">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, mobile, app no..."
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+          </div>
+          {activeStage !== "Converted" && (
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40">
+              <option value="All">All Statuses</option>
+              {STATUSES.map((s) => <option key={s}>{s}</option>)}
+            </select>
+          )}
+        </div>
+
+        {/* Table — sortable via DataTable; filtering stays the purpose-built
+            search box + status/stage controls above, so DataTable's own
+            global search is disabled to avoid a second, redundant search box. */}
+        <DataTable
+          data={filtered}
+          columns={activeStage === "Converted" ? convertedColumns : inProcessColumns}
+          searchable={false}
+          loading={isLoading}
+          emptyMessage={activeStage === "Converted" ? "No converted applications yet" : activeStage === "NotConverted" ? "No rejected/cancelled applications" : "No applications in process"}
+          className="border-0"
+        />
+      </div>
 
       {/* New Application Dialog — 5-step wizard: what the customer is
           applying for (unit/parking/KYC/docs). No money changes hands or
@@ -2193,7 +2209,7 @@ const CrmApplication: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

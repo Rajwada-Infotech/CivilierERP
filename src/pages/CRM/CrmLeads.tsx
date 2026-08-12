@@ -125,7 +125,7 @@ const CrmLeads: React.FC = () => {
           toolbar row floating above a separately-bordered table. */}
       <div className="rounded-xl overflow-hidden" style={glassStyle}>
         <div className="flex gap-3 flex-wrap items-center px-4 py-3 border-b" style={{ borderColor }}>
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/20 p-1 shrink-0">
+          <div className="flex items-center gap-1 rounded-lg bg-muted/20 p-1 shrink-0">
             {(["Available", "Used"] as const).map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-medium rounded-lg transition-all ${
