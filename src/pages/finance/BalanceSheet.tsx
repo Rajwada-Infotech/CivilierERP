@@ -80,7 +80,7 @@ function Signed({ amount, className = "" }: { amount: number; className?: string
   const neg = amount < -0.005;
   return (
     <span className={`tabular-nums ${neg ? "text-red-600 dark:text-red-400" : ""} ${className}`}>
-      {neg ? "(" : ""}₹{fmt(amount)}{neg ? ")" : ""}
+      {neg ? "(" : ""}{fmt(amount)}{neg ? ")" : ""}
     </span>
   );
 }
@@ -268,7 +268,7 @@ function GroupRow({
         </td>
         {/* Main amount */}
         <td className="py-2 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium text-foreground w-36">
-          ₹{fmt(group.total)}
+          {fmt(group.total)}
         </td>
       </tr>
 
@@ -281,7 +281,7 @@ function GroupRow({
                 <div key={h.id ?? h.name} className="flex items-center justify-between text-[10px] text-muted-foreground group">
                   <span className="truncate pr-4 group-hover:text-foreground transition-colors">{h.name}</span>
                   <span className="tabular-nums shrink-0 font-medium">
-                    {h.amount < -0.005 ? "(" : ""}₹{fmt(h.amount)}{h.amount < -0.005 ? ")" : ""}
+                    {h.amount < -0.005 ? "(" : ""}{fmt(h.amount)}{h.amount < -0.005 ? ")" : ""}
                   </span>
                 </div>
               ))}
@@ -302,7 +302,7 @@ function SubtotalRow({ label, amount, muted }: { label: string; amount: number; 
         {label}
       </td>
       <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36">
-        ₹{fmt(amount)}
+        {fmt(amount)}
       </td>
     </tr>
   );
@@ -319,7 +319,7 @@ function GrandTotalRow({ label, amount, variant }: { label: string; amount: numb
     <tr className="border-t-2 border-double border-foreground/35">
       <td colSpan={3} className={`py-2 pl-5 pr-3 text-xs font-bold ${colors}`}>{label}</td>
       <td className={`py-2 pl-3 pr-5 text-right text-xs font-bold tabular-nums w-36 ${colors}`}>
-        ₹{fmt(amount)}
+        {fmt(amount)}
       </td>
     </tr>
   );
@@ -523,7 +523,7 @@ function VerticalStatement({
           </span>
         </div>
         <span className="tabular-nums font-bold ml-4 shrink-0">
-          I: ₹{fmt(totalL)} · II: ₹{fmt(totalA)}
+          I: {fmt(totalL)} · II: {fmt(totalA)}
         </span>
       </div>
 
@@ -735,11 +735,11 @@ export default function BalanceSheet() {
                     <div>
                       <p className="text-[9px] font-heading uppercase tracking-widest text-emerald-700/60 dark:text-emerald-400/60 mb-1">Total Assets</p>
                       <p className="text-2xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400 tracking-tight">
-                        ₹{fmt(data.totals.assets)}
+                        {fmt(data.totals.assets)}
                       </p>
                       {r && (
                         <p className="text-[10px] text-muted-foreground/60 mt-1">
-                          Current: ₹{fmt(r.totalCurrentAssets)} · Non-Current: ₹{fmt(r.totalNonCurrentAssets)}
+                          Current: {fmt(r.totalCurrentAssets)} · Non-Current: {fmt(r.totalNonCurrentAssets)}
                         </p>
                       )}
                     </div>
@@ -753,11 +753,11 @@ export default function BalanceSheet() {
                     <div>
                       <p className="text-[9px] font-heading uppercase tracking-widest text-violet-700/60 dark:text-violet-400/60 mb-1">Total Equity & Liabilities</p>
                       <p className="text-2xl font-bold tabular-nums text-violet-700 dark:text-violet-400 tracking-tight">
-                        ₹{fmt(data.totals.liabilities)}
+                        {fmt(data.totals.liabilities)}
                       </p>
                       {r && (
                         <p className="text-[10px] text-muted-foreground/60 mt-1">
-                          Equity: ₹{fmt(r.totalEquity)} · Liabilities: ₹{fmt(r.totalCurrentLiabilities + r.totalNonCurrentLiabilities)}
+                          Equity: {fmt(r.totalEquity)} · Liabilities: {fmt(r.totalCurrentLiabilities + r.totalNonCurrentLiabilities)}
                         </p>
                       )}
                     </div>
@@ -780,7 +780,7 @@ export default function BalanceSheet() {
                     </span>
                   </div>
                   <span className="font-bold tabular-nums">
-                    {data.netProfit < 0 ? "(" : ""}₹{fmt(data.netProfit)}{data.netProfit < 0 ? ")" : ""}
+                    {data.netProfit < 0 ? "(" : ""}{fmt(data.netProfit)}{data.netProfit < 0 ? ")" : ""}
                   </span>
                 </div>
               )}

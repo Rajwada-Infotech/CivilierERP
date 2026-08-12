@@ -260,7 +260,7 @@ export default function YearEndClose() {
           <div className="mb-5 flex items-center gap-2 px-4 py-3 rounded-lg border bg-emerald-500/5 border-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-xs font-medium">
             <CheckCircle2 size={14} />
             <span>
-              Year-End Closing completed successfully! Net {result.netProfit >= 0 ? "Profit" : "Loss"}: ₹{fmt(result.netProfit)} transferred to Retained Earnings.
+              Year-End Closing completed successfully! Net {result.netProfit >= 0 ? "Profit" : "Loss"}: {fmt(result.netProfit)} transferred to Retained Earnings.
               Voucher: <code className="bg-background/60 px-1.5 py-0.5 rounded text-[10px]">{result.voucherNo}</code>. Financial Year locked.
             </span>
           </div>
@@ -287,11 +287,11 @@ export default function YearEndClose() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-xl border border-primary/15 bg-gradient-to-br from-primary/8 to-primary/3 p-4">
                 <p className="text-[9px] font-heading uppercase tracking-widest text-primary/60 mb-1">Total Revenue</p>
-                <p className="text-lg font-bold tabular-nums text-primary tracking-tight">₹{fmt(preview.totalIncome)}</p>
+                <p className="text-lg font-bold tabular-nums text-primary tracking-tight">{fmt(preview.totalIncome)}</p>
               </div>
               <div className="rounded-xl border border-orange-500/20 bg-gradient-to-br from-orange-500/8 to-orange-500/3 p-4">
                 <p className="text-[9px] font-heading uppercase tracking-widest text-orange-600/60 dark:text-orange-400/60 mb-1">Total Expenses</p>
-                <p className="text-lg font-bold tabular-nums text-orange-700 dark:text-orange-400 tracking-tight">₹{fmt(preview.totalExpenses)}</p>
+                <p className="text-lg font-bold tabular-nums text-orange-700 dark:text-orange-400 tracking-tight">{fmt(preview.totalExpenses)}</p>
               </div>
               <div className={`rounded-xl border p-4 ${
                 preview.isProfit
@@ -308,7 +308,7 @@ export default function YearEndClose() {
                   <p className={`text-lg font-bold tabular-nums tracking-tight ${
                     preview.isProfit ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"
                   }`}>
-                    ₹{fmt(preview.netProfit)}
+                    {fmt(preview.netProfit)}
                   </p>
                 </div>
               </div>

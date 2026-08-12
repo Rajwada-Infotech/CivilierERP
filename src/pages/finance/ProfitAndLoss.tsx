@@ -173,7 +173,7 @@ function KpiCard({
               ? "text-foreground"
               : isProfit ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
           }`}>
-            {amount < -0.005 ? "(" : ""}₹{fmt(amount)}{amount < -0.005 ? ")" : ""}
+            {amount < -0.005 ? "(" : ""}{fmt(amount)}{amount < -0.005 ? ")" : ""}
           </p>
           {subtitle && <p className="text-[9px] text-muted-foreground/60 mt-0.5">{subtitle}</p>}
         </div>
@@ -994,7 +994,7 @@ export default function ProfitAndLoss() {
                           ? "text-emerald-700 dark:text-emerald-400"
                           : "text-red-700 dark:text-red-400"
                       }`}>
-                        {st.profitAfterTax < 0 ? "(" : ""}₹{fmt(st.profitAfterTax)}{st.profitAfterTax < 0 ? ")" : ""}
+                        {st.profitAfterTax < 0 ? "(" : ""}{fmt(st.profitAfterTax)}{st.profitAfterTax < 0 ? ")" : ""}
                       </p>
                       <p className="text-[10px] text-muted-foreground/60 mt-0.5">{periodLabel}</p>
                     </div>
@@ -1069,7 +1069,7 @@ export default function ProfitAndLoss() {
                               ? "bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/40 text-emerald-700 dark:text-emerald-400"
                               : "bg-red-50/50 dark:bg-red-950/30 border-red-200 dark:border-red-800/40 text-red-700 dark:text-red-400"
                           }`}>
-                            {label}: {isUp ? "▲" : "▼"} ₹{fmt(Math.abs(delta))}
+                            {label}: {isUp ? "▲" : "▼"} {fmt(Math.abs(delta))}
                           </span>
                         );
                       })}
