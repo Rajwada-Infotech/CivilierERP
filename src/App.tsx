@@ -133,6 +133,7 @@ const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
 const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
 const BalanceSheet = lazy(() => import("./pages/finance/BalanceSheet"));
 const ProfitAndLoss = lazy(() => import("./pages/finance/ProfitAndLoss"));
+const YearEndClose = lazy(() => import("./pages/finance/YearEndClose"));
 const BalanceEnquiry = lazy(() => import("./pages/finance/BalanceEnquiry"));
 const JournalVoucher = lazy(() => import("./pages/finance/JournalVoucher"));
 const FundTransfer = lazy(() => import("./pages/finance/FundTransfer"));
@@ -681,6 +682,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="balance-enquiry">
             <BalanceEnquiry />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/finance/year-end-close"
+        element={
+          <ProtectedRoute pageKey="year-end-close">
+            <YearEndClose />
           </ProtectedRoute>
         }
       />

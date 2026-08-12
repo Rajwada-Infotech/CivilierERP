@@ -189,6 +189,8 @@ router.get("/balance-sheet", async (req, res) => {
       g.total = Math.round((g.total + head.amount) * 100) / 100;
     };
 
+    let incomeSummaryBalance = 0;
+
     for (const h of headsRes.recordset) {
       const debit = Number(h.debit) || 0;
       const credit = Number(h.credit) || 0;
@@ -199,6 +201,15 @@ router.get("/balance-sheet", async (req, res) => {
       const grp = groupMap.get(gid);
       const groupName = grp ? grp.name : `Group-${gid}`;
       let root = rootOf(groupMap, gid);
+
+      // If it's the Income Summary system head used for Year-End Close, capture 
+      // its balance to offset the synthetic P&L prior years calculation, and skip rendering.
+      if (h.name === "Income Summary") {
+        // As a liability head, a debit balance (net > 0) means it was debited 
+        // to transfer profit TO Retained Earnings. So its true liability balance is -net.
+        incomeSummaryBalance = -net;
+        continue;
+      }
 
       if (root == null && gid !== LOANS_GROUP_ID) continue; // orphan/unmapped, skip
       if (gid === LOANS_GROUP_ID) {
@@ -218,11 +229,14 @@ router.get("/balance-sheet", async (req, res) => {
       // this schema (they're period accounts, folded into netProfit above).
     }
 
-    if (Math.abs(netProfitPrior) > 0.005 || Math.abs(netProfitCurrent) > 0.005) {
+    // Adjust prior years profit by the amount already transferred to Retained Earnings
+    const adjustedNetProfitPrior = Math.round((netProfitPrior + incomeSummaryBalance) * 100) / 100;
+
+    if (Math.abs(adjustedNetProfitPrior) > 0.005 || Math.abs(netProfitCurrent) > 0.005) {
       const bucket = liabilityGroups.get("PL") || { groupId: "PL", groupName: "Profit & Loss A/c", heads: [], total: 0 };
-      if (Math.abs(netProfitPrior) > 0.005) {
-        bucket.heads.push({ id: null, name: "Retained Earnings (Prior Years)", amount: netProfitPrior });
-        bucket.total = Math.round((bucket.total + netProfitPrior) * 100) / 100;
+      if (Math.abs(adjustedNetProfitPrior) > 0.005) {
+        bucket.heads.push({ id: null, name: "Retained Earnings (Prior Years)", amount: adjustedNetProfitPrior });
+        bucket.total = Math.round((bucket.total + adjustedNetProfitPrior) * 100) / 100;
       }
       if (Math.abs(netProfitCurrent) > 0.005) {
         bucket.heads.push({ id: null, name: "Net Profit (Current Period)", amount: netProfitCurrent });

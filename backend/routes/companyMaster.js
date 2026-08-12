@@ -181,6 +181,17 @@ router.post("/", adminOnly, async (req, res) => {
       `);
     await bumpCacheVersion("enterprises");
     await bumpCacheVersion("company-master");
+
+    // Auto-generate capital account structure based on entity type
+    if (f.type) {
+      try {
+        const { ensureCapitalStructure } = require("../services/capitalSystemGenerator");
+        await ensureCapitalStructure(pool, f.type);
+      } catch (capErr) {
+        console.warn("[CompanyMaster] Capital structure generation warning:", capErr.message);
+      }
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -265,6 +276,17 @@ router.put("/:id", adminOnly, async (req, res) => {
       `);
     await bumpCacheVersion("enterprises");
     await bumpCacheVersion("company-master");
+
+    // Auto-generate capital account structure based on entity type
+    if (f.type) {
+      try {
+        const { ensureCapitalStructure } = require("../services/capitalSystemGenerator");
+        await ensureCapitalStructure(pool, f.type);
+      } catch (capErr) {
+        console.warn("[CompanyMaster] Capital structure generation warning:", capErr.message);
+      }
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
