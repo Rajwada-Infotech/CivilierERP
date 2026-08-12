@@ -780,6 +780,21 @@ router.put("/:id/reject", allowRoles(...APPROVER_ROLES), async (req, res) => {
   }
 
   await invalidateReceivedPaymentWorkflowCaches();
+
+  // If this ReceivedPayment is the one a CRM Money Receipt was generated
+  // from (Booking Amount / Milestone #1 submissions — see
+  // crmPayments.js's createReceiptForMilestone), its status is derived live
+  // from RPStatus, so rejecting here IS that receipt going Bounced. Best-
+  // effort PDF regen only, so a re-download shows the bounce reason
+  // immediately instead of a stale "Pending Approval" copy.
+  try {
+    const { getMoneyReceiptByReceivedPaymentId, generateMoneyReceiptPdf } = require("../services/moneyReceiptPdf");
+    const mr = await getMoneyReceiptByReceivedPaymentId(pool, pid);
+    if (mr) await generateMoneyReceiptPdf(pool, mr.Id);
+  } catch (mrErr) {
+    console.error("[received-payment] Money Receipt PDF regeneration on reject failed:", mrErr.message);
+  }
+
   res.json({ success: true });
 });
 

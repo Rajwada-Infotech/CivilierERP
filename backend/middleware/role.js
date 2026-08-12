@@ -87,6 +87,14 @@ const ROLE_ALIASES = {
   "legal person 1": "legal_person",
   "legal executive": "legal_person",
 
+  // accounts head
+  accounts_head: "accounts_head",
+  "accounts head": "accounts_head",
+  "account's head": "accounts_head",
+  "accounts hod": "accounts_head",
+  accountant: "accounts_head",
+  "finance manager": "accounts_head",
+
   // general user
   user: "user",
   employee: "user",

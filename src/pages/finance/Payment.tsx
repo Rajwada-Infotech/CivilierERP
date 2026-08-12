@@ -1020,6 +1020,25 @@ const Payment: React.FC = () => {
     setLoanLumpSumAmount("");
     setLoanLateFee("");
     setLoanPaymentNotes("");
+    // Auto-fill Company/Payable To from the loan's own borrower/lender —
+    // this is a loan repayment, not a fresh manual entry, so who pays and
+    // who gets paid is already on file and shouldn't need re-selecting.
+    // Company only ever gets set from BorrowerCompanyName (never the merged
+    // BorrowerName, which can be a customer) — form.company is matched
+    // against companyOptions by label elsewhere, and a customer name would
+    // never match one, silently leaving Company blank instead of wrong.
+    const matchedCompany = emi.BorrowerCompanyName
+      ? companyOptions.find((c) => c.label === emi.BorrowerCompanyName)
+      : undefined;
+    // Payee/Party is a dropdown over AccountHeadMaster Suppliers/
+    // Contractors/Brokers only (see fetchSupplierOptions) — a loan's lender
+    // is a company (or, for a Bank Loan, a bank head), so it's shown as
+    // plain text below instead of forced through that dropdown. Still worth
+    // setting partyId when the name genuinely happens to match a real
+    // ledger option, in case anything downstream keys off it.
+    const matchedParty = emi.LenderName
+      ? supplierOptions.find((s) => s.label === emi.LenderName)
+      : undefined;
     setForm((prev) => ({
       ...prev,
       paymentName: `Loan EMI ${emi.InstallmentNo} — ${emi.LoanNo} (${emi.BorrowerName})`,
@@ -1027,6 +1046,9 @@ const Payment: React.FC = () => {
       expenseId: "",
       contractId: "",
       amount: Number(emi.EMIAmount),
+      company: matchedCompany ? matchedCompany.label : prev.company,
+      paidTo: emi.LenderName || prev.paidTo,
+      partyId: matchedParty ? matchedParty.id : prev.partyId,
     }));
     // Late fee / loan-specific charges — and now multi-EMI / lump-sum
     // selection — are handled in a dedicated modal, not the regular
@@ -2454,54 +2476,70 @@ const Payment: React.FC = () => {
                     </Field>
                     <Field
                       label="Payee / Party"
-                      hint="Required for On Account tracking — who this payment is being made to"
+                      hint={
+                        selectedLoanEmi
+                          ? "From the loan record — a loan counterparty isn't a Supplier/Contractor/Broker, so it isn't picked from that list"
+                          : "Required for On Account tracking — who this payment is being made to"
+                      }
                     >
-                      <div className="relative">
-                        <Users
-                          size={13}
-                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                        />
-                        <select
-                          value={form.partyId !== null ? String(form.partyId) : ""}
-                          onChange={(e) => {
-                            const id = e.target.value;
-                            const opt = supplierOptions.find((s) => String(s.id) === id);
-                            set("partyId", id ? Number(id) : null);
-                            set("paidTo", opt?.label || "");
-                          }}
-                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                        >
-                          <option value="">Select party…</option>
-                          {(() => {
-                            // Group by category (Suppliers / Contractors / Brokers) so the
-                            // list isn't one flat undifferentiated block — falls back to a
-                            // single "Other" group for any row missing a recognised type.
-                            const groups = new Map<string, typeof supplierOptions>();
-                            supplierOptions.forEach((s) => {
-                              const key = PARTY_TYPE_LABELS[(s.type ?? "").trim()] ?? "Other";
-                              if (!groups.has(key)) groups.set(key, []);
-                              groups.get(key)!.push(s);
-                            });
-                            const order = ["Suppliers", "Contractors", "Brokers", "Other"];
-                            const sortedKeys = [...groups.keys()].sort(
-                              (a, b) => order.indexOf(a) - order.indexOf(b),
-                            );
-                            return sortedKeys.map((groupLabel) => (
-                              <optgroup key={groupLabel} label={groupLabel}>
-                                {groups.get(groupLabel)!.map((s) => (
-                                  <option key={s.id} value={String(s.id)}>
-                                    {s.label}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            ));
-                          })()}
-                        </select>
-                        <ChevronDown
-                          size={11}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                        />
-                      </div>
+                      {selectedLoanEmi ? (
+                        // A loan's lender is a company (or, for a Bank Loan, a
+                        // bank head) — never a Supplier/Contractor/Broker, so
+                        // it can't live in the dropdown below. Show it as
+                        // plain fact instead of a dropdown with nothing
+                        // selectable in it.
+                        <div className="flex items-center gap-2">
+                          <Users size={13} className="text-muted-foreground shrink-0" />
+                          <ReadOnlyField value={form.paidTo} placeholder="From loan record" />
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <Users
+                            size={13}
+                            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                          />
+                          <select
+                            value={form.partyId !== null ? String(form.partyId) : ""}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              const opt = supplierOptions.find((s) => String(s.id) === id);
+                              set("partyId", id ? Number(id) : null);
+                              set("paidTo", opt?.label || "");
+                            }}
+                            className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                          >
+                            <option value="">Select party…</option>
+                            {(() => {
+                              // Group by category (Suppliers / Contractors / Brokers) so the
+                              // list isn't one flat undifferentiated block — falls back to a
+                              // single "Other" group for any row missing a recognised type.
+                              const groups = new Map<string, typeof supplierOptions>();
+                              supplierOptions.forEach((s) => {
+                                const key = PARTY_TYPE_LABELS[(s.type ?? "").trim()] ?? "Other";
+                                if (!groups.has(key)) groups.set(key, []);
+                                groups.get(key)!.push(s);
+                              });
+                              const order = ["Suppliers", "Contractors", "Brokers", "Other"];
+                              const sortedKeys = [...groups.keys()].sort(
+                                (a, b) => order.indexOf(a) - order.indexOf(b),
+                              );
+                              return sortedKeys.map((groupLabel) => (
+                                <optgroup key={groupLabel} label={groupLabel}>
+                                  {groups.get(groupLabel)!.map((s) => (
+                                    <option key={s.id} value={String(s.id)}>
+                                      {s.label}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ));
+                            })()}
+                          </select>
+                          <ChevronDown
+                            size={11}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                          />
+                        </div>
+                      )}
                     </Field>
                     {/* TDS — only shown once the chosen party is actually
                         TDS-eligible. Never mandatory to fill here in the

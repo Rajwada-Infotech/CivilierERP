@@ -34,6 +34,8 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
       supplierStats,
       recentPaymentsMade,
       recentPaymentsReceived,
+      madeTimeline,
+      receivedTimeline,
     ] = await Promise.all([
       // ── Payments Made (NewPayment) ──────────────────────────────────────────
       pool.request().query(`
@@ -143,6 +145,26 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
         FROM dbo.ReceivedPayment
         ORDER BY RPCreatedAt DESC
       `),
+
+      // ── Payments Made — daily totals, last 14 days ─────────────────────────
+      pool.request().query(`
+        SELECT
+          CAST(PDate AS DATE)      AS Day,
+          ISNULL(SUM(PAmount), 0)  AS Amount
+        FROM dbo.NewPayment
+        WHERE CAST(PDate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+        GROUP BY CAST(PDate AS DATE)
+      `),
+
+      // ── Received Payments — daily totals, last 14 days ─────────────────────
+      pool.request().query(`
+        SELECT
+          CAST(RPDocDate AS DATE)  AS Day,
+          ISNULL(SUM(RPAmount), 0) AS Amount
+        FROM dbo.ReceivedPayment
+        WHERE CAST(RPDocDate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+        GROUP BY CAST(RPDocDate AS DATE)
+      `),
     ]);
 
     const pm = paymentMadeStats.recordset[0];
@@ -152,6 +174,26 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
     const bk = bankStats.recordset[0];
     const po = poStats.recordset[0];
     const sp = supplierStats.recordset[0];
+
+    // Zero-fill all 14 days — the GROUP BY queries above only return days
+    // that actually had a payment, so gaps would otherwise break the line.
+    const madeByDay = new Map(
+      madeTimeline.recordset.map((r) => [r.Day.toISOString().slice(0, 10), parseFloat(r.Amount)]),
+    );
+    const receivedByDay = new Map(
+      receivedTimeline.recordset.map((r) => [r.Day.toISOString().slice(0, 10), parseFloat(r.Amount)]),
+    );
+    const timeline = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      timeline.push({
+        date: key,
+        made: madeByDay.get(key) ?? 0,
+        received: receivedByDay.get(key) ?? 0,
+      });
+    }
 
     res.json({
       paymentsMade: {
@@ -197,6 +239,7 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
       },
       recentPaymentsMade: recentPaymentsMade.recordset,
       recentPaymentsReceived: recentPaymentsReceived.recordset,
+      timeline,
     });
   } catch (err) {
     console.error("FINANCE DASHBOARD ERROR:", err.message);

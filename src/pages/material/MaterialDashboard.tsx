@@ -36,6 +36,19 @@ import {
   PackageCheck,
   Send,
 } from "lucide-react";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Legend,
+} from "recharts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DashboardData {
@@ -97,6 +110,7 @@ interface DashboardData {
     TotalOut: number;
     NetStock: number;
   }[];
+  timeline: { date: string; grn: number; po: number }[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -227,6 +241,121 @@ function StatSkeleton() {
       </div>
       <div className="h-7 w-20 bg-muted rounded mb-2" />
       <div className="h-3 w-32 bg-muted rounded" />
+    </div>
+  );
+}
+
+// ─── Donut / trend chart cards ────────────────────────────────────────────────
+interface DonutPoint { name: string; value: number; color: string; }
+
+function DonutCard({
+  title, icon: Icon, accentColor, data, isDark, glassStyle, formatValue = fmt,
+}: {
+  title: string; icon: React.ElementType; accentColor: string; data: DonutPoint[];
+  isDark: boolean; glassStyle: React.CSSProperties; formatValue?: (n: number) => string;
+}) {
+  const total = data.reduce((s, d) => s + d.value, 0);
+  return (
+    <div className="rounded-xl overflow-hidden" style={glassStyle}>
+      <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: "rgba(16,185,129,0.12)" }}>
+        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${accentColor}26` }}>
+          <Icon size={11} style={{ color: accentColor }} />
+        </div>
+        <span className="text-xs font-heading font-semibold text-foreground">{title}</span>
+      </div>
+      <div className="p-4">
+        {total === 0 ? (
+          <div className="text-center text-muted-foreground py-10 text-sm">No data yet</div>
+        ) : (
+          <div className="flex flex-col sm:flex-row items-center gap-4">
+            <ResponsiveContainer width="100%" height={180}>
+              <PieChart>
+                <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2} strokeWidth={0}>
+                  {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+                </Pie>
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0];
+                    return (
+                      <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-lg">
+                        <p className="text-xs font-heading font-semibold text-foreground">{d.name}</p>
+                        <p className="text-xs text-muted-foreground">{formatValue(d.value as number)}</p>
+                      </div>
+                    );
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="space-y-2 w-full sm:w-auto shrink-0">
+              {data.map((d) => (
+                <div key={d.name} className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                  <span className="text-xs text-foreground whitespace-nowrap">{d.name}</span>
+                  <span className="text-xs text-muted-foreground ml-auto sm:ml-3">{formatValue(d.value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface TrendSeries { key: string; name: string; color: string; }
+
+function TrendCard({
+  title, icon: Icon, accentColor, data, series, isDark, glassStyle,
+}: {
+  title: string; icon: React.ElementType; accentColor: string;
+  data: { date: string; [key: string]: number | string }[]; series: TrendSeries[];
+  isDark: boolean; glassStyle: React.CSSProperties;
+}) {
+  const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
+  return (
+    <div className="rounded-xl overflow-hidden" style={glassStyle}>
+      <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: "rgba(16,185,129,0.12)" }}>
+        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${accentColor}26` }}>
+          <Icon size={11} style={{ color: accentColor }} />
+        </div>
+        <span className="text-xs font-heading font-semibold text-foreground">{title}</span>
+      </div>
+      <div className="p-4">
+        {!hasData ? (
+          <div className="text-center text-muted-foreground py-10 text-sm">No activity in the last 14 days</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "rgba(148,163,184,0.12)" : "rgba(100,116,139,0.15)"} vertical={false} />
+              <XAxis
+                dataKey="date"
+                tickFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
+                axisLine={false} tickLine={false}
+                interval={Math.max(0, Math.floor(data.length / 6) - 1)}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
+                axisLine={false} tickLine={false} width={40}
+                tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
+              />
+              <Tooltip
+                labelFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                formatter={(value: number, name: string) => [fmt(value), name]}
+                contentStyle={{
+                  background: isDark ? "rgba(15,17,26,0.95)" : "rgba(255,255,255,0.95)",
+                  border: `1px solid ${accentColor}30`, borderRadius: 8, fontSize: 12,
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
+              {series.map((s) => (
+                <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
     </div>
   );
 }
@@ -786,6 +915,7 @@ export default function MaterialDashboard() {
           recentRequests: raw.recentRequests ?? [],
           poStatusBreakdown: raw.poStatusBreakdown ?? [],
           topItems: raw.topItems ?? [],
+          timeline: raw.timeline ?? [],
         } as DashboardData;
       },
       staleTime: 0,
@@ -939,6 +1069,54 @@ export default function MaterialDashboard() {
                 icon={Receipt}
                 accentColor="#f59e0b"
                 trend="neutral"
+              />
+            </div>
+          </MaterialSection>
+        )}
+
+        {/* Breakdown charts */}
+        {data && (
+          <MaterialSection title="Breakdown" icon={BarChart3} accentColor="#10b981">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <DonutCard
+                title="GRN vs PO Value"
+                icon={TrendingUp}
+                accentColor="#10b981"
+                isDark={isDark}
+                glassStyle={gp}
+                data={[
+                  { name: "GRN Value", value: data.grns.totalValue, color: "#10b981" },
+                  { name: "PO Value", value: data.purchaseOrders.totalValue, color: "#3b82f6" },
+                ]}
+              />
+              <DonutCard
+                title="Material Requests by Status"
+                icon={Send}
+                accentColor="#4f46e5"
+                isDark={isDark}
+                glassStyle={gp}
+                formatValue={(n) => `${n}`}
+                data={[
+                  { name: "Pending", value: data.materialRequests.pending, color: "#f59e0b" },
+                  { name: "Approved", value: data.materialRequests.approved, color: "#10b981" },
+                  { name: "Ordered", value: data.materialRequests.ordered, color: "#8b5cf6" },
+                  { name: "Partially Ordered", value: data.materialRequests.partiallyOrdered, color: "#a855f7" },
+                  { name: "Draft", value: data.materialRequests.draft, color: "#94a3b8" },
+                ]}
+              />
+            </div>
+            <div className="mt-4">
+              <TrendCard
+                title="GRN & PO Value — Last 14 Days"
+                icon={TrendingUp}
+                accentColor="#10b981"
+                isDark={isDark}
+                glassStyle={gp}
+                data={data.timeline}
+                series={[
+                  { key: "grn", name: "GRN", color: "#10b981" },
+                  { key: "po", name: "PO", color: "#3b82f6" },
+                ]}
               />
             </div>
           </MaterialSection>

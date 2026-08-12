@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, ShieldAlert, IndianRupee, Lock, Unlock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -34,6 +34,7 @@ async function fetchBrokers(): Promise<any[]> {
 const CrmBrokerage: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -66,6 +67,21 @@ const CrmBrokerage: React.FC = () => {
     });
     setDialogOpen(true);
   };
+
+  // Deep-link from the Admin Approval Inbox's "Review & Approve" action
+  // (/crm/brokerage?view=X) — opens the same Customize dialog a manual
+  // "Customize amount" click would, instead of leaving the reviewer to
+  // hunt for the row themselves or approve blind straight from the inbox
+  // list. Waits for the records list to load so the row is actually there
+  // to find.
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId || !(records as any[]).length) return;
+    const row = (records as any[]).find((r) => String(r.Id) === viewId);
+    if (row) openEdit(row);
+    setSearchParams((sp) => { sp.delete("view"); return sp; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, records]);
 
   const handleSave = async () => {
     if (!editingId && (!form.BookingId || !form.BrokerId || !form.RateValue)) { toast.error("Booking, broker and rate are required"); return; }
@@ -107,13 +123,26 @@ const CrmBrokerage: React.FC = () => {
       ) },
     { id: "rate", header: "Rate", size: 90, enableSorting: false,
       cell: (i) => <span className="text-xs">{i.row.original.RateType === "Percentage" ? `${i.row.original.RateValue}%` : `₹${i.row.original.RateValue}`}</span> },
-    { accessorKey: "MilestoneNo", header: "Tranche", size: 150, enableSorting: false,
+    { id: "tranche", header: "Tranche", size: 150, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
-        if (r.MilestoneNo == null) return <span className="text-xs text-muted-foreground">Full payout</span>;
+        // TrancheLabel/UnlockGate cover all three payment plans now:
+        // OneTime -> single "Full" row, gate "Booking".
+        // TwoPart -> "Booking" (unlocked immediately) + "Agreement" tranches.
+        // AgreementOnly -> single "Agreement"-gated tranche.
+        // Older milestone-tranche records (pre-plan rework) still carry
+        // MilestoneNo/MilestoneId and fall through to that rendering.
+        if (r.TrancheLabel === "Full" || (r.UnlockGate == null && r.MilestoneNo == null)) {
+          return <span className="text-xs text-muted-foreground">Full payout</span>;
+        }
+        const label = r.UnlockGate === "Agreement"
+          ? `${r.TrancheLabel || "Agreement"} — unlocks on Agreement Executed`
+          : r.UnlockGate === "Booking"
+          ? `${r.TrancheLabel || "Booking"} — unlocks on booking amount paid`
+          : `Milestone ${r.MilestoneNo}${r.MilestoneName ? ` — ${r.MilestoneName}` : ""}`;
         return (
           <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium ${r.IsLocked ? "text-red-600 bg-red-50 border-red-200" : "text-green-600 bg-green-50 border-green-200"}`}>
-            {r.IsLocked ? <Lock size={11} /> : <Unlock size={11} />} Milestone {r.MilestoneNo}{r.MilestoneName ? ` — ${r.MilestoneName}` : ""}
+            {r.IsLocked ? <Lock size={11} /> : <Unlock size={11} />} {label}
           </span>
         );
       } },
@@ -125,7 +154,10 @@ const CrmBrokerage: React.FC = () => {
       cell: (i) => {
         const r = i.row.original;
         if (r.IsLocked) {
-          return <span className="flex items-center gap-1 text-xs text-red-600"><Lock size={11} /> Unlocks once Milestone {r.MilestoneNo ?? "?"} is paid</span>;
+          // Only an Agreement-gated tranche (TwoPart's second half /
+          // AgreementOnly) is ever created locked — a Booking-gated tranche
+          // always starts unlocked (see buildBrokerageTranches).
+          return <span className="flex items-center gap-1 text-xs text-red-600"><Lock size={11} /> Unlocks once the Agreement is Executed</span>;
         }
         return (
           <>

@@ -761,6 +761,12 @@ router.get(
 
       const total = result.recordset[0]?._total ?? 0;
 
+      // The global request-timeout middleware (30s) may have already sent a
+      // 503 while this query was still running — the DB call itself isn't
+      // cancelled by an HTTP timeout, so it can resolve (or reject, below)
+      // well after that. Writing a second response here would crash with
+      // ERR_HTTP_HEADERS_SENT instead of just being a harmless no-op.
+      if (res.headersSent) return;
       res.json({
         data: result.recordset.map((r) => {
           const { _total, ...rest } = r;
@@ -773,6 +779,7 @@ router.get(
       });
     } catch (err) {
       console.error("GET PurchaseOrders error:", err);
+      if (res.headersSent) return;
       res.status(500).json({ error: err.message });
     }
   },

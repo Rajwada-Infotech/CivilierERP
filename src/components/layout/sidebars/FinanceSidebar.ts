@@ -27,6 +27,7 @@ export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
       { label: "Balance Sheet",      path: "/balance-sheet",       pageKey: "balance-sheet" },
       { label: "Profit & Loss",      path: "/profit-and-loss",     pageKey: "profit-and-loss" },
       { label: "Balance Enquiry",    path: "/finance/balance-enquiry", pageKey: "balance-enquiry" },
+      { label: "Year-End Close",      path: "/finance/year-end-close",  pageKey: "year-end-close" },
     ],
   },
 ];

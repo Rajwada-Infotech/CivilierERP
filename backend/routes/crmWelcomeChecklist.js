@@ -44,6 +44,13 @@ const CHECKLIST_TEMPLATE = [
   { section: "PersonalContact", key: "mobile_number", label: "Mobile number confirmed" },
   { section: "PersonalContact", key: "email", label: "Email address confirmed" },
   { section: "PersonalContact", key: "address", label: "Communication address confirmed" },
+
+  { section: "Parking", key: "parking_selection", label: "Parking slot(s) & charges confirmed with customer (or marked N/A if none)" },
+
+  { section: "ExtraCharges", key: "extra_charges", label: "Extra work / additional charges confirmed with customer (or marked N/A if none)" },
+
+  { section: "Documents", key: "documents_uploaded", label: "All required KYC/booking documents uploaded" },
+  { section: "Documents", key: "documents_verified", label: "All uploaded documents verified against originals" },
 ];
 const SECTION_LABELS = {
   ProjectUnit: "Project & Unit Details",
@@ -51,6 +58,9 @@ const SECTION_LABELS = {
   BankNominee: "Bank & Nominee (KYC)",
   CoApplicant: "Co-Applicant Details",
   PersonalContact: "Customer Personal & Contact Details",
+  Parking: "Parking",
+  ExtraCharges: "Extra Work / Additional Charges",
+  Documents: "Documents & Attachments",
 };
 const ITEM_BY_KEY = Object.fromEntries(CHECKLIST_TEMPLATE.map((t) => [t.key, t]));
 

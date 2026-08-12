@@ -379,102 +379,9 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
  * maybeAutoCreateSalesDeed at every call site — both share the exact same
  * trigger condition (all milestones settled).
  */
-async function maybeAutoGenerateInvoice(pool, bookingId, actorUserId) {
-  const existing = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Possession'");
-  if (existing.recordset.length) return null;
-
-  const pendingMilestones = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND Status NOT IN ('Paid', 'Waived')
-  `);
-  if (pendingMilestones.recordset[0]?.Cnt > 0) return null;
-  const hasMilestones = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
-  if (!hasMilestones.recordset[0]?.Cnt) return null;
-
-  const booking = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT BookingNo, AssignedTo, GrandTotal, TotalValue FROM dbo.CrmBooking WHERE Id = @bid");
-  const bookingRow = booking.recordset[0];
-  if (!bookingRow) return null;
-
-  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
-  const amount = bookingRow.GrandTotal || bookingRow.TotalValue || 0;
-  const result = await pool.request()
-    .input("no",   sql.NVarChar(30),  invoiceNo)
-    .input("bid",  sql.Int,           bookingId)
-    .input("amt",  sql.Decimal(18,2), amount)
-    .input("desc", sql.NVarChar(500), "Final settlement — possession of unit")
-    .input("cb",   sql.Int,           actorUserId || null)
-    .query(`
-      INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, Description, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.Id
-      VALUES (@no, @bid, 'Possession', @amt, @desc, @cb, SYSDATETIME())
-    `);
-  const invoiceId = result.recordset[0].Id;
-
-  if (bookingRow.AssignedTo) {
-    await emitNotification(pool, bookingRow.AssignedTo, "crm_invoice_generated",
-      "Possession Invoice Generated",
-      `${invoiceNo} auto-generated for booking ${bookingRow.BookingNo} — all payment milestones are settled.`,
-      invoiceId, "crm_invoice");
-  }
-
-  return { id: invoiceId, InvoiceNo: invoiceNo };
-}
-
-/**
- * Auto-advance step: "AGREEMENT DONE -> INVOICE (receive payment for these
- * agreemental works)" — the moment an agreement reaches Executed (both
- * Senior and Customer approval already landed, per mark-executed's own
- * gate), automatically generate the Agreement-stage invoice, the same way
- * maybeAutoGenerateInvoice() does for the Possession stage. Only fires if
- * the booking's payment plan actually has a milestone named "Agreement..."
- * to invoice — if a custom plan doesn't have one, this deliberately does
- * nothing rather than guessing an amount; staff can still generate it
- * manually from the Booking Detail Invoice tab. Idempotent: no-op if an
- * Agreement-type invoice already exists for the booking.
- */
-async function maybeAutoGenerateAgreementInvoice(pool, bookingId, actorUserId) {
-  const existing = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Agreement'");
-  if (existing.recordset.length) return null;
-
-  const milestone = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone
-    WHERE BookingId = @bid AND MilestoneName LIKE 'Agreement%'
-    ORDER BY MilestoneNo
-  `);
-  if (!milestone.recordset.length) return null;
-
-  const booking = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT BookingNo, AssignedTo FROM dbo.CrmBooking WHERE Id = @bid");
-  const bookingRow = booking.recordset[0];
-  if (!bookingRow) return null;
-
-  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
-  const amount = milestone.recordset[0].AmountDue || 0;
-  const result = await pool.request()
-    .input("no",   sql.NVarChar(30),  invoiceNo)
-    .input("bid",  sql.Int,           bookingId)
-    .input("amt",  sql.Decimal(18,2), amount)
-    .input("desc", sql.NVarChar(500), "Agreement execution charges")
-    .input("cb",   sql.Int,           actorUserId || null)
-    .query(`
-      INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, Description, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.Id
-      VALUES (@no, @bid, 'Agreement', @amt, @desc, @cb, SYSDATETIME())
-    `);
-  const invoiceId = result.recordset[0].Id;
-
-  if (bookingRow.AssignedTo) {
-    await emitNotification(pool, bookingRow.AssignedTo, "crm_invoice_generated",
-      "Agreement Invoice Generated",
-      `${invoiceNo} auto-generated for booking ${bookingRow.BookingNo} — agreement executed.`,
-      invoiceId, "crm_invoice");
-  }
-
-  return { id: invoiceId, InvoiceNo: invoiceNo };
-}
+// Auto-generation of Possession and Agreement invoices was removed — every
+// invoice is now manual-only from the dedicated Invoice page, gated on the
+// relevant Demand having been raised. See routes/crmInvoices.js.
 
 // --- Single-field agreement-date negotiation loop -------------------------
 // Replaces the old two-column (ProposedDateByCompany / ProposedDateByCustomer)
@@ -894,27 +801,35 @@ async function syncParkingPaymentStatus(pool, bookingId) {
     .query(`UPDATE dbo.CrmParkingAllotment SET PaymentStatus = @st WHERE BookingId = @bid AND IsActive = 1`);
 }
 
-// Same 2%-under-1Cr / 1%-at-or-above-1Cr tier crmBrokerage.js's manual POST
-// leaves to a human to type in — this is the auto path's own default, used
-// only when the Application/Booking didn't carry an explicit override.
-const BROKERAGE_TIER_THRESHOLD = 10000000; // 1 Crore
-function tierBrokeragePercent(totalValue) {
-  return Number(totalValue) >= BROKERAGE_TIER_THRESHOLD ? 1 : 2;
+// Admin-editable commission tiers (dbo.CrmBrokerageRateTier — see
+// crmBrokerageRateTiers.js) — used only as a fallback default when the
+// Application/Booking didn't carry an explicit BrokerageRatePercent
+// override. Was previously a hardcoded 2%-under-1Cr / 1%-at-1Cr+ pair of JS
+// constants; now a real, queryable master so the thresholds/rates can
+// change without a code deploy. Falls back to the same 2% default the old
+// constants used if no active tier matches (misconfigured/empty table) —
+// never silently computes a 0%/null rate.
+async function tierBrokeragePercent(pool, dealValue) {
+  const value = Number(dealValue) || 0;
+  const result = await pool.request().input("val", sql.Decimal(18, 2), value).query(`
+    SELECT TOP 1 RatePercent
+    FROM dbo.CrmBrokerageRateTier
+    WHERE IsActive = 1 AND MinDealValue <= @val AND (MaxDealValue IS NULL OR MaxDealValue > @val)
+    ORDER BY MinDealValue DESC
+  `);
+  return result.recordset[0]?.RatePercent != null ? Number(result.recordset[0].RatePercent) : 2;
 }
 
 /**
  * Auto-advance step: the moment a booking's first payment milestone is fully
  * Paid, a broker selected at Application/Booking stage automatically gets
- * ONE CrmBrokerageMaster row PER payment milestone — the broker's payout
- * follows the exact same milestone schedule the customer's own payments do,
- * not a fixed one/two-tranche split. Each row's ComputedAmount is calculated
- * from the milestone's real AmountDue and the broker's actual commission
- * rate. Do not multiply the deal rate by the milestone percent and store
- * that as RateValue: a 1% brokerage on a 1% booking milestone is still a
- * 1% brokerage rate, not 0.01%. A milestone that's already Paid by
- * the time this fires (Milestone #1 itself, the trigger) is created
- * unlocked; every later milestone is created locked until
- * maybeUnlockBrokerageMilestoneTranche fires for it.
+ * one or more CrmBrokerageMaster tranche rows, shaped by the booking's own
+ * BrokeragePaymentPlan (OneTime/TwoPart/AgreementOnly — see
+ * buildBrokerageTranches below), not tied to the customer's own payment
+ * milestone schedule. ComputedAmount is the broker's real commission rate
+ * applied to the deal value (unit + parking + extras, GST excluded).
+ * TwoPart/AgreementOnly tranches gated on the Agreement start locked and are
+ * released by maybeUnlockBrokerageOnAgreementExecuted once it's Executed.
  * Idempotent: no-op if the booking has no BrokerId, or brokerage rows
  * already exist for it (still available as crmBrokerage.js POST / for
  * bookings that never had a broker picked up front).
@@ -923,9 +838,38 @@ function tierBrokeragePercent(totalValue) {
  * this file react to "all milestones settled", not milestone 1 alone, so
  * this can't reuse their trigger condition.
  */
+// BrokeragePaymentPlan on CrmBooking decides how the commission is split
+// into payable tranches — replaces the old always-one-tranche-per-milestone
+// behavior, which both mis-scoped the total (see totalBrokerageAmount
+// below) and paid brokers on a schedule nobody actually asked for.
+//   'OneTime'       - single tranche, unlocked immediately (same trigger
+//                      point as always: Milestone #1 / booking amount paid).
+//   'TwoPart'       - half unlocked immediately (booking amount paid),
+//                      other half locked until the Agreement is Executed.
+//   'AgreementOnly' - single tranche, locked until the Agreement is
+//                      Executed (created now so it's visible/tracked, but
+//                      not payable until then).
+function buildBrokerageTranches(plan, totalAmount, agreementExecuted) {
+  const round2 = (n) => Math.round(n * 100) / 100;
+  if (plan === "TwoPart") {
+    const first = round2(totalAmount / 2);
+    const second = round2(totalAmount - first);
+    return [
+      { label: "Booking", amount: first, gate: "Booking", locked: false },
+      { label: "Agreement", amount: second, gate: "Agreement", locked: !agreementExecuted },
+    ];
+  }
+  if (plan === "AgreementOnly") {
+    return [{ label: "Agreement", amount: round2(totalAmount), gate: "Agreement", locked: !agreementExecuted }];
+  }
+  // OneTime (default, and fallback for any unrecognized value)
+  return [{ label: "Full", amount: round2(totalAmount), gate: "Booking", locked: false }];
+}
+
 async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT BrokerId, BrokerageRatePercent, TotalValue, AssignedTo, BookingNo
+    SELECT BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, TotalValue,
+           ParkingTotal, ExtraChargesTotal, AssignedTo, BookingNo
     FROM dbo.CrmBooking WHERE Id = @bid
   `);
   const bk = booking.recordset[0];
@@ -940,31 +884,33 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   if (!broker.recordset.length) return null;
   const brk = broker.recordset[0];
 
-  const totalValue = Number(bk.TotalValue) || 0;
-  const totalPercent = bk.BrokerageRatePercent != null ? Number(bk.BrokerageRatePercent) : tierBrokeragePercent(totalValue);
-  const totalBrokerageAmount = Math.round(totalValue * totalPercent) / 100;
+  // Commission is rate% of the whole deal the broker actually closed —
+  // unit price + parking + extras — but NOT GrandTotal, because GrandTotal
+  // also folds in GST, and GST is a statutory pass-through the seller
+  // collects on the government's behalf, not revenue the broker should be
+  // cut in on. (TotalValue alone previously under-counted the deal by
+  // leaving parking/extras out entirely — see booking 41, where the old
+  // per-milestone schedule's real total was TotalValue + ParkingTotal,
+  // confirmed against CrmPaymentMilestone.AmountDue sums.)
+  const dealValue = Number(bk.TotalValue || 0) + Number(bk.ParkingTotal || 0) + Number(bk.ExtraChargesTotal || 0);
+  const totalPercent = bk.BrokerageRatePercent != null ? Number(bk.BrokerageRatePercent) : await tierBrokeragePercent(pool, dealValue);
+  const totalBrokerageAmount = Math.round(dealValue * totalPercent) / 100;
+  if (totalBrokerageAmount <= 0) return null;
 
-  // %-based schedule steps only — an Extra-Charge/Parking milestone is a
-  // fixed line item the customer negotiated directly, not part of the deal
-  // value the broker actually sold, so it earns no brokerage share (same
-  // exclusion recalculateRemainingMilestones already applies for the
-  // customer-facing schedule).
-  const milestones = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT Id, MilestoneNo, [Percent], AmountDue, Status
-    FROM dbo.CrmPaymentMilestone
-    WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
-    ORDER BY MilestoneNo
-  `);
-  if (!milestones.recordset.length) return null;
+  const plan = ["OneTime", "TwoPart", "AgreementOnly"].includes(bk.BrokeragePaymentPlan)
+    ? bk.BrokeragePaymentPlan : "OneTime";
 
-  const rows = milestones.recordset;
-  const totalMilestoneAmount = rows.reduce((s, m) => s + Number(m.AmountDue || 0), 0);
-  const totalTarget = totalMilestoneAmount > 0
-    ? Math.round(totalMilestoneAmount * totalPercent) / 100
-    : totalBrokerageAmount;
+  // Only relevant for TwoPart's second half / AgreementOnly — a booking
+  // that's fast-tracked and already has an Executed/Registered agreement by
+  // the time Milestone #1 clears shouldn't sit needlessly locked.
+  const agr = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
+  const agreementExecuted = ["Executed", "Registered"].includes(agr.recordset[0]?.Status);
+
+  const tranches = buildBrokerageTranches(plan, totalBrokerageAmount, agreementExecuted);
 
   // All-or-nothing: a failure partway through used to leave whatever
-  // milestones had already been inserted sitting in the DB as a permanent,
+  // tranches had already been inserted sitting in the DB as a permanent,
   // incomplete (and confusing) partial schedule — exactly the kind of
   // silent data corruption a broker-payout calculation can never tolerate.
   // A single transaction makes a mid-loop failure roll back cleanly instead.
@@ -973,18 +919,7 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   try {
     await tx.begin();
     ids = [];
-    let allocated = 0;
-    for (let i = 0; i < rows.length; i++) {
-      const m = rows[i];
-      const isLast = i === rows.length - 1;
-      // Last row absorbs the rounding remainder so the tranches always sum
-      // exactly to the commission on the scheduled milestone base.
-      const computedAmount = isLast
-        ? Math.round((totalTarget - allocated) * 100) / 100
-        : Math.round(Number(m.AmountDue || 0) * totalPercent) / 100;
-      allocated += computedAmount;
-      const isLocked = m.Status !== "Paid" && m.Status !== "Waived";
-
+    for (const t of tranches) {
       const result = await new sql.Request(tx)
         .input("bid",   sql.Int,           bookingId)
         .input("brid",  sql.Int,           brk.LHeadId)
@@ -992,18 +927,17 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
         .input("con",   sql.NVarChar(20),  brk.LHeadPhone || null)
         .input("rt",    sql.NVarChar(20),  "Percentage")
         .input("rv",    sql.Decimal(18,2), totalPercent)
-        .input("camt",  sql.Decimal(18,2), computedAmount)
-        .input("mid",   sql.Int,           m.Id)
-        .input("mno",   sql.Int,           m.MilestoneNo)
-        .input("tranche", sql.NVarChar(30), `Milestone-${m.MilestoneNo}`)
-        .input("lock",  sql.Bit,           isLocked ? 1 : 0)
-        .input("notes", sql.NVarChar(sql.MAX), `Auto-created — follows Milestone #${m.MilestoneNo} of the booking's own payment schedule`)
+        .input("camt",  sql.Decimal(18,2), t.amount)
+        .input("tranche", sql.NVarChar(30), t.label)
+        .input("gate",  sql.NVarChar(20),  t.gate)
+        .input("lock",  sql.Bit,           t.locked ? 1 : 0)
+        .input("notes", sql.NVarChar(sql.MAX), `Auto-created — ${plan} plan, ${t.label} tranche`)
         .input("cb",    sql.Int,           actorUserId || null)
         .query(`
           INSERT INTO dbo.CrmBrokerageMaster
-            (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, MilestoneId, MilestoneNo, TrancheLabel, IsLocked, Status, Notes, CreatedBy, CreatedAt)
+            (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, TrancheLabel, UnlockGate, IsLocked, Status, Notes, CreatedBy, CreatedAt)
           OUTPUT INSERTED.Id
-          VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @mid, @mno, @tranche, @lock, 'Pending', @notes, @cb, SYSDATETIME())
+          VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @tranche, @gate, @lock, 'Pending', @notes, @cb, SYSDATETIME())
         `);
       ids.push(result.recordset[0].Id);
     }
@@ -1019,7 +953,7 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   if (bk.AssignedTo) {
     await emitNotification(pool, bk.AssignedTo, "crm_brokerage_ready",
       "Brokerage Schedule Created",
-      `Brokerage schedule auto-created for booking ${bk.BookingNo} — ${ids.length} milestone-tranche(s) for broker ${brk.LHeadName}.`,
+      `Brokerage (${plan}) auto-created for booking ${bk.BookingNo} — ${ids.length} tranche(s) for broker ${brk.LHeadName}.`,
       ids[0], "crm_brokerage");
   }
 
@@ -1027,86 +961,23 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
 }
 
 /**
- * Unlocks the brokerage tranche tied to one specific payment milestone the
- * moment that milestone becomes Paid (or Waived — waiving still resolves
- * the milestone, and the broker's cut for it shouldn't stay stuck forever
- * just because the customer's own charge was forgiven). No-op if there's no
- * such row (bookings with no broker, or a milestone excluded from the
- * brokerage schedule).
- * Call sites: every place in crmPayments.js where a milestone's Status
- * transitions to Paid/Waived — createReceiptForMilestone, the direct
- * milestone PUT /:id edit, PUT /:id/waive, and the on-account "apply to
- * milestone" route.
+ * Unlocks the Agreement-gated brokerage tranche(s) — TwoPart's second half,
+ * or AgreementOnly's single tranche — the moment a booking's Agreement is
+ * marked Executed. No-op if there's no such row (OneTime plan, no broker,
+ * or the tranche is already unlocked).
+ * Call site: wherever CrmAgreement.Status transitions to 'Executed'
+ * (mark-executed route in crmAgreement.js).
  */
-async function maybeUnlockBrokerageMilestoneTranche(pool, bookingId, milestoneId) {
-  await pool.request().input("bid", sql.Int, bookingId).input("mid", sql.Int, milestoneId).query(`
+async function maybeUnlockBrokerageOnAgreementExecuted(pool, bookingId) {
+  await pool.request().input("bid", sql.Int, bookingId).query(`
     UPDATE dbo.CrmBrokerageMaster SET IsLocked = 0
-    WHERE BookingId = @bid AND MilestoneId = @mid AND IsLocked = 1
+    WHERE BookingId = @bid AND UnlockGate = 'Agreement' AND IsLocked = 1
   `);
 }
 
-// Fires when staff click "Book / Send for Approval" (PUT
-// /:id/ready-for-approval in crmBookings.js) — the moment a booking clears
-// its own checklist and is submitted for admin approval, generate the
-// Booking-stage invoice automatically instead of leaving staff to remember
-// a separate manual step. Idempotent on InvoiceType = 'Booking' so re-
-// notifying admins (a booking bounced back and resubmitted) never creates a
-// second invoice.
-async function maybeAutoGenerateBookingInvoice(pool, bookingId, actorUserId) {
-  const existing = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Booking'");
-  if (existing.recordset.length) return null;
-
-  const booking = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT BookingNo, AssignedTo, BookingAmount FROM dbo.CrmBooking WHERE Id = @bid");
-  const bookingRow = booking.recordset[0];
-  if (!bookingRow || !bookingRow.BookingAmount) return null;
-
-  // Auto-generation is only ever meant to fire for the booking (token)
-  // payment itself, once it's fully paid — not for any milestone-wise
-  // payment that comes after. crmBookings.js's ready-for-approval already
-  // gates on this via checkBookingApprovalReadiness before calling here,
-  // but that's a call-site guarantee, not a data-layer one — re-check the
-  // first milestone directly so this function stays correct even if a
-  // future call site is added without that same gate.
-  const firstMilestone = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT TOP 1 AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
-  `);
-  const fm = firstMilestone.recordset[0];
-  if (!fm || !(fm.AmountDue > 0) || Number(fm.AmountPaid) < Number(fm.AmountDue)) return null;
-
-  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
-  const result = await pool.request()
-    .input("no",   sql.NVarChar(30),  invoiceNo)
-    .input("bid",  sql.Int,           bookingId)
-    .input("amt",  sql.Decimal(18,2), bookingRow.BookingAmount)
-    .input("desc", sql.NVarChar(500), "Booking amount received against unit booking")
-    .input("cb",   sql.Int,           actorUserId || null)
-    .query(`
-      INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, Description, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.Id
-      VALUES (@no, @bid, 'Booking', @amt, @desc, @cb, SYSDATETIME())
-    `);
-  const invoiceId = result.recordset[0].Id;
-
-  // Same best-effort rule as the manual invoice route — a PDF-rendering
-  // problem must never block the booking's own approval submission, which
-  // is what this function runs inside of.
-  try {
-    await generateInvoicePdf(pool, invoiceId);
-  } catch (pdfErr) {
-    console.error("[crmWorkflowGuards] booking invoice PDF generation failed:", pdfErr.message);
-  }
-
-  if (bookingRow.AssignedTo) {
-    await emitNotification(pool, bookingRow.AssignedTo, "crm_invoice_generated",
-      "Booking Invoice Generated",
-      `${invoiceNo} auto-generated for booking ${bookingRow.BookingNo}.`,
-      invoiceId, "crm_invoice");
-  }
-
-  return { id: invoiceId, InvoiceNo: invoiceNo };
-}
+// Auto-generation of the Booking invoice was removed — it's now manual-only
+// from the dedicated Invoice page, gated on the Booking milestone's Demand
+// having been raised. See routes/crmInvoices.js.
 
 /**
  * Loan Processing gate — this stage only exists at all for a booking that
@@ -1140,11 +1011,8 @@ module.exports = {
   maybeAutoCreateAgreement,
   maybeAutoCreateLegalMilestone,
   maybeAutoCreateSalesDeed,
-  maybeAutoGenerateInvoice,
-  maybeAutoGenerateBookingInvoice,
-  maybeAutoGenerateAgreementInvoice,
   maybeAutoCreateBrokerage,
-  maybeUnlockBrokerageMilestoneTranche,
+  maybeUnlockBrokerageOnAgreementExecuted,
   proposeAgreementDate,
   acceptAgreementDate,
   finalizeAgreementDate,

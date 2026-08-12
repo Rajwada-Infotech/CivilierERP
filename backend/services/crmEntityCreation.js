@@ -15,7 +15,6 @@ const { validateSourceChain } = require("./sourceChain");
 const { logStatusChange } = require("./crmApplicationWorkflow");
 const { guardAndConvertHold, assertEntityNotTaken, findActiveHold, placeHoldIfNeeded } = require("./crmHoldService");
 const { rollupBookingTotals, applyAddParking } = require("../routes/crmParking");
-const { createReceiptForMilestone } = require("../routes/crmPayments");
 const { recalculateRemainingMilestones } = require("./crmWorkflowGuards");
 
 const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "Website", "EventLead", "Other"];
@@ -284,7 +283,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("cb",   sql.Int,           actorUserId)
       .input("brkid", sql.Int,          b.BrokerId ? parseInt(b.BrokerId) : null)
       .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
-      .input("brksplit", sql.Bit,       b.BrokerageSplitEnabled ? 1 : 0)
+      .input("brkplan", sql.NVarChar(20), ["OneTime", "TwoPart", "AgreementOnly"].includes(b.BrokeragePaymentPlan) ? b.BrokeragePaymentPlan : "OneTime")
       .query(`
         INSERT INTO dbo.CrmApplication
           (ApplicationNo, LeadId, CustomerId, ApplicantName, Mobile, AltMobile, Email,
@@ -293,7 +292,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
            Source, PlatformId, CampaignId, AdId, ChannelPartnerId,
            RatePerSqFt, DateOfApply, PaymentPlanId, TokenType, TokenValue, BookingAmount, PaymentMode,
            AssignedTo, AssignedBy, Status, Notes, ReferredByApplicationId, IsActive, CreatedBy, CreatedAt,
-           BrokerId, BrokerageRatePercent, BrokerageSplitEnabled)
+           BrokerId, BrokerageRatePercent, BrokeragePaymentPlan)
         OUTPUT INSERTED.Id
         VALUES
           (@no, @lid, @custid, @name, @mob, @alt, @em,
@@ -302,7 +301,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
            @src, @platid, @campid, @adid, @cpid,
            @rate, @doa, @ppid, @ttype, @tval, @bamt, @pmode,
            @asgn, @asgnby, 'Pending', @note, @refApp, 1, @cb, SYSDATETIME(),
-           @brkid, @brkpct, @brksplit)
+           @brkid, @brkpct, @brkplan)
       `);
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
@@ -556,21 +555,21 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     throw new CrmCreationError(`This application already has a booking (${existingForApp.recordset[0].BookingNo}) — an application can only have one`, 409);
   }
 
-  // The Application must have actually cleared its own verification gate
-  // (Status='Approved', set only via approvalService's crm-applications
-  // transition — see crmApplications.js PUT /:id/approve) before a Booking
-  // can exist for it. This used to just exclude the dead states (Rejected/
-  // Cancelled/Expired) and let a still-Pending, unverified Application
-  // through, back when Booking creation itself was what force-advanced the
-  // Application to Approved. Now that Approved is a real human decision made
-  // earlier in the flow, "not dead" isn't enough — this must require the
-  // real thing.
+  // Applications no longer have their own separate approval cycle — the
+  // moment one is Submitted (Status='Pending'), a Booking is created
+  // straight away (see crmApplications.js PUT /:id/submit), and all real
+  // review/approval (Level-1 data review, then Marketing Head, then
+  // Director) happens on the Booking itself from there
+  // (crmBookingStageService.js). So the only Applications a Booking can
+  // never exist for are the genuinely dead ones — the same "not dead"
+  // exclusion this used before Approved briefly became a real gate.
   const appRow = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
     .query("SELECT Status, IsActive, PaymentPlanId FROM dbo.CrmApplication WHERE Id = @aid");
   if (!appRow.recordset.length) throw new CrmCreationError("Application not found");
-  if (appRow.recordset[0].IsActive === false || appRow.recordset[0].Status !== "Approved") {
+  const deadApplicationStatuses = ["Rejected", "Cancelled", "Expired"];
+  if (appRow.recordset[0].IsActive === false || deadApplicationStatuses.includes(appRow.recordset[0].Status)) {
     throw new CrmCreationError(
-      `A Booking can only be created for a registered (Approved) application — current status: ${appRow.recordset[0].Status}`, 400);
+      `A Booking can't be created for an application that is ${appRow.recordset[0].Status}`, 400);
   }
 
   const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`
@@ -666,7 +665,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     .input("cb",    sql.Int,           actorUserId)
     .input("brkid", sql.Int,           b.BrokerId ? parseInt(b.BrokerId) : null)
     .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
-    .input("brksplit", sql.Bit,        b.BrokerageSplitEnabled ? 1 : 0)
+    .input("brkplan", sql.NVarChar(20), ["OneTime", "TwoPart", "AgreementOnly"].includes(b.BrokeragePaymentPlan) ? b.BrokeragePaymentPlan : "OneTime")
     .input("cdl",   sql.DateTime2(3),  confirmDeadline)
     .query(`
       INSERT INTO dbo.CrmBooking
@@ -674,7 +673,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
          AreaSqFt, RatePerSqFt, TotalValue, BookingAmount, TokenType, TokenValue, PaymentPlanId,
          BookingDate, PaymentMode, AssignedTo, Status, Notes, IsActive,
          ParkingTotal, ExtraChargesTotal, GrandTotal, CreatedBy, CreatedAt,
-         BrokerId, BrokerageRatePercent, BrokerageSplitEnabled, ConfirmDeadline)
+         BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ConfirmDeadline)
       OUTPUT INSERTED.Id
       VALUES
         (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @flr, @utype,
@@ -682,7 +681,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
          ISNULL(@bdate, CAST(SYSDATETIME() AS DATE)), @pmode,
          @asgn, 'Pending', @note, 1,
          0, 0, ISNULL(@tot, 0), @cb, SYSDATETIME(),
-         @brkid, @brkpct, @brksplit, @cdl)
+         @brkid, @brkpct, @brkplan, @cdl)
     `);
 
   const bookingId = result.recordset[0].Id;
@@ -782,69 +781,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // selections to this Booking.
   await rollupBookingTotals(pool, bookingId);
 
-  // The Application's Payment Details step already captured the token
-  // amount as "paid" (PaymentMode + a cheque/transaction reference, see
-  // CrmApplication.tsx) — that is real money Finance needs to know about,
-  // not just descriptive text sitting on the Application. Sync it into a
-  // real, GL-posted receipt against Milestone #1 the moment the booking
-  // (and its milestone schedule) exists, through the exact same accounting
-  // path a manually-entered receipt goes through (crmPayments.js). Never
-  // allowed to block booking creation — same partial-failure tolerance as
-  // every other best-effort step in this function.
-  if (bookingAmount > 0) {
-    try {
-      const m1 = await pool.request().input("bid", sql.Int, bookingId)
-        .query("SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
-      const instrument = await pool.request().input("bid", sql.Int, bookingId)
-        .query("SELECT ChequeNo, ChequeDate, TransactionRef FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
-      const actorRow = await pool.request().input("uid", sql.Int, actorUserId)
-        .query("SELECT email, name FROM dbo.users WHERE id = @uid");
-      // The COMPANY bank the token payment landed in — captured on the
-      // Application's own Payment Details step (b.DepositBankId, resolved
-      // from CrmApplication.DepositBankId by the caller) — is a completely
-      // separate thing from the customer's own bank above (that's KYC/
-      // refund banking, never where the company's money actually sits).
-      // Resolved here rather than trusting a caller-supplied name string, so
-      // it can never drift from what CrmProjectBank/AccountHeadMaster
-      // actually call this account.
-      let depositBankName = null;
-      if (b.DepositBankId) {
-        const bank = await pool.request().input("bid2", sql.Int, parseInt(b.DepositBankId))
-          .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @bid2");
-        depositBankName = bank.recordset[0]?.LHeadName || null;
-      }
-      if (m1.recordset.length) {
-        const inst = instrument.recordset[0] || {};
-        const actorEmail = actorRow.recordset[0]?.email || actorRow.recordset[0]?.name || null;
-        // The real amount actually received, not the plan's fixed figure —
-        // TokenValue on the Application's Payment Details step is what staff
-        // captured the customer as having actually paid, which can
-        // legitimately be more OR less than the fixed Booking Amount (the
-        // plan only fixes what's DUE, not what's collected). Passing this
-        // through lets createReceiptForMilestone's own overpayment-cap logic
-        // do the right thing either way: excess auto-parks to On Account,
-        // and a genuine underpayment leaves the milestone correctly
-        // Partially-paid instead of the system silently recording money that
-        // was never actually received. Falls back to the plan's fixed
-        // figure only when no token amount was captured at all.
-        const actualAmount = b.TokenValue != null && b.TokenValue !== "" ? parseFloat(b.TokenValue) : bookingAmount;
-        await createReceiptForMilestone(pool, m1.recordset[0].Id, {
-          Amount: actualAmount,
-          ReceivedDate: b.BookingDate,
-          PaymentMode: b.PaymentMode || null,
-          TransactionRef: b.PaymentMode === "Cheque" ? (inst.ChequeNo || null) : (inst.TransactionRef || null),
-          ChequeDate: b.PaymentMode === "Cheque" ? (inst.ChequeDate || null) : null,
-          DepositBankId: b.DepositBankId || null,
-          DepositBankName: depositBankName,
-          Notes: "Auto-synced from Application token payment capture",
-        }, actorUserId, actorEmail, { enforceBankMandate: true });
-      }
-    } catch (receiptErr) {
-      console.error("[crmEntityCreation] auto-receipt sync failed:", receiptErr.message);
-    }
-  }
-
-  // No status force-advance here anymore — the Application was already
+  // Booking Amount payment is no longer auto-submitted here. Data Review`r`n  // completion creates the independent Money Receipt, and Money Receipt`r`n  // approval creates the pending Finance ReceivedPayment row.`r`n`r`n  // No status force-advance here anymore — the Application was already
   // Approved (registered) before this function would even let it through
   // the gate above. Booking creation is now a downstream consequence of
   // that approval, not the thing that causes it.
@@ -875,3 +812,4 @@ module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
   generateMilestonesForBooking, resolveApplicationPaymentPlan, getApplicablePaymentPlans,
 };
+

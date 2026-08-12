@@ -279,12 +279,21 @@ router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req
         e.PrincipalComponent, e.InterestComponent,
         ls.LoanNo, ls.LoanType,
         COALESCE(bc.name, cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerName,
+        -- Company-only borrower name (NULL for a customer-side loan) — lets
+        -- the Payment page auto-fill its own Company field only when the
+        -- borrower actually is one of our own companies, never a customer.
+        bc.name AS BorrowerCompanyName,
+        -- Lender is always a company per the LoanSanction schema — this is
+        -- who repayment actually goes to, auto-filling "Payable To" on the
+        -- Payment page instead of leaving staff to look it up manually.
+        lc.name AS LenderName,
         CASE WHEN e.DueDate < CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS IsOverdue
       FROM dbo.LoanEMISchedule e
       JOIN dbo.LoanSanction ls ON ls.LoanId = e.LoanId
       LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
       LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
+      LEFT JOIN dbo.enterprise lc ON lc.id = ls.LenderCompanyId AND lc.business_type = 'C'
       WHERE e.IsPaid = 0 AND ls.Status <> 'Closed'
       ORDER BY e.DueDate ASC
     `);
@@ -663,7 +672,59 @@ async function createLoanSanctionInternal(payload, createdBy) {
 router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) => {
   const createdBy = req.user?.email || req.user?.name || "system";
   try {
-    const { loanId, loanNo } = await createLoanSanctionInternal(req.body, createdBy);
+    const { loanId, loanNo, lenderLHeadId, borrowerLHeadId } = await createLoanSanctionInternal(req.body, createdBy);
+
+    // Inter-Company: two of our own companies, so the disbursement is real
+    // money leaving one company's bank and landing in the other's the
+    // moment it's sanctioned — post both sides now instead of waiting on
+    // the manual POST /:id/post-to-gl step. Same SourceType/SourceId as
+    // that endpoint's own posting, so its "already posted" guard covers
+    // this and neither can double-post.
+    // Each company's own books reference the OTHER (counterparty) company
+    // by name, not itself — Lender's books carry "Loan - <Borrower>"
+    // (what's receivable from them), Borrower's books carry "Loan -
+    // <Lender>" (what's payable to them). Repayment (see PUT /:id/pay)
+    // mirrors and reverses these same two legs.
+    // Bank Loan/Customer Loan involve only one of our own companies (the
+    // other side is an external bank or customer), so they're left to the
+    // existing manual post-to-gl flow.
+    if (req.body.loanType === "Inter-Company" && lenderLHeadId && borrowerLHeadId) {
+      const lenderBankAccountId = req.body.lenderBankAccountId ? parseInt(req.body.lenderBankAccountId, 10) : null;
+      const borrowerBankAccountId = req.body.borrowerBankAccountId ? parseInt(req.body.borrowerBankAccountId, 10) : null;
+      const lenderCompanyId = parseInt(req.body.lenderCompanyId, 10);
+      const borrowerCompanyId = parseInt(req.body.borrowerCompanyId, 10);
+      const amt = parseFloat(req.body.amount);
+      if (lenderBankAccountId && borrowerBankAccountId) {
+        const { postVoucher } = require("../services/generalLedger");
+        const pool = getPool();
+        await postVoucher(pool, {
+          voucherNo: loanNo,
+          voucherDate: req.body.loanDate,
+          sourceType: "LoanPosting",
+          sourceId: loanId,
+          companyId: lenderCompanyId,
+          createdBy,
+          legs: [
+            { lHeadId: borrowerLHeadId, debit: amt, narration: `${loanNo} — inter-company loan receivable (funds sent)` },
+            { lHeadId: lenderBankAccountId, credit: amt, narration: `${loanNo} — loan disbursed` },
+          ],
+        });
+        await postVoucher(pool, {
+          voucherNo: loanNo,
+          voucherDate: req.body.loanDate,
+          sourceType: "LoanPosting",
+          sourceId: loanId,
+          companyId: borrowerCompanyId,
+          createdBy,
+          legs: [
+            { lHeadId: borrowerBankAccountId, debit: amt, narration: `${loanNo} — loan received` },
+            { lHeadId: lenderLHeadId, credit: amt, narration: `${loanNo} — inter-company loan payable (funds received)` },
+          ],
+        });
+        await bumpCacheVersion("journal-voucher");
+      }
+    }
+
     res.status(201).json({ loanId, loanNo });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -842,9 +903,95 @@ router.get("/:id/posting", requirePageRight("loan-sanction", "view"), async (req
     `);
     const existingPost = postedRes.recordset[0];
 
+    // Inter-Company loans sanctioned via the direct form auto-post two
+    // separate company-scoped entries (see POST / above) instead of the
+    // single combined JV the manual post-to-gl endpoint still produces for
+    // Bank/Customer loans — read back whatever was actually posted, grouped
+    // by company, rather than assuming the old single-JV shape.
+    let postings = [];
+    if (existingPost) {
+      const linesRes = await pool.request().input("SrcId", sql.Int, loanId).query(`
+        SELECT gle.CompanyId, gle.VoucherNo, gle.DebitAmount, gle.CreditAmount, gle.Narration,
+               ah.LHeadId, ah.LHeadName, grp.Name AS GroupName,
+               ent.name AS CompanyName
+        FROM dbo.GeneralLedgerEntry gle
+        LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = gle.LHeadId
+        LEFT JOIN dbo.AccountGroup grp ON grp.AGId = ah.LBelongsTo
+        LEFT JOIN dbo.enterprise ent ON ent.id = gle.CompanyId
+        WHERE gle.SourceType = 'LoanPosting' AND gle.SourceId = @SrcId AND gle.IsReversed = 0
+        ORDER BY gle.CompanyId, gle.EntryId
+      `);
+      const byCompany = new Map();
+      for (const r of linesRes.recordset) {
+        const key = r.CompanyId ?? "none";
+        if (!byCompany.has(key)) {
+          byCompany.set(key, { companyId: r.CompanyId, companyName: r.CompanyName || null, voucherNo: r.VoucherNo, lines: [] });
+        }
+        byCompany.get(key).lines.push({
+          lHeadId: r.LHeadId,
+          lHeadName: r.LHeadName,
+          groupName: r.GroupName,
+          debit: Number(r.DebitAmount) || 0,
+          credit: Number(r.CreditAmount) || 0,
+          narration: r.Narration,
+        });
+      }
+      postings = Array.from(byCompany.values());
+    }
+
+    // Repayments (see POST /:id/pay) each post their own two-sided entry,
+    // one SourceId (=PaymentId) per payment — pull them all back in the
+    // same company-grouped shape as the sanction posting above, so the UI
+    // can render the loan's full posting history (sanction + every
+    // repayment) the same way Payment.tsx shows an invoice's full payment
+    // chain, not just the one-off sanction entry.
+    const paymentsRes = await pool.request().input("LoanId", sql.Int, loanId).query(`
+      SELECT PaymentId, PaymentRef, PaymentDate, PaymentType, TotalAmount
+      FROM dbo.LoanPayment WHERE LoanId = @LoanId ORDER BY PaymentDate, PaymentId
+    `);
+    const repaymentPostings = [];
+    for (const pmt of paymentsRes.recordset) {
+      const repLinesRes = await pool.request().input("SrcId", sql.Int, pmt.PaymentId).query(`
+        SELECT gle.CompanyId, gle.VoucherNo, gle.DebitAmount, gle.CreditAmount, gle.Narration,
+               ah.LHeadId, ah.LHeadName, grp.Name AS GroupName,
+               ent.name AS CompanyName
+        FROM dbo.GeneralLedgerEntry gle
+        LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = gle.LHeadId
+        LEFT JOIN dbo.AccountGroup grp ON grp.AGId = ah.LBelongsTo
+        LEFT JOIN dbo.enterprise ent ON ent.id = gle.CompanyId
+        WHERE gle.SourceType = 'LoanRepayment' AND gle.SourceId = @SrcId AND gle.IsReversed = 0
+        ORDER BY gle.CompanyId, gle.EntryId
+      `);
+      if (!repLinesRes.recordset.length) continue; // Bank/Customer loan repayments don't post two-sided
+      const byCo = new Map();
+      for (const r of repLinesRes.recordset) {
+        const key = r.CompanyId ?? "none";
+        if (!byCo.has(key)) {
+          byCo.set(key, { companyId: r.CompanyId, companyName: r.CompanyName || null, voucherNo: r.VoucherNo, lines: [] });
+        }
+        byCo.get(key).lines.push({
+          lHeadId: r.LHeadId,
+          lHeadName: r.LHeadName,
+          groupName: r.GroupName,
+          debit: Number(r.DebitAmount) || 0,
+          credit: Number(r.CreditAmount) || 0,
+          narration: r.Narration,
+        });
+      }
+      repaymentPostings.push({
+        paymentId: pmt.PaymentId,
+        paymentRef: pmt.PaymentRef,
+        paymentDate: pmt.PaymentDate,
+        paymentType: pmt.PaymentType,
+        amount: pmt.TotalAmount,
+        postings: Array.from(byCo.values()),
+      });
+    }
+
     res.json({
       loanNo: loan.LoanNo,
       amount: loan.Amount,
+      repaymentPostings,
       accounts: {
         borrower: loan.BorrowerLHeadId
           ? { id: loan.BorrowerLHeadId, name: loan.BorrowerLHeadName, group: loan.BorrowerGroupName }
@@ -856,6 +1003,7 @@ router.get("/:id/posting", requirePageRight("loan-sanction", "view"), async (req
       isPosted: !!existingPost,
       jvNo: existingPost?.VoucherNo ?? null,
       jvId: existingPost?.EntryId ?? null,
+      postings,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1085,7 +1233,11 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
 
     const loanRes = await new sql.Request(tx)
       .input("LoanId", sql.Int, loanId)
-      .query("SELECT LoanId, LoanNo, LoanType, Status, BorrowerLHeadId, LenderLHeadId FROM dbo.LoanSanction WHERE LoanId = @LoanId");
+      .query(`
+        SELECT LoanId, LoanNo, LoanType, Status, BorrowerLHeadId, LenderLHeadId,
+               LenderCompanyId, BorrowerCompanyId, LenderBankAccountId, BorrowerBankAccountId
+        FROM dbo.LoanSanction WHERE LoanId = @LoanId
+      `);
     const loan = loanRes.recordset[0];
     if (!loan) throw Object.assign(new Error("Loan not found"), { status: 404 });
     if (loan.Status === "Closed") {
@@ -1245,6 +1397,48 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
       bumpCacheVersion("loan-sanction"),
       bumpCacheVersion("on-account"),
     ]);
+
+    // Inter-Company: repayment reverses the sanction-time cash movement —
+    // same two company-scoped legs, flipped. Borrower's books debit the
+    // Lender's counterparty head (paying down what's owed) and credit
+    // their own bank; Lender's books debit their own bank (cash back in)
+    // and credit the Borrower's counterparty head (receivable shrinks).
+    // Only the principal+interest portion moves the loan ledger — late fee
+    // is a separate charge, same as the OnAccountLedger entries above.
+    if (
+      loan.LoanType === "Inter-Company" &&
+      loan.LenderLHeadId && loan.BorrowerLHeadId &&
+      loan.LenderCompanyId && loan.BorrowerCompanyId &&
+      loan.LenderBankAccountId && loan.BorrowerBankAccountId
+    ) {
+      const { postVoucher } = require("../services/generalLedger");
+      await postVoucher(pool, {
+        voucherNo: paymentRef,
+        voucherDate: paymentDate,
+        sourceType: "LoanRepayment",
+        sourceId: paymentId,
+        companyId: loan.BorrowerCompanyId,
+        createdBy: actor,
+        legs: [
+          { lHeadId: loan.LenderLHeadId, debit: principalInterestAmount, narration: `${paymentRef} — loan repayment (${loan.LoanNo})` },
+          { lHeadId: loan.BorrowerBankAccountId, credit: principalInterestAmount, narration: `${paymentRef} — loan repayment sent` },
+        ],
+      });
+      await postVoucher(pool, {
+        voucherNo: paymentRef,
+        voucherDate: paymentDate,
+        sourceType: "LoanRepayment",
+        sourceId: paymentId,
+        companyId: loan.LenderCompanyId,
+        createdBy: actor,
+        legs: [
+          { lHeadId: loan.LenderBankAccountId, debit: principalInterestAmount, narration: `${paymentRef} — loan repayment received` },
+          { lHeadId: loan.BorrowerLHeadId, credit: principalInterestAmount, narration: `${paymentRef} — loan repayment (${loan.LoanNo})` },
+        ],
+      });
+      await bumpCacheVersion("journal-voucher");
+    }
+
     res.status(201).json({
       paymentId,
       paymentRef,
