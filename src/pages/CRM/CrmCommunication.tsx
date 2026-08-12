@@ -2,7 +2,7 @@ import React, { useMemo, useState, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Plus, Phone, Mail, MessageSquare, MapPin, FileText, X, Search,
@@ -76,12 +76,13 @@ function LogForm({
   form: typeof EMPTY_FORM; setForm: React.Dispatch<React.SetStateAction<typeof EMPTY_FORM>>;
   apps: any[]; bookings: any[]; lockLinkage?: boolean; locked?: boolean;
 }) {
-  const inputCls = `w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60 ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
+  const inputCls = `w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40 disabled:opacity-60 ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
+  const labelCls = "text-xs text-muted-foreground block mb-1.5";
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs text-muted-foreground block mb-1">Application</label>
+          <label className={labelCls}>Application</label>
           <select value={form.ApplicationId} disabled={lockLinkage || locked}
             onChange={(e) => setForm((f) => ({ ...f, ApplicationId: e.target.value }))}
             className={inputCls}>
@@ -90,7 +91,7 @@ function LogForm({
           </select>
         </div>
         <div>
-          <label className="text-xs text-muted-foreground block mb-1">Booking</label>
+          <label className={labelCls}>Booking</label>
           <select value={form.BookingId} disabled={lockLinkage || locked}
             onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
             className={inputCls}>
@@ -99,34 +100,34 @@ function LogForm({
           </select>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div>
-          <label className="text-xs text-muted-foreground block mb-1">Channel</label>
+          <label className={labelCls}>Channel</label>
           <select value={form.Channel} disabled={locked} onChange={(e) => setForm((f) => ({ ...f, Channel: e.target.value }))}
             className={inputCls}>
             {CHANNELS.map((c) => <option key={c}>{c}</option>)}
           </select>
         </div>
         <div>
-          <label className="text-xs text-muted-foreground block mb-1">Direction</label>
+          <label className={labelCls}>Direction</label>
           <select value={form.Direction} disabled={locked} onChange={(e) => setForm((f) => ({ ...f, Direction: e.target.value }))}
             className={inputCls}>
             {DIRECTIONS.map((d) => <option key={d}>{d}</option>)}
           </select>
         </div>
+        <div>
+          <label className={labelCls}>Contacted At</label>
+          <input type="datetime-local" value={form.ContactedAt} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, ContactedAt: e.target.value }))}
+            className={inputCls} />
+        </div>
       </div>
       <div>
-        <label className="text-xs text-muted-foreground block mb-1">Contacted At</label>
-        <input type="datetime-local" value={form.ContactedAt} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, ContactedAt: e.target.value }))}
-          className={inputCls} />
-      </div>
-      <div>
-        <label className="text-xs text-muted-foreground block mb-1">Subject</label>
+        <label className={labelCls}>Subject</label>
         <input type="text" value={form.Subject} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Subject: e.target.value }))}
           className={inputCls} />
       </div>
       <div>
-        <label className="text-xs text-muted-foreground block mb-1">Summary</label>
+        <label className={labelCls}>Summary</label>
         <textarea value={form.Summary} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Summary: e.target.value }))}
           rows={3} className={`${inputCls} resize-none`} />
       </div>
@@ -229,7 +230,7 @@ function EditLogDialog({
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">
-              <MessageSquare size={16} className="text-primary" /> Communication Detail
+              <MessageSquare size={16} className="text-amber-600 dark:text-amber-400" /> Communication Detail
             </span>
             {locked && (
               <button onClick={() => setLocked(false)}
@@ -250,7 +251,7 @@ function EditLogDialog({
             <div className="rounded-xl border border-border bg-muted/20 p-3.5 space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-full bg-primary/15 text-primary font-bold text-sm flex items-center justify-center shrink-0">
+                  <div className="w-11 h-11 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold text-sm flex items-center justify-center shrink-0">
                     {initials(log.ApplicantName)}
                   </div>
                   <div>
@@ -321,11 +322,11 @@ function EditLogDialog({
                 <History size={13} /> Interaction Timeline {customerHistory.length > 0 && `(${customerHistory.length} other${customerHistory.length === 1 ? "" : "s"})`}
               </h3>
               <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                <div className="flex items-start gap-2 text-xs bg-primary/5 border border-primary/20 rounded-lg p-2">
+                <div className="flex items-start gap-2 text-xs bg-amber-500/5 border border-amber-500/20 rounded-lg p-2">
                   {(() => { const CIcon = channelIcon[log.Channel] || MessageSquare; return <span className={`p-1 rounded-full shrink-0 ${channelStyle[log.Channel] || "bg-muted"}`}><CIcon size={11} /></span>; })()}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-primary">Currently editing</span>
+                      <span className="font-semibold text-amber-600 dark:text-amber-400">Currently editing</span>
                       <span className="text-muted-foreground shrink-0">{fmtDateTime(log.ContactedAt)}</span>
                     </div>
                     <div className="truncate">{log.Subject || log.Channel}</div>
@@ -380,7 +381,7 @@ function EditLogDialog({
               <>
                 <button onClick={() => { setLocked(true); onClose(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                 <button onClick={handleSave} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                  className="px-4 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
                   {saving ? "Saving..." : "Save Changes"}
                 </button>
               </>
@@ -412,19 +413,19 @@ function MessageBubble({ log, onClick }: { log: any; onClick: () => void }) {
   return (
     <div className={`flex ${isOutbound ? "justify-end" : "justify-start"} px-1`}>
       <button onClick={onClick}
-        className={`group max-w-[78%] text-left rounded-2xl px-3.5 py-2 shadow-sm transition-colors ${
+        className={`group max-w-[70%] text-left rounded-xl px-2.5 py-1.5 shadow-sm transition-colors ${
           isOutbound
-            ? "bg-primary text-primary-foreground rounded-br-sm hover:bg-primary/90"
+            ? "text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-br-sm hover:shadow-lg hover:shadow-amber-500/20"
             : "bg-muted text-foreground rounded-bl-sm hover:bg-muted/70"
         }`}>
-        <div className={`flex items-center gap-1.5 text-[10px] mb-0.5 ${isOutbound ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
-          <Icon size={10} /> {log.Channel}
+        <div className={`flex items-center gap-1 text-[9px] mb-0.5 ${isOutbound ? "text-white/70" : "text-muted-foreground"}`}>
+          <Icon size={9} /> {log.Channel}
         </div>
-        {log.Subject && <div className="text-sm font-medium leading-snug">{log.Subject}</div>}
-        {log.Summary && <div className="text-sm leading-snug whitespace-pre-wrap">{log.Summary}</div>}
-        <div className={`flex items-center justify-end gap-1 text-[10px] mt-1 ${isOutbound ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+        {log.Subject && <div className="text-xs font-medium leading-snug">{log.Subject}</div>}
+        {log.Summary && <div className="text-xs leading-snug whitespace-pre-wrap">{log.Summary}</div>}
+        <div className={`flex items-center justify-end gap-1 text-[9px] mt-0.5 ${isOutbound ? "text-white/70" : "text-muted-foreground"}`}>
           {fmtTime(log.ContactedAt)}
-          <Pencil size={9} className="opacity-0 group-hover:opacity-70 transition-opacity" />
+          <Pencil size={8} className="opacity-0 group-hover:opacity-70 transition-opacity" />
         </div>
       </button>
     </div>
@@ -626,19 +627,19 @@ const CrmCommunication: React.FC = () => {
   }, [activeConvo]);
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Communication Log"
       subtitle={filterBooking ? `Showing only ${filterBooking.BookingNo} — ${filterBooking.ApplicantName}` : "Every touchpoint with a buyer, in one place"}
       action={
         <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
           <Plus size={14} /> New Conversation
         </button>
       }
     >
       {bkgFilter && (
         <div className="flex items-center gap-2">
-          <span className="text-xs px-2.5 py-1 rounded-full border border-primary/30 bg-primary/10 text-primary flex items-center gap-1.5">
+          <span className="text-xs px-2.5 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
             Filtered to {filterBooking?.BookingNo || `booking #${bkgFilter}`}
             <button onClick={() => { sp.delete("bookingId"); setSp(sp); }} className="hover:text-red-600">
               <X size={11} />
@@ -665,16 +666,16 @@ const CrmCommunication: React.FC = () => {
       </div>
 
       {/* ── Messaging-app two-pane layout ── */}
-      <div className="rounded-xl border border-border overflow-hidden bg-card" style={{ height: "min(680px, 75vh)" }}>
+      <div className="rounded-xl border border-amber-500/15 overflow-hidden bg-card" style={{ height: "min(680px, 75vh)" }}>
         <div className="flex h-full">
           {/* ══ LEFT: conversation list ══ */}
-          <div className="w-[300px] shrink-0 border-r border-border flex flex-col">
-            <div className="p-2.5 border-b border-border">
+          <div className="w-[300px] shrink-0 border-r border-amber-500/15 flex flex-col">
+            <div className="p-2.5 border-b border-amber-500/15">
               <div className="relative">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <input value={threadSearch} onChange={(e) => setThreadSearch(e.target.value)}
                   placeholder="Search conversations..."
-                  className="w-full pl-7 pr-2 py-1.5 text-xs border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                  className="w-full pl-7 pr-2 py-1.5 text-xs border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
               </div>
             </div>
             <div className="flex-1 overflow-y-auto">
@@ -688,8 +689,8 @@ const CrmCommunication: React.FC = () => {
                 const isActive = c.key === activeKey;
                 return (
                   <button key={c.key} onClick={() => setActiveKey(c.key)}
-                    className={`w-full text-left px-3 py-2.5 flex items-start gap-2.5 border-b border-border/60 transition-colors ${isActive ? "bg-primary/10" : "hover:bg-muted/30"}`}>
-                    <div className="w-9 h-9 rounded-full bg-primary/15 text-primary font-bold text-xs flex items-center justify-center shrink-0">
+                    className={`w-full text-left px-3 py-2.5 flex items-start gap-2.5 border-b border-border/60 transition-colors ${isActive ? "bg-amber-500/10" : "hover:bg-muted/30"}`}>
+                    <div className="w-9 h-9 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold text-xs flex items-center justify-center shrink-0">
                       {initials(c.ApplicantName)}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -720,9 +721,9 @@ const CrmCommunication: React.FC = () => {
             ) : (
               <>
                 {/* thread header */}
-                <div className="px-4 py-2.5 border-b border-border flex items-center justify-between gap-3 shrink-0">
+                <div className="px-4 py-2.5 border-b border-amber-500/15 flex items-center justify-between gap-3 shrink-0">
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-9 h-9 rounded-full bg-primary/15 text-primary font-bold text-xs flex items-center justify-center shrink-0">
+                    <div className="w-9 h-9 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold text-xs flex items-center justify-center shrink-0">
                       {initials(activeConvo.ApplicantName)}
                     </div>
                     <div className="min-w-0">
@@ -758,23 +759,32 @@ const CrmCommunication: React.FC = () => {
                   ))}
                 </div>
 
-                {/* quick-send composer */}
-                <div className="border-t border-border p-2.5 shrink-0 space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <select value={composer.Channel} onChange={(e) => setComposer((c) => ({ ...c, Channel: e.target.value }))}
-                      className="text-xs border border-border rounded-lg px-2 py-1.5 bg-background">
-                      {CHANNELS.map((ch) => <option key={ch}>{ch}</option>)}
-                    </select>
-                    <div className="flex rounded-lg border border-border overflow-hidden text-xs">
+                {/* quick-send composer — Channel + Direction grouped into one
+                    labeled control (the old Direction toggle was two bare
+                    arrow icons with no text, easy to misread/misclick) */}
+                <div className="border-t border-amber-500/15 p-2.5 shrink-0 space-y-2 bg-muted/5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 rounded-lg border border-border bg-background pl-2 pr-1 py-1">
+                      {(() => { const CIcon = channelIcon[composer.Channel] || MessageSquare; return <CIcon size={12} className="text-muted-foreground shrink-0" />; })()}
+                      <select value={composer.Channel} onChange={(e) => setComposer((c) => ({ ...c, Channel: e.target.value }))}
+                        className="text-xs bg-transparent focus:outline-none pr-1">
+                        {CHANNELS.map((ch) => <option key={ch}>{ch}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-1 rounded-lg bg-muted/30 p-0.5 text-xs">
                       {DIRECTIONS.map((d) => (
                         <button key={d} onClick={() => setComposer((c) => ({ ...c, Direction: d }))}
-                          className={`px-2 py-1.5 font-medium ${composer.Direction === d ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}>
+                          title={d}
+                          className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium transition-all ${
+                            composer.Direction === d ? "text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                          }`}>
                           {d === "Inbound" ? <ArrowDownLeft size={11} /> : <ArrowUpRight size={11} />}
+                          {d === "Inbound" ? "In" : "Out"}
                         </button>
                       ))}
                     </div>
                     <button onClick={() => setDialogOpen(true)}
-                      className="ml-auto text-[11px] text-muted-foreground hover:text-primary flex items-center gap-1">
+                      className="ml-auto text-[11px] text-muted-foreground hover:text-amber-600 flex items-center gap-1 shrink-0">
                       <FileText size={11} /> Full form
                     </button>
                   </div>
@@ -782,9 +792,9 @@ const CrmCommunication: React.FC = () => {
                     <textarea value={composer.Text} onChange={(e) => setComposer((c) => ({ ...c, Text: e.target.value }))}
                       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleQuickSend(); } }}
                       placeholder={`Log a ${composer.Channel.toLowerCase()} touchpoint...`}
-                      rows={1} className="flex-1 text-sm border border-border rounded-lg px-3 py-2 bg-background resize-none max-h-24" />
+                      rows={1} className="flex-1 text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40 resize-none max-h-24" />
                     <button onClick={handleQuickSend} disabled={sending || !composer.Text.trim()}
-                      className="w-9 h-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 disabled:opacity-40 shrink-0">
+                      className="w-9 h-9 rounded-lg text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 flex items-center justify-center hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 shrink-0 transition-all">
                       <Send size={15} />
                     </button>
                   </div>
@@ -796,8 +806,12 @@ const CrmCommunication: React.FC = () => {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM, BookingId: bkgFilter }); } }}>
-        <DialogContent className="max-w-md max-h-[88vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="font-heading">Log Communication</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-lg max-h-[88vh] overflow-y-auto p-4 sm:p-5 gap-3">
+          <DialogHeader className="space-y-0.5">
+            <DialogTitle className="flex items-center gap-2 text-base font-heading font-bold">
+              <MessageSquare size={16} className="text-amber-500" /> Log Communication
+            </DialogTitle>
+          </DialogHeader>
           <LogForm form={form} setForm={setForm} apps={apps as any[]} bookings={bookings as any[]} />
           {selectedContact && (
             <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-2">
@@ -811,9 +825,12 @@ const CrmCommunication: React.FC = () => {
             </div>
           )}
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM, BookingId: bkgFilter }); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM, BookingId: bkgFilter }); }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+              Cancel
+            </button>
             <button onClick={handleCreate} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
               {saving ? "Logging..." : "Log"}
             </button>
           </div>
@@ -830,7 +847,7 @@ const CrmCommunication: React.FC = () => {
           onSaved={() => qc.invalidateQueries({ queryKey: ["crm-communication"] })}
         />
       )}
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

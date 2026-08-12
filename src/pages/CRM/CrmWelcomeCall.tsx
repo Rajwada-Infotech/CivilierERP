@@ -2,8 +2,9 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useTheme } from "@/contexts/ThemeContext";
 import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car, AlertTriangle, Download, ShieldCheck, ShieldAlert, RotateCcw, ClipboardList, Send, Unlock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
@@ -184,7 +185,7 @@ const DocPreviewDialog: React.FC<{ doc: any; onClose: () => void }> = ({ doc, on
         <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
           <span>{fmtBytes(doc.FileSize)}</span>
           {blobUrl && (
-            <a href={blobUrl} download={doc.FileName} className="text-primary hover:underline">Download</a>
+            <a href={blobUrl} download={doc.FileName} className="text-amber-600 dark:text-amber-400 hover:underline">Download</a>
           )}
         </div>
       </DialogContent>
@@ -218,10 +219,10 @@ const InvoicePdfDialog: React.FC<{ bookingId: number; invoice: any; onClose: () 
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
-            <DialogTitle className="font-heading flex items-center gap-1.5"><FileCheck size={16} className="text-primary" /> {invoice.InvoiceNo}</DialogTitle>
+            <DialogTitle className="font-heading flex items-center gap-1.5"><FileCheck size={16} className="text-amber-600 dark:text-amber-400" /> {invoice.InvoiceNo}</DialogTitle>
             {blobUrl && (
               <a href={blobUrl} download={`${invoice.InvoiceNo}.pdf`}
-                className="shrink-0 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 flex items-center gap-1.5">
+                className="shrink-0 px-3 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 flex items-center gap-1.5">
                 <Download size={14} /> Download PDF
               </a>
             )}
@@ -318,7 +319,7 @@ const ChecklistItemRow: React.FC<{
       <div className="flex items-start gap-2">
         <input type="checkbox" checked={checked} disabled={locked || isOpenRecheck}
           onChange={(e) => setChecked(e.target.checked)}
-          className="mt-0.5 shrink-0 w-4 h-4 accent-primary disabled:opacity-50" />
+          className="mt-0.5 shrink-0 w-4 h-4 accent-amber-500 disabled:opacity-50" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <span className={`text-sm ${item.IsChecked ? "text-foreground" : "text-foreground/90"}`}>{item.Label}</span>
@@ -352,7 +353,7 @@ const ChecklistItemRow: React.FC<{
               {!locked && (
                 <div className="flex items-center gap-3 mt-1.5">
                   <button type="button" onClick={handleSave} disabled={saving || !dirty}
-                    className="text-[11px] font-medium px-2 py-1 rounded bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90">
+                    className="text-[11px] font-medium px-2 py-1 rounded text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 disabled:opacity-40 hover:shadow-lg hover:shadow-amber-500/20">
                     {saving ? "Saving..." : "Save"}
                   </button>
                   <button type="button" onClick={() => setShowRecheckBox((v) => !v)}
@@ -427,7 +428,7 @@ const VerificationChecklist: React.FC<{ bookingId: number }> = ({ bookingId }) =
   return (
     <div className="rounded-xl border border-border p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardList size={14} className="text-primary" /> Verification Checklist</h3>
+        <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardList size={14} className="text-amber-600 dark:text-amber-400" /> Verification Checklist</h3>
         <div className="flex items-center gap-2 text-xs">
           <span className="text-muted-foreground">{vc.checkedCount}/{vc.totalCount} verified</span>
           {vc.openRecheckCount > 0 && (
@@ -785,7 +786,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
-            <PhoneCall size={18} className="text-primary" />
+            <PhoneCall size={18} className="text-amber-600 dark:text-amber-400" />
             Welcome Call — {booking.ApplicantName} <span className="text-muted-foreground font-normal text-sm">({booking.BookingNo})</span>
           </DialogTitle>
         </DialogHeader>
@@ -921,7 +922,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                   <div className="flex flex-wrap gap-1">
                     {callContext.invoices.map((inv: any) => (
                       <button key={inv.InvoiceNo} type="button" onClick={() => handleViewInvoice(inv.InvoiceNo)}
-                        className="inline-block px-1.5 py-0.5 rounded border border-border font-mono text-[11px] hover:bg-muted hover:border-primary/40">
+                        className="inline-block px-1.5 py-0.5 rounded border border-border font-mono text-[11px] hover:bg-muted hover:border-amber-500/40">
                         {inv.InvoiceNo} ({fmt(inv.Amount)})
                       </button>
                     ))}
@@ -981,12 +982,12 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
             {/* ── Log Call ── */}
             <div className="rounded-xl border border-border p-4 space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold flex items-center gap-1.5"><Phone size={14} className="text-primary" /> Log This Call</h3>
+                <h3 className="text-sm font-semibold flex items-center gap-1.5"><Phone size={14} className="text-amber-600 dark:text-amber-400" /> Log This Call</h3>
                 {/* Live duration timer — a genuinely dynamic touch: start it the
                     moment the call connects, it counts up on-screen, and Duration
                     below auto-fills from it when stopped. */}
                 <div className="flex items-center gap-2">
-                  {timerRunning && <span className="font-mono text-sm font-semibold text-primary tabular-nums">{fmtTimer(timerSeconds)}</span>}
+                  {timerRunning && <span className="font-mono text-sm font-semibold text-amber-600 dark:text-amber-400 tabular-nums">{fmtTimer(timerSeconds)}</span>}
                   <button type="button" onClick={() => setTimerRunning((r) => !r)}
                     className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium ${
                       timerRunning ? "border-red-200 bg-red-50 text-red-600 hover:bg-red-100" : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
@@ -1002,7 +1003,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                   {calledByLocked ? (
                     <div className="flex items-center justify-between gap-2 bg-muted/30 rounded px-2 py-1.5 border border-border">
                       <span className="text-sm text-foreground truncate">{currentUser?.name || "Self"} <span className="text-xs text-muted-foreground">(you)</span></span>
-                      <button type="button" onClick={() => setCalledByLocked(false)} className="text-xs text-primary hover:underline shrink-0">Change</button>
+                      <button type="button" onClick={() => setCalledByLocked(false)} className="text-xs text-amber-600 dark:text-amber-400 hover:underline shrink-0">Change</button>
                     </div>
                   ) : (
                     <select value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
@@ -1083,7 +1084,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                     Payment plan{callContext?.booking?.PaymentPlanName ? ` (${callContext.booking.PaymentPlanName})` : ""}
                   </span>
                   {ppLocked && (
-                    <button type="button" onClick={() => setPpLocked(false)} className="text-xs text-primary hover:underline">Change</button>
+                    <button type="button" onClick={() => setPpLocked(false)} className="text-xs text-amber-600 dark:text-amber-400 hover:underline">Change</button>
                   )}
                 </div>
 
@@ -1135,7 +1136,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs text-muted-foreground flex items-center gap-1"><ListPlus size={11} /> Additional Fields</label>
                   <button onClick={() => setCustomFields((f) => [...f, { key: "", value: "" }])}
-                    className="text-xs text-primary hover:underline flex items-center gap-0.5">
+                    className="text-xs text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-0.5">
                     <Plus size={11} /> Add Field
                   </button>
                 </div>
@@ -1157,7 +1158,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
 
               <button onClick={handleLogCall} disabled={saving || !form.Outcome}
                 title={!form.Outcome ? "Select an outcome above first" : undefined}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                className="px-4 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
                 {saving ? "Logging..." : "Log Call"}
               </button>
             </div>
@@ -1240,7 +1241,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                 </div>
               ))}
               {!addingCo ? (
-                <button onClick={() => setAddingCo(true)} className="text-xs text-primary hover:underline flex items-center gap-0.5">
+                <button onClick={() => setAddingCo(true)} className="text-xs text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-0.5">
                   <Plus size={11} /> Add Co-Applicant
                 </button>
               ) : (
@@ -1260,7 +1261,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                       className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={handleAddCoApplicant} className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">Save</button>
+                    <button onClick={handleAddCoApplicant} className="text-xs px-3 py-1.5 text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20">Save</button>
                     <button onClick={() => setAddingCo(false)} className="text-xs px-3 py-1.5 border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                   </div>
                 </div>
@@ -1345,7 +1346,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                   {!bankLocked && (
                     <div className="flex gap-2">
                       <button onClick={handleSaveBank} disabled={bankSaving}
-                        className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                        className="px-4 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
                         {bankSaving ? "Saving..." : "Save Bank & Nominee Details"}
                       </button>
                       <button onClick={() => setBankLocked(true)}
@@ -1451,7 +1452,7 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">
-              <Phone size={16} className="text-primary" /> Edit Welcome Call
+              <Phone size={16} className="text-amber-600 dark:text-amber-400" /> Edit Welcome Call
             </span>
             {locked && (
               <button onClick={() => setLocked(false)}
@@ -1578,7 +1579,7 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
               </div>
             ))}
             <button onClick={() => setCustomFields((cf) => [...cf, { key: "", value: "" }])} disabled={locked}
-              className="text-xs text-primary hover:underline font-medium disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed">+ Add field</button>
+              className="text-xs text-amber-600 dark:text-amber-400 hover:underline font-medium disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed">+ Add field</button>
           </div>
         </div>
 
@@ -1594,7 +1595,7 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
               <>
                 <button onClick={() => { setLocked(true); onClose(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                 <button onClick={handleSave} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                  className="px-4 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
                   {saving ? "Saving..." : "Save Changes"}
                 </button>
               </>
@@ -1669,7 +1670,7 @@ const CrmWelcomeCall: React.FC = () => {
 
   const recheckColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "BookingNo", header: "Booking No", size: 110,
-      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">{i.getValue() as string}</span> },
+      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">{i.getValue() as string}</span> },
     { accessorKey: "ApplicantName", header: "Customer", size: 140,
       cell: (i) => (
         <div onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer">
@@ -1694,7 +1695,7 @@ const CrmWelcomeCall: React.FC = () => {
 
   const queueColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "BookingNo", header: "Booking No", size: 110,
-      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">{i.getValue() as string}</span> },
+      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">{i.getValue() as string}</span> },
     { accessorKey: "ApplicantName", header: "Customer", size: 140,
       cell: (i) => (
         <div onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer">
@@ -1717,14 +1718,27 @@ const CrmWelcomeCall: React.FC = () => {
     { id: "actions", header: "Action", size: 100, enableSorting: false,
       cell: (i) => (
         <button onClick={() => setActiveBooking(i.row.original)}
-          className="flex items-center gap-1 text-xs px-2.5 py-1 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
           <Phone size={12} /> Call Now
         </button>
       ) },
   ];
 
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
+  const glassStyle: React.CSSProperties = {
+    background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
+    border: isDark ? "1px solid rgba(245,158,11,0.15)" : "1px solid rgba(245,158,11,0.18)",
+    backdropFilter: "blur(16px) saturate(150%)",
+    WebkitBackdropFilter: "blur(16px) saturate(150%)",
+    boxShadow: isDark
+      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+      : "0 4px 24px rgba(245,158,11,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+  };
+  const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
+
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Welcome Calls"
       subtitle="Work the call queue, verify documents, co-applicant, and bank/nominee details"
     >
@@ -1735,49 +1749,60 @@ const CrmWelcomeCall: React.FC = () => {
         </div>
       )}
 
-      <div className="flex gap-3 items-center flex-wrap">
-        <div className="relative flex-1 min-w-48">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by customer or booking no..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+      {/* Search + view toggle + queue/recheck table (or history list) live in
+          one continuous glass card, same convention as the other wrapped
+          CRM pages, instead of a loose toolbar row floating above a
+          separately-bordered table. */}
+      <div className="rounded-xl overflow-hidden" style={glassStyle}>
+        <div className="flex gap-3 items-center flex-wrap px-3.5 py-3 border-b" style={{ borderColor }}>
+          <div className="relative flex-1 min-w-48">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by customer or booking no..."
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+          </div>
+          <div className="flex items-center gap-1 rounded-lg bg-muted/20 p-1 shrink-0">
+            <button onClick={() => setView("queue")}
+              className={`px-3 py-1.5 text-xs font-heading font-medium rounded-lg transition-all ${
+                view === "queue" ? "text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}>
+              Queue ({queue.length})
+            </button>
+            <button onClick={() => setView("recheck")}
+              className={`px-3 py-1.5 text-xs font-heading font-medium rounded-lg flex items-center gap-1 transition-all ${
+                view === "recheck" ? "text-white shadow-sm bg-red-500" : "text-red-600 hover:bg-muted"
+              }`}>
+              <ShieldAlert size={12} /> Recheck ({recheckQueue.length})
+            </button>
+            <button onClick={() => setView("history")}
+              className={`px-3 py-1.5 text-xs font-heading font-medium rounded-lg transition-all ${
+                view === "history" ? "text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}>
+              Call History
+            </button>
+          </div>
         </div>
-        <div className="flex rounded-lg border border-border overflow-hidden">
-          <button onClick={() => setView("queue")}
-            className={`px-3 py-2 text-xs font-medium ${view === "queue" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>
-            Queue ({queue.length})
-          </button>
-          <button onClick={() => setView("recheck")}
-            className={`px-3 py-2 text-xs font-medium flex items-center gap-1 ${view === "recheck" ? "bg-red-500 text-white" : "bg-background hover:bg-muted text-red-600"}`}>
-            <ShieldAlert size={12} /> Recheck ({recheckQueue.length})
-          </button>
-          <button onClick={() => setView("history")}
-            className={`px-3 py-2 text-xs font-medium ${view === "history" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>
-            Call History
-          </button>
-        </div>
-      </div>
 
-      {view === "queue" ? (
-        <DataTable
-          data={filteredQueue}
-          columns={queueColumns}
-          searchable={false}
-          loading={queueLoading}
-          emptyMessage="Queue is clear — no calls pending"
-          className="rounded-xl border border-border overflow-hidden bg-card"
-        />
-      ) : view === "recheck" ? (
-        <DataTable
-          data={filteredRecheckQueue}
-          columns={recheckColumns}
-          searchable={false}
-          loading={recheckLoading}
-          emptyMessage="No open recheck flags — everything is clean"
-          className="rounded-xl border border-border overflow-hidden bg-card"
-        />
-      ) : (
-        <div className="space-y-2">
+        {view === "queue" ? (
+          <DataTable
+            data={filteredQueue}
+            columns={queueColumns}
+            searchable={false}
+            loading={queueLoading}
+            emptyMessage="Queue is clear — no calls pending"
+            className="border-0"
+          />
+        ) : view === "recheck" ? (
+          <DataTable
+            data={filteredRecheckQueue}
+            columns={recheckColumns}
+            searchable={false}
+            loading={recheckLoading}
+            emptyMessage="No open recheck flags — everything is clean"
+            className="border-0"
+          />
+        ) : (
+          <div className="space-y-2 p-3.5">
           {historyLoading ? (
             <div className="p-8 text-center text-muted-foreground text-sm">Loading...</div>
           ) : filteredHistory.length === 0 ? (
@@ -1789,7 +1814,7 @@ const CrmWelcomeCall: React.FC = () => {
               <button
                 key={c.Id}
                 onClick={() => setEditingCall(c)}
-                className="w-full text-left rounded-xl border border-border p-4 hover:bg-muted/10 hover:border-primary/40 transition-colors cursor-pointer"
+                className="w-full text-left rounded-xl border border-border p-4 hover:bg-muted/10 hover:border-amber-500/40 transition-colors cursor-pointer"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -1824,8 +1849,9 @@ const CrmWelcomeCall: React.FC = () => {
               </button>
             );
           })}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       {/* Same pattern as CrmBooking.tsx's own ?applicationId= deep link:
           closing the dialog clears the URL back to the plain page instead
@@ -1841,7 +1867,7 @@ const CrmWelcomeCall: React.FC = () => {
       {editingCall && (
         <EditCallDialog call={editingCall} onClose={() => setEditingCall(null)} onSaved={() => refetchHistory()} />
       )}
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 
