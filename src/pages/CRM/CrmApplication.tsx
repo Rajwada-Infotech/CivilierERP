@@ -12,6 +12,7 @@ import {
   Mail, MapPin, IndianRupee, Users2, Briefcase, History, X, PlayCircle, Ban, Lock, Wallet,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useGstRates, computeUnitParkingGst, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
@@ -155,8 +156,8 @@ function parseMilestones(json: string | null | undefined): MilestoneRow[] {
   } catch { return []; }
 }
 
-const inputCls = "w-full text-sm border border-border rounded px-2 py-1.5 bg-background";
-const labelCls = "text-xs text-muted-foreground block mb-1";
+const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40";
+const labelCls = "text-xs text-muted-foreground block mb-1.5";
 
 // Live "cost + GST" preview shown at every point Unit/Parking/Extra Work
 // values are picked — Application's Project/Unit and Parking steps, and
@@ -1051,20 +1052,20 @@ const CrmApplication: React.FC = () => {
   const inProcessColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "App No", size: 110,
       cell: (i) => (
-        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">
+        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
           {i.getValue() as string}
         </span>
       ) },
-    { accessorKey: "ApplicantName", header: "Applicant", size: 150,
+    { accessorKey: "ApplicantName", header: "Applicant", size: 160,
       cell: (i) => (
         <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
           {i.row.original.LeadUid && <div className="text-xs text-muted-foreground">Lead: {i.row.original.LeadUid}</div>}
         </div>
       ) },
-    { accessorKey: "Mobile", header: "Mobile", size: 100,
+    { accessorKey: "Mobile", header: "Mobile", size: 110,
       cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-muted-foreground">{i.getValue() as string}</span> },
-    { id: "interestedProject", header: "Interested Project", size: 140, enableSorting: false,
+    { id: "interestedProject", header: "Interested Project", size: 160, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
         const typeBit = [r.BhkPreference, r.PropertyType].filter(Boolean).join(" · ") || r.UnitTypeFromMaster || "";
@@ -1095,7 +1096,7 @@ const CrmApplication: React.FC = () => {
           {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
         </span>
       ) },
-    { id: "actions", header: "", size: 230, enableSorting: false,
+    { id: "actions", header: "", size: 180, enableSorting: false,
       cell: (i) => {
         const a = i.row.original;
         const canResume = activeStage === "InProcess" && isResumeEditable(a);
@@ -1258,11 +1259,15 @@ const CrmApplication: React.FC = () => {
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
           </div>
           {activeStage !== "Converted" && (
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40">
-              <option value="All">All Statuses</option>
-              {STATUSES.map((s) => <option key={s}>{s}</option>)}
-            </select>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-amber-500/40">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All Statuses</SelectItem>
+                {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
           )}
         </div>
 
@@ -1283,9 +1288,9 @@ const CrmApplication: React.FC = () => {
           applying for (unit/parking/KYC/docs). No money changes hands or
           gets recorded here — that's entirely the Booking page's job. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetWizard(); } }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-heading">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6 gap-4">
+          <DialogHeader className="space-y-0.5">
+            <DialogTitle className="font-heading text-base font-bold">
               New CRM Application {applicationNo ? `— ${applicationNo}` : ""}
             </DialogTitle>
           </DialogHeader>
@@ -1296,7 +1301,7 @@ const CrmApplication: React.FC = () => {
               and Bank/KYC again. A step beyond what's been reached yet isn't
               clickable — steps 2-6 all need applicationId (created in step 1)
               and Bank/KYC intentionally still gates via its own Next/Save. */}
-          <div className="flex items-center gap-1.5 text-xs flex-wrap">
+          <div className="flex items-center gap-2 text-xs flex-wrap">
             {["Project/Unit", "Parking", "Extra Work", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => {
               const stepNum = i + 1;
               const reachable = stepNum === 1 || (!!applicationId && stepNum <= maxStepReached);
@@ -1307,8 +1312,10 @@ const CrmApplication: React.FC = () => {
                     type="button"
                     onClick={() => reachable && setStep(stepNum)}
                     disabled={!reachable}
-                    className={`flex items-center gap-1.5 px-2 py-1 rounded-full font-medium transition-colors ${
-                      step === stepNum ? "bg-primary text-primary-foreground" : step > stepNum ? "text-green-600" : "text-muted-foreground"
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full font-heading font-medium transition-colors ${
+                      step === stepNum
+                        ? "text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600"
+                        : step > stepNum ? "text-green-600" : "text-muted-foreground"
                     } ${reachable ? "cursor-pointer hover:opacity-80" : "cursor-not-allowed opacity-60"}`}>
                     {step > stepNum ? <CheckCircle2 size={12} /> : <span className="w-4 text-center">{stepNum}</span>}
                     {label}
@@ -1329,7 +1336,7 @@ const CrmApplication: React.FC = () => {
                 <div className="flex items-center justify-between mb-1">
                   <label className={labelCls}>Customer *</label>
                   <a href="/crm/customers" target="_blank" rel="noreferrer"
-                    className="text-xs text-primary hover:underline flex items-center gap-1">
+                    className="text-xs text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1">
                     <ExternalLink size={11} /> New Customer
                   </a>
                 </div>
@@ -1342,292 +1349,308 @@ const CrmApplication: React.FC = () => {
                 </select>
                 {selectedCustomer && (
                   <div className="mt-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs space-y-0.5">
-                    <div className="flex items-center gap-1.5 font-medium text-foreground"><IdCard size={12} className="text-primary" /> {selectedCustomer.CustomerName}</div>
+                    <div className="flex items-center gap-1.5 font-medium text-foreground"><IdCard size={12} className="text-amber-500" /> {selectedCustomer.CustomerName}</div>
                     <div className="text-muted-foreground">{selectedCustomer.Mobile}{selectedCustomer.Email ? ` · ${selectedCustomer.Email}` : ""}</div>
                     <div className="text-muted-foreground">PAN: {selectedCustomer.PanNo || "—"} · {selectedCustomer.Address || "No address on file"}</div>
                   </div>
                 )}
               </div>
 
-              {/* Tree: Company > Project > Block > Floor > Unit. Locked
-                  (read-only-styled, disabled) once a pick is already saved,
-                  same as Source below — "Edit" unlocks it for changes made
-                  before approval. Once the application is past Draft/Pending
-                  (canEditUnitSelection false), Edit never renders at all and
-                  every field here stays permanently disabled — a real
-                  Booking either exists or is expected the moment it's
-                  Approved, so the unit pick can't move anymore. */}
-              <div className="rounded-lg border border-border p-3 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-foreground block">Project / Unit (tree)</label>
-                  {!!applicationId && (
-                    canEditUnitSelection ? (
-                      unitLocked && (
-                        <button type="button" onClick={() => setUnitLocked(false)}
-                          className="text-xs text-primary hover:underline shrink-0">
-                          Edit
-                        </button>
+              {/* Two columns from here on — left is the tree pick itself,
+                  right is everything that pick unlocks (GST, Payment Plan,
+                  Date/Rate/Value, Broker). Keeping all of it in one column
+                  was what made this step tall enough to need a scroller;
+                  splitting it left/right uses the wider dialog instead of
+                  stacking everything vertically. */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Left: Company > Project > Block > Floor > Unit. Locked
+                    (read-only-styled, disabled) once a pick is already
+                    saved, same as Source below — "Edit" unlocks it for
+                    changes made before approval. Once the application is
+                    past Draft/Pending (canEditUnitSelection false), Edit
+                    never renders at all and every field here stays
+                    permanently disabled — a real Booking either exists or
+                    is expected the moment it's Approved, so the unit pick
+                    can't move anymore. */}
+                <div className="rounded-xl border border-border p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-heading font-semibold text-foreground block">Project / Unit (tree)</label>
+                    {!!applicationId && (
+                      canEditUnitSelection ? (
+                        unitLocked && (
+                          <button type="button" onClick={() => setUnitLocked(false)}
+                            className="text-xs text-amber-600 dark:text-amber-400 hover:underline shrink-0">
+                            Edit
+                          </button>
+                        )
+                      ) : (
+                        <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
+                          <Lock size={11} /> Locked ({wizardAppStatus})
+                        </span>
                       )
-                    ) : (
-                      <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
-                        <Lock size={11} /> Locked ({wizardAppStatus})
-                      </span>
-                    )
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className={labelCls}>Company *</label>
-                    <select value={form.CompanyId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
-                      onChange={(e) => {
-                        setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
-                      }}
-                      className={inputCls}>
-                      <option value="">Select company</option>
-                      {(companies as any[]).map((c: any) => <option key={c.Id} value={String(c.Id)}>{c.Name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Project *</label>
-                    <select value={form.ProjectId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
-                      onChange={(e) => {
-                        setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
-                      }}
-                      className={inputCls}>
-                      <option value="">Select project</option>
-                      {(projectsForCompany as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Block / Tower</label>
-                    <select value={form.BlockId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
-                      onChange={(e) => {
-                        setForm((f) => ({ ...f, BlockId: e.target.value, FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
-                      }}
-                      className={inputCls}>
-                      <option value="">Select block</option>
-                      {blocksForProject.map((b) => <option key={b.Id} value={b.Id}>{b.Name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Floor</label>
-                    <select value={form.FloorNo} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
-                      onChange={(e) => {
-                        setForm((f) => ({ ...f, FloorNo: e.target.value, PreferredUnitId: "", PaymentPlanId: "" }));
-                      }}
-                      className={inputCls}>
-                      <option value="">Select floor</option>
-                      {floorsForBlock.map((fl) => <option key={fl} value={fl}>Floor {fl}</option>)}
-                    </select>
-                  </div>
-                  <div className="col-span-2">
-                    <label className={labelCls}>Unit *</label>
-                    <select value={form.PreferredUnitId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
-                      onChange={(e) => {
-                        // Unit can be picked before Block/Floor are chosen —
-                        // the dropdown already falls back to the full
-                        // project's unit list when they're empty (see
-                        // unitsForBlock/unitsForFloor). Whichever way it was
-                        // reached, backfill Block/Floor from the picked
-                        // unit's own record so downstream logic that keys off
-                        // them (Parking's blockId scoping, Block-tagged
-                        // Payment Plans) still narrows correctly instead of
-                        // silently staying project-wide.
-                        const picked = (unitsForProject as any[]).find((u: any) => String(u.Id) === e.target.value);
-                        setForm((f) => ({
-                          ...f,
-                          PreferredUnitId: e.target.value,
-                          BlockId: picked?.BlockId != null ? String(picked.BlockId) : f.BlockId,
-                          FloorNo: picked?.FloorNo != null ? String(picked.FloorNo) : f.FloorNo,
-                          PaymentPlanId: "",
-                        }));
-                      }}
-                      className={inputCls}>
-                      <option value="">Select unit</option>
-                      {(unitsForFloor as any[]).map((u: any) => (
-                        <option key={u.Id} value={String(u.Id)}>{u.UnitName} · {u.UnitType || "—"} · {u.AreaSqFt ? `${u.AreaSqFt} sqft` : "—"}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {/* Brief unit price — the unit's own name/type/area is
-                    already visible in the Unit dropdown right above, so
-                    this only needs to show the derived ₹ math itself. */}
-                {selectedUnit && (
-                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
-                    <IndianRupee size={11} className="text-primary shrink-0" />
-                    {form.RatePerSqFt && computedTotal ? (
-                      <span>
-                        {selectedUnit.AreaSqFt} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">₹{computedTotal.toLocaleString("en-IN")}</span>
-                      </span>
-                    ) : (
-                      <span>Enter Rate (₹/sqft) below to see the full price.</span>
                     )}
                   </div>
-                )}
-
-                {/* GST preview — live from the moment a Rate is entered,
-                    including any Parking already picked on Step 2 in this
-                    same application, so staff see the real combined bracket
-                    from the very start, not just at the very end. */}
-                {form.RatePerSqFt && computedTotal ? (
-                  <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
-                ) : null}
-
-                {/* Payment Plan — mandatory the moment a unit is picked.
-                    Options are this unit's own tagged plans (set in Unit
-                    Master); if the unit has none tagged, every active plan
-                    is offered instead. Not re-selectable on the Booking
-                    page — this is the one place it's chosen. */}
-                {form.PreferredUnitId && (
-                  <div className="pt-2">
-                    <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
-                    <select value={form.PaymentPlanId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
-                      onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
-                      <option value="">Select a payment plan</option>
-                      {applicablePaymentPlans.map((p: any) => (
-                        <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
-                      ))}
-                    </select>
-                    {!unitTaggedPaymentPlans.length && blockTaggedPaymentPlans.length > 0 && (
-                      <p className="text-[11px] text-muted-foreground mt-1">This unit has no payment plans of its own — showing its Block's tagged plans.</p>
-                    )}
-                    {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && projectTaggedPaymentPlans.length > 0 && (
-                      <p className="text-[11px] text-muted-foreground mt-1">This unit's Block has no payment plans of its own — showing its Project's tagged plans.</p>
-                    )}
-                    {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && !projectTaggedPaymentPlans.length && (
-                      <p className="text-[11px] text-muted-foreground mt-1">No payment plans tagged anywhere in this unit's hierarchy — showing every active plan instead.</p>
-                    )}
-
-                    {/* Brief plan breakdown — Booking is the plan's own
-                        fixed ₹ (never a %), everything after it splits
-                        100% of (Total Value - Booking) the same way
-                        generateMilestonesForBooking computes it for a real
-                        Booking. Purely a preview here — nothing is saved
-                        until the actual Booking is created. */}
-                    {selectedPaymentPlan && selectedPlanMilestones.length > 0 && (
-                      <div className="mt-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 space-y-1">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>Booking</span>
-                          <span className="font-semibold text-foreground">₹{selectedPlanBookingAmount.toLocaleString("en-IN")}</span>
-                        </div>
-                        {selectedPlanMilestones.slice(1).map((m, i) => (
-                          <div key={i} className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span className="truncate pr-2">{m.name} <span className="text-[10px]">({m.pct}%)</span></span>
-                            <span className="font-semibold text-foreground shrink-0">
-                              {computedTotal ? `₹${Math.round((selectedPlanRemainder * m.pct) / 100).toLocaleString("en-IN")}` : "—"}
-                            </span>
-                          </div>
-                        ))}
-                        {!computedTotal && (
-                          <p className="text-[10px] text-muted-foreground pt-0.5">Enter Rate (₹/sqft) to see ₹ amounts for each step.</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className={labelCls}>Date of Apply</label>
-                  <input type="date" value={form.DateOfApply} onChange={(e) => setForm((f) => ({ ...f, DateOfApply: e.target.value }))} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Rate (₹/sqft) <span className="text-destructive">*</span></label>
-                  <input type="number" value={form.RatePerSqFt} onChange={(e) => setForm((f) => ({ ...f, RatePerSqFt: e.target.value }))} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Est. Total Value</label>
-                  <input type="text" readOnly value={computedTotal ? `₹${computedTotal.toLocaleString("en-IN")}` : "—"}
-                    className={`${inputCls} bg-muted/30 text-muted-foreground`} />
-                </div>
-              </div>
-
-
-              {/* Broker — separate from Source/Channel Partner. A deal can
-                  come from a Referral source AND still be brokered; the two
-                  concepts are unrelated (see CrmBrokerageMaster). The broker
-                  is introduced right here, at Application time — always
-                  picked from Broker Master (AccountHeadMaster, LHeadType=BR),
-                  never a fresh Customer-level concept. His own identity
-                  (name/phone/PAN/RERA) is never re-typed, only ever selected
-                  and shown read-only. The ONLY editable field on this whole
-                  block is the per-deal commission override % — everything
-                  else is fetched, not entered. The rate here is captured now
-                  but only becomes a real commission schedule once Milestone
-                  #1 is paid (maybeAutoCreateBrokerage), at which point it's
-                  split into one tranche per payment milestone, each
-                  unlocking as that milestone is paid — not a manual toggle
-                  here. */}
-              <div className="rounded-lg border border-border p-3 space-y-3">
-                <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
-                  <input type="checkbox" checked={form.ViaBroker}
-                    onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "" }) }))} />
-                  Via Broker
-                </label>
-                {form.ViaBroker && (
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className={labelCls}>Broker (from Broker Master)</label>
-                      <select value={form.BrokerId} onChange={(e) => setForm((f) => ({ ...f, BrokerId: e.target.value }))} className={inputCls}>
-                        <option value="">Select broker</option>
-                        {(brokers as any[]).map((b: any) => <option key={b.LHeadId} value={String(b.LHeadId)}>{b.LHeadName}</option>)}
+                      <label className={labelCls}>Company *</label>
+                      <select value={form.CompanyId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
+                        }}
+                        className={inputCls}>
+                        <option value="">Select company</option>
+                        {(companies as any[]).map((c: any) => <option key={c.Id} value={String(c.Id)}>{c.Name}</option>)}
                       </select>
                     </div>
-
-                    {/* Read-only, auto-fetched from Broker Master the moment a
-                        broker is on the form — mirrors the Supplier info card
-                        pattern used on Purchase Orders (PurchaseOrderMaster.tsx).
-                        Nothing in here is ever an editable input. */}
-                    {selectedBroker && (
-                      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-muted/20 border border-border p-3 text-sm">
-                        {selectedBroker.LHeadPhone && (
-                          <div>
-                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
-                            <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5"><Phone size={12} className="text-muted-foreground" />{selectedBroker.LHeadPhone}</dd>
-                          </div>
-                        )}
-                        {selectedBroker.LHeadPan && (
-                          <div>
-                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">PAN</dt>
-                            <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" />{selectedBroker.LHeadPan}</dd>
-                          </div>
-                        )}
-                        {selectedBroker.LHeadRera && (
-                          <div>
-                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">RERA No.</dt>
-                            <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><FileBadge size={12} className="text-muted-foreground" />{selectedBroker.LHeadRera}</dd>
-                          </div>
-                        )}
-                        {selectedBroker.LHeadPaymentTerms && (
-                          <div>
-                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Payment Terms</dt>
-                            <dd className="text-foreground font-medium mt-0.5">{selectedBroker.LHeadPaymentTerms}</dd>
-                          </div>
-                        )}
-                      </dl>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className={labelCls}>Default rate (preview)</label>
-                        <input readOnly value={`${brokerageTierDefault}% (< 1 Cr → 2%, ≥ 1 Cr → 1%)`}
-                          className={`${inputCls} bg-muted/30 text-muted-foreground`} />
-                      </div>
-                      <div>
-                        <label className={labelCls}>Commission override % (only if this deal needs a custom rate)</label>
-                        <input type="number" step="0.01" min="0" max="100" value={form.BrokerageRatePercent}
-                          onChange={(e) => setForm((f) => ({ ...f, BrokerageRatePercent: e.target.value }))}
-                          placeholder={String(brokerageTierDefault)} className={inputCls} />
-                      </div>
+                    <div>
+                      <label className={labelCls}>Project *</label>
+                      <select value={form.ProjectId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
+                        }}
+                        className={inputCls}>
+                        <option value="">Select project</option>
+                        {(projectsForCompany as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+                      </select>
                     </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      Commission is paid out one milestone at a time, following the same schedule as the customer's own payments — unlocking as each milestone is paid.
-                    </p>
+                    <div>
+                      <label className={labelCls}>Block / Tower</label>
+                      <select value={form.BlockId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, BlockId: e.target.value, FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
+                        }}
+                        className={inputCls}>
+                        <option value="">Select block</option>
+                        {blocksForProject.map((b) => <option key={b.Id} value={b.Id}>{b.Name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Floor</label>
+                      <select value={form.FloorNo} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, FloorNo: e.target.value, PreferredUnitId: "", PaymentPlanId: "" }));
+                        }}
+                        className={inputCls}>
+                        <option value="">Select floor</option>
+                        {floorsForBlock.map((fl) => <option key={fl} value={fl}>Floor {fl}</option>)}
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <label className={labelCls}>Unit *</label>
+                      <select value={form.PreferredUnitId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                        onChange={(e) => {
+                          // Unit can be picked before Block/Floor are chosen —
+                          // the dropdown already falls back to the full
+                          // project's unit list when they're empty (see
+                          // unitsForBlock/unitsForFloor). Whichever way it was
+                          // reached, backfill Block/Floor from the picked
+                          // unit's own record so downstream logic that keys off
+                          // them (Parking's blockId scoping, Block-tagged
+                          // Payment Plans) still narrows correctly instead of
+                          // silently staying project-wide.
+                          const picked = (unitsForProject as any[]).find((u: any) => String(u.Id) === e.target.value);
+                          setForm((f) => ({
+                            ...f,
+                            PreferredUnitId: e.target.value,
+                            BlockId: picked?.BlockId != null ? String(picked.BlockId) : f.BlockId,
+                            FloorNo: picked?.FloorNo != null ? String(picked.FloorNo) : f.FloorNo,
+                            PaymentPlanId: "",
+                          }));
+                        }}
+                        className={inputCls}>
+                        <option value="">Select unit</option>
+                        {(unitsForFloor as any[]).map((u: any) => (
+                          <option key={u.Id} value={String(u.Id)}>{u.UnitName} · {u.UnitType || "—"} · {u.AreaSqFt ? `${u.AreaSqFt} sqft` : "—"}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                )}
+
+                  {/* Brief unit price — the unit's own name/type/area is
+                      already visible in the Unit dropdown right above, so
+                      this only needs to show the derived ₹ math itself. */}
+                  {selectedUnit && (
+                    <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
+                      <IndianRupee size={11} className="text-amber-500 shrink-0" />
+                      {form.RatePerSqFt && computedTotal ? (
+                        <span>
+                          {selectedUnit.AreaSqFt} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">₹{computedTotal.toLocaleString("en-IN")}</span>
+                        </span>
+                      ) : (
+                        <span>Enter Rate (₹/sqft) to see the full price.</span>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className={labelCls}>Date of Apply</label>
+                      <input type="date" value={form.DateOfApply} onChange={(e) => setForm((f) => ({ ...f, DateOfApply: e.target.value }))} className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Rate (₹/sqft) <span className="text-destructive">*</span></label>
+                      <input type="number" value={form.RatePerSqFt} onChange={(e) => setForm((f) => ({ ...f, RatePerSqFt: e.target.value }))} className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Est. Total Value</label>
+                      <input type="text" readOnly value={computedTotal ? `₹${computedTotal.toLocaleString("en-IN")}` : "—"}
+                        className={`${inputCls} bg-muted/30 text-muted-foreground`} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right: everything the unit pick unlocks — GST preview,
+                    Payment Plan, and Broker. */}
+                <div className="space-y-4">
+                  {/* GST preview — live from the moment a Rate is entered,
+                      including any Parking already picked on Step 2 in this
+                      same application, so staff see the real combined
+                      bracket from the very start, not just at the very end. */}
+                  {form.RatePerSqFt && computedTotal ? (
+                    <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
+                  ) : null}
+
+                  {/* Payment Plan — mandatory the moment a unit is picked.
+                      Options are this unit's own tagged plans (set in Unit
+                      Master); if the unit has none tagged, every active plan
+                      is offered instead. Not re-selectable on the Booking
+                      page — this is the one place it's chosen. */}
+                  {form.PreferredUnitId && (
+                    <div className="rounded-xl border border-border p-4 space-y-2">
+                      <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
+                      <select value={form.PaymentPlanId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                        onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
+                        <option value="">Select a payment plan</option>
+                        {applicablePaymentPlans.map((p: any) => (
+                          <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
+                        ))}
+                      </select>
+                      {!unitTaggedPaymentPlans.length && blockTaggedPaymentPlans.length > 0 && (
+                        <p className="text-[11px] text-muted-foreground">This unit has no payment plans of its own — showing its Block's tagged plans.</p>
+                      )}
+                      {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && projectTaggedPaymentPlans.length > 0 && (
+                        <p className="text-[11px] text-muted-foreground">This unit's Block has no payment plans of its own — showing its Project's tagged plans.</p>
+                      )}
+                      {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && !projectTaggedPaymentPlans.length && (
+                        <p className="text-[11px] text-muted-foreground">No payment plans tagged anywhere in this unit's hierarchy — showing every active plan instead.</p>
+                      )}
+
+                      {/* Brief plan breakdown — Booking is the plan's own
+                          fixed ₹ (never a %), everything after it splits
+                          100% of (Total Value - Booking) the same way
+                          generateMilestonesForBooking computes it for a real
+                          Booking. Purely a preview here — nothing is saved
+                          until the actual Booking is created. */}
+                      {selectedPaymentPlan && selectedPlanMilestones.length > 0 && (
+                        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 space-y-1">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>Booking</span>
+                            <span className="font-semibold text-foreground">₹{selectedPlanBookingAmount.toLocaleString("en-IN")}</span>
+                          </div>
+                          {selectedPlanMilestones.slice(1).map((m, i) => (
+                            <div key={i} className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span className="truncate pr-2">{m.name} <span className="text-[10px]">({m.pct}%)</span></span>
+                              <span className="font-semibold text-foreground shrink-0">
+                                {computedTotal ? `₹${Math.round((selectedPlanRemainder * m.pct) / 100).toLocaleString("en-IN")}` : "—"}
+                              </span>
+                            </div>
+                          ))}
+                          {!computedTotal && (
+                            <p className="text-[10px] text-muted-foreground pt-0.5">Enter Rate (₹/sqft) to see ₹ amounts for each step.</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Broker — separate from Source/Channel Partner. A deal
+                      can come from a Referral source AND still be brokered;
+                      the two concepts are unrelated (see
+                      CrmBrokerageMaster). The broker is introduced right
+                      here, at Application time — always picked from Broker
+                      Master (AccountHeadMaster, LHeadType=BR), never a fresh
+                      Customer-level concept. His own identity (name/phone/
+                      PAN/RERA) is never re-typed, only ever selected and
+                      shown read-only. The ONLY editable field on this whole
+                      block is the per-deal commission override % —
+                      everything else is fetched, not entered. The rate here
+                      is captured now but only becomes a real commission
+                      schedule once Milestone #1 is paid
+                      (maybeAutoCreateBrokerage), at which point it's split
+                      into one tranche per payment milestone, each unlocking
+                      as that milestone is paid — not a manual toggle here. */}
+                  <div className="rounded-xl border border-border p-4 space-y-3">
+                    <label className="flex items-center gap-2 text-xs font-heading font-semibold text-foreground">
+                      <input type="checkbox" checked={form.ViaBroker}
+                        onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "" }) }))} />
+                      Via Broker
+                    </label>
+                    {form.ViaBroker && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className={labelCls}>Broker (from Broker Master)</label>
+                          <select value={form.BrokerId} onChange={(e) => setForm((f) => ({ ...f, BrokerId: e.target.value }))} className={inputCls}>
+                            <option value="">Select broker</option>
+                            {(brokers as any[]).map((b: any) => <option key={b.LHeadId} value={String(b.LHeadId)}>{b.LHeadName}</option>)}
+                          </select>
+                        </div>
+
+                        {/* Read-only, auto-fetched from Broker Master the moment a
+                            broker is on the form — mirrors the Supplier info card
+                            pattern used on Purchase Orders (PurchaseOrderMaster.tsx).
+                            Nothing in here is ever an editable input. */}
+                        {selectedBroker && (
+                          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-muted/20 border border-border p-3 text-sm">
+                            {selectedBroker.LHeadPhone && (
+                              <div>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
+                                <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5"><Phone size={12} className="text-muted-foreground" />{selectedBroker.LHeadPhone}</dd>
+                              </div>
+                            )}
+                            {selectedBroker.LHeadPan && (
+                              <div>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">PAN</dt>
+                                <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" />{selectedBroker.LHeadPan}</dd>
+                              </div>
+                            )}
+                            {selectedBroker.LHeadRera && (
+                              <div>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">RERA No.</dt>
+                                <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><FileBadge size={12} className="text-muted-foreground" />{selectedBroker.LHeadRera}</dd>
+                              </div>
+                            )}
+                            {selectedBroker.LHeadPaymentTerms && (
+                              <div>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Payment Terms</dt>
+                                <dd className="text-foreground font-medium mt-0.5">{selectedBroker.LHeadPaymentTerms}</dd>
+                              </div>
+                            )}
+                          </dl>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className={labelCls}>Default Rate (Preview)</label>
+                            <input readOnly value={`${brokerageTierDefault}% (< 1 Cr → 2%, ≥ 1 Cr → 1%)`}
+                              className={`${inputCls} bg-muted/30 text-muted-foreground`} />
+                          </div>
+                          <div>
+                            <label className={labelCls}>Commission Override %</label>
+                            <input type="number" step="0.01" min="0" max="100" value={form.BrokerageRatePercent}
+                              onChange={(e) => setForm((f) => ({ ...f, BrokerageRatePercent: e.target.value }))}
+                              placeholder={String(brokerageTierDefault)} className={inputCls} />
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground -mt-1.5">
+                          Only fill in the override if this specific deal needs a custom commission rate — otherwise the default above applies.
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          Commission is paid out one milestone at a time, following the same schedule as the customer's own payments — unlocking as each milestone is paid.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -1848,53 +1871,53 @@ const CrmApplication: React.FC = () => {
             <button
               onClick={() => step > 1 && setStep(step - 1)}
               disabled={step === 1}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-30 flex items-center gap-1">
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all disabled:opacity-30">
               <ChevronLeft size={14} /> Back
             </button>
             <div className="flex gap-2">
               <button onClick={() => { setDialogOpen(false); resetWizard(); }}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
                 Cancel
               </button>
               {step === 1 && (
                 <button onClick={handleCreateAndNext} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors flex items-center gap-1">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
                   {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
                 </button>
               )}
               {step === 2 && (
                 <button onClick={() => advanceStep(3)}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 3 && (
                 <button onClick={() => advanceStep(4)}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 4 && (
                 <button onClick={handleBankDetailsNext} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors flex items-center gap-1">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
                   {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
                 </button>
               )}
               {step === 5 && (
                 <button onClick={() => advanceStep(6)}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 6 && (
                 <button onClick={() => advanceStep(7)}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 7 && (
                 <button onClick={handleFinalSave} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
                   {saving ? "Submitting..." : "Submit Application"}
                 </button>
               )}
