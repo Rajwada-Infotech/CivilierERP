@@ -23,6 +23,13 @@ import {
   CheckCircle2,
   Clock,
 } from "lucide-react";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
@@ -104,6 +111,108 @@ const fmtDate = (d: string | null) =>
         year: "numeric",
       })
     : "—";
+
+interface DonutPoint {
+  name: string;
+  value: number;
+  color: string;
+}
+
+const DonutCard: React.FC<{
+  title: string;
+  icon: React.ElementType;
+  accentColor: string;
+  data: DonutPoint[];
+  isDark: boolean;
+  glassStyle: React.CSSProperties;
+  formatValue?: (n: number) => string;
+}> = ({ title, icon: Icon, accentColor, data, isDark, glassStyle, formatValue = fmt }) => {
+  const total = data.reduce((s, d) => s + d.value, 0);
+  return (
+    <div className="rounded-xl overflow-hidden" style={glassStyle}>
+      <div
+        className="flex items-center gap-2 px-4 py-3 border-b"
+        style={{
+          borderColor: isDark ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.12)",
+        }}
+      >
+        <div
+          className="w-5 h-5 rounded-md flex items-center justify-center"
+          style={{ background: `${accentColor}26` }}
+        >
+          <Icon size={11} style={{ color: accentColor }} />
+        </div>
+        <span
+          className="text-xs font-heading font-semibold"
+          style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
+        >
+          {title}
+        </span>
+      </div>
+      <div className="p-4">
+        {total === 0 ? (
+          <div className="text-center text-muted-foreground py-10 text-sm">
+            No data yet
+          </div>
+        ) : (
+          <div className="flex flex-col sm:flex-row items-center gap-4">
+            <ResponsiveContainer width="100%" height={180}>
+              <PieChart>
+                <Pie
+                  data={data}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={45}
+                  outerRadius={75}
+                  paddingAngle={2}
+                  strokeWidth={0}
+                >
+                  {data.map((d, i) => (
+                    <Cell key={i} fill={d.color} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0];
+                    return (
+                      <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-lg">
+                        <p className="text-xs font-heading font-semibold text-foreground">
+                          {d.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatValue(d.value as number)}
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="space-y-2 w-full sm:w-auto shrink-0">
+              {data.map((d) => (
+                <div key={d.name} className="flex items-center gap-2">
+                  <div
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ background: d.color }}
+                  />
+                  <span className="text-xs text-foreground whitespace-nowrap">
+                    {d.name}
+                  </span>
+                  <span className="text-xs text-muted-foreground ml-auto sm:ml-3">
+                    {formatValue(d.value)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 const StatCardSkeleton = () => (
   <div className="rounded-xl overflow-hidden border border-border/40 bg-card/40 backdrop-blur-sm p-4">
@@ -312,6 +421,37 @@ const FinanceDashboard = () => {
                 />
               </>
             )}
+          </div>
+        </GlassSection>
+
+        {/* ── Breakdown charts ──────────────────────────────────────────────── */}
+        <GlassSection title="Breakdown" icon={BadgeDollarSign} accentColor="#6366f1">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <DonutCard
+              title="Payments Made vs Received"
+              icon={BadgeDollarSign}
+              accentColor="#6366f1"
+              isDark={isDark}
+              glassStyle={tableGlass}
+              data={[
+                { name: "Made", value: data?.paymentsMade.totalAmount ?? 0, color: "#f43f5e" },
+                { name: "Received", value: data?.receivedPayments.totalAmount ?? 0, color: "#10b981" },
+              ]}
+            />
+            <DonutCard
+              title="Cheques & Cards Status"
+              icon={CreditCard}
+              accentColor="#8b5cf6"
+              isDark={isDark}
+              glassStyle={tableGlass}
+              formatValue={(n) => `${n}`}
+              data={[
+                { name: "Cheques Active", value: data?.cheques.activeCount ?? 0, color: "#f59e0b" },
+                { name: "Cheques Inactive", value: data?.cheques.inactiveCount ?? 0, color: "#f59e0b66" },
+                { name: "Cards Active", value: data?.cards.activeCount ?? 0, color: "#8b5cf6" },
+                { name: "Cards Inactive", value: data?.cards.inactiveCount ?? 0, color: "#8b5cf666" },
+              ]}
+            />
           </div>
         </GlassSection>
 

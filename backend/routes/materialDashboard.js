@@ -49,6 +49,8 @@ router.get("/", async (req, res) => {
       materialRequestStats,
       recentIssues,
       recentRequests,
+      grnTimeline,
+      poTimeline,
     ] = await Promise.all([
       // ── Items + Groups ──────────────────────────────────────────────
       safeQuery(`
