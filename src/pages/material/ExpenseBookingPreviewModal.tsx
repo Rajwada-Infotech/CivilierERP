@@ -1668,11 +1668,39 @@ export function ExpenseBookingPreviewModal({
               <div className="rounded-xl border border-border overflow-hidden">
                 <div className="divide-y divide-border/60">
                   <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
-                    <p className="text-xs text-muted-foreground">Net Payable</p>
+                    {/* "Net Payable" here means the same thing the Amount
+                        Breakdown section above labels "Amount Payable
+                        (After TDS)" — i.e. what's actually still owed in
+                        cash, TDS already netted out. Kept the two rows'
+                        wording aligned so the same number isn't described
+                        two different ways in one modal. */}
+                    <p className="text-xs text-muted-foreground">
+                      {displayTdsAmount > 0 ? "Amount Payable (After TDS)" : "Net Payable"}
+                    </p>
                     <p className="font-mono text-sm font-semibold">
-                      ₹{fmt(displayNetAmount)}
+                      ₹{fmt(displayPayableAfterTds)}
                     </p>
                   </div>
+                  {displayTdsAmount > 0 && (
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <p className="text-xs text-muted-foreground">
+                        Invoice Total <span className="opacity-60">(before TDS)</span>
+                      </p>
+                      <p className="font-mono text-sm text-foreground/80">
+                        ₹{fmt(displayNetAmount)}
+                      </p>
+                    </div>
+                  )}
+                  {displayTdsAmount > 0 && (
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <p className="text-xs text-amber-600 dark:text-amber-400">
+                        TDS Deducted
+                      </p>
+                      <p className="font-mono text-sm text-amber-600 dark:text-amber-400 font-semibold">
+                        − ₹{fmt(displayTdsAmount)}
+                      </p>
+                    </div>
+                  )}
                   {(previewRecord.totalPaid ?? 0) > 0 && (
                     <div className="flex items-center justify-between px-4 py-2.5">
                       <p className="text-xs text-emerald-600 dark:text-emerald-400">

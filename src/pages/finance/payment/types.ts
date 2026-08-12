@@ -91,6 +91,9 @@ export interface ExpenseOption {
   partyName?: string;
   partyId?: number | null;
   amount?: number;
+  /** TDS withheld at source on this invoice, 0 when not applicable —
+   * amount − tdsAmount is what's actually payable in cash. */
+  tdsAmount?: number;
   companyId?: number | null;
   companyName?: string;
   financialYear?: string;

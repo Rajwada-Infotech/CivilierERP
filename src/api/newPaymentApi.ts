@@ -173,6 +173,8 @@ export interface PaymentChainInvoice {
   ETotalPaid: number | null;
   ERemainingAmount: number | null;
   EBillStatus: string | null;
+  /** TDS withheld at source, 0 when not applicable. */
+  TDSAmount: number | null;
   ProjectName: string | null;
   PartyName: string | null;
 }

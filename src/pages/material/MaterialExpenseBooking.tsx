@@ -137,7 +137,9 @@ import type {
 // from grnTotalAmount + billing terms; everything else falls back to
 // computeBreakdown on the stored basicAmount) — kept in sync so the export
 // never shows a different number than what's on screen.
-function computeEffectiveNet(rec: any): number {
+// GST-inclusive net, before TDS — computeEffectiveNet() below is what the
+// list/export actually display, net of TDS too.
+function computeGrossNet(rec: any): number {
   if (rec.eSourceType === "GRN" && rec.grnTotalAmount != null) {
     const terms =
       rec.billingTerms && rec.billingTerms.length > 0
@@ -155,6 +157,16 @@ function computeEffectiveNet(rec: any): number {
     rec.igstRate ?? 0,
   );
   return rec.netAmount ?? rbd.netAmount;
+}
+
+// What the supplier is actually owed in cash — gross net minus TDS withheld
+// at the invoice. Same "TDS is deducted once, everything downstream reads
+// that figure" principle already applied on the Payment page; this is the
+// list/export view's own copy of it.
+function computeEffectiveNet(rec: any): number {
+  const gross = computeGrossNet(rec);
+  const tds = rec.tdsAmount ?? 0;
+  return Math.max(0, gross - tds);
 }
 
 // Mirrors the visible table's column order exactly (Booking Ref → Vendor →
@@ -2559,36 +2571,10 @@ export default function MaterialExpenseBooking() {
                               // For GRN-linked records, recompute from grnTotalAmount + billing terms
                               // with correct pre/post-GST split (avoids stale ENetAmount from DB).
                               // For all others, use computeBreakdown on stored basicAmount.
-                              const effectiveNet = (() => {
-                                if (
-                                  rec.eSourceType === "GRN" &&
-                                  rec.grnTotalAmount != null
-                                ) {
-                                  const terms =
-                                    rec.billingTerms &&
-                                    rec.billingTerms.length > 0
-                                      ? rec.billingTerms
-                                      : rec.discount
-                                        ? [rec.discount]
-                                        : [];
-                                  return computeGrnNetWithTerms(
-                                    rec.grnTotalAmount,
-                                    terms,
-                                    rec.basicAmount,
-                                  );
-                                }
-                                const rbd = computeBreakdown(
-                                  rec.basicAmount,
-                                  rec.cgstRate,
-                                  rec.sgstRate,
-                                  rec.billingTerms &&
-                                    rec.billingTerms.length > 0
-                                    ? rec.billingTerms
-                                    : rec.discount,
-                                  rec.igstRate ?? 0,
-                                );
-                                return rec.netAmount ?? rbd.netAmount;
-                              })();
+                              // Net of TDS too — matches the export column and the Payment
+                              // page's own "Amount Payable (After TDS)" figure, instead of
+                              // showing the pre-TDS gross like this row used to.
+                              const effectiveNet = computeEffectiveNet(rec);
                               return (
                                 <TableRow
                                   key={
