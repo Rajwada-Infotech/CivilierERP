@@ -2,6 +2,7 @@ import React from "react";
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams, useLocation } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -158,7 +159,11 @@ const Payment: React.FC = () => {
 
   const [view, setView] = useState<"list" | "form">("list");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<Omit<PaymentRecord, "id">>(blankForm());
+  const [form, setForm] = useDraftForm<Omit<PaymentRecord, "id">>(
+    "finance-payment",
+    blankForm(),
+    { skip: editingId !== null },
+  );
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -262,6 +267,14 @@ const Payment: React.FC = () => {
         .catch(() => {});
     }
   };
+
+  // Reopen the form view if a draft was restored from localStorage on mount
+  useEffect(() => {
+    if (form.paymentName || form.paidTo || form.amount || form.notes) {
+      setView("form");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch payment posting data when posting tab opens
   useEffect(() => {
@@ -2162,6 +2175,7 @@ const Payment: React.FC = () => {
         {view === "form" && (
           <div
             className="rounded-2xl overflow-hidden"
+            onKeyDown={preventEnterSubmit}
             style={{
               background: isDark
                 ? "rgba(12,14,22,0.55)"

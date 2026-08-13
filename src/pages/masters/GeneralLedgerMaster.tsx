@@ -6,6 +6,7 @@ import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import {
   getLedgers,
   addLedger,
@@ -233,7 +234,9 @@ const GeneralLedgerMaster: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<LedgerForm>(EMPTY_FORM);
+  const [form, setForm] = useDraftForm<LedgerForm>("general-ledger-master", EMPTY_FORM, {
+    skip: editingId !== null,
+  });
   const [errors, setErrors] = useState<
     Partial<Record<keyof LedgerForm, boolean>>
   >({});
@@ -493,6 +496,7 @@ const GeneralLedgerMaster: React.FC = () => {
         {rights.canCreate && (
         <div
           className="rounded-xl overflow-hidden"
+          onKeyDown={preventEnterSubmit}
           style={{
             background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
             border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.16)",

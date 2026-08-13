@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -306,7 +307,9 @@ const AccountGroupMaster: React.FC = () => {
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [form, setForm] = useDraftForm("account-group-master", EMPTY_FORM, {
+    skip: editingId !== null,
+  });
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -496,6 +499,7 @@ const AccountGroupMaster: React.FC = () => {
         {/* ── Form card ── */}
         {(rights.canCreate || rights.canEdit) && <div
           className="rounded-xl overflow-visible relative"
+          onKeyDown={preventEnterSubmit}
           style={{
             background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
             border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.16)",

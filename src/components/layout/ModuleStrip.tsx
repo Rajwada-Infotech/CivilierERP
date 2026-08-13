@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from "react";
 import ReactDOM from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, ChevronDown } from "lucide-react";
 import {
   Bank,
   Box,
@@ -177,6 +177,21 @@ export const ModuleStrip: React.FC = () => {
   const { canAccessPage } = useAuth();
   const [tooltip, setTooltip] = useState<TooltipState>(null);
 
+  // ── "More icons below" scroll hint ────────────────────────────────────────
+  // The icon region scrolls internally once there are too many modules for
+  // the viewport (see the region below) — nothing else in the pill hints
+  // that, so a collapsed sidebar can look like the module list simply ends.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollDown, setCanScrollDown] = useState(false);
+
+  const updateScrollHint = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const hasOverflow = el.scrollHeight - el.clientHeight > 2;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 4;
+    setCanScrollDown(hasOverflow && !atBottom);
+  }, []);
+
   // Map each module to a representative page key that signals access.
   // A user with ANY view right in a module's page definitions will see that module.
   const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
@@ -200,6 +215,19 @@ export const ModuleStrip: React.FC = () => {
   const canAccessApprovalInbox = canAccessPage("approval-inbox" as any);
   const regularItems = MODULES.filter((m) => userHasModuleAccess(m.id));
   const adminItems = (isAdminTier || canAccessApprovalInbox) ? [ADMIN_MODULE] : [];
+
+  useLayoutEffect(() => {
+    updateScrollHint();
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(updateScrollHint);
+    ro.observe(el);
+    window.addEventListener("resize", updateScrollHint);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", updateScrollHint);
+    };
+  }, [updateScrollHint, regularItems.length, adminItems.length]);
 
   const handleSwitch = async (mod: NonNullable<Module>) => {
     setTooltip(null);
@@ -315,7 +343,11 @@ export const ModuleStrip: React.FC = () => {
               internally (instead of overflowing the pill) once there are
               too many modules for the viewport, so the footer's expand
               button below always stays fully visible, never clipped. ── */}
-          <div className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div
+            ref={scrollRef}
+            onScroll={updateScrollHint}
+            className="relative z-10 flex-1 min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
             {/* ── Regular module icons (finance → ticket) ───────────────────── */}
             <div className="flex flex-col items-center gap-2 pt-2 pb-1">
               {regularItems.map((item) => (
@@ -386,6 +418,47 @@ export const ModuleStrip: React.FC = () => {
               ))}
             </div>
           </div>
+
+          {/* ── "More icons below" scroll hint — only shown once the icon
+              region actually overflows and isn't already scrolled to the
+              bottom; fades out as soon as either stops being true. A bare
+              pulsing chevron sitting inside the fade, not a badge — a
+              circle/border here reads as a floating button rather than a
+              hint. ──────────────────────────────────────────────────────── */}
+          <AnimatePresence>
+            {canScrollDown && (
+              <motion.div
+                key="scroll-hint"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="absolute left-0 right-0 z-20 flex flex-col items-center justify-end pointer-events-none"
+                style={{ bottom: 64, height: 26 }}
+              >
+                {/* Fade so the last icon doesn't hard-clip against the hint */}
+                <div
+                  className="absolute inset-x-0 bottom-0 top-0"
+                  style={{
+                    background: isDark
+                      ? "linear-gradient(to bottom, transparent, rgba(15,17,26,0.92) 75%)"
+                      : "linear-gradient(to bottom, transparent, rgba(255,255,255,0.92) 75%)",
+                  }}
+                />
+                <motion.div
+                  animate={{ opacity: [0.4, 0.9, 0.4] }}
+                  transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+                  className="relative flex items-center justify-center pb-1"
+                >
+                  <ChevronDown
+                    size={13}
+                    strokeWidth={2.6}
+                    style={{ color: isDark ? "rgba(244,245,249,0.55)" : "rgba(20,22,31,0.42)" }}
+                  />
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* ── Footer — h-16, expand button when collapsed (no border) ────── */}
           <div className="relative z-10 h-16 shrink-0 flex items-center justify-center">

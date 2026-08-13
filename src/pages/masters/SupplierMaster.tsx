@@ -11,6 +11,7 @@ import {
 } from "@/api/accountHeadApi";
 import { getAccountGroups } from "@/api/accountApi";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
 import {
@@ -435,7 +436,9 @@ const SupplierMaster: React.FC = () => {
   const rights = usePageRights("supplier-master");
 
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<SupplierForm>(EMPTY_FORM);
+  const [form, setForm] = useDraftForm<SupplierForm>("supplier-master", EMPTY_FORM, {
+    skip: editingId !== null,
+  });
   const [errors, setErrors] = useState<
     Partial<Record<keyof SupplierForm, boolean>>
   >({});
@@ -1002,6 +1005,7 @@ const SupplierMaster: React.FC = () => {
         {/* ── Form Card ── */}
         <div
           className="rounded-xl overflow-visible"
+          onKeyDown={preventEnterSubmit}
           style={{
             background: isDark
               ? "rgba(12,14,22,0.55)"
