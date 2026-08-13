@@ -8,8 +8,10 @@ import {
   Trash2, Wallet, Car,
   ChevronUp, ChevronDown, ShieldAlert, Check,
   CreditCard, ClipboardCheck, ArrowLeft, ArrowRight,
+  KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, Phone, User,
+  CalendarCheck, Lock,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useGstRates, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
 
 const API = "/api/crm/bookings";
@@ -31,7 +33,7 @@ const EMPTY_BANK = {
 // frontend-side permission preview.
 const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
-const TABS = ["Booking", "Parking & Extra Work", "Payment Plan", "Bank Details", "Attachments", "Payment & Invoice"] as const;
+const TABS = ["Booking", "Parking & Extra Work", "Payment Plan", "Bank Details", "Customer Portal", "Attachments", "Payment & Invoice"] as const;
 type Tab = typeof TABS[number];
 
 const fmt = (n: number | null | undefined) =>
@@ -286,6 +288,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchAttachments(bookingId),
     enabled: tab === "Attachments",
   });
+  const { data: portalStatus, isFetching: portalFetching, refetch: refetchPortal } = useQuery({
+    queryKey: ["crm-booking-portal-status", bookingId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/${bookingId}/portal-status`);
+      return r.ok ? r.json() : null;
+    },
+    enabled: tab === "Customer Portal",
+  });
+  const [provisioning, setProvisioning] = useState(false);
+  async function handleProvisionPortal() {
+    setProvisioning(true);
+    try {
+      const r = await fetchWithAuth(`${API}/${bookingId}/provision-portal`, { method: "POST" });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(body.error || "Provisioning failed"); return; }
+      toast.success("Customer portal provisioned successfully");
+      refetchPortal();
+    } finally {
+      setProvisioning(false);
+    }
+  }
   const { data: parking = [] } = useQuery({
     queryKey: ["crm-parking", bookingId],
     queryFn: () => fetchParkingAllotments(bookingId),
@@ -1871,6 +1894,109 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               </div>
             )}
 
+            {tab === "Customer Portal" && (
+              <div className="space-y-4 pt-2">
+                {portalFetching ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center">
+                    <RefreshCw size={15} className="animate-spin" />
+                    Checking portal status…
+                  </div>
+                ) : portalStatus?.hasPortal ? (
+                  <div className="rounded-xl border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30 p-5 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck size={20} className="text-green-600 dark:text-green-400 shrink-0" />
+                      <div>
+                        <p className="text-sm font-semibold text-green-800 dark:text-green-300">Customer Portal Active</p>
+                        <p className="text-xs text-green-700 dark:text-green-400">Access was provisioned automatically at booking confirmation.</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-2 rounded-lg bg-background border border-border px-3 py-2">
+                        <User size={13} className="shrink-0 text-primary" />
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wide font-medium mb-0.5">Customer</p>
+                          <p className="font-medium text-foreground">{portalStatus.customerName || "—"}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 rounded-lg bg-background border border-border px-3 py-2">
+                        <Mail size={13} className="shrink-0 text-primary" />
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wide font-medium mb-0.5">Email (Username)</p>
+                          <p className="font-medium text-foreground break-all">{portalStatus.email || "—"}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 rounded-lg bg-background border border-border px-3 py-2">
+                        <Lock size={13} className="shrink-0 text-primary" />
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wide font-medium mb-0.5">Initial Password</p>
+                          <p className="font-medium text-foreground">Mobile: <span className="font-mono">{portalStatus.maskedMobile || "—"}</span></p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 rounded-lg bg-background border border-border px-3 py-2">
+                        <Phone size={13} className="shrink-0 text-primary" />
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wide font-medium mb-0.5">Status</p>
+                          <p className="font-medium text-foreground">
+                            {portalStatus.isActive ? (
+                              <span className="text-green-600 dark:text-green-400">Active</span>
+                            ) : (
+                              <span className="text-red-500">Inactive</span>
+                            )}
+                            {portalStatus.mustChangePassword ? (
+                              <span className="ml-2 text-amber-600 dark:text-amber-400 text-[10px]">(password change required on first login)</span>
+                            ) : null}
+                          </p>
+                        </div>
+                      </div>
+                      {portalStatus.portalCreatedAt && (
+                        <div className="flex items-center gap-2 rounded-lg bg-background border border-border px-3 py-2 sm:col-span-2">
+                          <CalendarCheck size={13} className="shrink-0 text-primary" />
+                          <div>
+                            <p className="text-[10px] uppercase tracking-wide font-medium mb-0.5">Provisioned At</p>
+                            <p className="font-medium text-foreground">
+                              {new Date(portalStatus.portalCreatedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => refetchPortal()}
+                      disabled={portalFetching}
+                      className="mt-1 flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted disabled:opacity-40"
+                    >
+                      <RefreshCw size={12} className={portalFetching ? "animate-spin" : ""} />
+                      Refresh
+                    </button>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-5 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle size={20} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                      <div>
+                        <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Portal Not Provisioned</p>
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          {portalStatus?.workflowStage !== "Confirmed"
+                            ? "The portal is provisioned automatically once the booking reaches Confirmed status."
+                            : "This booking is Confirmed but no portal exists. Use the button below to provision it now."}
+                        </p>
+                      </div>
+                    </div>
+                    {portalStatus?.workflowStage === "Confirmed" && (
+                      <button
+                        onClick={handleProvisionPortal}
+                        disabled={provisioning}
+                        className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-40"
+                      >
+                        <KeyRound size={14} />
+                        {provisioning ? "Provisioning…" : "Provision Customer Portal Now"}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {tab === "Attachments" && (
               <div className="space-y-4 pt-2">
                 {canEdit && booking.Status !== "Approved" && (
@@ -2136,7 +2262,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     {reasonDialog && (
       <Dialog open onOpenChange={(o) => { if (!o) setReasonDialog(null); }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>{reasonDialog.title}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{reasonDialog.title}</DialogTitle>
+            <DialogDescription>{reasonDialog.label}</DialogDescription>
+          </DialogHeader>
           <form onSubmit={async (e) => {
             e.preventDefault();
             const reason = (e.currentTarget.elements.namedItem("reason") as HTMLTextAreaElement).value;
@@ -2144,7 +2273,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             await reasonDialog.onConfirm(reason);
             setReasonDialog(null);
           }}>
-            <label className="block text-sm text-muted-foreground mb-2">{reasonDialog.label}</label>
             <textarea name="reason" rows={3} className="w-full border rounded-lg p-2 text-sm" autoFocus />
             <div className="flex justify-end gap-2 mt-4">
               <button type="button" onClick={() => setReasonDialog(null)} className="px-4 py-1.5 text-sm border rounded-lg">Cancel</button>

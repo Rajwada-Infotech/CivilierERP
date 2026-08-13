@@ -789,12 +789,7 @@ router.get("/count", async (req, res) => {
     res.json({ count: result.recordset[0].TotalPending ?? 0 });
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox count error");
-    res.status(500).json({
-      error:
-        process.env.NODE_ENV === "development"
-          ? err.message
-          : "Internal Server Error",
-    });
+    res.json({ count: 0 });
   }
 });
 

@@ -1,6 +1,5 @@
 const { sql } = require("../db");
 const { getNextDocNumber } = require("./docNumber");
-const { ensurePortalUser } = require("./crmPortalProvision");
 const { emitNotification } = require("./notify");
 const { generateInvoicePdf } = require("./invoicePdf");
 
@@ -257,20 +256,8 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
     console.error("[maybeAutoCreateAgreement] legal milestone auto-start failed:", e.message);
   }
 
-  // The agreement (and its identity-proof document request) are already
-  // committed above by this point — portal provisioning is a "nice to have
-  // in parallel" step per the workflow spec, not a prerequisite for the
-  // agreement itself. Guarded separately so a portal-provisioning hiccup
-  // (e.g. a transient DB error) can't turn into a 500 on whatever unrelated
-  // action actually triggered this — logging a welcome call or saving bank
-  // details — when that action itself already succeeded and committed.
-  let portalInfo = null;
-  try {
-    portalInfo = await ensurePortalUser(pool, prereq.booking.ApplicationId);
-  } catch (e) {
-    console.error("[maybeAutoCreateAgreement] portal provisioning failed:", e.message);
-    portalInfo = { created: false, error: e.message };
-  }
+  // Portal is provisioned at booking confirmation (crmBookingStageService.js)
+  // — no duplicate call needed here.
 
   if (prereq.booking.AssignedTo) {
     await emitNotification(pool, prereq.booking.AssignedTo, "crm_agreement_ready",
@@ -279,7 +266,7 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
       agreementId, "crm_agreement");
   }
 
-  return { id: agreementId, AgreementNo: agNo, portal: portalInfo };
+  return { id: agreementId, AgreementNo: agNo };
 }
 
 /**

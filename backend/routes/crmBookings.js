@@ -62,8 +62,6 @@ const BOOKING_SELECT = `
     b.PaymentMode, b.AssignedTo, b.Status, b.Notes, b.IsActive,
     b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
     b.UnitParkingGstRate, b.UnitGstAmount, b.ParkingGstAmount, b.UnitParkingGstAmount, b.ExtraWorkGstAmount, b.TotalGstAmount,
-    b.UnitReviewConfirmed, b.UnitReviewConfirmedBy, b.UnitReviewConfirmedAt,
-    b.PlanReviewConfirmed, b.PlanReviewConfirmedBy, b.PlanReviewConfirmedAt,
     b.ReadyForApprovalAt, b.WorkflowStage, b.StageRemarks, b.RejectedFromStage,
     b.RejectedBy, b.RejectedAt, b.MarketingHeadApprovedAt, b.MarketingHeadApprovedBy,
     b.DirectorApprovedAt, b.DirectorApprovedBy, b.ConfirmedAt, b.ConfirmedBy,
@@ -1301,6 +1299,82 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-bookings] DELETE /:id/attachments/:attId error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/portal-status — staff-facing: shows whether the customer portal
+// account has been provisioned for this booking's customer. Includes masked
+// mobile (initial password hint) so support staff can help a customer who
+// forgot their first-login credential. Only meaningful once the booking is
+// Confirmed, but readable at any stage.
+router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("bid", sql.Int, id).query(`
+      SELECT
+        p.Id          AS PortalUserId,
+        p.Email       AS PortalEmail,
+        p.IsActive    AS PortalIsActive,
+        p.MustChangePassword,
+        p.CreatedAt   AS PortalCreatedAt,
+        c.Mobile      AS CustomerMobile,
+        c.Name        AS CustomerName,
+        c.Email       AS CustomerEmail,
+        b.Status      AS BookingStatus,
+        b.WorkflowStage,
+        b.ConfirmedAt
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
+      LEFT JOIN dbo.CrmCustomerPortalUser p ON p.CustomerId = c.Id
+      WHERE b.Id = @bid AND b.IsActive = 1
+    `);
+    if (!result.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    const row = result.recordset[0];
+    const mob = row.CustomerMobile;
+    res.json({
+      hasPortal: !!row.PortalUserId,
+      portalUserId: row.PortalUserId || null,
+      email: row.PortalEmail || row.CustomerEmail || null,
+      // Mask middle digits — support staff see enough to confirm identity
+      // without exposing the full number in the UI.
+      maskedMobile: mob ? `${mob.slice(0, 2)}${"*".repeat(Math.max(0, mob.length - 4))}${mob.slice(-2)}` : null,
+      isActive: !!row.PortalIsActive,
+      mustChangePassword: !!row.MustChangePassword,
+      portalCreatedAt: row.PortalCreatedAt || null,
+      customerName: row.CustomerName || null,
+      bookingStatus: row.BookingStatus,
+      workflowStage: row.WorkflowStage,
+      confirmedAt: row.ConfirmedAt || null,
+    });
+  } catch (e) {
+    console.error("[crm-bookings] GET /:id/portal-status error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/provision-portal — idempotent recovery route. The portal is
+// normally auto-provisioned at booking confirmation, but if that failed
+// (e.g. customer had no email on file at that moment and it was added later),
+// staff can trigger it here without re-running the full approval flow.
+router.post("/:id/provision-portal", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const bkg = await pool.request().input("bid", sql.Int, id)
+      .query("SELECT ApplicationId, WorkflowStage FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
+    if (!bkg.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    const { ApplicationId, WorkflowStage } = bkg.recordset[0];
+    if (WorkflowStage !== "Confirmed") {
+      return res.status(400).json({ error: "Portal can only be provisioned once the booking is fully confirmed" });
+    }
+    const { ensurePortalUser } = require("../services/crmPortalProvision");
+    const result = await ensurePortalUser(pool, ApplicationId);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    console.error("[crm-bookings] POST /:id/provision-portal error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

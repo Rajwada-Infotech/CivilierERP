@@ -8,7 +8,6 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
-const { ensurePortalUser } = require("../services/crmPortalProvision");
 const { emitNotification } = require("../services/notify");
 const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeAutoCreateLegalMilestone, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep, syncLegalMilestoneFromDocument, maybeUnlockBrokerageOnAgreementExecuted } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
@@ -310,23 +309,10 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
       console.error("[crm-agreements] legal milestone auto-start failed:", e.message);
     }
 
-    // Parallel: auto-create the customer portal login the moment agreement
-    // preparation begins, so the customer can start tracking progress.
-    // The agreement above is already committed by this point (no transaction
-    // wraps the two together) — portal provisioning failing here must not
-    // read back as "agreement creation failed" and must not leave the
-    // already-created Draft agreement unreported to the caller.
-    const appRow = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid");
-    let portalInfo = null;
-    if (appRow.recordset.length) {
-      try {
-        portalInfo = await ensurePortalUser(pool, appRow.recordset[0].ApplicationId);
-      } catch (e) {
-        console.error("[crm-agreements] portal provisioning failed:", e.message);
-        portalInfo = { created: false, error: e.message };
-      }
-    }
+    // Portal is provisioned at booking confirmation (crmBookingStageService.js)
+    // — no duplicate call needed here. The idempotent ensurePortalUser() would
+    // no-op anyway, but removing it keeps this path clean and avoids an extra
+    // DB round-trip on every manual agreement creation.
 
     // "A legal person will arrange/prepare the papers works" — if assigned
     // at creation time, they're notified immediately rather than having to
@@ -338,7 +324,7 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
         agreementId, "crm_agreement");
     }
 
-    res.status(201).json({ success: true, id: agreementId, AgreementNo: agNo, portal: portalInfo });
+    res.status(201).json({ success: true, id: agreementId, AgreementNo: agNo });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
       return res.status(409).json({ error: "An agreement already exists for this booking" });

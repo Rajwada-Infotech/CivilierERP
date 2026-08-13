@@ -511,7 +511,7 @@ const CrmBooking: React.FC = () => {
             {b.Status === "Pending" && (
               b.WorkflowStage && b.WorkflowStage !== "Review" ? (
                 <span className="text-xs text-muted-foreground">Pending {workflowStageLabel[b.WorkflowStage] || "Approval"}</span>
-              ) : b.UnitReviewConfirmed && b.PlanReviewConfirmed ? (
+              ) : b.ReadyForApprovalAt ? (
                 <span className="text-xs text-muted-foreground">Ready for Marketing Head Approval</span>
               ) : (
                 <button onClick={() => setViewingBookingId(b.Id)}

@@ -1625,6 +1625,18 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                   )}
                 </div>
               </div>
+              {/* Portal hint — customer already has a login since booking was
+                  confirmed. If they prefer to self-fill bank/nominee details,
+                  tell them to log in. Staff still verify the data here during
+                  the welcome call either way. */}
+              {!checklist?.bankDetails.complete && (
+                <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40 px-3 py-2 text-xs text-sky-700 dark:text-sky-300">
+                  <Send size={12} className="shrink-0 mt-0.5" />
+                  <span>
+                    <span className="font-medium">Tip:</span> The customer already has a portal login (auto-created at booking confirmation). If they prefer to self-enter their bank &amp; nominee details, ask them to log in at the Customer Portal — their entries will reflect here automatically.
+                  </span>
+                </div>
+              )}
               {bankLocked && (
                 <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground bg-muted/30 border border-border rounded-lg px-2.5 py-1.5">
                   <Lock size={10} /> Locked for viewing — read this back to the customer to confirm, or click "Edit / Re-verify" to correct it.

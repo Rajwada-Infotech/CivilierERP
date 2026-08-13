@@ -513,9 +513,6 @@ const CrmAgreement: React.FC = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create agreement");
       toast.success(`Agreement ${data.AgreementNo} created`);
-      if (data.portal?.error) {
-        toast.warning(`Agreement created, but customer portal login could not be provisioned: ${data.portal.error}`, { duration: 8000 });
-      }
       setAgrDialog(false);
       setAgrForm({ ...EMPTY_AGR_FORM, BookingId: bkgFilter });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
