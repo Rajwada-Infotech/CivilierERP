@@ -1262,7 +1262,7 @@ const ActivityRow: React.FC<{
       </div>
 
       {/* Desktop */}
-      <div className="hidden sm:block rounded-lg border border-border/50">
+      <div className="hidden sm:block rounded-lg border border-border/50 sm:min-w-[960px]">
         <div className="grid grid-cols-[48px_1fr_120px_128px_112px_90px_100px_120px_32px] gap-2 items-center px-3 py-2.5 bg-muted/20">
           <div className="text-xs font-mono text-primary font-semibold">
             {label}
@@ -1498,46 +1498,58 @@ const ActivityGroupCard: React.FC<{
       </div>
       {group.expanded && (
         <div className="p-3 space-y-2">
-          {group.activities.length > 0 && (
-            <div className="hidden sm:grid grid-cols-[48px_1fr_120px_128px_112px_90px_100px_120px_32px] gap-2 px-3 pb-1">
-              {[
-                "#",
-                "Activity",
-                "Unit",
-                "Rate / Unit (Labour)",
-                "Area",
-                "Materials",
-                "SAC / GST",
-                "Activity Total",
-                "",
-              ].map((h) => (
-                <div
-                  key={h}
-                  className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
-                >
-                  {h}
-                </div>
+          {/* The desktop grid's fixed-width columns (750px+) don't fit
+              most viewports once the sidebar is open — contain the
+              horizontal scroll to this table instead of letting it push
+              the whole page wide (which was dragging the entire app into
+              a sideways scroll, cutting off unrelated content). Header and
+              rows share this one scroll container so they always scroll
+              in sync; sm:min-w-[960px] on each (below) is what actually
+              forces the overflow, not this wrapper itself. */}
+          <div className="overflow-x-auto">
+            {group.activities.length > 0 && (
+              <div className="hidden sm:grid grid-cols-[48px_1fr_120px_128px_112px_90px_100px_120px_32px] gap-2 px-3 pb-1 sm:min-w-[960px]">
+                {[
+                  "#",
+                  "Activity",
+                  "Unit",
+                  "Rate / Unit (Labour)",
+                  "Area",
+                  "Materials",
+                  "SAC / GST",
+                  "Activity Total",
+                  "",
+                ].map((h) => (
+                  <div
+                    key={h}
+                    className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                  >
+                    {h}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="space-y-2">
+              {group.activities.map((activity, actIdx) => (
+                <ActivityRow
+                  key={activity.id}
+                  activity={activity}
+                  index={actIdx}
+                  groupIndex={index}
+                  onUpdate={(patch) => updateActivity(actIdx, patch)}
+                  onDelete={() => deleteActivity(actIdx)}
+                  canDelete={group.activities.length > 1}
+                  activityOptions={filteredActivities}
+                  uomOptions={uomOptions}
+                  itemOptions={itemOptions}
+                  suppliers={suppliers}
+                  loadingActivities={loadingDropdowns}
+                  loadingItems={loadingItems}
+                  hsnRecords={hsnRecords}
+                />
               ))}
             </div>
-          )}
-          {group.activities.map((activity, actIdx) => (
-            <ActivityRow
-              key={activity.id}
-              activity={activity}
-              index={actIdx}
-              groupIndex={index}
-              onUpdate={(patch) => updateActivity(actIdx, patch)}
-              onDelete={() => deleteActivity(actIdx)}
-              canDelete={group.activities.length > 1}
-              activityOptions={filteredActivities}
-              uomOptions={uomOptions}
-              itemOptions={itemOptions}
-              suppliers={suppliers}
-              loadingActivities={loadingDropdowns}
-              loadingItems={loadingItems}
-              hsnRecords={hsnRecords}
-            />
-          ))}
+          </div>
           {group.groupId !== null &&
             filteredActivities.length === 0 &&
             !loadingDropdowns && (

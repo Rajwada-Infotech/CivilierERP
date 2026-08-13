@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,11 +29,19 @@ export default function PaymentReasonMaster() {
 
   const [open, setOpen]         = useState(false);
   const [editing, setEditing]   = useState<PaymentReason | null>(null);
-  const [form, setForm]         = useState(EMPTY);
+  // This form only exists inside a Dialog, so a refresh closes it
+  // regardless — persisting values alone wouldn't be visible again until
+  // the dialog reopens. Rehydrate + reopen together (mount effect below).
+  const [form, setForm]         = useDraftForm("payment-reason-master", EMPTY, { skip: !!editing });
   const [saving, setSaving]     = useState(false);
   const [deleting, setDeleting] = useState<PaymentReason | null>(null);
   const [purging, setPurging]   = useState<PaymentReason | null>(null);
   const [purgeBusy, setPurgeBusy] = useState(false);
+
+  useEffect(() => {
+    if (form.name || form.description) setOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openCreate = () => { setEditing(null); setForm(EMPTY); setOpen(true); };
   const openEdit   = (r: PaymentReason) => {
@@ -211,7 +220,7 @@ export default function PaymentReasonMaster() {
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Payment Reason" : "New Payment Reason"}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 pt-1">
+          <div className="space-y-4 pt-1" onKeyDown={preventEnterSubmit}>
             <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                 Reason <span className="text-red-500">*</span>

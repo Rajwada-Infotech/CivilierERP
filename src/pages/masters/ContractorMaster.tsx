@@ -13,6 +13,7 @@ import { getAccountGroups } from "@/api/accountApi";
 import { getContractorCategoryOptions } from "@/api/contractorCategoryApi";
 import { getVendorPaymentTermOptions } from "@/api/vendorPaymentTermApi";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
 import {
@@ -387,7 +388,9 @@ const ContractorMaster: React.FC = () => {
   const rights = usePageRights("contractor-master");
 
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<ContractorForm>(EMPTY_FORM);
+  const [form, setForm] = useDraftForm<ContractorForm>("contractor-master", EMPTY_FORM, {
+    skip: editingId !== null,
+  });
   const [errors, setErrors] = useState<
     Partial<Record<keyof ContractorForm, boolean>>
   >({});
@@ -918,6 +921,7 @@ const ContractorMaster: React.FC = () => {
         {/* ── Form Card ── */}
         {(rights.canCreate || rights.canEdit) && <div
           className="rounded-xl overflow-hidden"
+          onKeyDown={preventEnterSubmit}
           style={{
             background: isDark
               ? "rgba(12,14,22,0.55)"

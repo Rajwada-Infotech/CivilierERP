@@ -62,6 +62,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { ExportMenu } from "@/components/ExportMenu";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -254,9 +255,20 @@ export default function MaterialExpenseBooking() {
   const [, setTotalBookedAmount] = useState(0);
   const [view, setView] = useState<PageView>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
+  const [form, setForm] = useDraftForm<Omit<ExpenseRecord, "id">>(
+    "material-expense-booking",
+    blankForm(),
+    { skip: editingId !== null },
+  );
   const [gstEnabled, setGstEnabled] = useState(false);
   const [gstMode, setGstMode] = useState<"cgst_sgst" | "igst">("cgst_sgst");
+
+  useEffect(() => {
+    if (form.bookingName || form.supplier || form.invoiceReference || form.basicAmount) {
+      setView("form");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredProjectOptions = useMemo(() => {
     if (!form.companyId) return projectOptions;
@@ -1578,7 +1590,7 @@ export default function MaterialExpenseBooking() {
       >
         {/* Form View */}
         {view === "form" && (
-          <Card className="border-border shadow-sm">
+          <Card className="border-border shadow-sm" onKeyDown={preventEnterSubmit}>
             <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-indigo-500/[0.06] border-b border-indigo-500/20">
               <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-indigo-500 to-transparent" />
               <div className="flex items-center gap-3 min-w-0">

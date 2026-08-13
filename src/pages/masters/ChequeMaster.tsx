@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useDraftFormSync, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -362,6 +363,25 @@ const ChequeMaster: React.FC = () => {
   });
   const isDirty = (Object.keys(EMPTY) as (keyof FormState)[]).some(
     (k) => form[k] !== EMPTY[k],
+  );
+
+  // A refresh used to wipe whatever was typed into the "Add" form —
+  // nothing here persisted it. `form` is the real source of truth for
+  // field values (react-hook-form here is only used as a validation
+  // side-channel — see setValue calls throughout), so rehydrating it also
+  // has to push the same values into RHF via setValue, or `errors`/
+  // `trigger()` would validate against stale (empty) RHF state instead.
+  useDraftFormSync(
+    "cheque-master",
+    form,
+    (draft) => {
+      setForm(draft);
+      (Object.keys(draft) as (keyof FormState)[]).forEach((k) =>
+        setValue(k as any, draft[k] as any),
+      );
+    },
+    EMPTY,
+    { skip: editingId !== null },
   );
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -794,6 +814,7 @@ const ChequeMaster: React.FC = () => {
         {rights.canCreate && (
         <div
           className="rounded-xl overflow-hidden"
+          onKeyDown={preventEnterSubmit}
           style={{
             background: isDark
               ? "rgba(12,14,22,0.55)"
