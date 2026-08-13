@@ -1013,7 +1013,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     );
   };
 
-  return (
+  return (<>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto thin-scroll">
         <DialogHeader>
@@ -2133,27 +2133,26 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         )}
       </DialogContent>
     </Dialog>
-
-      {reasonDialog && (
-        <Dialog open onOpenChange={(o) => { if (!o) setReasonDialog(null); }}>
-          <DialogContent className="max-w-md">
-            <DialogHeader><DialogTitle>{reasonDialog.title}</DialogTitle></DialogHeader>
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              const reason = (e.currentTarget.elements.namedItem("reason") as HTMLTextAreaElement).value;
-              if (reasonDialog.required && !reason.trim()) { toast.error("Reason is required"); return; }
-              await reasonDialog.onConfirm(reason);
-              setReasonDialog(null);
-            }}>
-              <label className="block text-sm text-muted-foreground mb-2">{reasonDialog.label}</label>
-              <textarea name="reason" rows={3} className="w-full border rounded-lg p-2 text-sm" autoFocus />
-              <div className="flex justify-end gap-2 mt-4">
-                <button type="button" onClick={() => setReasonDialog(null)} className="px-4 py-1.5 text-sm border rounded-lg">Cancel</button>
-                <button type="submit" className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg">Confirm</button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
-      )}
-  );
+    {reasonDialog && (
+      <Dialog open onOpenChange={(o) => { if (!o) setReasonDialog(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>{reasonDialog.title}</DialogTitle></DialogHeader>
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            const reason = (e.currentTarget.elements.namedItem("reason") as HTMLTextAreaElement).value;
+            if (reasonDialog.required && !reason.trim()) { toast.error("Reason is required"); return; }
+            await reasonDialog.onConfirm(reason);
+            setReasonDialog(null);
+          }}>
+            <label className="block text-sm text-muted-foreground mb-2">{reasonDialog.label}</label>
+            <textarea name="reason" rows={3} className="w-full border rounded-lg p-2 text-sm" autoFocus />
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setReasonDialog(null)} className="px-4 py-1.5 text-sm border rounded-lg">Cancel</button>
+              <button type="submit" className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg">Confirm</button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    )}
+  </>);
 }
