@@ -323,6 +323,7 @@ const DBADashboard = lazy(() => import("./pages/dba/DBADashboard"));
 const ControlPanel = lazy(() => import("./pages/dba/ControlPanel"));
 const AdsManager = lazy(() => import("./pages/dba/AdsManager"));
 const FollowUp = lazy(() => import("./pages/followup/FollowUp"));
+const ClosedTasks = lazy(() => import("./pages/followup/ClosedTasks"));
 const FollowupReminders = lazy(
   () => import("./pages/admin/masters/Reminders"),
 );
@@ -866,6 +867,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="followup-dashboard">
             <FollowUp />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/close-tasks"
+        element={
+          <ProtectedRoute pageKey="followup-close-tasks">
+            <ClosedTasks />
           </ProtectedRoute>
         }
       />
