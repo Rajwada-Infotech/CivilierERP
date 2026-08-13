@@ -13,7 +13,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const [apps, bookings, payments, tickets, cancellations, legal, noc, deeds, handovers, inventory, collections] = await Promise.all([
+    const [apps, bookings, payments, tickets, cancellations, legal, noc, deeds, handovers, monthlyTrend] = await Promise.all([
       pool.request().query(`
         SELECT Status, COUNT(*) AS Count FROM dbo.CrmApplication WHERE IsActive = 1 GROUP BY Status
       `),
@@ -47,31 +47,31 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       pool.request().query(`
         SELECT Status, COUNT(*) AS Count FROM dbo.CrmHandover GROUP BY Status
       `),
+      // Last 6 months — applications/bookings created and payments actually
+      // collected in each month, for the dashboard's trend line chart.
       pool.request().query(`
-        SELECT 
-          CASE 
-            WHEN u.IsActive = 0 THEN 'Blocked'
-            WHEN bk.Id IS NOT NULL THEN 'Booked'
-            WHEN h.Id IS NOT NULL THEN 'OnHold'
-            ELSE 'Available'
-          END AS Status,
-          COUNT(*) AS Count
-        FROM dbo.UnitMaster u
-        LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired')
-        LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
-        GROUP BY CASE 
-            WHEN u.IsActive = 0 THEN 'Blocked'
-            WHEN bk.Id IS NOT NULL THEN 'Booked'
-            WHEN h.Id IS NOT NULL THEN 'OnHold'
-            ELSE 'Available'
-          END
+        ;WITH Months AS (
+          SELECT DATEFROMPARTS(YEAR(m.d), MONTH(m.d), 1) AS MonthStart
+          FROM (VALUES
+            (DATEADD(MONTH, -5, SYSDATETIME())),
+            (DATEADD(MONTH, -4, SYSDATETIME())),
+            (DATEADD(MONTH, -3, SYSDATETIME())),
+            (DATEADD(MONTH, -2, SYSDATETIME())),
+            (DATEADD(MONTH, -1, SYSDATETIME())),
+            (SYSDATETIME())
+          ) AS m(d)
+        )
+        SELECT
+          FORMAT(mo.MonthStart, 'MMM yyyy') AS MonthLabel,
+          (SELECT COUNT(*) FROM dbo.CrmApplication a
+            WHERE a.IsActive = 1 AND a.CreatedAt >= mo.MonthStart AND a.CreatedAt < DATEADD(MONTH, 1, mo.MonthStart)) AS Applications,
+          (SELECT COUNT(*) FROM dbo.CrmBooking b
+            WHERE b.IsActive = 1 AND b.CreatedAt >= mo.MonthStart AND b.CreatedAt < DATEADD(MONTH, 1, mo.MonthStart)) AS Bookings,
+          (SELECT ISNULL(SUM(pm.AmountPaid), 0) FROM dbo.CrmPaymentMilestone pm
+            WHERE pm.PaidDate >= mo.MonthStart AND pm.PaidDate < DATEADD(MONTH, 1, mo.MonthStart)) AS Collected
+        FROM Months mo
+        ORDER BY mo.MonthStart
       `),
-      pool.request().query(`
-        SELECT FORMAT(ReceivedDate, 'yyyy-MM') AS Month, ISNULL(SUM(Amount),0) AS TotalCollected
-        FROM dbo.CrmPaymentReceipt
-        GROUP BY FORMAT(ReceivedDate, 'yyyy-MM')
-        ORDER BY Month ASC
-      `)
     ]);
 
     res.json({
@@ -84,8 +84,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       noc: noc.recordset,
       salesDeeds: deeds.recordset,
       handovers: handovers.recordset,
-      inventory: inventory.recordset,
-      collections: collections.recordset,
+      monthlyTrend: monthlyTrend.recordset,
     });
   } catch (e) {
     console.error("[crm-dashboard] GET error:", e.message);

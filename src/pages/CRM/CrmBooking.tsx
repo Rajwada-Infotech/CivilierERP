@@ -1,11 +1,13 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useTheme } from "@/contexts/ThemeContext";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Plus, Search, ChevronRight, MoreHorizontal, CheckCircle2,
-  Eye, Phone, MessageSquare, Landmark, FileSignature, IndianRupee, Repeat,
+  Eye, Phone, MessageSquare, Landmark, FileSignature, IndianRupee, Repeat, Building2,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -33,6 +35,13 @@ const BANK_MASTER_API = "/api/bank-master";
 const STATUSES    = ["Pending", "Approved", "Rejected", "Cancelled"];
 const PAY_MODES   = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
 const TOKEN_TYPES = ["Percentage", "Amount"];
+
+// Shared field styling for the New Booking dialog's restructured 2-column
+// layout — same amber-focus-ring convention as the New Application wizard's
+// inputCls/labelCls (CrmApplication.tsx).
+const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40";
+const inputClsDisabled = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed";
+const labelCls = "text-xs text-muted-foreground block mb-1";
 
 const statusColor: Record<string, string> = {
   Pending:   "text-orange-600 bg-orange-50 border-orange-200",
@@ -132,12 +141,12 @@ function getNextStep(b: any): NextStep {
   // HasWelcomeCall means Outcome = 'Welcomed' specifically (see crmBookings.js
   // BOOKING_SELECT) -- a logged call with any other outcome must NOT satisfy
   // this, since that's not what unblocks Agreement auto-creation either.
-  if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
+  if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-amber-500 border-amber-200 bg-amber-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
   if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-amber-600 border-amber-200 bg-amber-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
   if (!b.AgreementId || b.SeniorApprovalStatus !== "Approved" || b.CustomerApprovalStatus !== "Approved") {
-    return { label: "Agreement", color: "text-purple-600 border-purple-200 bg-purple-50", path: `/crm/agreements?bookingId=${b.Id}` };
+    return { label: "Agreement", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
-  if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-primary border-primary/20 bg-primary/5", path: `/crm/payments?bookingId=${b.Id}` };
+  if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
   return null; // every gated step is complete
 }
 
@@ -149,6 +158,8 @@ const CrmBooking: React.FC = () => {
   // canEdit gates both this and the other mutating actions on this review
   // page (see CrmBookingDetail.tsx).
   const canEdit = canDoAction("crm-bookings", "edit");
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   const navigate = useNavigate();
   const [sp] = useSearchParams();
   const appFilter = sp.get("applicationId") || "";
@@ -262,6 +273,46 @@ const CrmBooking: React.FC = () => {
   const appPreferredUnitAvailable = appPreferredUnitId != null
     && (availableUnits as any[]).some((u: any) => u.Id === appPreferredUnitId);
   const unitLockedFromApp = !!appPreferredUnitId && appPreferredUnitAvailable;
+
+  // Everything the Application already captured (rate, token, booking
+  // amount, payment mode, assignee, plan, brokerage, notes) is auto-fetched
+  // and locked here — the exact same data createCrmBookingRecord would have
+  // used had auto-booking succeeded at Application-approval time (see
+  // crmApplications.js PUT /:id/approve). Staff filling this manual fallback
+  // dialog only ever need to pick the Unit; nothing Application-sourced
+  // should be re-typed or drift from what was already approved.
+  const handleApplicationSelect = (applicationId: string) => {
+    const app = (apps as any[]).find((a: any) => String(a.Id) === applicationId);
+    const appUnit = app?.PreferredUnitId
+      ? (units as any[]).find((u: any) => u.Id === app.PreferredUnitId)
+      : null;
+    const area = appUnit?.AreaSqFt != null ? String(appUnit.AreaSqFt) : "";
+    const rate = app?.RatePerSqFt != null ? String(app.RatePerSqFt) : "";
+    const areaNum = parseFloat(area);
+    const rateNum = parseFloat(rate);
+    setForm((f) => ({
+      ...f,
+      ApplicationId: applicationId,
+      UnitId: appUnit ? String(appUnit.Id) : "",
+      UnitNo: appUnit?.UnitName || "",
+      ProjectName: appUnit?.ProjectName || "",
+      BlockName: appUnit?.BlockName || "",
+      UnitType: appUnit?.UnitType || "",
+      AreaSqFt: area,
+      RatePerSqFt: rate,
+      TotalValue: !isNaN(areaNum) && !isNaN(rateNum) ? String(Math.round(areaNum * rateNum)) : "",
+      PaymentPlanId: app?.PaymentPlanId ? String(app.PaymentPlanId) : "",
+      TokenType: app?.TokenType || "Percentage",
+      TokenValue: app?.TokenValue != null ? String(app.TokenValue) : "",
+      BookingAmount: app?.BookingAmount != null ? String(app.BookingAmount) : "",
+      PaymentMode: app?.PaymentMode || "",
+      AssignedTo: app?.AssignedTo != null ? String(app.AssignedTo) : "",
+      Notes: app?.Notes || "",
+      BrokerId: app?.BrokerId != null ? String(app.BrokerId) : "",
+      BrokerageRatePercent: app?.BrokerageRatePercent != null ? String(app.BrokerageRatePercent) : "",
+      BrokerageSplitEnabled: !!app?.BrokerageSplitEnabled,
+    }));
+  };
 
   const handleUnitSelect = (unitId: string) => {
     const u = (units as any[]).find((x: any) => String(x.Id) === unitId);
@@ -379,20 +430,20 @@ const CrmBooking: React.FC = () => {
   };
 
   const bookingColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "BookingNo", header: "Booking No", size: 110,
+    { accessorKey: "BookingNo", header: "Booking No", size: 115,
       cell: (i) => (
-        <button onClick={() => setViewingBookingId(i.row.original.Id)} className="font-mono text-xs font-semibold text-primary hover:underline">
+        <button onClick={() => setViewingBookingId(i.row.original.Id)} className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
           {i.row.original.BookingNo}
         </button>
       ) },
-    { accessorKey: "ApplicantName", header: "Customer", size: 140,
+    { accessorKey: "ApplicantName", header: "Customer", size: 160,
       cell: (i) => (
         <div onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium">{i.row.original.ApplicantName}</div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
       ) },
-    { id: "projectUnit", header: "Project / Unit", size: 150, enableSorting: false,
+    { id: "projectUnit", header: "Project / Unit", size: 180, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
         return (
@@ -405,7 +456,7 @@ const CrmBooking: React.FC = () => {
       } },
     { accessorKey: "AreaSqFt", header: "Area", size: 90,
       cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer text-sm">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sqft` : "—"}</span> },
-    { id: "value", header: "Value", size: 130, enableSorting: false,
+    { id: "value", header: "Value", size: 145, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
         return (
@@ -422,11 +473,11 @@ const CrmBooking: React.FC = () => {
           </div>
         );
       } },
-    { accessorKey: "BookingAmount", header: "Booking Amt", size: 100,
+    { accessorKey: "BookingAmount", header: "Booking Amt", size: 110,
       cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer">{fmt(i.row.original.BookingAmount)}</span> },
     { accessorKey: "Status", header: "Status", size: 100,
       cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
-    { accessorKey: "BookingDate", header: "Date", size: 100,
+    { accessorKey: "BookingDate", header: "Date", size: 95,
       cell: (i) => (
         <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
           {i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}
@@ -500,7 +551,7 @@ const CrmBooking: React.FC = () => {
                 )}
                 {welcomeCallReached && (
                   <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)} className="gap-2">
-                    <Phone size={14} className="text-sky-600" /> Welcome Call
+                    <Phone size={14} className="text-amber-500" /> Welcome Call
                   </DropdownMenuItem>
                 )}
                 {bankDetailsReached && (
@@ -510,16 +561,16 @@ const CrmBooking: React.FC = () => {
                 )}
                 {agreementReached && (
                   <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)} className="gap-2">
-                    <FileSignature size={14} className="text-purple-600" /> Agreement
+                    <FileSignature size={14} className="text-orange-500" /> Agreement
                   </DropdownMenuItem>
                 )}
                 {paymentsReached && (
                   <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)} className="gap-2">
-                    <IndianRupee size={14} className="text-primary" /> Payments
+                    <IndianRupee size={14} className="text-amber-600" /> Payments
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)} className="gap-2">
-                  <MessageSquare size={14} className="text-violet-600" /> Communication
+                  <MessageSquare size={14} className="text-amber-700 dark:text-amber-400" /> Communication
                 </DropdownMenuItem>
                 {b.Status !== "Cancelled" && canEdit && (
                   <>
@@ -536,285 +587,293 @@ const CrmBooking: React.FC = () => {
       } },
   ];
 
+  const glassStyle: React.CSSProperties = {
+    background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
+    border: isDark ? "1px solid rgba(245,158,11,0.15)" : "1px solid rgba(245,158,11,0.18)",
+    backdropFilter: "blur(16px) saturate(150%)",
+    WebkitBackdropFilter: "blur(16px) saturate(150%)",
+    boxShadow: isDark
+      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+      : "0 4px 24px rgba(245,158,11,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+  };
+  const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
+
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Applications and Bookings"
       subtitle="Applications become pending bookings, then move through review, Marketing Head approval, and Director approval"
       action={
         canEdit ? (
           <button onClick={() => { setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); setDialogOpen(true); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
             <Plus size={14} /> New Booking
           </button>
         ) : undefined
       }
     >
-      <div className="flex gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-48">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, booking no, unit..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+      {/* Search + status filter + table live in one continuous glass card,
+          same convention as CrmLeads/CrmApplication, instead of a loose
+          toolbar row floating above a separately-bordered table. */}
+      <div className="rounded-xl overflow-hidden" style={glassStyle}>
+        <div className="flex gap-3 flex-wrap items-center px-3.5 py-3 border-b" style={{ borderColor }}>
+          <div className="relative flex-1 min-w-48">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, booking no, unit..."
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+          </div>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-amber-500/40">
+              <SelectValue placeholder="All Statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="All">All Statuses</SelectItem>
+              {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
-          <option value="All">All Statuses</option>
-          {STATUSES.map((s) => <option key={s}>{s}</option>)}
-        </select>
+
+        <DataTable
+          data={filtered}
+          columns={bookingColumns}
+          searchable={false}
+          loading={isLoading}
+          emptyMessage="No bookings found"
+          className="border-0"
+        />
       </div>
 
-      <DataTable
-        data={filtered}
-        columns={bookingColumns}
-        searchable={false}
-        loading={isLoading}
-        emptyMessage="No bookings found"
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
-
-      {/* New Booking Dialog — manual fallback, still requires a real Application */}
+      {/* New Booking Dialog — manual fallback, still requires a real Application.
+          Widened + restructured into a 2-column layout (Unit/Project+Pricing on
+          the left, Booking/Payment on the right) so every field fits in one
+          screen without an inner scroller, matching the New Application
+          wizard's Step 1 convention. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); } }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-heading">New Booking</DialogTitle>
+        <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-3">
+          <DialogHeader className="space-y-0.5">
+            <DialogTitle className="flex items-center gap-2 text-base font-heading font-bold">
+              <Building2 size={16} className="text-amber-500" /> New Booking
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Application * (Approved, not yet booked)</label>
-              <select value={form.ApplicationId} onChange={(e) => {
-                const app = (apps as any[]).find((a: any) => String(a.Id) === e.target.value);
-                const appUnit = app?.PreferredUnitId
-                  ? (units as any[]).find((u: any) => u.Id === app.PreferredUnitId)
-                  : null;
-                const area = appUnit?.AreaSqFt != null ? String(appUnit.AreaSqFt) : "";
-                // Everything the Application already captured (rate, token,
-                // booking amount, payment mode, assignee, plan, brokerage,
-                // notes) is auto-fetched and locked here — the exact same
-                // data createCrmBookingRecord would have used had auto-
-                // booking succeeded at Application-approval time (see
-                // crmApplications.js PUT /:id/approve). Staff filling this
-                // manual fallback dialog only ever need to pick the Unit;
-                // nothing Application-sourced should be re-typed or drift
-                // from what was already approved.
-                const rate = app?.RatePerSqFt != null ? String(app.RatePerSqFt) : "";
-                const areaNum = parseFloat(area);
-                const rateNum = parseFloat(rate);
-                setForm((f) => ({
-                  ...f,
-                  ApplicationId: e.target.value,
-                  UnitId: appUnit ? String(appUnit.Id) : "",
-                  UnitNo: appUnit?.UnitName || "",
-                  ProjectName: appUnit?.ProjectName || "",
-                  BlockName: appUnit?.BlockName || "",
-                  UnitType: appUnit?.UnitType || "",
-                  AreaSqFt: area,
-                  RatePerSqFt: rate,
-                  TotalValue: !isNaN(areaNum) && !isNaN(rateNum) ? String(Math.round(areaNum * rateNum)) : "",
-                  PaymentPlanId: app?.PaymentPlanId ? String(app.PaymentPlanId) : "",
-                  TokenType: app?.TokenType || "Percentage",
-                  TokenValue: app?.TokenValue != null ? String(app.TokenValue) : "",
-                  BookingAmount: app?.BookingAmount != null ? String(app.BookingAmount) : "",
-                  PaymentMode: app?.PaymentMode || "",
-                  AssignedTo: app?.AssignedTo != null ? String(app.AssignedTo) : "",
-                  Notes: app?.Notes || "",
-                  BrokerId: app?.BrokerId != null ? String(app.BrokerId) : "",
-                  BrokerageRatePercent: app?.BrokerageRatePercent != null ? String(app.BrokerageRatePercent) : "",
-                  BrokeragePaymentPlan: ["OneTime", "TwoPart", "AgreementOnly"].includes(app?.BrokeragePaymentPlan) ? app.BrokeragePaymentPlan : "OneTime",
-                }));
-              }}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select application</option>
-                {(apps as any[]).map((a: any) => (
-                  <option key={a.Id} value={String(a.Id)}>
-                    {a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <label className="text-xs text-muted-foreground block mb-1">
-                  Unit * {unitLockedFromApp ? "(from Application — already selected)" : "(from Unit Master — mandatory)"}
-                </label>
-                {unitLockedFromApp ? (
-                  <input type="text" readOnly disabled
-                    value={`${form.ProjectName} — ${form.BlockName} — ${form.UnitNo}`}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-                ) : (
-                  <>
-                    <select value={form.UnitId} onChange={(e) => handleUnitSelect(e.target.value)}
-                      className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                      <option value="">Select unit</option>
-                      {(availableUnits as any[]).map((u: any) => (
-                        <option key={u.Id} value={String(u.Id)}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</option>
-                      ))}
-                    </select>
-                    {appPreferredUnitId != null && !appPreferredUnitAvailable && (
-                      <p className="text-[11px] text-amber-600 mt-1">
-                        This Application's preferred unit is no longer available — select a different one.
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Project (from selected unit)</label>
-                <input type="text" value={form.ProjectName} readOnly disabled
-                  placeholder="Auto-filled once a unit is selected"
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Block/Tower (from selected unit)</label>
-                <input type="text" value={form.BlockName} readOnly disabled
-                  placeholder="Auto-filled once a unit is selected"
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Type of Unit (from selected unit)</label>
-                <input type="text" value={form.UnitType} readOnly disabled
-                  placeholder="Auto-filled once a unit is selected"
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Booking Date</label>
-                <input type="date" value={form.BookingDate}
-                  onChange={(e) => setForm((f) => ({ ...f, BookingDate: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Booking Token Type (from Application)</label>
-                {form.ApplicationId ? (
-                  <input type="text" value={form.TokenType} readOnly disabled
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-                ) : (
-                  <select value={form.TokenType} onChange={(e) => setForm((f) => ({ ...f, TokenType: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                    {TOKEN_TYPES.map((t) => <option key={t}>{t}</option>)}
-                  </select>
-                )}
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  Token {form.TokenType === "Percentage" ? "(%)" : "Amount (₹)"} {form.ApplicationId && form.TokenValue ? "(from Application)" : ""}
-                </label>
-                <input type="number" value={form.TokenValue}
-                  onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))}
-                  readOnly={!!form.ApplicationId && !!form.TokenValue} disabled={!!form.ApplicationId && !!form.TokenValue}
-                  className={`w-full text-sm border border-border rounded px-2 py-1.5 ${form.ApplicationId && form.TokenValue ? "bg-muted/40 text-muted-foreground cursor-not-allowed" : "bg-background"}`} />
-              </div>
-              <div className="col-span-2">
-                <label className="text-xs text-muted-foreground block mb-1">Payment Plan (from the Application — not editable here)</label>
-                <input type="text" readOnly disabled
-                  value={selectedPlan?.PlanName
-                    || (apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName
-                    || "Default 7-stage split"}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-              </div>
-              {form.BrokerId && (
-                <div className="col-span-2">
-                  <label className="text-xs text-muted-foreground block mb-1">Brokerage Payout Plan (from the Application — not editable here)</label>
-                  <input type="text" readOnly disabled
-                    value={
-                      form.BrokeragePaymentPlan === "TwoPart" ? "Two-part payout"
-                      : form.BrokeragePaymentPlan === "AgreementOnly" ? "Agreement-only payout"
-                      : "One-time — full commission once Booking Amount is paid"
-                    }
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-                </div>
-              )}
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  Payment Mode {form.ApplicationId && form.PaymentMode ? "(from Application)" : ""}
-                </label>
-                {form.ApplicationId && form.PaymentMode ? (
-                  <input type="text" value={form.PaymentMode} readOnly disabled
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-                ) : (
-                  <select value={form.PaymentMode} onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                    <option value="">Select</option>
-                    {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
-                  </select>
-                )}
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}{bankOptions.length > 0 ? " *" : ""}
-                </label>
-                <select value={form.DepositBankId} onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">— Select company bank —</option>
-                  {(bankOptions as any[]).map((b: any) => (
-                    <option key={b.BId} value={String(b.BId)}>{b.BName}</option>
+              <label className={labelCls}>Application * (Approved, not yet booked)</label>
+              <Select value={form.ApplicationId || undefined} onValueChange={handleApplicationSelect}>
+                <SelectTrigger className={inputCls}>
+                  <SelectValue placeholder="Select application" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(apps as any[]).map((a: any) => (
+                    <SelectItem key={a.Id} value={String(a.Id)}>
+                      {a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})
+                    </SelectItem>
                   ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Area (sq ft) — from Unit Master</label>
-                <input type="text" value={form.AreaSqFt} readOnly disabled
-                  placeholder="Auto-filled once a unit is selected"
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  Rate per sq ft (₹) {form.ApplicationId && form.RatePerSqFt ? "(from Application)" : ""}
-                </label>
-                <input type="number" value={form.RatePerSqFt} onChange={(e) => handleRateChange(e.target.value)}
-                  readOnly={!!form.ApplicationId && !!form.RatePerSqFt} disabled={!!form.ApplicationId && !!form.RatePerSqFt}
-                  className={`w-full text-sm border border-border rounded px-2 py-1.5 ${form.ApplicationId && form.RatePerSqFt ? "bg-muted/40 text-muted-foreground cursor-not-allowed" : "bg-background"}`} />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Total Value (₹) — auto-calculated</label>
-                <input type="number" value={form.TotalValue} onChange={(e) => setForm((f) => ({ ...f, TotalValue: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background font-semibold" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  Booking Amount (₹) {selectedPlan ? "(from Payment Plan)" : ""}
-                </label>
-                <input type="number" value={form.BookingAmount}
-                  onChange={(e) => setForm((f) => ({ ...f, BookingAmount: e.target.value }))}
-                  readOnly={!!selectedPlan} disabled={!!selectedPlan}
-                  placeholder={selectedPlan ? undefined : "Select a Payment Plan to set this"}
-                  className={`w-full text-sm border border-border rounded px-2 py-1.5 ${selectedPlan ? "bg-muted/40 text-muted-foreground cursor-not-allowed" : "bg-background"}`} />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  Assigned To {form.ApplicationId && form.AssignedTo ? "(from Application)" : ""}
-                </label>
-                {form.ApplicationId && form.AssignedTo ? (
-                  <input type="text" readOnly disabled
-                    value={users.find((u) => u.value === form.AssignedTo)?.label || "— Assigned on Application —"}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed" />
-                ) : (
-                  <select value={form.AssignedTo} onChange={(e) => setForm((f) => ({ ...f, AssignedTo: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                    <option value="">— Unassigned —</option>
-                    {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                  </select>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {/* ── LEFT: Unit / Project + Pricing ── */}
+              <div className="rounded-lg border border-border p-2.5 space-y-2.5">
+                <p className="text-[11px] font-heading font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">Unit / Project</p>
+                <div>
+                  <label className={labelCls}>
+                    Unit * {unitLockedFromApp ? "(from Application — already selected)" : "(from Unit Master — mandatory)"}
+                  </label>
+                  {unitLockedFromApp ? (
+                    <input type="text" readOnly disabled
+                      value={`${form.ProjectName} — ${form.BlockName} — ${form.UnitNo}`}
+                      className={inputClsDisabled} />
+                  ) : (
+                    <>
+                      <Select value={form.UnitId || undefined} onValueChange={handleUnitSelect}>
+                        <SelectTrigger className={inputCls}>
+                          <SelectValue placeholder="Select unit" />
+                        </SelectTrigger>
+                        <SelectContent className="max-w-[min(90vw,420px)]">
+                          {(availableUnits as any[]).map((u: any) => (
+                            <SelectItem key={u.Id} value={String(u.Id)}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {appPreferredUnitId != null && !appPreferredUnitAvailable && (
+                        <p className="text-[11px] text-amber-600 mt-1">
+                          This Application's preferred unit is no longer available — select a different one.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div>
+                    <label className={labelCls}>Project</label>
+                    <input type="text" value={form.ProjectName} readOnly disabled
+                      placeholder="Auto-filled"
+                      className={inputClsDisabled} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Block/Tower</label>
+                    <input type="text" value={form.BlockName} readOnly disabled
+                      placeholder="Auto-filled"
+                      className={inputClsDisabled} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Type of Unit</label>
+                    <input type="text" value={form.UnitType} readOnly disabled
+                      placeholder="Auto-filled"
+                      className={inputClsDisabled} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div>
+                    <label className={labelCls}>Area (sq ft)</label>
+                    <input type="text" value={form.AreaSqFt} readOnly disabled
+                      placeholder="Auto-filled"
+                      className={inputClsDisabled} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>
+                      Rate/sqft (₹) {form.ApplicationId && form.RatePerSqFt ? "(App)" : ""}
+                    </label>
+                    <input type="number" value={form.RatePerSqFt} onChange={(e) => handleRateChange(e.target.value)}
+                      readOnly={!!form.ApplicationId && !!form.RatePerSqFt} disabled={!!form.ApplicationId && !!form.RatePerSqFt}
+                      className={form.ApplicationId && form.RatePerSqFt ? inputClsDisabled : inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Total Value (₹)</label>
+                    <input type="number" value={form.TotalValue} onChange={(e) => setForm((f) => ({ ...f, TotalValue: e.target.value }))}
+                      className={`${inputCls} font-semibold`} />
+                  </div>
+                </div>
+                {form.TotalValue && (
+                  <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-[11px] text-emerald-700">
+                    Milestone payment schedule (7 stages) will be auto-generated from total value of ₹{Number(form.TotalValue).toLocaleString("en-IN")}
+                  </div>
                 )}
               </div>
-            </div>
-            {form.TotalValue && (
-              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-700">
-                Milestone payment schedule (7 stages) will be auto-generated from total value of ₹{Number(form.TotalValue).toLocaleString("en-IN")}
+
+              {/* ── RIGHT: Booking / Payment ── */}
+              <div className="rounded-lg border border-border p-2.5 space-y-2.5">
+                <p className="text-[11px] font-heading font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">Booking & Payment</p>
+                <div className="grid grid-cols-1 sm:grid-cols-[1.3fr_1fr_0.9fr] gap-2.5">
+                  <div>
+                    <label className={labelCls}>Booking Date</label>
+                    <input type="date" value={form.BookingDate}
+                      onChange={(e) => setForm((f) => ({ ...f, BookingDate: e.target.value }))}
+                      className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Token Type</label>
+                    {form.ApplicationId ? (
+                      <input type="text" value={form.TokenType} readOnly disabled className={inputClsDisabled} />
+                    ) : (
+                      <Select value={form.TokenType} onValueChange={(v) => setForm((f) => ({ ...f, TokenType: v }))}>
+                        <SelectTrigger className={inputCls}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TOKEN_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                  <div>
+                    <label className={labelCls}>
+                      Token {form.TokenType === "Percentage" ? "(%)" : "(₹)"}
+                    </label>
+                    <input type="number" value={form.TokenValue}
+                      onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))}
+                      readOnly={!!form.ApplicationId && !!form.TokenValue} disabled={!!form.ApplicationId && !!form.TokenValue}
+                      className={form.ApplicationId && form.TokenValue ? inputClsDisabled : inputCls} />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelCls}>Payment Plan (from the Application — not editable here)</label>
+                  <input type="text" readOnly disabled
+                    value={selectedPlan?.PlanName
+                      || (apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName
+                      || "Default 7-stage split"}
+                    className={inputClsDisabled} />
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className={labelCls}>Payment Mode</label>
+                    {form.ApplicationId && form.PaymentMode ? (
+                      <input type="text" value={form.PaymentMode} readOnly disabled className={inputClsDisabled} />
+                    ) : (
+                      <Select value={form.PaymentMode || undefined} onValueChange={(v) => setForm((f) => ({ ...f, PaymentMode: v }))}>
+                        <SelectTrigger className={inputCls}>
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PAY_MODES.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                  <div>
+                    <label className={labelCls}>
+                      Deposited To{bankOptions.length > 0 ? " *" : ""}
+                    </label>
+                    <Select value={form.DepositBankId || undefined} onValueChange={(v) => setForm((f) => ({ ...f, DepositBankId: v }))}>
+                      <SelectTrigger className={inputCls}>
+                        <SelectValue placeholder="— Select bank —" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(bankOptions as any[]).map((b: any) => (
+                          <SelectItem key={b.BId} value={String(b.BId)}>{b.BName}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className={labelCls}>
+                      Booking Amount (₹) {selectedPlan ? "(Plan)" : ""}
+                    </label>
+                    <input type="number" value={form.BookingAmount}
+                      onChange={(e) => setForm((f) => ({ ...f, BookingAmount: e.target.value }))}
+                      readOnly={!!selectedPlan} disabled={!!selectedPlan}
+                      placeholder={selectedPlan ? undefined : "From Payment Plan"}
+                      className={selectedPlan ? inputClsDisabled : inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Assigned To</label>
+                    {form.ApplicationId && form.AssignedTo ? (
+                      <input type="text" readOnly disabled
+                        value={users.find((u) => u.value === form.AssignedTo)?.label || "— Assigned on Application —"}
+                        className={inputClsDisabled} />
+                    ) : (
+                      <Select value={form.AssignedTo || undefined} onValueChange={(v) => setForm((f) => ({ ...f, AssignedTo: v }))}>
+                        <SelectTrigger className={inputCls}>
+                          <SelectValue placeholder="— Unassigned —" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {users.map((u) => <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                </div>
               </div>
-            )}
+            </div>
+
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">
+              <label className={labelCls}>
                 Notes {form.ApplicationId && form.Notes ? "(from Application — add to it below if needed)" : ""}
               </label>
               <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+                rows={2} className={`${inputCls} resize-none`} />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
               Cancel
             </button>
             <button onClick={handleSave} disabled={saving || (bankOptions.length > 0 && !form.DepositBankId)}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
               {saving ? "Creating..." : "Create Booking"}
             </button>
           </div>
@@ -886,7 +945,7 @@ const CrmBooking: React.FC = () => {
           </DialogContent>
         </Dialog>
       )}
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

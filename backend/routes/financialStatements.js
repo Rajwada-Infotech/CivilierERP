@@ -199,7 +199,7 @@ router.get("/balance-sheet", async (req, res) => {
 
       const gid = Number(h.groupId);
       const grp = groupMap.get(gid);
-      const groupName = grp ? grp.name : `Group-${gid}`;
+      let groupName = grp ? grp.name : `Group-${gid}`;
       let root = rootOf(groupMap, gid);
 
       // If it's the Income Summary system head used for Year-End Close, capture 
@@ -213,8 +213,16 @@ router.get("/balance-sheet", async (req, res) => {
 
       if (root == null && gid !== LOANS_GROUP_ID) continue; // orphan/unmapped, skip
       if (gid === LOANS_GROUP_ID) {
-        // Per-head sign classification (see file header comment).
+        // Per-head sign classification (see file header comment). Relabel
+        // the group name too — "LOANS AND ADVANCES" alone doesn't match
+        // isCurrentAsset/isCurrentLiability below, so these heads used to
+        // fall through to Non-Current. A per-company inter-company loan
+        // (LOAN-C-<id> heads) is a short-term intercompany balance, not a
+        // long-term investment/borrowing, so it belongs in Current — and
+        // "Receivable"/"Payable" are exactly the keywords those regexes
+        // already look for, so relabeling is enough without touching them.
         root = net > 0 ? ROOT_IDS.ASSETS : ROOT_IDS.LIABILITIES;
+        groupName = net > 0 ? "Loan Receivable" : "Loan Payable";
       }
 
       if (root === ROOT_IDS.ASSETS) {

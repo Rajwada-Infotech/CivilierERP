@@ -498,6 +498,8 @@ const CrmAgreement: React.FC = () => {
 
   const handleSaveAgreement = async () => {
     if (!agrForm.BookingId) { toast.error("Booking is required"); return; }
+    if (agrForm.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(agrForm.PanNo.trim())) { toast.error("Invalid PAN format (e.g. ABCDE1234F)"); return; }
+    if (agrForm.AadhaarNo && !/^\d{12}$/.test(agrForm.AadhaarNo.trim())) { toast.error("Aadhaar must be exactly 12 digits"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -760,6 +762,8 @@ const CrmAgreement: React.FC = () => {
 
   const handleSaveEdit = async () => {
     if (!selectedId) return;
+    if (editForm.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(editForm.PanNo.trim())) { toast.error("Invalid PAN format (e.g. ABCDE1234F)"); return; }
+    if (editForm.AadhaarNo && !/^\d{12}$/.test(editForm.AadhaarNo.trim())) { toast.error("Aadhaar must be exactly 12 digits"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}`, {
@@ -1439,7 +1443,7 @@ const CrmAgreement: React.FC = () => {
                 <div key={key}>
                   <label className="text-xs text-muted-foreground block mb-1">{label}</label>
                   <input type={type} value={agrForm[key as keyof typeof agrForm]}
-                    onChange={(e) => setAgrForm((f) => ({ ...f, [key]: e.target.value }))}
+                    onChange={(e) => setAgrForm((f) => ({ ...f, [key]: key === "PanNo" ? e.target.value.toUpperCase() : e.target.value }))}
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                 </div>
               ))}
@@ -1664,7 +1668,7 @@ const CrmAgreement: React.FC = () => {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">PAN No.</label>
-                <input type="text" value={editForm.PanNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, PanNo: e.target.value }))}
+                <input type="text" value={editForm.PanNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, PanNo: e.target.value.toUpperCase() }))}
                   className={editInputCls} />
               </div>
               <div>

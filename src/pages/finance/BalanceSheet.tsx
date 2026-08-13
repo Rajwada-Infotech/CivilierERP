@@ -139,7 +139,7 @@ function RatioCard({
   label:      string;
   value:      number | null;
   formatted:  string;
-  icon:       React.FC<{ size?: number; className?: string }>;
+  icon:       React.ElementType;
   healthKey:  string;
   subtitle?:  string;
   benchmark?: string;

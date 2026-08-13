@@ -1671,7 +1671,7 @@ export default function LoanSanctionPage() {
                     title={`Loan Sanctioned — ${viewingLoan.LoanNo}`}
                     subtitle={`${fmt(viewingLoan.Amount)} disbursed to ${displayBorrower} on ${fmtDate(viewingLoan.LoanDate)}`}
                     done
-                    isLast={payments.length === 0}
+                    isLast={payments.length === 0 && paidEmis === 0}
                   />
                   {payments.map((p, i, arr) => (
                     <ChainNode
@@ -1683,6 +1683,22 @@ export default function LoanSanctionPage() {
                       isLast={i === arr.length - 1 && viewingLoan.Status === "Closed"}
                     />
                   ))}
+                  {/* EMIs can be marked paid (IsPaid=1 on LoanEMISchedule)
+                      with no matching dbo.LoanPayment row — pre-dates the
+                      Payment-page-only repayment flow, or was set directly
+                      rather than through it. Surfacing this honestly (with
+                      whatever PaidDate is on file) instead of either hiding
+                      it or showing the contradictory "No payments yet" next
+                      to a progress bar that's clearly already moved. */}
+                  {payments.length === 0 && paidEmis > 0 && (
+                    <ChainNode
+                      icon={<Receipt size={13} className="text-amber-500" />}
+                      title={`${paidEmis} installment${paidEmis === 1 ? "" : "s"} marked paid`}
+                      subtitle={`No dbo.LoanPayment record on file for ${paidEmis === 1 ? "it" : "them"} — likely set before this loan's repayments moved to Finance → Payment.${schedule.find((e) => e.IsPaid)?.PaidDate ? ` Earliest: ${fmtDate(schedule.find((e) => e.IsPaid)!.PaidDate!)}.` : ""}`}
+                      done
+                      isLast={viewingLoan.Status !== "Closed"}
+                    />
+                  )}
                   {viewingLoan.Status === "Closed" && (
                     <ChainNode
                       icon={<FileCheck2 size={13} className="text-emerald-500" />}
@@ -1698,7 +1714,7 @@ export default function LoanSanctionPage() {
                       isLast
                     />
                   )}
-                  {viewingLoan.Status !== "Closed" && payments.length === 0 && (
+                  {viewingLoan.Status !== "Closed" && payments.length === 0 && paidEmis === 0 && (
                     <ChainNode
                       icon={<Circle size={13} className="text-amber-500" />}
                       title="No payments yet"
@@ -1740,74 +1756,90 @@ export default function LoanSanctionPage() {
                     ) : null
                   )}
                 </div>
-                <div className="rounded-xl border border-border overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-muted/30 text-[10px] uppercase tracking-widest text-muted-foreground">
-                        <th className="text-left px-3 py-2">Account</th>
-                        <th className="text-left px-3 py-2">Account Group</th>
-                        <th className="text-right px-3 py-2">Debit</th>
-                        <th className="text-right px-3 py-2">Credit</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      <tr>
-                        <td className="px-3 py-2.5">
-                          Loan — {displayBorrower || "Borrower"}
-                          {readOnly && viewingLoan?.BorrowerLHeadCode && (
-                            <span className="block text-[10px] text-muted-foreground font-mono mt-0.5">
-                              {viewingLoan.BorrowerLHeadCode}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground">
-                          {readOnly ? (
-                            viewingLoan?.BorrowerGroupName ? (
-                              <>
-                                {viewingLoan.BorrowerParentGroupName && `${viewingLoan.BorrowerParentGroupName} / `}
-                                {viewingLoan.BorrowerGroupName}
-                              </>
+                {readOnly && (loanPostingData?.postings?.length ?? 0) > 1 ? (
+                  // Inter-Company: two separate company-scoped entries were
+                  // actually posted (see POST / in loanSanction.js) — show
+                  // each company's own books as its own card, same Dr/Cr
+                  // layout as the invoice Payment page's own Posting tab
+                  // (Payment.tsx "GL Postings — Full Payment Chain"), rather
+                  // than the plain single-JV table below (which only
+                  // applies when there's just one posting, i.e. Bank/
+                  // Customer loans).
+                  <div className="space-y-4">
+                    {loanPostingData.postings.map((p: any, i: number) => (
+                      <PostingCard key={p.companyId ?? i} p={p} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-muted/30 text-[10px] uppercase tracking-widest text-muted-foreground">
+                          <th className="text-left px-3 py-2">Account</th>
+                          <th className="text-left px-3 py-2">Account Group</th>
+                          <th className="text-right px-3 py-2">Debit</th>
+                          <th className="text-right px-3 py-2">Credit</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        <tr>
+                          <td className="px-3 py-2.5">
+                            Loan — {displayBorrower || "Borrower"}
+                            {readOnly && viewingLoan?.BorrowerLHeadCode && (
+                              <span className="block text-[10px] text-muted-foreground font-mono mt-0.5">
+                                {viewingLoan.BorrowerLHeadCode}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                            {readOnly ? (
+                              viewingLoan?.BorrowerGroupName ? (
+                                <>
+                                  {viewingLoan.BorrowerParentGroupName && `${viewingLoan.BorrowerParentGroupName} / `}
+                                  {viewingLoan.BorrowerGroupName}
+                                </>
+                              ) : (
+                                "—"
+                              )
                             ) : (
-                              "—"
-                            )
-                          ) : (
-                            "Loans and Advances"
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5 text-right font-mono">{fmt(displayAmount)}</td>
-                        <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">—</td>
-                      </tr>
-                      <tr>
-                        <td className="px-3 py-2.5">
-                          Loan — {displayLender || "Lender"}
-                          {readOnly && viewingLoan?.LenderLHeadCode && (
-                            <span className="block text-[10px] text-muted-foreground font-mono mt-0.5">
-                              {viewingLoan.LenderLHeadCode}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5 text-xs text-muted-foreground">
-                          {readOnly ? (
-                            viewingLoan?.LenderGroupName ? (
-                              <>
-                                {viewingLoan.LenderParentGroupName && `${viewingLoan.LenderParentGroupName} / `}
-                                {viewingLoan.LenderGroupName}
-                              </>
+                              "Loans and Advances"
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono">{fmt(displayAmount)}</td>
+                          <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">—</td>
+                        </tr>
+                        <tr>
+                          <td className="px-3 py-2.5">
+                            Loan — {displayLender || "Lender"}
+                            {readOnly && viewingLoan?.LenderLHeadCode && (
+                              <span className="block text-[10px] text-muted-foreground font-mono mt-0.5">
+                                {viewingLoan.LenderLHeadCode}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                            {readOnly ? (
+                              viewingLoan?.LenderGroupName ? (
+                                <>
+                                  {viewingLoan.LenderParentGroupName && `${viewingLoan.LenderParentGroupName} / `}
+                                  {viewingLoan.LenderGroupName}
+                                </>
+                              ) : (
+                                "—"
+                              )
+                            ) : isBankLoan ? (
+                              "Bank's own account group"
                             ) : (
-                              "—"
-                            )
-                          ) : isBankLoan ? (
-                            "Bank's own account group"
-                          ) : (
-                            "Loans and Advances"
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">—</td>
-                        <td className="px-3 py-2.5 text-right font-mono">{fmt(displayAmount)}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                              "Loans and Advances"
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">—</td>
+                          <td className="px-3 py-2.5 text-right font-mono">{fmt(displayAmount)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
                 <p className="text-xs text-muted-foreground">
                   All postings use system-generated GL accounts, auto-created per counterparty on
                   first use{isBankLoan ? " — for a Bank Loan, the lender's own existing GL account (and its real account group) is reused directly, not a shadow account" : ""}.
@@ -1815,6 +1847,40 @@ export default function LoanSanctionPage() {
                     ? " This entry is posted to the General Ledger automatically and appears in Trial Balance."
                     : " Save the loan to generate this posting."}
                 </p>
+
+                {/* Repayment postings — each repayment (see POST /:id/pay)
+                    posts its own reversing two-sided entry; list them below
+                    the sanction entry the same way Payment.tsx lists every
+                    transaction in an invoice's "Full Payment Chain", instead
+                    of only ever showing the one-off sanction posting. */}
+                {readOnly && (loanPostingData?.repaymentPostings?.length ?? 0) > 0 && (
+                  <div className="space-y-4 pt-2">
+                    <div className="flex items-center gap-2">
+                      <Receipt size={14} className="text-emerald-600" />
+                      <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                        Repayment Postings
+                      </span>
+                    </div>
+                    {loanPostingData.repaymentPostings.map((rp: any) => (
+                      <div key={rp.paymentId} className="space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap text-[10px] text-muted-foreground">
+                          <span className="font-mono">{rp.paymentRef}</span>
+                          <span>·</span>
+                          <span>{fmtDate(rp.paymentDate)}</span>
+                          <span>·</span>
+                          <span>{rp.paymentType === "LumpSum" ? "Lump Sum" : "EMI"}</span>
+                          <span>·</span>
+                          <span className="font-mono">{fmt(rp.amount)}</span>
+                        </div>
+                        <div className="space-y-4">
+                          {rp.postings.map((p: any, i: number) => (
+                            <PostingCard key={p.companyId ?? i} p={p} />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1945,14 +2011,66 @@ function ChainNode({
         >
           {icon}
         </div>
-        {!isLast && <div className="w-px flex-1 bg-border my-1" />}
+        {!isLast && <div className="w-px flex-1 bg-border my-1.5" />}
       </div>
-      <div className={`flex-1 flex items-center justify-between gap-3 ${isLast ? "pb-0" : "pb-5"}`}>
+      <div className={`flex-1 flex items-center justify-between gap-3 ${isLast ? "pb-0" : "pb-8"}`}>
         <div>
           <p className="text-sm font-medium text-foreground">{title}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
         </div>
         {action}
+      </div>
+    </div>
+  );
+}
+
+// ── PostingCard ─────────────────────────────────────────────────────────────
+// One company's own books for one posted GL entry (sanction or a single
+// repayment) — same Dr/Cr card layout as Payment.tsx's own "GL Postings —
+// Full Payment Chain" Posting tab, reused so the loan's sanction entry and
+// every repayment entry render identically.
+function PostingCard({ p }: { p: { companyId: number | null; companyName: string | null; voucherNo: string; lines: any[] } }) {
+  const total = p.lines.reduce((s: number, l: any) => s + (l.debit || 0), 0);
+  return (
+    <div className="rounded-xl border border-border overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b bg-muted/40 border-border">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+            {p.companyName || "Company"}'s Books
+          </span>
+          <span className="text-[10px] font-mono text-muted-foreground">{p.voucherNo}</span>
+        </div>
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
+          ✓ Posted
+        </span>
+      </div>
+      <div className="divide-y divide-border/50">
+        <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+          <span>Account</span>
+          <span className="text-right">Debit (₹)</span>
+          <span className="text-right">Credit (₹)</span>
+        </div>
+        {p.lines.map((l: any, li: number) => (
+          <div key={li} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2.5 items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${l.debit > 0 ? "bg-emerald-500" : "bg-rose-500"}`} />
+              <span className="text-xs text-foreground truncate">
+                {l.lHeadName || `Head #${l.lHeadId}`}{l.groupName ? ` (${l.groupName})` : ""}
+              </span>
+            </div>
+            <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+              {l.debit > 0 ? fmt(l.debit) : ""}
+            </span>
+            <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+              {l.credit > 0 ? fmt(l.credit) : ""}
+            </span>
+          </div>
+        ))}
+        <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
+          <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+          <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(total)}</span>
+          <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(total)}</span>
+        </div>
       </div>
     </div>
   );

@@ -147,10 +147,10 @@ function InvoicePdfDialog({ bookingId, invoice, onClose }: { bookingId: number; 
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
-            <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> {invoice.InvoiceNo}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-amber-600 dark:text-amber-400" /> {invoice.InvoiceNo}</DialogTitle>
             {blobUrl && (
               <a href={blobUrl} download={`${invoice.InvoiceNo}.pdf`}
-                className="shrink-0 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 flex items-center gap-1.5">
+                className="shrink-0 px-3 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 flex items-center gap-1.5">
                 <Download size={14} /> Download PDF
               </a>
             )}
@@ -464,22 +464,33 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     setParkingReason("");
   };
 
-  const handleRemoveParking = async (id: number) => {
-    let reason = "";
-    if (legalWorkStarted) {
-      reason = window.prompt("Legal documents are already under verification for this booking. Enter a reason for releasing this parking allotment:") || "";
-      if (!reason.trim()) return;
+  const handleRemoveParking = (id: number) => {
+    if (!legalWorkStarted) {
+      (async () => {
+        try {
+          const res = await fetchWithAuth(`/api/crm/parking/${id}`, { method: "DELETE" });
+          const resData = await res.json();
+          if (!res.ok) throw new Error(resData.error);
+          toast.success("Parking allotment released");
+          invalidateCharges();
+        } catch (e: any) { toast.error(e.message); }
+      })();
+      return;
     }
-    try {
-      const url = legalWorkStarted ? `/api/crm/parking/${id}?reason=${encodeURIComponent(reason.trim())}` : `/api/crm/parking/${id}`;
-      const res = await fetchWithAuth(url, { method: "DELETE" });
-      const resData = await res.json();
-      if (!res.ok) throw new Error(resData.error);
-      toast.success(resData.pending ? "Amendment request submitted — pending approval" : "Parking allotment released");
-      invalidateCharges();
-    } catch (e: any) {
-      toast.error(e.message);
-    }
+    setReasonDialog({
+      title: "Release Parking Allotment",
+      label: "Legal documents are already under verification. Enter a reason for releasing this parking allotment:",
+      required: true,
+      onConfirm: async (reason) => {
+        try {
+          const res = await fetchWithAuth(`/api/crm/parking/${id}?reason=${encodeURIComponent(reason.trim())}`, { method: "DELETE" });
+          const resData = await res.json();
+          if (!res.ok) throw new Error(resData.error);
+          toast.success(resData.pending ? "Amendment request submitted — pending approval" : "Parking allotment released");
+          invalidateCharges();
+        } catch (e: any) { toast.error(e.message); }
+      },
+    });
   };
 
   const handleAddExtra = async () => {
@@ -526,22 +537,33 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     setExtraReason("");
   };
 
-  const handleRemoveExtra = async (id: number) => {
-    let reason = "";
-    if (legalWorkStarted) {
-      reason = window.prompt("Legal documents are already under verification for this booking. Enter a reason for removing this charge:") || "";
-      if (!reason.trim()) return;
+  const handleRemoveExtra = (id: number) => {
+    if (!legalWorkStarted) {
+      (async () => {
+        try {
+          const res = await fetchWithAuth(`/api/crm/extra-charges/${id}`, { method: "DELETE" });
+          const resData = await res.json();
+          if (!res.ok) throw new Error(resData.error);
+          toast.success("Charge removed");
+          invalidateCharges();
+        } catch (e: any) { toast.error(e.message); }
+      })();
+      return;
     }
-    try {
-      const url = legalWorkStarted ? `/api/crm/extra-charges/${id}?reason=${encodeURIComponent(reason.trim())}` : `/api/crm/extra-charges/${id}`;
-      const res = await fetchWithAuth(url, { method: "DELETE" });
-      const resData = await res.json();
-      if (!res.ok) throw new Error(resData.error);
-      toast.success(resData.pending ? "Amendment request submitted — pending approval" : "Charge removed");
-      invalidateCharges();
-    } catch (e: any) {
-      toast.error(e.message);
-    }
+    setReasonDialog({
+      title: "Remove Extra Charge",
+      label: "Legal documents are already under verification. Enter a reason for removing this charge:",
+      required: true,
+      onConfirm: async (reason) => {
+        try {
+          const res = await fetchWithAuth(`/api/crm/extra-charges/${id}?reason=${encodeURIComponent(reason.trim())}`, { method: "DELETE" });
+          const resData = await res.json();
+          if (!res.ok) throw new Error(resData.error);
+          toast.success(resData.pending ? "Amendment request submitted — pending approval" : "Charge removed");
+          invalidateCharges();
+        } catch (e: any) { toast.error(e.message); }
+      },
+    });
   };
 
   const INVOICE_SORT_COLS: { key: string; label: string }[] = [
@@ -996,7 +1018,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto thin-scroll">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
-            <Building2 size={16} className="text-primary" />
+            <Building2 size={16} className="text-amber-600 dark:text-amber-400" />
             {booking ? `${booking.BookingNo} — ${booking.ApplicantName}` : "Booking Detail"}
           </DialogTitle>
         </DialogHeader>
@@ -1107,7 +1129,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               {TABS.map((t) => (
                 <button key={t} onClick={() => setTab(t)}
                   className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                    tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                    tab === t ? "border-amber-500 text-amber-600 dark:text-amber-400" : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}>
                   {t}
                 </button>
@@ -1150,7 +1172,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     HSN Master row itself (9954AFH/9954OTH/9954EXW). */}
                 <div className="rounded-lg border border-border p-3 space-y-1.5 text-xs">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">GST (fixed — set by HSN Master)</p>
+                    <p className="text-sm font-medium">GST</p>
                     {booking.HsnCode && <span className="text-[11px] font-mono text-muted-foreground">{booking.HsnCode} · {booking.UnitParkingGstRate != null ? `${booking.UnitParkingGstRate}%` : "—"}</span>}
                   </div>
 
@@ -1206,7 +1228,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                   <div className="flex items-center justify-between border-t border-border pt-1 font-semibold">
                     <span>Total Amount</span>
-                    <span className="text-primary">{fmt(booking.GrandTotal)}</span>
+                    <span className="text-amber-600 dark:text-amber-400">{fmt(booking.GrandTotal)}</span>
                   </div>
                 </div>
 
@@ -1224,10 +1246,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-4 pt-2">
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-primary" /> Payment Plan</h3>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-amber-600 dark:text-amber-400" /> Payment Plan</h3>
                     {!planEditOpen && canEdit && booking.Status !== "Approved" && (
                       <button onClick={() => { setPlanEditOpen(true); setPlanEditValue(booking.PaymentPlanId ? String(booking.PaymentPlanId) : ""); }}
-                        className="text-xs text-primary hover:underline shrink-0">
+                        className="text-xs text-amber-600 dark:text-amber-400 hover:underline shrink-0">
                         Edit
                       </button>
                     )}
@@ -1247,7 +1269,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           Cancel
                         </button>
                         <button onClick={handleSavePaymentPlan} disabled={planSaving}
-                          className="px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                          className="px-2.5 py-1 text-xs text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
                           {planSaving ? "Saving..." : "Save"}
                         </button>
                       </div>
@@ -1274,7 +1296,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   const grandTotal = Number(booking.GrandTotal ?? (unitValue + parkingTotal + extraTotal));
                   return (
                     <div className="rounded-xl border border-border p-4 space-y-2">
-                      <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Total Price Breakdown</h3>
+                      <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-amber-600 dark:text-amber-400" /> Total Price Breakdown</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm">
                         <div className="rounded-lg bg-muted/30 px-2.5 py-2">
                           <div className="text-xs text-muted-foreground mb-0.5">Unit Base</div>
@@ -1292,9 +1314,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           <div className="text-xs text-muted-foreground mb-0.5">Extra incl. GST</div>
                           <div className="font-medium">{fmt(extraTotal)}</div>
                         </div>
-                        <div className="rounded-lg bg-primary/10 px-2.5 py-2">
+                        <div className="rounded-lg bg-amber-500/10 px-2.5 py-2">
                           <div className="text-xs text-muted-foreground mb-0.5">Grand Total</div>
-                          <div className="font-semibold text-primary">{fmt(grandTotal)}</div>
+                          <div className="font-semibold text-amber-600 dark:text-amber-400">{fmt(grandTotal)}</div>
                         </div>
                       </div>
                     </div>
@@ -1364,7 +1386,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   return (
                     <div className="rounded-xl border border-border p-4 space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Payment Breakdown</h3>
+                        <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-amber-600 dark:text-amber-400" /> Payment Breakdown</h3>
                         <span className="text-xs text-muted-foreground">{fmt(totalPaid)} of {fmt(totalDue)} paid — all charges</span>
                       </div>
                       <div className="overflow-x-auto thin-scroll">
@@ -1403,7 +1425,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             {tab === "Payment & Invoice" && (
               <div className="space-y-3 pt-2">
                 <div className="rounded-xl border border-border p-4 space-y-2">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><CreditCard size={15} className="text-primary" /> Booking Amount</h3>
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><CreditCard size={15} className="text-amber-600 dark:text-amber-400" /> Booking Amount</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                     <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">{bookingAmountDue > 0 ? fmt(bookingAmountDue) : "Not set"}</span></div>
                     <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-emerald-700">{fmt(bookingAmountPaid)}</span></div>
@@ -1453,7 +1475,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     so a booking with none doesn't show an empty card. */}
                 {(onAccountData?.payments || []).length > 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-primary" /> On-Account Payments</h3>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-amber-600 dark:text-amber-400" /> On-Account Payments</h3>
                     <div className="space-y-1.5">
                       {(onAccountData.payments as any[]).map((p: any) => {
                         const inv = (invoices as any[]).find((i: any) => i.OnAccountPaymentId === p.Id)
@@ -1470,7 +1492,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               <div className="flex items-center gap-2 shrink-0">
                                 <span className="flex items-center gap-1 text-xs font-medium text-green-600"><Check size={13} /> Invoiced</span>
                                 <button onClick={() => setPreviewInvoice(inv)}
-                                  className="flex items-center gap-1 text-xs text-primary hover:underline">
+                                  className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline">
                                   <Eye size={12} /> View
                                 </button>
                               </div>
@@ -1511,7 +1533,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   && !(Number(firstMilestone?.PendingVerificationAmount) > 0)
                   && currentStage !== "Review" && moneyReceipts.length === 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Submit Payment for Approval</h3>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-amber-600 dark:text-amber-400" /> Submit Payment for Approval</h3>
                     <p className="text-[11px] text-muted-foreground">Creates the Money Receipt for this booking — it goes Pending until Finance/Account's Head approves it.</p>
                     <div className="grid grid-cols-2 gap-2">
                       <input type="number" placeholder={`Amount — Balance Due ${fmt(bookingAmountBalance)}`} value={payForm.Amount}
@@ -1543,7 +1565,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       )}
                     </div>
                     <button onClick={handleRecordPayment} disabled={paySaving || (bankOptions.length > 0 && !payForm.DepositBankId)}
-                      className="w-full py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40">
+                      className="w-full py-2 text-sm font-medium text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
                       {paySaving ? "Submitting..." : `Submit for Approval`}
                     </button>
                   </div>
@@ -1580,7 +1602,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {/* Parking */}
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Car size={15} className="text-primary" /> Parking Allotments</h3>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Car size={15} className="text-amber-600 dark:text-amber-400" /> Parking Allotments</h3>
                     {(parking as any[]).length > 0 && (
                       <span className="text-xs font-semibold text-foreground">
                         Total {fmt((parking as any[]).reduce((s: number, p: any) => s + Number(p.TotalAmount || 0), 0))}
@@ -1621,7 +1643,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                     </span>
                                   )}
                                   <button onClick={handleAddParking} disabled={chargesSaving}
-                                    className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded font-medium disabled:opacity-40">
+                                    className="px-2 py-1 text-xs text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded font-medium disabled:opacity-40">
                                     Save
                                   </button>
                                   <button onClick={cancelEditParking}
@@ -1658,7 +1680,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
                 {/* Extra Charges */}
                 <div className="rounded-xl border border-border p-4 space-y-2">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-primary" /> Extra Charges</h3>
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-amber-600 dark:text-amber-400" /> Extra Charges</h3>
                   <div className="overflow-x-auto thin-scroll">
                     {(extras as any[]).length === 0 ? (
                       <p className="text-xs text-muted-foreground">No extra charges added yet.</p>
@@ -1684,7 +1706,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                     onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
                                     className="w-20 text-xs border border-border rounded px-1.5 py-1 bg-background" />
                                   <button onClick={handleAddExtra} disabled={chargesSaving}
-                                    className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded font-medium disabled:opacity-40">
+                                    className="px-2 py-1 text-xs text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded font-medium disabled:opacity-40">
                                     Save
                                   </button>
                                   <button onClick={cancelEditExtra}
@@ -1742,7 +1764,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
                           className="w-32 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                         <button onClick={handleAddExtra} disabled={chargesSaving}
-                          className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 shrink-0">
+                          className="px-3 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 shrink-0">
                           {chargesSaving ? "Adding..." : "Add"}
                         </button>
                       </div>
@@ -1937,7 +1959,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 </div>
 
                 <div className="flex items-center justify-between gap-2 pt-3">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={15} className="text-primary" /> Invoices</h3>
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={15} className="text-amber-600 dark:text-amber-400" /> Invoices</h3>
                   {/* Invoices are manual-only, gated on a milestone's own
                       Demand — not on whether the booking is still Approved.
                       That used to hide this button once Approved (a leftover
@@ -1992,7 +2014,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               <td className="px-2.5 py-2 whitespace-nowrap text-xs">{inv.CreatedByName || "—"}</td>
                               <td className="px-2.5 py-2 whitespace-nowrap">
                                 <button onClick={() => setPreviewInvoice(inv)}
-                                  className="flex items-center gap-1 text-xs text-primary hover:underline">
+                                  className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline">
                                   <Eye size={12} /> View
                                 </button>
                               </td>
@@ -2111,5 +2133,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         )}
       </DialogContent>
     </Dialog>
+
+      {reasonDialog && (
+        <Dialog open onOpenChange={(o) => { if (!o) setReasonDialog(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>{reasonDialog.title}</DialogTitle></DialogHeader>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const reason = (e.currentTarget.elements.namedItem("reason") as HTMLTextAreaElement).value;
+              if (reasonDialog.required && !reason.trim()) { toast.error("Reason is required"); return; }
+              await reasonDialog.onConfirm(reason);
+              setReasonDialog(null);
+            }}>
+              <label className="block text-sm text-muted-foreground mb-2">{reasonDialog.label}</label>
+              <textarea name="reason" rows={3} className="w-full border rounded-lg p-2 text-sm" autoFocus />
+              <div className="flex justify-end gap-2 mt-4">
+                <button type="button" onClick={() => setReasonDialog(null)} className="px-4 py-1.5 text-sm border rounded-lg">Cancel</button>
+                <button type="submit" className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg">Confirm</button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
   );
 }

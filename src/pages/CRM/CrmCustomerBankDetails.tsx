@@ -183,11 +183,17 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
     }
   };
 
+  const UPPERCASE_FIELDS: (keyof typeof EMPTY_FORM)[] = ["PanNo", "IfscCode"];
+
   const field = (key: keyof typeof form, label: string, type = "text", required = false) => (
     <div>
       <label className="text-xs text-muted-foreground block mb-1">{label}{required && " *"}</label>
       <input type={type} value={form[key]} readOnly={locked}
-        onChange={(e) => !locked && setForm((f) => ({ ...f, [key]: e.target.value }))}
+        onChange={(e) => {
+          if (locked) return;
+          const val = UPPERCASE_FIELDS.includes(key) ? e.target.value.toUpperCase() : e.target.value;
+          setForm((f) => ({ ...f, [key]: val }));
+        }}
         onBlur={() => setTouched(true)}
         className={`w-full text-sm border rounded-lg px-2.5 py-2 ${locked ? "bg-muted/30 text-muted-foreground cursor-not-allowed" : "bg-background"} ${touched && errors[key] ? "border-rose-400" : "border-border"}`} />
       {touched && errors[key] && <p className="text-[11px] text-rose-500 mt-0.5">{errors[key]}</p>}
