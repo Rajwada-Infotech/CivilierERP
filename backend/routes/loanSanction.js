@@ -287,6 +287,12 @@ router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req
         -- who repayment actually goes to, auto-filling "Payable To" on the
         -- Payment page instead of leaving staff to look it up manually.
         lc.name AS LenderName,
+        -- Same lender company, but as the auto-fill source for the Payment
+        -- page's Company field on a Customer Loan — there the borrower is
+        -- external (a customer), so the LENDER is whose books this
+        -- repayment is actually recorded under, the reverse of Inter-Company
+        -- /Bank Loan where the borrower company is the one paying out.
+        lc.name AS LenderCompanyName,
         CASE WHEN e.DueDate < CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS IsOverdue
       FROM dbo.LoanEMISchedule e
       JOIN dbo.LoanSanction ls ON ls.LoanId = e.LoanId
@@ -1194,6 +1200,31 @@ router.put("/:id/emi/:emiId/pay", requirePageRight("loan-sanction", "edit"), asy
   }
 });
 
+// Posts a Customer Loan repayment to GL — the single-sided counterpart to
+// the Inter-Company two-sided posting below. A customer isn't one of our
+// own companies, so there's no second set of books to post into: only the
+// LENDER company's side is real. Dr the lender's bank account (cash
+// actually received from the customer), Cr the customer's Loan ledger head
+// (what they still owe shrinks). Guarded the same way the Inter-Company
+// block is — every required id must be present, or this silently no-ops
+// and the repayment still records fine via OnAccountLedger alone.
+async function postCustomerLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor }) {
+  if (!loan.LenderCompanyId || !loan.LenderBankAccountId || !loan.BorrowerLHeadId) return;
+  const { postVoucher } = require("../services/generalLedger");
+  await postVoucher(pool, {
+    voucherNo: paymentRef,
+    voucherDate: paymentDate,
+    sourceType: "LoanRepayment",
+    sourceId: paymentId,
+    companyId: loan.LenderCompanyId,
+    createdBy: actor,
+    legs: [
+      { lHeadId: loan.LenderBankAccountId, debit: principalInterestAmount, narration: `${paymentRef} — loan repayment received from ${loan.LoanNo}'s borrower` },
+      { lHeadId: loan.BorrowerLHeadId, credit: principalInterestAmount, narration: `${paymentRef} — loan repayment (${loan.LoanNo})` },
+    ],
+  });
+}
+
 // ── POST /:id/pay — flexible repayment: single EMI, multiple EMIs, or a
 //    lump sum. Applies to every loan type.
 //
@@ -1436,6 +1467,14 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
           { lHeadId: loan.BorrowerLHeadId, credit: principalInterestAmount, narration: `${paymentRef} — loan repayment (${loan.LoanNo})` },
         ],
       });
+      await bumpCacheVersion("journal-voucher");
+    }
+
+    // Customer Loan: single-sided posting into the LENDER's own books only
+    // — a customer has no company books of its own to post the mirror leg
+    // into. See postCustomerLoanRepayment above.
+    if (loan.LoanType === "Customer Loan") {
+      await postCustomerLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor });
       await bumpCacheVersion("journal-voucher");
     }
 

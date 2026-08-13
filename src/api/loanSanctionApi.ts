@@ -117,6 +117,9 @@ export interface PayableEmi {
   BorrowerCompanyName: string | null;
   /** Lender is always a company — who repayment actually goes to. */
   LenderName: string | null;
+  /** Same lender company, but as the Payment page's Company auto-fill
+   *  source on a Customer Loan — see BorrowerCompanyName's note. */
+  LenderCompanyName: string | null;
   IsOverdue: boolean;
 }
 
