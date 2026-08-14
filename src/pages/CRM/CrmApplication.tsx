@@ -1935,7 +1935,7 @@ const CrmApplication: React.FC = () => {
                       </p>
                     )}
                     <p className="text-[11px] text-muted-foreground mt-1">
-                      This submits to Finance's Received Payment queue for approval (Account's Head/admin/super admin) — it won't count as paid on the Booking until approved.
+                      This amount is held on the Booking record. A Money Receipt is auto-generated when the booking reaches the approval stage ("Verify &amp; Send for Approval") — Finance then approves it, after which it counts as paid.
                     </p>
                   </div>
                   <div>

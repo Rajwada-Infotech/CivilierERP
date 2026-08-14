@@ -9,10 +9,11 @@ import {
   ChevronUp, ChevronDown, ShieldAlert, Check,
   CreditCard, ClipboardCheck, ArrowLeft, ArrowRight,
   KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, Phone, User,
-  CalendarCheck, Lock,
+  CalendarCheck, Lock, Clock, Hourglass, Info,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useGstRates, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
+import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 
 const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
@@ -170,6 +171,51 @@ function InvoicePdfDialog({ bookingId, invoice, onClose }: { bookingId: number; 
   );
 }
 
+function ReceiptPdfPreview({ receipt, onClose }: { receipt: any; onClose: () => void }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    fetchWithAuth(`/api/crm/money-receipts/${receipt.Id}/pdf`)
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (cancelled || !blob) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [receipt.Id]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <div className="flex items-center justify-between gap-3 pr-6">
+            <DialogTitle className="flex items-center gap-2">
+              <FileText size={16} className="text-primary" /> {receipt.ReceiptNo}
+            </DialogTitle>
+            {blobUrl && (
+              <a href={blobUrl} download={`${receipt.ReceiptNo}.pdf`}
+                className="shrink-0 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 flex items-center gap-1.5">
+                <Download size={14} /> Download PDF
+              </a>
+            )}
+          </div>
+          <DialogDescription>
+            {receipt.BookingNo || ""} · {receipt.Amount != null ? `₹${Number(receipt.Amount).toLocaleString("en-IN")}` : ""} · {receipt.Status}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center justify-center min-h-[300px] bg-muted/20 rounded-lg overflow-hidden border border-border">
+          {!blobUrl
+            ? <span className="text-sm text-muted-foreground flex items-center gap-2"><RefreshCw size={14} className="animate-spin" /> Loading preview…</span>
+            : <iframe src={blobUrl} title={receipt.ReceiptNo} className="w-full h-[60vh] border-0" />}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; onClose: () => void }) {
   const qc = useQueryClient();
   const { canDoAction, currentUser } = useAuth();
@@ -180,6 +226,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [uploading, setUploading] = useState(false);
   const [invoiceDialog, setInvoiceDialog] = useState(false);
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
+  const [previewReceipt, setPreviewReceipt] = useState<any | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "", MilestoneId: "", OnAccountPaymentId: "" });
   const [parkingForm, setParkingForm] = useState({ Quantity: "1" });
   // No GstRate field here anymore — Extra Charges are always taxed at the
@@ -192,8 +239,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [extraReason, setExtraReason] = useState("");
   const [parkingReason, setParkingReason] = useState("");
   const [invoiceSort, setInvoiceSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
-  const [bookingAmountInput, setBookingAmountInput] = useState<string | null>(null);
-  const [bookingAmountSaving, setBookingAmountSaving] = useState(false);
   const [payForm, setPayForm] = useState({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
   const [paySaving, setPaySaving] = useState(false);
   const [planEditOpen, setPlanEditOpen] = useState(false);
@@ -281,7 +326,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const { data: onAccountData } = useQuery({
     queryKey: ["crm-booking-on-account", bookingId],
     queryFn: () => fetchOnAccount(bookingId),
-    enabled: tab === "Payment & Invoice",
+    enabled: !!bookingId,
   });
   const { data: attachments = [] } = useQuery({
     queryKey: ["crm-booking-attachments", bookingId],
@@ -297,6 +342,19 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     enabled: tab === "Customer Portal",
   });
   const [provisioning, setProvisioning] = useState(false);
+  const [togglingPortal, setTogglingPortal] = useState(false);
+  async function handleTogglePortalAccess(deactivate: boolean) {
+    setTogglingPortal(true);
+    try {
+      const r = await fetchWithAuth(`${API}/${bookingId}/portal/${deactivate ? "deactivate" : "reactivate"}`, { method: "PUT" });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(body.error || "Failed to update portal access"); return; }
+      toast.success(deactivate ? "Portal access deactivated" : "Portal access reactivated");
+      refetchPortal();
+    } finally {
+      setTogglingPortal(false);
+    }
+  }
   async function handleProvisionPortal() {
     setProvisioning(true);
     try {
@@ -823,30 +881,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // time. Changing it (first time or a correction) re-aligns Milestone #1
   // via the same resync-schedule the server already exposes for exactly
   // this purpose, instead of duplicating that math client-side.
-  const handleSaveBookingAmount = async () => {
-    if (bookingAmountInput == null || bookingAmountInput === "") return;
-    setBookingAmountSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${bookingId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ BookingAmount: parseFloat(bookingAmountInput) }),
-      });
-      const resData = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(resData.error || "Save failed");
-      const syncRes = await fetchWithAuth(`${API}/${bookingId}/resync-schedule`, { method: "POST" });
-      const syncData = await syncRes.json().catch(() => ({}));
-      if (!syncRes.ok) throw new Error(syncData.error || "Failed to align milestone schedule");
-      toast.success("Booking amount saved");
-      setBookingAmountInput(null);
-      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-milestones", String(bookingId)] });
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setBookingAmountSaving(false);
-    }
-  };
 
   const handleRecordPayment = async () => {
     if (!payForm.Amount || parseFloat(payForm.Amount) <= 0) { toast.error("Enter a valid amount"); return; }
@@ -1061,6 +1095,24 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 )}
               </div>
             </div>
+
+            {/* ── Financial Status Bar ── always visible across all tabs ── */}
+            {(() => {
+              const totalCleared = milestoneList.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+              const mrReceived = (moneyReceipts as any[]).filter((r: any) => r.Status !== "Bounced").reduce((s: number, r: any) => s + Number(r.Amount || 0), 0);
+              const storedGrand = Number(booking.GrandTotal ?? 0);
+              const computedGrand = Number(booking.TotalValue || 0) + Number(booking.UnitGstAmount || 0) + Number(booking.ParkingTotal || 0) + Number(booking.ExtraChargesTotal || 0);
+              const grandTotal = storedGrand > 0 ? storedGrand : computedGrand;
+              return (
+                <FinancialStatusBar
+                  grandTotal={grandTotal}
+                  cleared={totalCleared}
+                  pendingReceipts={Math.max(0, mrReceived - totalCleared)}
+                  approvedOnAccount={Number(onAccountData?.availableBalance || 0)}
+                  overdueCount={milestoneList.filter((m: any) => m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date()).length}
+                />
+              );
+            })()}
 
             {rejectOpen && (
               <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60" onClick={() => !stageActioning && setRejectOpen(false)}>
@@ -1361,30 +1413,50 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   if (!milestoneList.length) return null;
                   const totalDue = milestoneList.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
                   const totalPaid = milestoneList.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+                  const mrOnAccount = Math.max(0, (moneyReceipts as any[]).filter((r: any) => r.Status !== "Bounced").reduce((s: number, r: any) => s + Number(r.Amount || 0), 0) - totalPaid);
+                  const firstUnpaidId = milestoneList.find((m: any) => m.Status !== "Paid" && m.Status !== "Waived")?.Id;
 
                   const renderGroupRows = (label: string, rows: any[]) => rows.length > 0 && (
                     <React.Fragment key={label}>
                       <tr className="bg-muted/20">
-                        <td colSpan={6} className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{label}</td>
+                        <td colSpan={7} className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{label}</td>
                       </tr>
-                      {rows.map((m: any) => (
-                        <tr key={m.Id} className="border-b border-border">
+                      {rows.map((m: any) => {
+                        const paid = Number(m.AmountPaid || 0);
+                        const due = Number(m.AmountDue || 0);
+                        const isFirstUnpaid = m.Id === firstUnpaidId;
+                        const mrForThis = isFirstUnpaid ? mrOnAccount : 0;
+                        const effectivePaid = paid + mrForThis;
+                        const bal = Math.max(0, due - effectivePaid);
+                        const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
+                        return (
+                        <tr key={m.Id} className={`border-b border-border ${isOverdue ? "bg-red-50/30 dark:bg-red-950/20" : ""}`}>
                           <td className="px-2.5 py-1.5 text-xs text-muted-foreground">{m.MilestoneNo}</td>
-                          <td className="px-2.5 py-1.5">{m.MilestoneName}</td>
+                          <td className="px-2.5 py-1.5">
+                            <div>{m.MilestoneName}</div>
+                            {isOverdue && <div className="text-[10px] text-red-600 font-medium flex items-center gap-0.5"><AlertTriangle size={9} /> Overdue since {new Date(m.DueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</div>}
+                          </td>
                           <td className="px-2.5 py-1.5 text-right text-xs text-muted-foreground">{m.Percent != null ? `${m.Percent}%` : "—"}</td>
-                          <td className="px-2.5 py-1.5 text-right font-medium">{fmt(m.AmountDue)}</td>
+                          <td className="px-2.5 py-1.5 text-right font-medium">{fmt(due)}</td>
                           <td className="px-2.5 py-1.5 text-right text-emerald-700">
-                            {fmt(m.AmountPaid)}
+                            {fmt(paid)}
+                            {mrForThis > 0 && (
+                              <div className="text-[10px] text-blue-600 font-normal">+{fmt(mrForThis)} on account</div>
+                            )}
                             {Number(m.PendingVerificationAmount) > 0 && (
                               <div className="text-[10px] text-amber-700 font-normal">+{fmt(m.PendingVerificationAmount)} pending verification</div>
                             )}
+                          </td>
+                          <td className={`px-2.5 py-1.5 text-right font-semibold ${bal > 0 ? (isOverdue ? "text-red-600" : "text-amber-700") : "text-muted-foreground"}`}>
+                            {bal > 0 ? fmt(bal) : "—"}
                           </td>
                           <td className="px-2.5 py-1.5">
                             <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${
                               m.Status === "Paid" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
                                 : m.Status === "Waived" ? "text-muted-foreground bg-muted/40 border-border"
+                                : isOverdue ? "text-red-700 bg-red-50 border-red-200"
                                 : "text-amber-700 bg-amber-50 border-amber-200"
-                            }`}>{m.Status}</span>
+                            }`}>{isOverdue ? "Overdue" : m.Status}</span>
                             {/* Same "no orphan money" principle as the
                                 On-Account section above: a milestone that's
                                 fully paid but has no matching invoice yet is
@@ -1402,7 +1474,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             )}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </React.Fragment>
                   );
 
@@ -1410,7 +1483,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div className="rounded-xl border border-border p-4 space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-amber-600 dark:text-amber-400" /> Payment Breakdown</h3>
-                        <span className="text-xs text-muted-foreground">{fmt(totalPaid)} of {fmt(totalDue)} paid — all charges</span>
+                        <span className="text-xs text-muted-foreground">
+                          {fmt(totalPaid)} of {fmt(totalDue)} cleared
+                          {mrOnAccount > 0 && <span className="text-blue-600"> · {fmt(mrOnAccount)} on account</span>}
+                        </span>
                       </div>
                       <div className="overflow-x-auto thin-scroll">
                         <div className="min-w-[520px]">
@@ -1422,6 +1498,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 <th className="text-right px-2.5 py-1.5 text-xs text-muted-foreground font-medium">%</th>
                                 <th className="text-right px-2.5 py-1.5 text-xs text-muted-foreground font-medium">Amount Due</th>
                                 <th className="text-right px-2.5 py-1.5 text-xs text-muted-foreground font-medium">Paid</th>
+                                <th className="text-right px-2.5 py-1.5 text-xs text-muted-foreground font-medium">Balance</th>
                                 <th className="text-left px-2.5 py-1.5 text-xs text-muted-foreground font-medium">Status</th>
                               </tr>
                             </thead>
@@ -1463,29 +1540,94 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2"><span className="text-sky-700 block">Balance (On Account)</span><span className="font-semibold text-sky-700">{fmt(bookingOnAccountBalance)}</span></div>
                     )}
                   </div>
-                  {Number(firstMilestone?.PendingVerificationAmount) > 0 && (
-                    <p className="text-[11px] text-amber-700 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-                      {fmt(firstMilestone.PendingVerificationAmount)} submitted and awaiting Finance (Account's Head) approval — not counted as paid yet.
-                    </p>
-                  )}
+                  {/* Token payment transparency — shows whenever the customer
+                      has paid a token amount and it hasn't yet been fully
+                      approved by Finance. Covers four states:
+                      A) Token exists, no Money Receipt yet (still at Review)
+                      B) Money Receipt created but not yet submitted to Finance
+                      C) Submitted to Finance, awaiting approval
+                      D) Bounced — needs resubmission */}
+                  {Number(booking?.TokenValue) > 0 && (() => {
+                    const receipt = (moneyReceipts as any[])[0];
+                    const tokenAmt = Number(booking.TokenValue);
+                    const pmode = booking.PaymentMode || "—";
+
+                    // State D — bounced
+                    if (receipt?.Status === "Bounced") {
+                      return (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30 px-3 py-2.5 text-xs mt-1">
+                          <AlertTriangle size={13} className="shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
+                          <div>
+                            <p className="font-semibold text-red-700 dark:text-red-300">Token Payment Bounced — {fmt(tokenAmt)}</p>
+                            <p className="text-red-600 dark:text-red-400 mt-0.5">
+                              {receipt.BouncedReason ? `Reason: ${receipt.BouncedReason}. ` : ""}
+                              A new Money Receipt must be submitted.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // State C — submitted to Finance (RPStatus = Pending)
+                    if (receipt?.Status === "Pending" && receipt?.RPStatus === "Pending") {
+                      return (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs mt-1">
+                          <Hourglass size={13} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-amber-800 dark:text-amber-300">
+                              {fmt(receipt.Amount || tokenAmt)} held — awaiting Finance approval
+                            </p>
+                            <p className="text-amber-700 dark:text-amber-400">
+                              Receipt {receipt.ReceiptNo} · {pmode} · submitted to Finance (Account's Head / Admin).
+                              This amount will count as paid once approved.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // State B — Money Receipt created, not yet submitted to Finance
+                    if (receipt?.Status === "Pending" && !receipt?.RPStatus) {
+                      return (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs mt-1">
+                          <Clock size={13} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-amber-800 dark:text-amber-300">
+                              {fmt(receipt.Amount || tokenAmt)} on hold — Money Receipt pending Finance submission
+                            </p>
+                            <p className="text-amber-700 dark:text-amber-400">
+                              Receipt {receipt.ReceiptNo} · {pmode} · created but not yet sent to Finance for approval.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // State A — no receipt yet (booking still at Review / before submission)
+                    if (!receipt) {
+                      return (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs mt-1">
+                          <Clock size={13} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-amber-800 dark:text-amber-300">
+                              Token Received &amp; On Hold — {fmt(tokenAmt)} via {pmode}
+                            </p>
+                            <p className="text-amber-700 dark:text-amber-400">
+                              Payment recorded but not yet processed. A Money Receipt is auto-generated when this booking is submitted for approval
+                              ("Verify &amp; Send for Approval"). Finance approves it — only then does it count as paid.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return null; // Approved — reflected in AmountPaid already
+                  })()}
                   {bookingAmountDue <= 0 && (
-                    <p className="text-[11px] text-muted-foreground">No default amount is shown here — set the actual Booking Amount below; the rest of the payment schedule is calculated from it.</p>
-                  )}
-                  {canEdit && booking.Status !== "Approved" && !bookingAmountPaidInFull && (
-                    <div className="flex items-center gap-2 pt-1">
-                      <input type="number" placeholder="Set/correct booking amount (₹)"
-                        value={bookingAmountInput ?? (booking.BookingAmount != null ? String(booking.BookingAmount) : "")}
-                        onChange={(e) => setBookingAmountInput(e.target.value)}
-                        className="flex-1 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                      <button onClick={handleSaveBookingAmount} disabled={bookingAmountSaving || bookingAmountInput == null}
-                        className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted disabled:opacity-40 shrink-0">
-                        {bookingAmountSaving ? "Saving..." : "Save"}
-                      </button>
-                    </div>
+                    <p className="text-[11px] text-muted-foreground">Booking Amount not set on the payment plan — open the Payment Plan Master and set a fixed Booking Amount.</p>
                   )}
                   {bookingAmountPaidInFull && (
-                    <p className="text-[11px] text-emerald-700">Booking Amount fully paid — locked from further edits.</p>
+                    <p className="text-[11px] text-emerald-700">Booking Amount fully paid.</p>
                   )}
                 </div>
 
@@ -1510,6 +1652,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               <div className="text-muted-foreground">
                                 {p.ReceivedDate ? new Date(p.ReceivedDate).toLocaleDateString("en-IN") : "—"} · {p.PaymentMode || "—"}
                               </div>
+                              {(() => {
+                                const unapplied = Number(p.Amount || 0) - Number(p.AppliedAmount || 0);
+                                const statusColor = p.Status === "Applied" ? "text-emerald-700" : p.Status === "PartiallyApplied" ? "text-amber-700" : "text-blue-700";
+                                return (
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className={`font-medium ${statusColor}`}>{p.Status || "Unapplied"}</span>
+                                    {unapplied > 0 && <span className="text-blue-700 font-medium">· {fmt(unapplied)} unapplied</span>}
+                                  </div>
+                                );
+                              })()}
                             </div>
                             {inv ? (
                               <div className="flex items-center gap-2 shrink-0">
@@ -1902,94 +2054,108 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     Checking portal status…
                   </div>
                 ) : portalStatus?.hasPortal ? (
-                  <div className="rounded-xl border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30 p-5 space-y-4">
-                    <div className="flex items-center gap-2">
-                      <ShieldCheck size={20} className="text-green-600 dark:text-green-400 shrink-0" />
-                      <div>
-                        <p className="text-sm font-semibold text-green-800 dark:text-green-300">Customer Portal Active</p>
-                        <p className="text-xs text-green-700 dark:text-green-400">Access was provisioned automatically at booking confirmation.</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-muted-foreground">
-                      <div className="flex items-center gap-2 rounded-lg bg-background border border-border px-3 py-2">
-                        <User size={13} className="shrink-0 text-primary" />
-                        <div>
-                          <p className="text-[10px] uppercase tracking-wide font-medium mb-0.5">Customer</p>
-                          <p className="font-medium text-foreground">{portalStatus.customerName || "—"}</p>
+                  <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+                    {/* Header stripe */}
+                    <div className={`px-5 py-4 flex items-center justify-between gap-4 border-b border-border ${portalStatus.isActive ? "bg-emerald-500/8 dark:bg-emerald-500/10" : "bg-rose-500/8 dark:bg-rose-500/10"}`}>
+                      <div className="flex items-center gap-3">
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 ${portalStatus.isActive ? "bg-emerald-100 dark:bg-emerald-500/20" : "bg-rose-100 dark:bg-rose-500/20"}`}>
+                          <ShieldCheck size={20} className={portalStatus.isActive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"} />
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2 rounded-lg bg-background border border-border px-3 py-2">
-                        <Mail size={13} className="shrink-0 text-primary" />
                         <div>
-                          <p className="text-[10px] uppercase tracking-wide font-medium mb-0.5">Email (Username)</p>
-                          <p className="font-medium text-foreground break-all">{portalStatus.email || "—"}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 rounded-lg bg-background border border-border px-3 py-2">
-                        <Lock size={13} className="shrink-0 text-primary" />
-                        <div>
-                          <p className="text-[10px] uppercase tracking-wide font-medium mb-0.5">Initial Password</p>
-                          <p className="font-medium text-foreground">Mobile: <span className="font-mono">{portalStatus.maskedMobile || "—"}</span></p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 rounded-lg bg-background border border-border px-3 py-2">
-                        <Phone size={13} className="shrink-0 text-primary" />
-                        <div>
-                          <p className="text-[10px] uppercase tracking-wide font-medium mb-0.5">Status</p>
-                          <p className="font-medium text-foreground">
-                            {portalStatus.isActive ? (
-                              <span className="text-green-600 dark:text-green-400">Active</span>
-                            ) : (
-                              <span className="text-red-500">Inactive</span>
-                            )}
-                            {portalStatus.mustChangePassword ? (
-                              <span className="ml-2 text-amber-600 dark:text-amber-400 text-[10px]">(password change required on first login)</span>
-                            ) : null}
+                          <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">Customer Portal</p>
+                          <p className={`text-sm font-bold mt-0.5 ${portalStatus.isActive ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                            {portalStatus.isActive ? "Access Active" : "Access Deactivated"}
                           </p>
                         </div>
                       </div>
-                      {portalStatus.portalCreatedAt && (
-                        <div className="flex items-center gap-2 rounded-lg bg-background border border-border px-3 py-2 sm:col-span-2">
-                          <CalendarCheck size={13} className="shrink-0 text-primary" />
-                          <div>
-                            <p className="text-[10px] uppercase tracking-wide font-medium mb-0.5">Provisioned At</p>
-                            <p className="font-medium text-foreground">
-                              {new Date(portalStatus.portalCreatedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
-                            </p>
+                      <button
+                        onClick={() => handleTogglePortalAccess(portalStatus.isActive)}
+                        disabled={togglingPortal}
+                        className={`shrink-0 px-4 py-1.5 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 ${
+                          portalStatus.isActive
+                            ? "border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-800 dark:hover:bg-rose-950/40"
+                            : "border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:hover:bg-emerald-950/40"
+                        }`}
+                      >
+                        {togglingPortal ? "Updating…" : portalStatus.isActive ? "Deactivate Access" : "Reactivate Access"}
+                      </button>
+                    </div>
+
+                    {/* Detail rows */}
+                    <div className="divide-y divide-border/60">
+                      <div className="px-5 py-3 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+                          <Mail size={13} className="text-primary shrink-0" />
+                          <span>Login Email</span>
+                        </div>
+                        <span className="text-xs font-medium text-foreground font-mono">{portalStatus.email || "—"}</span>
+                      </div>
+                      <div className="px-5 py-3 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+                          <KeyRound size={13} className="text-primary shrink-0" />
+                          <span>Password Status</span>
+                        </div>
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold border ${
+                          portalStatus.mustChangePassword
+                            ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-400 dark:border-amber-700"
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-700"
+                        }`}>
+                          {portalStatus.mustChangePassword ? "First login pending" : "Password set by customer"}
+                        </span>
+                      </div>
+                      {portalStatus.customerName && (
+                        <div className="px-5 py-3 flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+                            <User size={13} className="text-primary shrink-0" />
+                            <span>Account Holder</span>
                           </div>
+                          <span className="text-xs font-medium text-foreground">{portalStatus.customerName}</span>
+                        </div>
+                      )}
+                      {portalStatus.portalCreatedAt && (
+                        <div className="px-5 py-3 flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+                            <CalendarCheck size={13} className="text-primary shrink-0" />
+                            <span>Provisioned</span>
+                          </div>
+                          <span className="text-xs text-foreground">
+                            {new Date(portalStatus.portalCreatedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                          </span>
                         </div>
                       )}
                     </div>
-                    <button
-                      onClick={() => refetchPortal()}
-                      disabled={portalFetching}
-                      className="mt-1 flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted disabled:opacity-40"
-                    >
-                      <RefreshCw size={12} className={portalFetching ? "animate-spin" : ""} />
-                      Refresh
-                    </button>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-5 space-y-4">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle size={20} className="text-amber-600 dark:text-amber-400 shrink-0" />
-                      <div>
-                        <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Portal Not Provisioned</p>
-                        <p className="text-xs text-amber-700 dark:text-amber-400">
-                          {portalStatus?.workflowStage !== "Confirmed"
-                            ? "The portal is provisioned automatically once the booking reaches Confirmed status."
-                            : "This booking is Confirmed but no portal exists. Use the button below to provision it now."}
+
+                    {/* Initial password hint */}
+                    {portalStatus.mustChangePassword && portalStatus.maskedMobile && (
+                      <div className="px-5 py-3 bg-muted/30 border-t border-border flex items-start gap-2.5 text-xs text-muted-foreground">
+                        <Hourglass size={13} className="shrink-0 mt-0.5 text-amber-500" />
+                        <p>
+                          Initial password is the applicant's mobile number <span className="font-mono font-medium text-foreground">{portalStatus.maskedMobile}</span>. They'll be prompted to set a new password on first login.
                         </p>
                       </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-8 flex flex-col items-center text-center gap-3">
+                    <div className="h-14 w-14 rounded-full bg-muted/60 border border-border flex items-center justify-center">
+                      <Lock size={24} className="text-muted-foreground" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground">Portal Not Provisioned</h4>
+                      <p className="text-xs text-muted-foreground mt-1 max-w-xs leading-relaxed">
+                        {portalStatus?.workflowStage !== "Confirmed"
+                          ? "The customer portal is provisioned automatically once this booking reaches Confirmed status."
+                          : "This booking is Confirmed but no portal account exists yet. Provision it manually below."}
+                      </p>
                     </div>
                     {portalStatus?.workflowStage === "Confirmed" && (
                       <button
                         onClick={handleProvisionPortal}
                         disabled={provisioning}
-                        className="flex items-center gap-1.5 px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-40"
+                        className="mt-2 inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold bg-primary text-primary-foreground rounded-xl shadow-sm hover:opacity-90 disabled:opacity-50 transition-all"
                       >
-                        <KeyRound size={14} />
-                        {provisioning ? "Provisioning…" : "Provision Customer Portal Now"}
+                        <KeyRound size={15} />
+                        {provisioning ? "Provisioning…" : "Provision Customer Portal"}
                       </button>
                     )}
                   </div>
@@ -2058,30 +2224,70 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Payment & Invoice" && (
               <div className="space-y-4 pt-4 mt-1 border-t border-border">
-                {/* Money Receipt — auto-generated the moment this booking is
-                    actually submitted for approval (Confirm & Book, PUT
-                    /:id/ready-for-approval), never merely once the Data
-                    Review checklist is complete — a booking can sit fully
-                    checked at Review for a while before staff submit it, and
-                    a receipt must not exist before that real submission. */}
-                <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2.5">
-                  <div className="text-xs">
-                    <span className="font-semibold flex items-center gap-1.5"><FileText size={14} className="text-primary" /> Money Receipt</span>
-                    <span className="text-muted-foreground">
-                      {moneyReceipts.length === 0
-                        ? (currentStage === "Review"
-                          ? "Generated automatically once this booking is submitted for approval (Confirm & Book)."
-                          : "Not created yet.")
-                        : `${moneyReceipts.length} receipt${moneyReceipts.length > 1 ? "s" : ""} — latest ${moneyReceipts[0]?.Status || "Pending"}.`}
-                    </span>
-                  </div>
-                  <a
-                    href={moneyReceipts.length ? `/crm/money-receipts?bookingId=${bookingId}` : undefined}
-                    aria-disabled={!moneyReceipts.length}
-                    className={`shrink-0 px-3 py-1.5 text-xs rounded-lg font-medium ${moneyReceipts.length ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed pointer-events-none"}`}
-                  >
-                    View Receipts
-                  </a>
+                {/* Money Receipt — inline card with View + Download, no page navigation */}
+                <div className="rounded-xl border border-border p-4 space-y-3">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                    <FileText size={15} className="text-primary" /> Money Receipt
+                  </h3>
+
+                  {(moneyReceipts as any[]).length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      {currentStage === "Review"
+                        ? "Auto-generated when this booking is submitted for approval (Verify & Send for Approval)."
+                        : "No money receipt yet."}
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {(moneyReceipts as any[]).map((mr: any) => {
+                        const statusColor =
+                          mr.Status === "Approved" ? "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-950/40 dark:border-emerald-800"
+                          : mr.Status === "Bounced" ? "text-red-700 bg-red-50 border-red-200 dark:text-red-400 dark:bg-red-950/40 dark:border-red-800"
+                          : "text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/40 dark:border-amber-800";
+                        const pdfUrl = `/api/crm/money-receipts/${mr.Id}/pdf`;
+                        return (
+                          <div key={mr.Id} className="rounded-lg border border-border bg-muted/10 px-3 py-2.5 space-y-2">
+                            {/* top row: receipt no + status + actions */}
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-semibold">{mr.ReceiptNo}</span>
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${statusColor}`}>
+                                  {mr.Status}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button onClick={() => setPreviewReceipt(mr)}
+                                  className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border rounded-lg hover:bg-muted font-medium">
+                                  <Eye size={11} /> View
+                                </button>
+                              </div>
+                            </div>
+                            {/* detail grid */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                              <div><span className="font-medium text-foreground">{fmt(mr.Amount)}</span><span className="block">Amount</span></div>
+                              <div><span className="font-medium text-foreground">{mr.PaymentMode || "—"}</span><span className="block">Mode</span></div>
+                              <div>
+                                <span className="font-medium text-foreground">
+                                  {mr.ChequeNo || mr.TransactionRef || "—"}
+                                </span>
+                                <span className="block">{mr.PaymentMode === "Cheque" ? "Cheque No" : "Ref / UTR"}</span>
+                              </div>
+                              <div>
+                                <span className="font-medium text-foreground">
+                                  {mr.ReceivedDate ? new Date(mr.ReceivedDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                                </span>
+                                <span className="block">Received Date</span>
+                              </div>
+                            </div>
+                            {mr.BouncedReason && (
+                              <p className="text-[11px] text-red-600 dark:text-red-400 flex items-center gap-1">
+                                <AlertTriangle size={11} /> {mr.BouncedReason}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between gap-2 pt-3">
@@ -2259,6 +2465,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         )}
       </DialogContent>
     </Dialog>
+    {previewReceipt && (
+      <ReceiptPdfPreview receipt={previewReceipt} onClose={() => setPreviewReceipt(null)} />
+    )}
     {reasonDialog && (
       <Dialog open onOpenChange={(o) => { if (!o) setReasonDialog(null); }}>
         <DialogContent className="max-w-md">

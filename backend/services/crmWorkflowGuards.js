@@ -328,6 +328,14 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   `);
   if (pendingMilestones.recordset[0]?.Cnt > 0) return null;
 
+  // Do not auto-create a Sales Deed if the loan financing is unresolved —
+  // the deed would precede loan confirmation, creating a legal/accounting conflict.
+  const loanErr = await checkLoanProcessingCleared(pool, bookingId);
+  if (loanErr) {
+    console.warn(`[crm-workflow] maybeAutoCreateSalesDeed skipped for booking ${bookingId}: ${loanErr}`);
+    return null;
+  }
+
   const booking = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT BookingNo, AssignedTo FROM dbo.CrmBooking WHERE Id = @bid");
   const bookingRow = booking.recordset[0];

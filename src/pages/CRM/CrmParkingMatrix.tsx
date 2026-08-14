@@ -84,21 +84,6 @@ async function fetchMatrix(projectId: string, blockId: string): Promise<MatrixSl
 
 const NONE = "__none__";
 
-// Hour/minute-precision countdown — mirrors CrmUnitMatrix.tsx's timeLeft().
-function timeLeft(until: string): string {
-  const ms = new Date(until).getTime() - Date.now();
-  if (ms <= 0) return "Overdue";
-  const totalMin = Math.floor(ms / 60000);
-  const d = Math.floor(totalMin / 1440);
-  const h = Math.floor((totalMin % 1440) / 60);
-  const m = totalMin % 60;
-  if (d > 0) return `${d}d ${h}h left`;
-  if (h > 0) return `${h}h ${m}m left`;
-  return `${m}m left`;
-}
-function isOverdue(until: string | null): boolean {
-  return !!until && new Date(until).getTime() - Date.now() <= 0;
-}
 
 // Available slot -> choose whether to sell it now or just hold it for a
 // customer who's still deciding.
@@ -334,7 +319,6 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
   const [showExtend, setShowExtend] = useState(false);
   const isHold = slot.Status === "OnHold";
   const hasUnpaidAllotment = isHold && !!slot.AllotmentId;
-  const overdue = isHold && isOverdue(slot.HoldUntil);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["parking-matrix"] });
 
@@ -387,8 +371,8 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
           <DialogTitle className="font-heading flex items-center gap-2">
             <Car size={18} className="text-primary" />
             Slot {slot.SlotNo}
-            <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${overdue ? "bg-rose-500/15 text-rose-600 border-rose-400/30" : STATUS_STYLE[isHold ? "OnHold" : "Booked"]}`}>
-              {isHold ? (hasUnpaidAllotment ? "Booked — Payment Pending" : overdue ? "Hold Overdue" : "On Hold") : "Booked"}
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${STATUS_STYLE[isHold ? "OnHold" : "Booked"]}`}>
+              {isHold ? (hasUnpaidAllotment ? "Booked — Payment Pending" : "On Hold") : "Booked"}
             </span>
           </DialogTitle>
         </DialogHeader>
@@ -412,14 +396,10 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
         </div>
 
         {isHold ? (
-          <div className={`rounded-xl border p-4 space-y-2 ${overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`}>
-            <h3 className={`text-sm font-semibold flex items-center gap-1.5 ${overdue ? "text-rose-800" : "text-amber-800"}`}>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-amber-800">
               <Clock size={14} /> Hold Status
             </h3>
-            <div className="flex items-center justify-between text-xs">
-              <span className={overdue ? "text-rose-700" : "text-amber-700"}>{overdue ? "Overdue since" : "Expires in"}</span>
-              <span className={`font-bold text-sm ${overdue ? "text-rose-700" : "text-amber-700"}`}>{slot.HoldUntil ? timeLeft(slot.HoldUntil) : "—"}</span>
-            </div>
             {hasUnpaidAllotment && (
               <div className="text-xs pt-1 border-t border-current/10">
                 <span className="text-muted-foreground block">Booking</span>
@@ -647,10 +627,8 @@ export function ParkingMatrixPage() {
                   >
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                       <span className="font-bold text-sm text-foreground truncate">#{s.SlotNo}</span>
-                      <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${
-                        s.Status === "OnHold" && isOverdue(s.HoldUntil) ? "bg-rose-500/15 text-rose-600 border border-rose-400/30" : STATUS_STYLE[s.Status]
-                      }`}>
-                        {s.Status === "OnHold" ? (isOverdue(s.HoldUntil) ? "Overdue" : "Hold") : s.Status}
+                      <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${STATUS_STYLE[s.Status]}`}>
+                        {s.Status === "OnHold" ? "Hold" : s.Status}
                       </span>
                     </div>
                     <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
@@ -658,7 +636,7 @@ export function ParkingMatrixPage() {
                         : s.Status === "OnHold" ? (
                           <>
                             <Clock size={11} className="shrink-0" />
-                            {(s.HoldApplicantName || s.ApplicantName)} · {s.HoldUntil ? timeLeft(s.HoldUntil) : ""}
+                            {s.HoldApplicantName || s.ApplicantName || "—"}
                           </>
                         ) : "—"}
                     </div>

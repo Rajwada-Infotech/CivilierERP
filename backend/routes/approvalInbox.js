@@ -776,7 +776,6 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.JournalVoucher     WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.InterCompanyTransfer WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.FundTransfer       WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmApplication     WHERE Status = 'Pending' AND IsActive = 1) +
         (SELECT COUNT(*) FROM dbo.CrmBooking         WHERE Status = 'Pending' AND IsActive = 1 AND ReadyForApprovalAt IS NOT NULL) +
         (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE SeniorApprovalStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE DateApprovalStatus = 'Pending') +

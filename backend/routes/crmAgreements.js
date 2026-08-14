@@ -188,7 +188,7 @@ router.get("/:id", requirePageRight("crm-agreements", "view"), async (req, res) 
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
-    const [agRes, docRes] = await Promise.all([
+    const [agRes, docRes, milRes, oaRes, mrRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${AGR_SELECT} WHERE ag.Id = @id`),
       pool.request().input("id", sql.Int, id).query(
         `SELECT d.Id, d.AgreementId, d.DocumentType, d.DocumentUrl, d.FileName, d.IssuedBy, d.Status, d.Remarks,
@@ -197,9 +197,30 @@ router.get("/:id", requirePageRight("crm-agreements", "view"), async (req, res) 
                 CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS FilePath,
                 cu.name AS CreatedByName
          FROM dbo.CrmAgreementDocument d LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy WHERE d.AgreementId = @id ORDER BY d.CreatedAt`),
+      pool.request().input("id", sql.Int, id).query(
+        `SELECT ISNULL(SUM(AmountDue),0) AS TotalDue, ISNULL(SUM(AmountPaid),0) AS TotalPaid
+         FROM dbo.CrmPaymentMilestone WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
+      pool.request().input("id", sql.Int, id).query(
+        `SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) AS AvailableBalance
+         FROM dbo.CrmOnAccountPayment WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
+      pool.request().input("id", sql.Int, id).query(
+        `SELECT ISNULL(SUM(Amount),0) AS MRTotal FROM dbo.CrmMoneyReceipt
+         WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id) AND Status IN ('Pending','Approved')`),
     ]);
     if (!agRes.recordset[0]) return res.status(404).json({ error: "Agreement not found" });
-    res.json({ agreement: agRes.recordset[0], documents: docRes.recordset });
+    const mil = milRes.recordset[0] || {};
+    const cleared = Number(mil.TotalPaid || 0);
+    const mrReceived = Number(mrRes.recordset[0]?.MRTotal || 0);
+    res.json({
+      agreement: agRes.recordset[0],
+      documents: docRes.recordset,
+      financialSummary: {
+        cleared,
+        totalDue: Number(mil.TotalDue || 0),
+        approvedOnAccount: Number(oaRes.recordset[0]?.AvailableBalance || 0),
+        mrOnAccount: Math.max(0, mrReceived - cleared),
+      },
+    });
   } catch (e) {
     console.error("[crm-agreements] GET /:id error:", e.message);
     res.status(500).json({ error: e.message });
@@ -481,7 +502,11 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
       }
     }
 
-    await logApprovalHistory(id, "SeniorApprove", remarks, actorId(req));
+    // Only log the audit entry once ALL approval levels are satisfied —
+    // partial multi-level approvals should not appear as "SeniorApprove" in the trail.
+    if (result.newStatus === "Approved") {
+      await logApprovalHistory(id, "SeniorApprove", remarks, actorId(req));
+    }
     // Forward the full transition() result (not just `status`) — when this
     // is one level of several (see migration 169's 2-level workflow),
     // newStatus/level/totalLevels are what ApprovalActions.tsx reads to show
@@ -515,6 +540,12 @@ router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req
       .query("SELECT VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes FROM dbo.CrmAgreement WHERE Id = @id")).recordset[0];
 
     const result = await approvalTransition("crm-agreements", id, "Rejected", userEmail, req.user?.role, remarks);
+    // Check if customer had already approved before resetting — log it so the
+    // reset is traceable and not a silent discard.
+    const priorCustomer = (await pool.request().input("id", sql.Int, id)
+      .query("SELECT CustomerApprovalStatus, CustomerApprovedAt FROM dbo.CrmAgreement WHERE Id = @id")).recordset[0];
+    const customerHadApproved = priorCustomer?.CustomerApprovalStatus === "Approved";
+
     await pool.request()
       .input("id", sql.Int, id)
       .input("rem", sql.NVarChar(sql.MAX), remarks)
@@ -529,6 +560,12 @@ router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+    if (customerHadApproved) {
+      await pool.request().input("agid", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), remarks).query(`
+        INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, Remarks, ActorType, CreatedAt)
+        VALUES (@agid, 'CustomerApprovalVoided', @rem, 'System', SYSDATETIME())
+      `);
+    }
 
     if (oldRow) {
       await pool.request()

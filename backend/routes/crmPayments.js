@@ -60,8 +60,11 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   const oaRow = oa.recordset[0];
   const remaining = Number(oaRow.Amount) - Number(oaRow.AppliedAmount);
 
-  const target = await pool.request().input("id", sql.Int, milestoneId)
-    .query("SELECT BookingId, MilestoneNo, MilestoneName, AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WHERE Id = @id");
+  const target = await pool.request().input("id", sql.Int, milestoneId).query(`
+    SELECT m.BookingId, m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, b.BookingNo
+    FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+    WHERE m.Id = @id
+  `);
   if (!target.recordset.length) return { error: "Milestone not found" };
   const targetRow = target.recordset[0];
   if (targetRow.BookingId !== oaRow.BookingId) {
@@ -129,11 +132,16 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
 
   const finalCheck = await pool.request().input("id", sql.Int, milestoneId).query("SELECT Status FROM dbo.CrmPaymentMilestone WHERE Id = @id");
   const becamePaid = finalCheck.recordset[0]?.Status === "Paid";
+  let brokerWarning = null;
   if (becamePaid) {
-    await maybeAutoCreateSalesDeed(pool, targetRow.BookingId, actorUserId);
+    const outcome = await handleMilestoneBecamePaid(pool, {
+      bookingId: targetRow.BookingId, bookingNo: targetRow.BookingNo,
+      milestoneNo: targetRow.MilestoneNo, actorUserId,
+    });
+    brokerWarning = outcome.brokerWarning;
   }
 
-  return { applied: requested, remaining: remaining - requested, becamePaid, milestoneId, onAccountId };
+  return { applied: requested, remaining: remaining - requested, becamePaid, milestoneId, onAccountId, brokerWarning };
 }
 
 // Auto-sweep: whenever money lands on a booking's On Account balance —
@@ -188,9 +196,16 @@ function buildDemandNo(bookingNo, milestoneNo) {
 router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search } = req.query;
+    const { status, search, view } = req.query;
     const req0 = pool.request();
-    const conds = [];
+    const conds = [
+      "b.IsActive = 1",
+      "b.Status NOT IN ('Cancelled', 'Rejected')",
+      "m.Status NOT IN ('Waived')",
+    ];
+    if (view !== "all") {
+      conds.push("(m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0");
+    }
     if (status && ["Pending", "Demanded", "Paid"].includes(status)) {
       req0.input("st", sql.NVarChar(20), status);
       conds.push("m.DemandStatus = @st");
@@ -204,12 +219,17 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
       SELECT m.Id, m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, m.[Percent], m.DueDate, m.Status,
              m.DemandStatus, m.DemandNo, m.DemandRaisedOn, m.DemandNotes,
              b.Id AS BookingId, b.BookingNo, b.ProjectName, b.UnitNo, b.AssignedTo,
-             a.ApplicantName, a.Mobile
+             b.GrandTotal AS BookingGrandTotal, b.TotalValue AS BookingTotalValue,
+             a.ApplicantName, a.Mobile,
+             u.name AS AssignedToName,
+             CASE WHEN m.DueDate < CAST(SYSDATETIME() AS DATE) AND m.Status = 'Pending' THEN 1 ELSE 0 END AS IsOverdue,
+             DATEDIFF(DAY, m.DueDate, CAST(SYSDATETIME() AS DATE)) AS DaysOverdue
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.Users u ON u.id = b.AssignedTo
       ${where}
-      ORDER BY CASE WHEN m.DemandStatus = 'Pending' THEN 0 ELSE 1 END, m.DueDate ASC, b.BookingNo, m.MilestoneNo
+      ORDER BY b.BookingNo, m.MilestoneNo
     `);
 
     const rows = result.recordset;
@@ -217,12 +237,14 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
       pendingCount: 0, pendingAmount: 0,
       demandedCount: 0, demandedAmount: 0,
       paidCount: 0, paidAmount: 0,
+      overdueCount: 0, overdueAmount: 0,
     };
     for (const r of rows) {
-      const balance = Number(r.AmountDue || 0) - Number(r.AmountPaid || 0);
+      const balance = Math.max(0, Number(r.AmountDue || 0) - Number(r.AmountPaid || 0));
       if (r.DemandStatus === "Pending") { summary.pendingCount++; summary.pendingAmount += balance; }
       else if (r.DemandStatus === "Demanded") { summary.demandedCount++; summary.demandedAmount += balance; }
       else if (r.DemandStatus === "Paid") { summary.paidCount++; summary.paidAmount += balance; }
+      if (r.IsOverdue && r.DemandStatus !== "Paid") { summary.overdueCount++; summary.overdueAmount += balance; }
     }
     res.json({ demands: rows, summary });
   } catch (e) {
@@ -253,13 +275,18 @@ async function raiseDemandForMilestone(pool, milestoneId, notes) {
     e.status = 400;
     throw e;
   }
+  const balance = (row.AmountDue || 0) - (row.AmountPaid || 0);
+  if (balance <= 0) {
+    const e = new Error("This milestone has no outstanding balance — nothing to demand");
+    e.status = 400;
+    throw e;
+  }
   if (row.DemandStatus !== "Pending") {
     const e = new Error(`Cannot raise demand — current status is ${row.DemandStatus}`);
     e.status = 400;
     throw e;
   }
 
-  const balance = (row.AmountDue || 0) - (row.AmountPaid || 0);
   const demandNo = buildDemandNo(row.BookingNo, row.MilestoneNo);
   const demandRaisedOn = new Date().toISOString().slice(0, 10);
   const cleanNotes = (notes || "").trim() || null;
@@ -284,6 +311,43 @@ async function raiseDemandForMilestone(pool, milestoneId, notes) {
       milestoneId, "payment_milestone");
   }
   return { DemandNo: demandNo, DemandRaisedOn: demandRaisedOn };
+}
+
+// Shared side-effects for "this milestone just became Paid" — auto-create
+// the Sales Deed / Brokerage where applicable, auto-raise the NEXT
+// milestone's demand if it's still Pending, and surface the broker-unpaid
+// warning. Previously this whole block only lived inline inside
+// applyCrmMilestonePaymentApproval, so a milestone settled via the
+// on-account sweep (applyOnAccountToMilestone / autoApplyOnAccount) — a
+// manual deposit, an overpayment overflow, or a manual on-account apply —
+// never triggered any of it. That meant the next milestone's demand simply
+// never got raised on that path, and nobody was notified: a bug, not
+// intentional behavior. Both settlement paths now call this exact same
+// function so the outcome can't depend on which one happened to clear the
+// balance.
+async function handleMilestoneBecamePaid(pool, { bookingId, bookingNo, milestoneNo, actorUserId }) {
+  await maybeAutoCreateSalesDeed(pool, bookingId, actorUserId);
+  if (Number(milestoneNo) === 1) {
+    await maybeAutoCreateBrokerage(pool, bookingId, actorUserId);
+  }
+  try {
+    const next = await pool.request()
+      .input("bid", sql.Int, bookingId)
+      .input("mno", sql.Int, milestoneNo)
+      .query(`
+        SELECT TOP 1 Id, DemandStatus, Status FROM dbo.CrmPaymentMilestone
+        WHERE BookingId = @bid AND MilestoneNo > @mno AND Status NOT IN ('Paid', 'Waived')
+        ORDER BY MilestoneNo
+      `);
+    const nextRow = next.recordset[0];
+    if (nextRow && nextRow.DemandStatus === "Pending") {
+      await raiseDemandForMilestone(pool, nextRow.Id, `Auto-raised — milestone #${milestoneNo} payment settled for Booking ${bookingNo || bookingId}`);
+    }
+  } catch (demandErr) {
+    console.error("[crm-payments] next-milestone demand auto-raise failed:", demandErr.message);
+  }
+  const brokerWarning = await warnIfBrokerUnpaid(pool, bookingId, actorUserId);
+  return { brokerWarning };
 }
 
 // POST /:id/demand — raise a payment demand for a milestone: assigns a real
@@ -540,20 +604,10 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
     }
 
     if (rollup.recordset[0]?.Status === "Paid") {
-      await maybeAutoCreateSalesDeed(pool, targetRow.BookingId, actorUserId);
+      // Milestone-1-specific: regenerate the Money Receipt PDF, tied to this
+      // specific ReceivedPayment row — not part of the shared handler since
+      // the on-account path has no single ReceivedPaymentId to key off.
       if (targetRow.MilestoneNo === 1) {
-        await maybeAutoCreateBrokerage(pool, targetRow.BookingId, actorUserId);
-
-        // Booking Amount payment just got approved — this IS the linked
-        // Money Receipt's own approval (its status is derived live from
-        // this ReceivedPayment row, not stored separately, so there's
-        // nothing to flip here). Its PDF is regenerated so a re-download
-        // shows "APPROVED" instead of "PENDING APPROVAL". Milestone #1
-        // itself has nothing left to demand (it's Paid) — what actually
-        // becomes demandable now is the NEXT milestone in the payment
-        // plan, per "after someone approves the payment then a demand
-        // will be generated" — reusing the exact same Demands mechanism,
-        // not a parallel one.
         try {
           const { getMoneyReceiptByReceivedPaymentId, generateMoneyReceiptPdf } = require("../services/moneyReceiptPdf");
           const mr = await getMoneyReceiptByReceivedPaymentId(pool, rp.RPPaymentID);
@@ -561,20 +615,12 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
         } catch (mrErr) {
           console.error("[crm-payments] Money Receipt PDF regeneration on approval failed:", mrErr.message);
         }
-        try {
-          const next = await pool.request().input("bid", sql.Int, targetRow.BookingId).query(`
-            SELECT TOP 1 Id, DemandStatus, Status FROM dbo.CrmPaymentMilestone
-            WHERE BookingId = @bid AND MilestoneNo = 2
-          `);
-          const nextRow = next.recordset[0];
-          if (nextRow && nextRow.DemandStatus === "Pending" && nextRow.Status !== "Paid" && nextRow.Status !== "Waived") {
-            await raiseDemandForMilestone(pool, nextRow.Id, `Auto-raised — Booking Amount payment approved for Booking ${targetRow.BookingNo}`);
-          }
-        } catch (demandErr) {
-          console.error("[crm-payments] next-milestone demand auto-raise failed:", demandErr.message);
-        }
       }
-      brokerWarning = await warnIfBrokerUnpaid(pool, targetRow.BookingId, actorUserId);
+      const outcome = await handleMilestoneBecamePaid(pool, {
+        bookingId: targetRow.BookingId, bookingNo: targetRow.BookingNo,
+        milestoneNo: targetRow.MilestoneNo, actorUserId,
+      });
+      brokerWarning = outcome.brokerWarning;
     }
   }
 
@@ -680,6 +726,10 @@ router.post("/escalate-overdue", requirePageRight("crm-payments", "edit"), async
   try {
     if (!isSaAdmin(req)) return res.status(403).json({ error: "Admin access required" });
     const pool = getPool();
+    // NOTE: matches GET /demands' filter — this previously had NO IsActive /
+    // Cancelled / Rejected exclusion at all, so a booking that had been
+    // cancelled could still trigger an overdue escalation notification even
+    // though it's already hidden from the Demands page itself.
     const overdue = await pool.request().query(`
       SELECT m.Id, m.MilestoneName, m.AmountDue, m.AmountPaid, m.DueDate,
              b.BookingNo, b.AssignedTo, a.ApplicantName
@@ -687,18 +737,40 @@ router.post("/escalate-overdue", requirePageRight("crm-payments", "edit"), async
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE m.Status = 'Pending' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
+        AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected')
     `);
+
+    const { normalizeRole } = require("../middleware/role");
+    const allActive = await pool.request().query(`
+      SELECT u.id, r.RName AS roleName
+      FROM dbo.Users u
+      LEFT JOIN dbo.Role r ON u.RoleId = r.RId
+      WHERE u.discontinue = 0
+    `);
+    const mktHeadIds = allActive.recordset
+      .filter((u) => normalizeRole(u.roleName) === "marketing_head")
+      .map((u) => u.id);
+
     let notified = 0;
     for (const m of overdue.recordset) {
       const balance = (m.AmountDue || 0) - (m.AmountPaid || 0);
+      const msg = `${m.ApplicantName} · ${m.BookingNo} — ${m.MilestoneName} overdue (₹${balance.toLocaleString("en-IN")} pending)`;
       if (m.AssignedTo) {
-        await emitNotification(pool, m.AssignedTo, "payment_overdue",
-          "Payment Overdue",
-          `${m.ApplicantName} · ${m.BookingNo} — ${m.MilestoneName} overdue (₹${balance.toLocaleString("en-IN")} pending)`,
-          m.Id, "payment_milestone");
+        await emitNotification(pool, m.AssignedTo, "payment_overdue", "Payment Overdue", msg, m.Id, "payment_milestone");
         notified++;
       }
+      for (const headId of mktHeadIds) {
+        if (headId !== m.AssignedTo) {
+          await emitNotification(pool, headId, "payment_overdue", "Payment Overdue", msg, m.Id, "payment_milestone");
+          notified++;
+        }
+      }
     }
+    // NOTE: still no de-dup tracking — running this twice in the same day
+    // re-notifies every still-overdue milestone again. Doing this properly
+    // needs a DemandEscalatedAt (or similar) column on CrmPaymentMilestone
+    // to check/stamp here; flagging rather than guessing at a column that
+    // may not exist in this schema yet.
     res.json({ success: true, overdueCount: overdue.recordset.length, notified });
   } catch (e) {
     console.error("[crm-payments] POST /escalate-overdue error:", e.message);
@@ -874,6 +946,66 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
     // GrandTotal — this one stays fixed at what staff just typed in.
     if (amountDueOverride != null && updated?.BookingId) {
       await recalculateRemainingMilestones(pool, updated.BookingId, { fixedMilestoneId: id });
+
+      // Re-run the Paid/DemandStatus rollup for THIS milestone — a manual
+      // reduction can retroactively cross the paid threshold against
+      // receipts already on file, and that must be reflected immediately
+      // rather than waiting on some unrelated future payment event to
+      // happen to re-trigger the same CASE logic. If it's still open and
+      // already had a formal demand raised against the OLD amount, that
+      // demand no longer describes the real balance — reset it to Pending
+      // (clearing DemandNo) so it must be consciously re-raised rather than
+      // silently misrepresenting what was actually asked for.
+      const selfRollup = await pool.request().input("id", sql.Int, id).query(`
+        UPDATE dbo.CrmPaymentMilestone SET
+          Status = CASE WHEN ISNULL(AmountPaid,0) >= AmountDue THEN 'Paid' ELSE Status END,
+          PaidDate = CASE WHEN ISNULL(AmountPaid,0) >= AmountDue AND PaidDate IS NULL THEN CAST(SYSDATETIME() AS DATE) ELSE PaidDate END,
+          DemandStatus = CASE
+            WHEN ISNULL(AmountPaid,0) >= AmountDue THEN 'Paid'
+            WHEN DemandStatus = 'Demanded' THEN 'Pending'
+            ELSE DemandStatus END,
+          DemandNo = CASE WHEN ISNULL(AmountPaid,0) < AmountDue AND DemandStatus = 'Demanded' THEN NULL ELSE DemandNo END,
+          DemandRaisedOn = CASE WHEN ISNULL(AmountPaid,0) < AmountDue AND DemandStatus = 'Demanded' THEN NULL ELSE DemandRaisedOn END,
+          DemandNotes = CASE WHEN ISNULL(AmountPaid,0) < AmountDue AND DemandStatus = 'Demanded' THEN NULL ELSE DemandNotes END,
+          DemandRaisedAt = CASE WHEN ISNULL(AmountPaid,0) < AmountDue AND DemandStatus = 'Demanded' THEN NULL ELSE DemandRaisedAt END,
+          UpdatedAt = SYSDATETIME()
+        OUTPUT INSERTED.Status, INSERTED.MilestoneNo
+        WHERE Id = @id
+      `);
+      if (selfRollup.recordset[0]?.Status === "Paid") {
+        await handleMilestoneBecamePaid(pool, {
+          bookingId: updated.BookingId, milestoneNo: selfRollup.recordset[0].MilestoneNo, actorUserId: actorId(req),
+        });
+      }
+
+      // recalculateRemainingMilestones protects any milestone with real
+      // money on it (AmountPaid > 0) from being reproportioned, but a
+      // milestone that's Demanded with ZERO received yet has no such
+      // protection — it's still in the "open" pool and its AmountDue can
+      // get silently redistributed while a formal demand notice quoting the
+      // old figure is already sitting with the customer. Invalidate any
+      // such demand the cascade could have touched and tell whoever's
+      // assigned to re-raise it.
+      const staleDemands = await pool.request().input("bid", sql.Int, updated.BookingId).input("fid", sql.Int, id).query(`
+        UPDATE dbo.CrmPaymentMilestone SET
+          DemandStatus = 'Pending', DemandNo = NULL, DemandRaisedOn = NULL,
+          DemandNotes = NULL, DemandRaisedAt = NULL, UpdatedAt = SYSDATETIME()
+        OUTPUT INSERTED.MilestoneName
+        WHERE BookingId = @bid AND Id <> @fid AND MilestoneNo <> 1
+          AND Status NOT IN ('Paid','Waived') AND ISNULL(AmountPaid,0) = 0 AND DemandStatus = 'Demanded'
+      `);
+      if (staleDemands.recordset.length) {
+        const bk = await pool.request().input("bid", sql.Int, updated.BookingId)
+          .query("SELECT AssignedTo, BookingNo FROM dbo.CrmBooking WHERE Id = @bid");
+        const bkRow = bk.recordset[0];
+        if (bkRow?.AssignedTo) {
+          const names = staleDemands.recordset.map((r) => r.MilestoneName).join(", ");
+          await emitNotification(pool, bkRow.AssignedTo, "payment_demand_invalidated",
+            "Demand amount changed — re-raise required",
+            `Booking ${bkRow.BookingNo}: the due amount was recalculated for ${names}. The previously raised demand(s) were reset to "Not Raised" since they no longer match the real balance — please review and re-raise.`,
+            updated.BookingId, "crm_booking");
+        }
+      }
     }
 
     if (paymentSubmission) {
@@ -1053,4 +1185,3 @@ module.exports.applyCrmOnAccountPaymentApproval = applyCrmOnAccountPaymentApprov
 module.exports.autoApplyOnAccount = autoApplyOnAccount;
 module.exports.ReceiptError = ReceiptError;
 module.exports.raiseDemandForMilestone = raiseDemandForMilestone;
-

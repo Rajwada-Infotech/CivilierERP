@@ -4,7 +4,7 @@ const { generateMoneyReceiptPdf } = require("./moneyReceiptPdf");
 const { ensureChecklistRows } = require("./crmApplicationChecklist");
 const { STAGE_REVIEW, stageLabel } = require("./crmBookingStageService");
 
-const APPROVER_ROLES = ["admin", "super_admin", "dba", "account's head", "finance"];
+const APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
 
 class MoneyReceiptError extends Error {
   constructor(message, status = 400) {
@@ -239,13 +239,16 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
       throw new MoneyReceiptError("Booking must complete Level 1 and Level 2 approval before payment approval");
     }
 
+    // Pick the first milestone that is NOT yet fully paid — prevents a second
+    // receipt (e.g. after a bounce-and-resubmit) from being linked to an
+    // already-settled milestone and double-counting AmountPaid.
     const m1 = await tx.request().input("bid", sql.Int, mrRow.BookingId).query(`
       SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid
+      WHERE BookingId = @bid AND Status NOT IN ('Paid', 'Waived')
       ORDER BY MilestoneNo
     `);
     const milestoneId = m1.recordset[0]?.Id;
-    if (!milestoneId) throw new MoneyReceiptError("Booking amount milestone not found", 404);
+    if (!milestoneId) throw new MoneyReceiptError("No unpaid milestone found to link this receipt to", 404);
 
     const { createReceivedPaymentInternal } = require("../routes/receivedPayment");
     rp = await createReceivedPaymentInternal(tx, {
@@ -290,20 +293,13 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
 
   await generateMoneyReceiptPdf(pool, receiptId);
 
-  try {
-    const { raiseDemandForMilestone } = require("../routes/crmPayments");
-    const next = await pool.request().input("bid", sql.Int, mrRow.BookingId).query(`
-      SELECT TOP 1 Id, DemandStatus, Status
-      FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND MilestoneNo = 2
-    `);
-    const nextRow = next.recordset[0];
-    if (nextRow && nextRow.DemandStatus === "Pending" && !["Paid", "Waived"].includes(nextRow.Status)) {
-      await raiseDemandForMilestone(pool, nextRow.Id, `Auto-raised - Money Receipt ${mrRow.ReceiptNo} approved for Booking ${mrRow.BookingNo}`);
-    }
-  } catch (demandErr) {
-    console.error("[crm-money-receipts] next-milestone demand auto-raise failed:", demandErr.message);
-  }
+  // No demand-raise here on purpose. This milestone's own status doesn't
+  // flip to Paid until Finance separately approves the linked
+  // ReceivedPayment (receivedPayment.js PUT /:id/approve ->
+  // applyCrmMilestonePaymentApproval), and THAT already calls
+  // handleMilestoneBecamePaid, which correctly raises the true next
+  // milestone's demand (MilestoneNo > this one). Raising it here too would
+  // just re-target this same still-unpaid milestone.
 
   return { success: true, ReceivedPaymentId: rp.RPPaymentID, RPDocNo: rp.RPDocNo };
 }

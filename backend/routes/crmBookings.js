@@ -92,7 +92,11 @@ const BOOKING_SELECT = `
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.Occupation, ''))), '') IS NOT NULL
     ) THEN 1 ELSE 0 END AS BIT) AS BankDetailsComplete,
     ag.Id AS AgreementId, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus,
-    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.Status = 'Pending') AS PendingMilestoneCount
+    ag.AgreementDate, ag.DateApprovalStatus, ag.Status AS AgreementStatus,
+    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.Status = 'Pending') AS PendingMilestoneCount,
+    (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalCleared,
+    (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS ApprovedOnAccount,
+    (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmMoneyReceipt WHERE BookingId = b.Id AND Status IN ('Pending','Approved')) AS MRReceivedTotal
   FROM dbo.CrmBooking b
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
@@ -224,9 +228,20 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const actor = actorId(req);
 
     const old = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, AssignedTo, AreaSqFt, PaymentPlanId, CompanyId, ProjectId, UnitId, TotalValue, BookingAmount FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Status, WorkflowStage, ReadyForApprovalAt, AssignedTo, AreaSqFt, PaymentPlanId, CompanyId, ProjectId, UnitId, TotalValue, BookingAmount FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
     if (!old.recordset.length) return res.status(404).json({ error: "Booking not found" });
     const oldRow = old.recordset[0];
+
+    // Block financial field edits once the booking has entered the approval pipeline.
+    // The approver must see exactly the figures they approved — silent mid-approval changes
+    // would mean the approval is for different numbers than what was submitted.
+    const APPROVAL_STAGES = ["MarketingHeadApproval", "DirectorApproval", "Confirmed"];
+    const inApproval = APPROVAL_STAGES.includes(oldRow.WorkflowStage) || oldRow.ReadyForApprovalAt != null;
+    const financialFields = ["RatePerSqFt", "TotalValue", "BookingAmount", "PaymentPlanId"];
+    if (inApproval && financialFields.some(f => b[f] !== undefined)) {
+      return res.status(400).json({ error: `Financial fields (rate, value, booking amount, payment plan) cannot be changed once the booking is in ${oldRow.WorkflowStage || "the approval pipeline"}. Reject it back to Review first.` });
+    }
+
     const existingArea = oldRow.AreaSqFt;
 
     const total = b.TotalValue != null ? parseFloat(b.TotalValue)
@@ -1238,7 +1253,7 @@ router.post("/:id/attachments", requirePageRight("crm-bookings", "edit"), upload
     if (!files.length) return res.status(400).json({ error: "No files uploaded" });
 
     const statusCheck = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
-    if (statusCheck.recordset[0]?.Status === "Approved") return res.status(400).json({ error: "This Booking is Approved — attachments can no longer be added." });
+    if (["Cancelled","Rejected"].includes(statusCheck.recordset[0]?.Status)) return res.status(400).json({ error: "Attachments cannot be added to a cancelled or rejected booking." });
 
     const inserted = [];
     for (const file of files) {
@@ -1290,7 +1305,7 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
     const bookingId = parseInt(req.params.id);
     const attId = parseInt(req.params.attId);
     const statusCheck = await pool.request().input("id", sql.Int, bookingId).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
-    if (statusCheck.recordset[0]?.Status === "Approved") return res.status(400).json({ error: "This Booking is Approved — attachments can no longer be removed." });
+    if (["Cancelled","Rejected"].includes(statusCheck.recordset[0]?.Status)) return res.status(400).json({ error: "Attachments cannot be removed from a cancelled or rejected booking." });
 
     const result = await pool.request().input("id", sql.Int, attId).input("bid", sql.Int, bookingId)
       .query("SELECT Id FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
@@ -1312,42 +1327,66 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
   const id = parseInt(req.params.id, 10);
   try {
     const pool = getPool();
-    const result = await pool.request().input("bid", sql.Int, id).query(`
+
+    // Query 1: booking + customer — always safe (no portal table join)
+    const bkgResult = await pool.request().input("bid", sql.Int, id).query(`
       SELECT
-        p.Id          AS PortalUserId,
-        p.Email       AS PortalEmail,
-        p.IsActive    AS PortalIsActive,
-        p.MustChangePassword,
-        p.CreatedAt   AS PortalCreatedAt,
-        c.Mobile      AS CustomerMobile,
-        c.Name        AS CustomerName,
-        c.Email       AS CustomerEmail,
-        b.Status      AS BookingStatus,
+        b.Status        AS BookingStatus,
         b.WorkflowStage,
-        b.ConfirmedAt
+        b.ConfirmedAt,
+        b.ApplicationId,
+        a.CustomerId,
+        c.CustomerName,
+        c.Email         AS CustomerEmail,
+        c.Mobile        AS CustomerMobile
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
-      LEFT JOIN dbo.CrmCustomerPortalUser p ON p.CustomerId = c.Id
       WHERE b.Id = @bid AND b.IsActive = 1
     `);
-    if (!result.recordset.length) return res.status(404).json({ error: "Booking not found" });
-    const row = result.recordset[0];
-    const mob = row.CustomerMobile;
+    if (!bkgResult.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    const bkgRow = bkgResult.recordset[0];
+
+    // Query 2: portal user lookup — may fail if migration 254 not yet applied;
+    // degrade gracefully so the frontend still gets the booking stage.
+    let portalRow = null;
+    try {
+      // Try CustomerId-keyed lookup (post-migration-254 schema)
+      let pResult = null;
+      if (bkgRow.CustomerId) {
+        pResult = await pool.request().input("cid", sql.Int, bkgRow.CustomerId).query(`
+          SELECT Id, Email, IsActive, MustChangePassword, CreatedAt
+          FROM dbo.CrmCustomerPortalUser
+          WHERE CustomerId = @cid
+        `);
+      }
+      // Fall back to ApplicationId-keyed lookup (pre-migration-254 rows)
+      if ((!pResult || !pResult.recordset.length) && bkgRow.ApplicationId) {
+        pResult = await pool.request().input("aid", sql.Int, bkgRow.ApplicationId).query(`
+          SELECT Id, Email, IsActive, MustChangePassword, CreatedAt
+          FROM dbo.CrmCustomerPortalUser
+          WHERE ApplicationId = @aid
+        `);
+      }
+      if (pResult && pResult.recordset.length) portalRow = pResult.recordset[0];
+    } catch (pe) {
+      // Column missing (migration not run) or other transient issue — log and continue
+      console.warn("[crm-bookings] portal user lookup failed (non-fatal):", pe.message);
+    }
+
+    const mob = bkgRow.CustomerMobile;
     res.json({
-      hasPortal: !!row.PortalUserId,
-      portalUserId: row.PortalUserId || null,
-      email: row.PortalEmail || row.CustomerEmail || null,
-      // Mask middle digits — support staff see enough to confirm identity
-      // without exposing the full number in the UI.
-      maskedMobile: mob ? `${mob.slice(0, 2)}${"*".repeat(Math.max(0, mob.length - 4))}${mob.slice(-2)}` : null,
-      isActive: !!row.PortalIsActive,
-      mustChangePassword: !!row.MustChangePassword,
-      portalCreatedAt: row.PortalCreatedAt || null,
-      customerName: row.CustomerName || null,
-      bookingStatus: row.BookingStatus,
-      workflowStage: row.WorkflowStage,
-      confirmedAt: row.ConfirmedAt || null,
+      hasPortal: !!portalRow,
+      portalUserId: portalRow ? portalRow.Id : null,
+      email: portalRow ? portalRow.Email : (bkgRow.CustomerEmail || null),
+      maskedMobile: mob || null,
+      isActive: portalRow ? !!portalRow.IsActive : false,
+      mustChangePassword: portalRow ? !!portalRow.MustChangePassword : false,
+      portalCreatedAt: portalRow ? portalRow.CreatedAt : null,
+      customerName: bkgRow.CustomerName || null,
+      bookingStatus: bkgRow.BookingStatus,
+      workflowStage: bkgRow.WorkflowStage,
+      confirmedAt: bkgRow.ConfirmedAt || null,
     });
   } catch (e) {
     console.error("[crm-bookings] GET /:id/portal-status error:", e.message);
@@ -1375,6 +1414,62 @@ router.post("/:id/provision-portal", requirePageRight("crm-bookings", "edit"), a
     res.json({ success: true, ...result });
   } catch (e) {
     console.error("[crm-bookings] POST /:id/provision-portal error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Helper shared by deactivate + reactivate below
+async function setBookingPortalActive(pool, bookingId, isActive) {
+  // Look up portal user via booking → application → customer (CustomerId-keyed first, then ApplicationId fallback)
+  const bkg = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT b.ApplicationId, a.CustomerId FROM dbo.CrmBooking b
+    JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+    WHERE b.Id = @bid AND b.IsActive = 1
+  `);
+  if (!bkg.recordset.length) return { error: "Booking not found", status: 404 };
+  const { ApplicationId, CustomerId } = bkg.recordset[0];
+
+  let portalUserId = null;
+  if (CustomerId) {
+    try {
+      const r = await pool.request().input("cid", sql.Int, CustomerId)
+        .query("SELECT Id FROM dbo.CrmCustomerPortalUser WHERE CustomerId = @cid");
+      if (r.recordset.length) portalUserId = r.recordset[0].Id;
+    } catch (_) {}
+  }
+  if (!portalUserId && ApplicationId) {
+    try {
+      const r = await pool.request().input("aid", sql.Int, ApplicationId)
+        .query("SELECT Id FROM dbo.CrmCustomerPortalUser WHERE ApplicationId = @aid");
+      if (r.recordset.length) portalUserId = r.recordset[0].Id;
+    } catch (_) {}
+  }
+  if (!portalUserId) return { error: "No portal account exists for this customer yet", status: 404 };
+  await pool.request().input("id", sql.Int, portalUserId).input("act", sql.Bit, isActive ? 1 : 0)
+    .query("UPDATE dbo.CrmCustomerPortalUser SET IsActive = @act WHERE Id = @id");
+  return { ok: true };
+}
+
+router.put("/:id/portal/deactivate", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const result = await setBookingPortalActive(getPool(), id, false);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-bookings] portal deactivate error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put("/:id/portal/reactivate", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const result = await setBookingPortalActive(getPool(), id, true);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-bookings] portal reactivate error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

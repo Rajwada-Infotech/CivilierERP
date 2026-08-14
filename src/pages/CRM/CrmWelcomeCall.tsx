@@ -6,6 +6,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car, AlertTriangle, Download, ShieldCheck, ShieldAlert, RotateCcw, ClipboardList, Send, Unlock, MapPin } from "lucide-react";
+import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -1281,17 +1282,25 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
             </div>
 
             <div className="rounded-xl border border-border p-3.5 space-y-2.5">
-              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Financial Summary</h4>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-lg border border-border bg-background p-2.5">
-                  <div className="flex items-center gap-1 text-muted-foreground mb-0.5"><IndianRupee size={11} /> Total Value</div>
-                  <div className="font-bold text-sm">{fmt(callContext?.booking?.GrandTotal ?? callContext?.booking?.TotalValue)}</div>
-                </div>
-                <div className={`rounded-lg border p-2.5 ${(callContext?.outstanding?.balance ?? 0) > 0 ? "border-amber-200 bg-amber-50" : "border-border bg-background"}`}>
-                  <div className="flex items-center gap-1 text-muted-foreground mb-0.5"><IndianRupee size={11} /> Outstanding</div>
-                  <div className={`font-bold text-sm ${(callContext?.outstanding?.balance ?? 0) > 0 ? "text-amber-700" : ""}`}>{fmt(callContext?.outstanding?.balance)}</div>
-                  <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "outstanding_balance")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
-                </div>
+              {(() => {
+                const cleared = Number(callContext?.outstanding?.totalPaid ?? 0);
+                const mrReceived = Number(callContext?.mrReceived ?? 0);
+                const bk = callContext?.booking;
+                const storedGrand = Number(bk?.GrandTotal ?? 0);
+                const grandTotal = storedGrand > 0 ? storedGrand : (Number(bk?.TotalValue || 0) + Number(bk?.ParkingTotal || 0) + Number(bk?.ExtraChargesTotal || 0));
+                return (
+                  <FinancialStatusBar
+                    grandTotal={grandTotal}
+                    cleared={cleared}
+                    pendingReceipts={Math.max(0, mrReceived - cleared)}
+                    approvedOnAccount={Number(callContext?.onAccount?.availableBalance ?? 0)}
+                    overdueCount={milestones.filter((m: any) => m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date()).length}
+                    compact
+                  />
+                );
+              })()}
+              <div className="pt-1">
+                <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "outstanding_balance")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
               </div>
               {/* Payment Plan — tap to flex open the real milestone
                   schedule instead of just the plan name. */}
@@ -1402,11 +1411,6 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                       </button>
                     ))}
                   </div>
-                </div>
-              )}
-              {(callContext?.onAccount?.availableBalance ?? 0) > 0 && (
-                <div className="flex items-center gap-1.5 text-xs text-blue-700 font-medium pt-1 border-t border-border">
-                  <Wallet size={12} className="shrink-0" /> {fmt(callContext?.onAccount.availableBalance)} on account, not yet applied — see Payment Milestones
                 </div>
               )}
             </div>

@@ -230,7 +230,10 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
   const result = await approvalTransition("crm-bookings", bookingId, "Approved", userEmail, userRole, null, userId);
 
   const nextStage = stage === STAGE_MARKETING ? STAGE_DIRECTOR : STAGE_CONFIRMED;
-  const confirmedNow = nextStage === STAGE_CONFIRMED && result.level >= result.totalLevels;
+  // Require at least 2 approval levels (Marketing Head + Director) before confirming.
+  // A misconfigured 1-level workflow must never bypass Director approval.
+  const MIN_APPROVAL_LEVELS = 2;
+  const confirmedNow = nextStage === STAGE_CONFIRMED && result.level >= result.totalLevels && result.totalLevels >= MIN_APPROVAL_LEVELS;
 
   await pool.request()
     .input("bid", sql.Int, bookingId)

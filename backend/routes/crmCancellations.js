@@ -98,7 +98,7 @@ router.post("/", requirePageRight("crm-cancellations", "create"), async (req, re
       .query(`
         SELECT 
           (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid) +
-          (SELECT ISNULL(SUM(BalanceAmount), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS TotalPaid
+          (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS TotalPaid
       `);
     const totalPaid = paidRes.recordset[0].TotalPaid || 0;
 
@@ -225,7 +225,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       .query(`
         SELECT 
           (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid) +
-          (SELECT ISNULL(SUM(BalanceAmount), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS TotalPaid
+          (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS TotalPaid
       `);
     const freshTotalPaid = freshPaidRes.recordset[0].TotalPaid || 0;
     if (Math.abs(freshTotalPaid - Number(staleAmountPaid || 0)) >= 1) {

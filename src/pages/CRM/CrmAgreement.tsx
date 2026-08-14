@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { promptNextStep } from "@/lib/workflowNav";
+import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 
 const API = "/api/crm/agreements";
 // NOTE: mount path assumed as "/api/users" to match users.js's PRIVILEGED_ROLES
@@ -1069,41 +1070,20 @@ const CrmAgreement: React.FC = () => {
                     )}
                   </div>
                 </div>
-                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <span className="text-muted-foreground">Customer Portal Account: </span>
-                      {detail.agreement?.PortalEmail ? (
-                        <span className="font-medium">{detail.agreement.PortalEmail}</span>
-                      ) : (
-                        <span className="text-amber-600">Not yet provisioned — applicant needs an email and mobile on file</span>
-                      )}
-                    </div>
-                    {detail.agreement?.PortalEmail && (
-                      <span className={`px-2 py-0.5 rounded-full border font-medium ${detail.agreement.PortalMustChangePassword ? "text-orange-600 bg-orange-50 border-orange-200" : "text-green-600 bg-green-50 border-green-200"}`}>
-                        {detail.agreement.PortalMustChangePassword ? "First login pending" : "Password set"}
-                      </span>
-                    )}
-                  </div>
-                  {detail.agreement?.PortalEmail && (
-                    <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/60">
-                      <span className={`px-2 py-0.5 rounded-full border font-medium ${detail.agreement.PortalActive === false ? "text-rose-600 bg-rose-50 border-rose-200" : "text-green-600 bg-green-50 border-green-200"}`}>
-                        {detail.agreement.PortalActive === false ? "Access Deactivated" : "Access Active"}
-                      </span>
-                      <button
-                        onClick={() => handleTogglePortalAccess(detail.agreement.PortalActive !== false)}
-                        disabled={togglingPortal}
-                        className={`px-2.5 py-1 rounded-md border font-medium hover:bg-muted disabled:opacity-40 ${detail.agreement.PortalActive === false ? "border-green-200 text-green-600" : "border-rose-200 text-rose-600"}`}>
-                        {togglingPortal ? "Working..." : detail.agreement.PortalActive === false ? "Reactivate Access" : "Deactivate Access"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-                {detail.agreement?.PortalEmail && detail.agreement?.PortalMustChangePassword && (
-                  <p className="text-[11px] text-muted-foreground">
-                    Initial login: email above, password is the applicant's mobile number ({detail.agreement?.Mobile || "on file"}). They'll be asked to set a new password on first login.
-                  </p>
-                )}
+                {detail?.financialSummary && (() => {
+                  const ag = detail.agreement;
+                  const storedGrand = Number(ag?.GrandTotal ?? 0);
+                  const grandTotal = storedGrand > 0 ? storedGrand : (Number(ag?.TotalValue || 0) + Number(ag?.UnitGstAmount || 0) + Number(ag?.ParkingTotal || 0) + Number(ag?.ExtraChargesTotal || 0));
+                  return (
+                  <FinancialStatusBar
+                    grandTotal={grandTotal}
+                    cleared={Number(detail.financialSummary.cleared || 0)}
+                    pendingReceipts={Number(detail.financialSummary.mrOnAccount || 0)}
+                    approvedOnAccount={Number(detail.financialSummary.approvedOnAccount || 0)}
+                    compact
+                  />
+                  );
+                })()}
                 {revisions.length > 0 && (
                   <div className="text-xs">
                     <div className="text-muted-foreground mb-1">Version History (prior to v{detail.agreement?.VersionNo})</div>

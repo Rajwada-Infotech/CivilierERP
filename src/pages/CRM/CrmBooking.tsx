@@ -143,10 +143,17 @@ function getNextStep(b: any): NextStep {
   // this, since that's not what unblocks Agreement auto-creation either.
   if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-amber-500 border-amber-200 bg-amber-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
   if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-amber-600 border-amber-200 bg-amber-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
+  // Agreement sub-stages: draft → senior approval → customer approval → date negotiation → date approval → executed
   if (!b.AgreementId || b.SeniorApprovalStatus !== "Approved" || b.CustomerApprovalStatus !== "Approved") {
     return { label: "Agreement", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
-  if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
+  if (!b.AgreementDate) {
+    return { label: "Agreement Date", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
+  }
+  if (b.DateApprovalStatus !== "Approved") {
+    return { label: "Date Approval", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
+  }
+if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
   return null; // every gated step is complete
 }
 
@@ -456,18 +463,39 @@ const CrmBooking: React.FC = () => {
       } },
     { accessorKey: "AreaSqFt", header: "Area", size: 90,
       cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer text-sm">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sqft` : "—"}</span> },
-    { id: "value", header: "Value", size: 145, enableSorting: false,
+    { id: "value", header: "Value / Financial", size: 185, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
+        const storedGrand = Number(b.GrandTotal ?? 0);
+        const grand = storedGrand > 0 ? storedGrand : (Number(b.TotalValue || 0) + Number(b.UnitGstAmount || 0) + Number(b.ParkingTotal || 0) + Number(b.ExtraChargesTotal || 0));
+        const cleared = Number(b.TotalCleared ?? 0);
+        const mrOnAcc = Math.max(0, Number(b.MRReceivedTotal ?? 0) - cleared);
+        const onAcc = mrOnAcc + Number(b.ApprovedOnAccount ?? 0);
+        const outstanding = Math.max(0, grand - cleared - onAcc);
+        const clearedPct = grand > 0 ? Math.min(100, Math.round((cleared / grand) * 100)) : 0;
+        const onAccPct = grand > 0 ? Math.min(100 - clearedPct, Math.round((onAcc / grand) * 100)) : 0;
         return (
-          <div onClick={() => setViewingBookingId(b.Id)} className="cursor-pointer">
-            <div className="font-semibold">{fmt(b.GrandTotal ?? b.TotalValue)}</div>
+          <div onClick={() => setViewingBookingId(b.Id)} className="cursor-pointer space-y-1">
+            <div className="font-semibold">{fmt(grand)}</div>
             {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
               <div className="text-[10px] text-muted-foreground">
                 Unit {fmt(b.TotalValue)}
                 {b.UnitGstAmount > 0 && ` + Unit GST ${fmt(b.UnitGstAmount)}`}
                 {b.ParkingTotal > 0 && ` + Parking ${fmt(b.ParkingTotal)}`}
                 {b.ExtraChargesTotal > 0 && ` + Extra ${fmt(b.ExtraChargesTotal)}`}
+              </div>
+            )}
+            {grand > 0 && (
+              <div className="space-y-0.5">
+                <div className="h-1 w-full rounded-full bg-muted overflow-hidden flex">
+                  <div className="h-full bg-emerald-500 transition-all" style={{ width: `${clearedPct}%` }} />
+                  <div className="h-full bg-blue-400 transition-all" style={{ width: `${onAccPct}%` }} />
+                </div>
+                <div className="flex gap-2 text-[9px]">
+                  {cleared > 0 && <span className="text-emerald-600">✓ {fmt(cleared)}</span>}
+                  {onAcc > 0 && <span className="text-blue-600">⬡ {fmt(onAcc)}</span>}
+                  {outstanding > 0 && <span className="text-amber-600">○ {fmt(outstanding)}</span>}
+                </div>
               </div>
             )}
           </div>

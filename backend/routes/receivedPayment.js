@@ -19,7 +19,7 @@ const allowRoles = require("../middleware/role");
 // approval engine (services/approvalService.js). Without this, any user with
 // ReceivedPayments "edit" permission could approve a receipt and post it to
 // the ledger, because checkPermissionForMethod only checks CanEdit for a PUT.
-const APPROVER_ROLES = ["admin", "super_admin", "dba", "Account's Head"];
+const APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 
