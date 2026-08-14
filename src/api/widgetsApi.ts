@@ -211,3 +211,71 @@ export async function getWidgetCatalog(): Promise<WidgetCatalogItem[]> {
 
   return response.json().catch(() => [] as WidgetCatalogItem[]);
 }
+
+// ─── Cross-module metrics registry — lets Bar/Line/Pie/Stat Card widgets be
+// pointed at real Finance/Material/Engineering/CRM data instead of the one
+// fixed dataset getWidgetsDashboard() above returns. See backend/routes/
+// widgetMetrics.js for the full catalog and query implementations.
+
+export interface WidgetMetricDef {
+  key: string;
+  label: string;
+  module: string;
+  type: "timeseries" | "breakdown" | "stat";
+  unit: "currency" | "count";
+}
+
+export interface WidgetMetricTimeseries {
+  type: "timeseries";
+  key: string;
+  label: string;
+  module: string;
+  unit: "currency" | "count";
+  labels: string[];
+  series: { name: string; data: number[]; color: string }[];
+}
+
+export interface WidgetMetricBreakdown {
+  type: "breakdown";
+  key: string;
+  label: string;
+  module: string;
+  unit: "currency" | "count";
+  slices: { name: string; value: number; color: string }[];
+}
+
+export interface WidgetMetricStat {
+  type: "stat";
+  key: string;
+  label: string;
+  module: string;
+  unit: "currency" | "count";
+  value: number;
+  format: "currency" | "count";
+}
+
+export type WidgetMetricData =
+  | WidgetMetricTimeseries
+  | WidgetMetricBreakdown
+  | WidgetMetricStat;
+
+export async function getWidgetMetricsCatalog(): Promise<WidgetMetricDef[]> {
+  const response = await fetchWithAuth("/api/widgets/metrics/catalog");
+
+  if (!response.ok) {
+    throw new Error("Failed to load widget metrics catalog");
+  }
+
+  return response.json().catch(() => [] as WidgetMetricDef[]);
+}
+
+export async function getWidgetMetric(key: string): Promise<WidgetMetricData> {
+  const response = await fetchWithAuth(`/api/widgets/metrics/${encodeURIComponent(key)}`);
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to load metric "${key}"`);
+  }
+
+  return response.json();
+}

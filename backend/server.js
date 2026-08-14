@@ -231,6 +231,7 @@ const ALL_ROUTES = [
   { path: "/api/approval-inbox", file: "./routes/approvalInbox" },
   { path: "/api/tasks", file: "./routes/tasks" },
   { path: "/api/widgets", file: "./routes/widgets" },
+  { path: "/api/widgets/metrics", file: "./routes/widgetMetrics" },
   { path: "/api/tenant-reminders", file: "./routes/tenantReminders" },
   { path: "/api/reminders", file: "./routes/tenantReminders" },
   { path: "/api/applicants", file: "./routes/applicants" },
