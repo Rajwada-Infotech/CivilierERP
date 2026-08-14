@@ -12,6 +12,7 @@ const { guardAndConvertHold } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
 const { generateInvoicePdf, getInvoicePdfBuffer } = require("../services/invoicePdf");
+const { normalizeRole } = require("../middleware/role");
 const { recalculateBookingGst } = require("../services/crmGst");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
@@ -997,7 +998,7 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       `);
       const oaRow = oa.recordset[0];
       if (!oaRow) return res.status(404).json({ error: "On-account payment not found on this booking" });
-      const already = await pool.request().input("oid", sql.Int, onAccountPaymentId).query("SELECT Id FROM dbo.CrmInvoice WHERE OnAccountPaymentId = @oid");
+      const already = await pool.request().input("oid", sql.Int, onAccountPaymentId).query("SELECT Id FROM dbo.CrmInvoice WHERE OnAccountPaymentId = @oid AND Status <> 'Void'");
       if (already.recordset.length) return res.status(400).json({ error: `On-account payment "${oaRow.ReceiptNo}" already has an invoice` });
       amount = Number(oaRow.Amount);
       invoiceDate = oaRow.ReceivedDate;
@@ -1017,7 +1018,7 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       if (mRow.DemandStatus === "Pending") {
         return res.status(400).json({ error: `A demand must be raised for "${mRow.MilestoneName}" (from the Demands page) before its invoice can be generated` });
       }
-      const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid");
+      const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid AND Status <> 'Void'");
       if (already.recordset.length) return res.status(400).json({ error: `"${mRow.MilestoneName}" already has an invoice` });
       amount = Number(mRow.AmountPaid);
       invoiceDate = mRow.PaidDate;
@@ -1048,7 +1049,7 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
         .input("mo", sql.Int, periodMonth)
         .query(`
           SELECT TOP 1 Id, InvoiceNo FROM dbo.CrmInvoice
-          WHERE BookingId = @bid AND InvoiceType = @type
+          WHERE BookingId = @bid AND InvoiceType = @type AND Status <> 'Void'
             AND YEAR(InvoiceDate) = @yr AND MONTH(InvoiceDate) = @mo
         `);
       if (dup.recordset.length) {
@@ -1149,6 +1150,56 @@ router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "vie
     res.send(buffer);
   } catch (e) {
     console.error("[crm-bookings] GET /:id/invoices/:invoiceId/pdf error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Invoices are otherwise write-once (no UPDATE/DELETE route exists) — Void
+// is the one, audited correction path: it never deletes the row (InvoiceNo
+// stays on record for audit trail, matching this app's no-hard-delete
+// convention elsewhere in CRM), but it does free the invoice's MilestoneId /
+// OnAccountPaymentId / BillingPeriod slot (migration 325's re-scoped unique
+// indexes + the Status <> 'Void' guards above) so a corrected invoice can be
+// generated in its place. Gated tighter than plain "crm-bookings edit" —
+// same approver set as Money Receipt approval (crmMoneyReceiptWorkflow.js's
+// APPROVER_ROLES) since this is a financial-document correction, not routine
+// booking editing.
+const INVOICE_VOID_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
+router.put("/:id/invoices/:invoiceId/void", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  try {
+    if (!INVOICE_VOID_ROLES.includes(normalizeRole(req.user?.role))) {
+      return res.status(403).json({ error: "Only Finance / Accounts Head can void an invoice" });
+    }
+    const pool = getPool();
+    const bookingId = parseInt(req.params.id);
+    const invoiceId = parseInt(req.params.invoiceId);
+    const reason = String(req.body?.reason || req.body?.Reason || "").trim();
+    if (!reason) return res.status(400).json({ error: "A reason is required to void an invoice" });
+
+    const cur = await pool.request().input("iid", sql.Int, invoiceId).input("bid", sql.Int, bookingId).query(`
+      SELECT Id, InvoiceNo, Status FROM dbo.CrmInvoice WHERE Id = @iid AND BookingId = @bid
+    `);
+    const row = cur.recordset[0];
+    if (!row) return res.status(404).json({ error: "Invoice not found" });
+    if (row.Status === "Void") return res.status(400).json({ error: `"${row.InvoiceNo}" is already void` });
+
+    await pool.request()
+      .input("iid", sql.Int, invoiceId)
+      .input("by", sql.Int, actorId(req))
+      .input("reason", sql.NVarChar(500), reason)
+      .query(`
+        UPDATE dbo.CrmInvoice SET
+          Status = 'Void', VoidedBy = @by, VoidedAt = SYSDATETIME(), VoidReason = @reason
+        WHERE Id = @iid
+      `);
+    await logCrmAudit(pool, "CrmInvoice", invoiceId, actorId(req), [
+      { field: "Status", oldVal: row.Status, newVal: "Void" },
+      { field: "VoidReason", oldVal: null, newVal: reason },
+    ]);
+
+    res.json({ success: true, InvoiceNo: row.InvoiceNo });
+  } catch (e) {
+    console.error("[crm-bookings] PUT /:id/invoices/:invoiceId/void error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

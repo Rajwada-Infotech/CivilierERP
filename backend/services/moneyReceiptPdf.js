@@ -52,14 +52,21 @@ function decodeLogo(dataUrl) {
   }
 }
 
-// A Money Receipt's Status is never stored independently — it mirrors the
-// linked ReceivedPayment row it was generated from (Submit Payment for
-// Approval, see crmPayments.js's createReceiptForMilestone), so there is
-// only ever one approval for one real payment. RPStatus 'Pending' ->
-// 'Pending', 'Approved' -> 'Approved', 'Rejected' -> 'Bounced' (a rejected
-// cheque/instrument — RPRejectionNote becomes the bounce reason shown on
-// the document). The mr.Status column still exists on the row (set once at
-// INSERT) but is never trusted for display; this mapping is authoritative.
+// Two independent status sources feed the same displayed value, deliberately:
+// mr.Status is the customer-facing approval state (Pending -> Approved via
+// approveMoneyReceipt when Account's Head signs off; Pending -> Bounced via
+// bounceMoneyReceipt if the instrument itself failed), while rpStatus is the
+// downstream Finance/ledger state on the linked ReceivedPayment row. Priority:
+//   mr.Status = 'Approved'  -> "Approved"   (customer-facing sign-off)
+//   mr.Status = 'Bounced'   -> "Bounced"    (instrument bounced pre-approval)
+//   rpStatus  = 'Approved'  -> "Approved"   (auto-generated MRs from
+//                                            ensureMoneyReceiptForApproved
+//                                            Payment: mr.Status = 'Approved'
+//                                            already, so this only kicks in
+//                                            for legacy rows that predate it)
+//   rpStatus  = 'Rejected'  -> "Bounced"    (RPRejectionNote becomes the
+//                                            bounce reason shown on the doc)
+//   otherwise               -> "Pending"
 function deriveStatus(moneyReceiptStatus, rpStatus) {
   if (moneyReceiptStatus === "Approved") return "Approved";
   if (moneyReceiptStatus === "Bounced") return "Bounced";

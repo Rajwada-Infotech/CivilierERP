@@ -1,6 +1,6 @@
 const { sql } = require("../db");
 const { getNextDocNumber } = require("./docNumber");
-const { generateMoneyReceiptPdf } = require("./moneyReceiptPdf");
+const { generateMoneyReceiptPdf, getMoneyReceiptByReceivedPaymentId } = require("./moneyReceiptPdf");
 const { ensureChecklistRows } = require("./crmApplicationChecklist");
 const { STAGE_REVIEW, stageLabel } = require("./crmBookingStageService");
 
@@ -304,6 +304,70 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
   return { success: true, ReceivedPaymentId: rp.RPPaymentID, RPDocNo: rp.RPDocNo };
 }
 
+// Every CRM payment gets its own Money Receipt document, not just the
+// Booking Amount's first payment — called once from receivedPayment.js's
+// PUT /:id/approve, right after applyCrmMilestonePaymentApproval or
+// applyCrmOnAccountPaymentApproval has actually applied the money, for
+// every CRM-linked ReceivedPayment (any milestone, any installment/top-up,
+// or an on-account deposit). Deliberately NOT a new Pending->Approved gate:
+// the underlying ReceivedPayment has already been through Finance approval
+// by the time this runs, so the receipt is generated Approved immediately —
+// it documents a payment that's already been accepted, it doesn't ask for a
+// second yes.
+//
+// Idempotent by ReceivedPaymentId: the Booking Amount's first payment still
+// goes through the separate Pending-MR-first flow above (createMoneyReceipt
+// AfterDataReview -> approveMoneyReceipt), which already links its MR to
+// the ReceivedPayment it creates — for that one case this just refreshes
+// the PDF instead of creating a duplicate document for the same money.
+// Every other payment (a top-up on an already-partly-paid milestone, any
+// milestone 2+, an on-account deposit) has no such pre-existing MR, so one
+// gets created here for the first time.
+async function ensureMoneyReceiptForApprovedPayment(pool, receivedPaymentId, actorUserId) {
+  const existing = await getMoneyReceiptByReceivedPaymentId(pool, receivedPaymentId);
+  if (existing) {
+    await generateMoneyReceiptPdf(pool, existing.Id);
+    return { existing: true, id: existing.Id };
+  }
+
+  const cur = await pool.request().input("id", sql.Int, receivedPaymentId).query(`
+    SELECT RPPaymentID, RPAmount, RPMode, RPCheckNumber, RPChequeDate, RPBankName,
+           RPTransactionID, RPDocDate, RPRemarks, CrmBookingId
+    FROM dbo.ReceivedPayment WHERE RPPaymentID = @id
+  `);
+  const row = cur.recordset[0];
+  if (!row || !row.CrmBookingId) return { existing: false, skipped: true };
+
+  const receiptNo = await getNextDocNumber(pool, "MR", "MR");
+  const result = await pool.request()
+    .input("no",   sql.NVarChar(30),  receiptNo)
+    .input("bid",  sql.Int,           row.CrmBookingId)
+    .input("amt",  sql.Decimal(18, 2), row.RPAmount)
+    .input("mode", sql.NVarChar(30),  row.RPMode || "Other")
+    .input("chq",  sql.NVarChar(50),  row.RPMode === "Cheque" ? row.RPCheckNumber : null)
+    .input("chqDt", sql.Date,         row.RPMode === "Cheque" ? row.RPChequeDate : null)
+    .input("bank", sql.NVarChar(150), row.RPBankName)
+    .input("ref",  sql.NVarChar(150), row.RPMode === "Cheque" ? null : row.RPTransactionID)
+    .input("rcvd", sql.Date,          row.RPDocDate || null)
+    .input("rem",  sql.NVarChar(500), row.RPRemarks)
+    .input("cb",   sql.Int,           actorUserId || null)
+    .input("rpid", sql.Int,           receivedPaymentId)
+    .query(`
+      INSERT INTO dbo.CrmMoneyReceipt
+        (ReceiptNo, BookingId, Amount, PaymentMode, ChequeNo, ChequeDate, BankName,
+         TransactionRef, ReceivedDate, Remarks, Status, ReceivedPaymentId, CreatedBy,
+         CreatedAt, UpdatedAt, ApprovedBy, ApprovedAt)
+      OUTPUT INSERTED.Id
+      VALUES
+        (@no, @bid, @amt, @mode, @chq, @chqDt, @bank,
+         @ref, ISNULL(@rcvd, CAST(SYSDATETIME() AS DATE)), @rem, 'Approved', @rpid, @cb,
+         SYSDATETIME(), SYSDATETIME(), @cb, SYSDATETIME())
+    `);
+  const id = result.recordset[0].Id;
+  await generateMoneyReceiptPdf(pool, id);
+  return { existing: false, id };
+}
+
 module.exports = {
   MoneyReceiptError,
   isMoneyReceiptApprover,
@@ -313,4 +377,5 @@ module.exports = {
   resubmitMoneyReceipt,
   bounceMoneyReceipt,
   approveMoneyReceipt,
+  ensureMoneyReceiptForApprovedPayment,
 };

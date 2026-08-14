@@ -686,6 +686,35 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "crm-money-receipts") {
+      queries.push(`
+        SELECT
+          'crm-money-receipts'                  AS Module,
+          'CRM Money Receipt'                   AS ModuleLabel,
+          CAST(mr.Id AS NVARCHAR)               AS RecordId,
+          mr.ReceiptNo                          AS Reference,
+          mr.ReceivedDate                       AS RecordDate,
+          mr.Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          mr.Amount                             AS Amount,
+          ${NULL_EXTRA}
+          CAST(ISNULL(u_cr.name, CAST(mr.CreatedBy AS NVARCHAR(255))) AS NVARCHAR(255)) AS CreatedBy,
+          ISNULL(CAST(u_appr.name AS NVARCHAR(255)), '') AS ApprovedBy,
+          ISNULL(CAST(mr.ApprovedAt AS NVARCHAR), '')    AS ApprovedAt,
+          ISNULL(CAST(u_bnc.name AS NVARCHAR(255)), '')  AS RejectedBy,
+          ISNULL(CAST(mr.BouncedReason AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(mr.UpdatedAt, mr.CreatedAt)    AS LastModified
+        FROM dbo.CrmMoneyReceipt mr
+        JOIN dbo.CrmBooking b     ON b.Id = mr.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.Users u_cr   ON u_cr.id   = mr.CreatedBy
+        LEFT JOIN dbo.Users u_appr ON u_appr.id = mr.ApprovedBy
+        LEFT JOIN dbo.Users u_bnc  ON u_bnc.id  = mr.BouncedBy
+        WHERE mr.Status = 'Pending' AND mr.ReceivedPaymentId IS NULL
+      `);
+    }
+
     if (!module || module === "crm-noc") {
       queries.push(`
         SELECT
@@ -776,6 +805,7 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.JournalVoucher     WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.InterCompanyTransfer WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.FundTransfer       WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt     WHERE Status = 'Pending' AND ReceivedPaymentId IS NULL) +
         (SELECT COUNT(*) FROM dbo.CrmBooking         WHERE Status = 'Pending' AND IsActive = 1 AND ReadyForApprovalAt IS NOT NULL) +
         (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE SeniorApprovalStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE DateApprovalStatus = 'Pending') +

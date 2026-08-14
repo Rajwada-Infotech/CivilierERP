@@ -8,8 +8,12 @@
 -- codebase's uploaded files still reads it — safe to drop later once
 -- confirmed dead.
 
-ALTER TABLE dbo.CrmApplication
-  ADD BrokeragePaymentPlan NVARCHAR(20) NOT NULL
-    CONSTRAINT DF_CrmApplication_BrokeragePaymentPlan DEFAULT 'OneTime'
-    CONSTRAINT CK_CrmApplication_BrokeragePaymentPlan
-      CHECK (BrokeragePaymentPlan IN ('OneTime', 'TwoPart', 'AgreementOnly'));
+-- Same applied-by-hand-before-umzug situation as migration 303 — guarded
+-- so this is a safe no-op here and a real apply anywhere still missing it.
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CrmApplication') AND name = 'BrokeragePaymentPlan')
+  ALTER TABLE dbo.CrmApplication
+    ADD BrokeragePaymentPlan NVARCHAR(20) NOT NULL
+      CONSTRAINT DF_CrmApplication_BrokeragePaymentPlan DEFAULT 'OneTime'
+      CONSTRAINT CK_CrmApplication_BrokeragePaymentPlan
+        CHECK (BrokeragePaymentPlan IN ('OneTime', 'TwoPart', 'AgreementOnly'));
+GO

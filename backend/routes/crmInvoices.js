@@ -30,7 +30,7 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
     }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`
-      SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.Status, inv.CreatedAt,
+      SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.Status, inv.VoidReason, inv.CreatedAt,
              b.Id AS BookingId, b.BookingNo, b.ProjectName, b.UnitNo,
              a.ApplicantName, a.Mobile,
              cu.name AS CreatedByName

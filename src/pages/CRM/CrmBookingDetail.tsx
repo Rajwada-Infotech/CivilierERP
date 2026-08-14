@@ -953,9 +953,32 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // places do the same thing" trap the checklist/payment-form duplication
   // bugs earlier in this build all came from.
   const bookingMilestone = milestoneList.find((m: any) => Number(m.MilestoneNo) === 1);
+  const bookingMilestoneInvoiced = !!bookingMilestone
+    && (invoices as any[]).some((inv: any) => inv.MilestoneId === bookingMilestone.Id && inv.Status !== "Void");
   const bookingInvoiceReady = !!bookingMilestone && bookingMilestone.Status === "Paid" && bookingMilestone.DemandStatus !== "Pending"
-    && !(invoices as any[]).some((inv: any) => inv.MilestoneId === bookingMilestone.Id);
+    && !bookingMilestoneInvoiced;
   const canGenerateAnything = bookingInvoiceReady;
+
+  // The real, specific reason the Booking Amount invoice isn't generatable
+  // yet — not a single hardcoded guess. Previously this said "pending a
+  // Demand being raised" unconditionally, which is simply wrong once the
+  // demand actually has been raised and the real blocker is an unpaid
+  // balance instead; and it was gated on the WHOLE booking having zero
+  // invoices, so it silently disappeared the moment any unrelated invoice
+  // (Maintenance, Other, a later milestone) existed — exactly the situation
+  // that let a ₹5,000 shortfall on the Booking Amount go unexplained next
+  // to an unrelated ₹10,000 Maintenance invoice.
+  const bookingInvoiceGapMessage = (() => {
+    if (!bookingMilestone || bookingMilestoneInvoiced || bookingInvoiceReady) return null;
+    if (bookingMilestone.Status !== "Paid" && bookingMilestone.Status !== "Waived") {
+      const due = Number(bookingMilestone.AmountDue || 0) - Number(bookingMilestone.AmountPaid || 0);
+      return `Booking Amount is short by ${fmt(due)} (${fmt(bookingMilestone.AmountPaid)} of ${fmt(bookingMilestone.AmountDue)} paid) — invoice generation unlocks once it's fully paid`;
+    }
+    if (bookingMilestone.DemandStatus === "Pending") {
+      return "Booking Amount is fully paid — raise a Demand (Demands page) to unlock invoice generation";
+    }
+    return null;
+  })();
 
   const openInvoiceDialog = () => {
     setInvoiceForm({ InvoiceType: "Milestone", Amount: "", InvoiceDate: "", Description: "", MilestoneId: bookingMilestone ? String(bookingMilestone.Id) : "", OnAccountPaymentId: "" });
@@ -1467,7 +1490,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 dedicated CRM Invoices page instead. Read-only
                                 here, just a pointer. */}
                             {m.Status === "Paid" && Number(m.MilestoneNo) !== 1
-                              && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id) && (
+                              && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id && inv.Status !== "Void") && (
                               <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">
                                 Invoice Generation Pending
                               </span>
@@ -2307,10 +2330,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </button>
                   )}
                 </div>
-                {booking.Status === "Approved" && !canGenerateAnything && (invoices as any[]).length === 0 && (
+                {booking.Status === "Approved" && bookingInvoiceGapMessage && (
                   <div className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 font-medium">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-                    Booking confirmed — invoice generation is pending a Demand being raised on a milestone
+                    {bookingInvoiceGapMessage}
                   </div>
                 )}
                 {(invoices as any[]).length === 0 ? (

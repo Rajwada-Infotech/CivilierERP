@@ -153,6 +153,19 @@ router.put("/:id/bounce", requirePageRight("crm-money-receipts", "edit"), async 
   }
 });
 
+router.put("/:id/reject", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
+  try {
+    if (!requireMoneyReceiptApprover(req, res)) return;
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const reason = req.body?.reason || req.body?.Reason || req.body?.note || req.body?.remarks;
+    const row = await bounceMoneyReceipt(pool, id, reason, actorId(req));
+    res.json({ success: true, ...row });
+  } catch (e) {
+    handleError(res, e, "PUT /:id/reject");
+  }
+});
+
 router.put("/:id/approve", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
   try {
     if (!requireMoneyReceiptApprover(req, res)) return;
