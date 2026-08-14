@@ -123,6 +123,12 @@ const CivilWorkDprDashboard = lazy(
 const CivilWorkDprWorkDone = lazy(
   () => import("./pages/civilworkdpr/WorkDone"),
 );
+const RoomCategoryMaster = lazy(
+  () => import("./pages/civilworkdpr/RoomCategoryMaster"),
+);
+const RoomCompositionBuilder = lazy(
+  () => import("./pages/civilworkdpr/RoomCompositionBuilder"),
+);
 const DependencyTracker = lazy(
   () => import("./pages/civilworkdpr/DependencyTracker"),
 );
@@ -846,6 +852,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-work-done">
             <CivilWorkDprWorkDone />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/room-category-master"
+        element={
+          <ProtectedRoute pageKey="room-category-master">
+            <RoomCategoryMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/room-composition"
+        element={
+          <ProtectedRoute pageKey="room-composition-builder">
+            <RoomCompositionBuilder />
           </ProtectedRoute>
         }
       />

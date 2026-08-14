@@ -4,6 +4,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
+import { getRoomInstancesForUnit } from "@/api/unitBhkConfigApi";
 import { Hammer, Layers, Building2, LayoutGrid, DoorOpen, MapPin } from "lucide-react";
 
 // ── Field styling — same cyan-accent convention as the rest of the Civil
@@ -43,8 +44,10 @@ interface WorkDoneLocationForm {
   BlockId: string;
   FloorNo: string;
   UnitId: string;
-  // Room has no data source yet — deliberately never populated. See the
-  // disabled dropdown below; wiring RoomMaster in is a separate follow-up.
+  // Value is the synthetic "<categoryId>-<index>" key from
+  // getRoomInstancesForUnit — there's no per-room table yet, just a
+  // category+quantity count, so this key only ever exists for the
+  // lifetime of this form (nothing persists it).
   RoomId: string;
 }
 const EMPTY_FORM: WorkDoneLocationForm = { ProjectId: "", BlockId: "", FloorNo: "", UnitId: "", RoomId: "" };
@@ -104,6 +107,17 @@ export default function WorkDone() {
     () => (units as any[]).find((u: any) => String(u.Id) === form.UnitId) || null,
     [units, form.UnitId],
   );
+
+  // Room instances (Bathroom 1, Bathroom 2, ...) generated live from the
+  // selected Unit's saved room composition — current Alias at render time,
+  // so a renamed category shows up immediately without touching any stored
+  // data (see RoomCompositionBuilder.tsx / RoomCategoryMaster.tsx).
+  const selectedUnitId = form.UnitId ? parseInt(form.UnitId, 10) : null;
+  const { data: roomInstances = [], isLoading: loadingRooms } = useQuery({
+    queryKey: ["work-done-room-instances", selectedUnitId],
+    queryFn: () => getRoomInstancesForUnit(selectedUnitId as number),
+    enabled: !!selectedUnitId,
+  });
   const selectedProject = useMemo(
     () => (projects as any[]).find((p: any) => String(p.Id) === form.ProjectId) || null,
     [projects, form.ProjectId],
@@ -237,16 +251,34 @@ export default function WorkDone() {
                   </select>
                 </div>
 
-                {/* 5. Room — stub only, no data source wired yet. Stays
-                    disabled regardless of Unit selection; further
-                    instructions to follow before this is bound to
-                    RoomMaster. */}
+                {/* 5. Room — generated from the selected Unit's saved room
+                    composition (Room Category Master x quantity, via
+                    RoomCompositionBuilder.tsx). Empty/disabled until a Unit
+                    with a saved composition is picked. */}
                 <div>
                   <label className={labelCls}>
                     <DoorOpen size={11} /> Room
                   </label>
-                  <select value="" disabled className={inputCls}>
-                    <option value="">Coming soon</option>
+                  <select
+                    value={form.RoomId}
+                    onChange={(e) => setForm((f) => ({ ...f, RoomId: e.target.value }))}
+                    disabled={!form.UnitId || loadingRooms || roomInstances.length === 0}
+                    className={inputCls}
+                  >
+                    <option value="">
+                      {!form.UnitId
+                        ? "Select a unit first"
+                        : loadingRooms
+                          ? "Loading rooms…"
+                          : roomInstances.length === 0
+                            ? "No rooms configured for this unit"
+                            : "Select room…"}
+                    </option>
+                    {roomInstances.map((r) => (
+                      <option key={r.key} value={r.key}>
+                        {r.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>

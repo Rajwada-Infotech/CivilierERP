@@ -240,6 +240,8 @@ const ALL_ROUTES = [
   { path: "/api/block-master", file: "./routes/blockMaster" },
   { path: "/api/unit-master", file: "./routes/unitMaster" },
   { path: "/api/room-master", file: "./routes/roomMaster" },
+  { path: "/api/room-category-master", file: "./routes/roomCategoryMaster" },
+  { path: "/api/unit-bhk-config", file: "./routes/unitBhkConfig" },
   { path: "/api/payment-plan-master", file: "./routes/paymentPlanMaster" },
   { path: "/api/parking-master", file: "./routes/parkingMaster" },
   { path: "/api/parking-slot-master", file: "./routes/parkingSlotMaster" },
