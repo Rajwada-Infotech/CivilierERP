@@ -163,6 +163,9 @@ const ParkingSlotMaster = lazy(
 const ExtraChargeMaster = lazy(
   () => import("./pages/admin/masters/ExtraChargeMaster"),
 );
+const TagMaster = lazy(
+  () => import("./pages/admin/masters/TagMaster"),
+);
 const DepartmentMaster = lazy(
   () => import("./pages/admin/masters/DepartmentMaster"),
 );
@@ -324,6 +327,10 @@ const ControlPanel = lazy(() => import("./pages/dba/ControlPanel"));
 const AdsManager = lazy(() => import("./pages/dba/AdsManager"));
 const FollowUp = lazy(() => import("./pages/followup/FollowUp"));
 const ClosedTasks = lazy(() => import("./pages/followup/ClosedTasks"));
+const TaskTransfer = lazy(() => import("./pages/followup/TaskTransfer"));
+const TaskPerformanceReport = lazy(() => import("./pages/followup/TaskPerformanceReport"));
+const TaskDashboard = lazy(() => import("./pages/followup/TaskDashboard"));
+const TagPerformanceReport = lazy(() => import("./pages/followup/TagPerformanceReport"));
 const FollowupReminders = lazy(
   () => import("./pages/admin/masters/Reminders"),
 );
@@ -875,6 +882,38 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="followup-close-tasks">
             <ClosedTasks />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/task-transfer"
+        element={
+          <ProtectedRoute pageKey="followup-task-transfer">
+            <TaskTransfer />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/task-performance-report"
+        element={
+          <ProtectedRoute pageKey="task-performance-report">
+            <TaskPerformanceReport />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/task-dashboard"
+        element={
+          <ProtectedRoute pageKey="task-performance-report">
+            <TaskDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/tag-performance-report"
+        element={
+          <ProtectedRoute pageKey="task-performance-report">
+            <TagPerformanceReport />
           </ProtectedRoute>
         }
       />
@@ -1990,6 +2029,7 @@ function AppRoutes() {
       <Route path="/crm/setup/parking-slot-master" element={<ProtectedRoute pageKey="followup-parking-slot-master"><ParkingSlotMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/extra-charge-master" element={<ProtectedRoute pageKey="followup-extra-charge-master"><ExtraChargeMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/department-master" element={<ProtectedRoute pageKey="followup-department-master"><DepartmentMaster /></ProtectedRoute>} />
+      <Route path="/followup/setup/tag-master" element={<ProtectedRoute pageKey="followup-tag-master"><TagMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/task-master" element={<ProtectedRoute pageKey="task-master"><TaskMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/pending-tasks"       element={<ProtectedRoute pageKey="followup-pending-tasks"><PendingTasksPage /></ProtectedRoute>} />
       <Route path="/crm/setup/reminders"           element={<ProtectedRoute pageKey="followup-reminders"><FollowupReminders /></ProtectedRoute>} />

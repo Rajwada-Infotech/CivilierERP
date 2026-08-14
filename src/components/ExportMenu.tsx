@@ -190,7 +190,7 @@ export function ExportMenu({
           align="end"
           sideOffset={6}
           className="
-            z-50 w-56 rounded-xl border border-border bg-card shadow-lg
+            z-[80] w-56 rounded-xl border border-border bg-card shadow-lg
             overflow-hidden
             animate-in fade-in slide-in-from-top-2 duration-150
           "

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Search, Flame, Clock3, CalendarDays, ArrowRight, ClipboardList, Pause, Check, ChevronRight, ChevronDown, CornerDownRight, CheckCircle2 } from "lucide-react";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { TaskDrawer } from "@/components/followup/TaskDrawer";
+import { ProgressBar } from "@/components/followup/ProgressBar";
 import { ExportMenu } from "@/components/ExportMenu";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -35,6 +36,10 @@ interface Task {
   ParentTaskId: number | null;
   ParentTaskNo: string | null;
   ParentTaskSubject: string | null;
+  Tags: { Id: number; Name: string }[];
+  Progress: number;
+  EffectiveProgress: number;
+  HasChildren: boolean;
 }
 
 // Standalone data source — Follow-Up never reads Task Master's cache/shape,
@@ -119,12 +124,13 @@ const TaskCard: React.FC<{
   index: number;
   onClick: () => void;
   onPriorityChange: (id: number, priority: (typeof PRIORITIES)[number]) => void;
+  onProgressChange: (id: number, progress: number) => void;
   depth?: number;
   hasChildren?: boolean;
   childCount?: number;
   expanded?: boolean;
   onToggleExpand?: () => void;
-}> = ({ task, index, onClick, onPriorityChange, depth = 0, hasChildren = false, childCount = 0, expanded = false, onToggleExpand }) => {
+}> = ({ task, index, onClick, onPriorityChange, onProgressChange, depth = 0, hasChildren = false, childCount = 0, expanded = false, onToggleExpand }) => {
   const { glassCard } = useGlass();
   // A Held task isn't "overdue" in the actionable sense — it's paused — so
   // skip the red urgency styling for anything that isn't Active.
@@ -201,6 +207,20 @@ const TaskCard: React.FC<{
           Next follow-up · {formatDate(task.NextFollowUpAt)}
         </p>
       )}
+      {task.Tags?.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {task.Tags.map((tag) => (
+            <span
+              key={tag.Id}
+              className={`inline-flex items-center rounded-full font-medium truncate max-w-[110px] ${isChild ? "text-[9px] px-1.5 py-0.5" : "text-[10px] px-1.5 py-0.5"}`}
+              style={{ background: "rgba(13,148,136,0.12)", border: "1px solid rgba(13,148,136,0.3)", color: ACCENT }}
+              title={tag.Name}
+            >
+              {tag.Name}
+            </span>
+          ))}
+        </div>
+      )}
       <div className={`flex items-center pt-1 ${isChild ? "gap-1" : "gap-1.5"}`} onClick={(e) => e.stopPropagation()}>
         {PRIORITIES.map((p) => {
           const color = PRIORITY_COLORS[p];
@@ -233,6 +253,12 @@ const TaskCard: React.FC<{
           <span className="ml-auto text-[11px] text-muted-foreground font-mono">{task.CaseNumber}</span>
         )}
       </div>
+      <ProgressBar
+        value={task.EffectiveProgress ?? task.Progress ?? 0}
+        onCommit={(v) => onProgressChange(task.Id, v)}
+        disabled={task.HasChildren}
+        size={isChild ? "sm" : "md"}
+      />
     </motion.div>
   );
 };
@@ -347,6 +373,7 @@ const FollowUp: React.FC = () => {
         t.DueDate,
         t.DueDate ? formatDate(t.DueDate) : null,
         t.NextFollowUpAt ? formatDate(t.NextFollowUpAt) : null,
+        ...(t.Tags?.map((tag) => tag.Name) ?? []),
       ];
       return haystack.some((field) => field?.toString().toLowerCase().includes(q));
     });
@@ -426,6 +453,24 @@ const FollowUp: React.FC = () => {
       return;
     }
     toast.success(`Priority set to ${priority}`);
+    await queryClient.invalidateQueries({ queryKey: ["followup-board"] });
+  };
+
+  const handleProgressChange = async (id: number, progress: number) => {
+    const res = await fetchWithAuth(`${API}/${id}/progress`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ Progress: progress }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(data.error || "Failed to update progress");
+      // Board still holds the stale value client-side — refetch so the bar
+      // snaps back to what's actually saved instead of the rejected drag.
+      await queryClient.invalidateQueries({ queryKey: ["followup-board"] });
+      return;
+    }
+    if (progress === 100) toast.success("Task marked Completed");
     await queryClient.invalidateQueries({ queryKey: ["followup-board"] });
   };
 
@@ -588,16 +633,16 @@ const FollowUp: React.FC = () => {
       ) : (
         <>
           {(!bucketFilter || bucketFilter === "overdue") && (
-            <TaskGroup title="Overdue" tasks={buckets.overdue} onSelect={setSelectedTaskId} onPriorityChange={handlePriorityChange} childrenByParent={childrenByParent} expandedIds={expandedIds} onToggleExpand={toggleExpanded} />
+            <TaskGroup title="Overdue" tasks={buckets.overdue} onSelect={setSelectedTaskId} onPriorityChange={handlePriorityChange} onProgressChange={handleProgressChange} childrenByParent={childrenByParent} expandedIds={expandedIds} onToggleExpand={toggleExpanded} />
           )}
           {(!bucketFilter || bucketFilter === "dueToday") && (
-            <TaskGroup title="Today" tasks={buckets.dueToday} onSelect={setSelectedTaskId} onPriorityChange={handlePriorityChange} childrenByParent={childrenByParent} expandedIds={expandedIds} onToggleExpand={toggleExpanded} />
+            <TaskGroup title="Today" tasks={buckets.dueToday} onSelect={setSelectedTaskId} onPriorityChange={handlePriorityChange} onProgressChange={handleProgressChange} childrenByParent={childrenByParent} expandedIds={expandedIds} onToggleExpand={toggleExpanded} />
           )}
           {(!bucketFilter || bucketFilter === "upcoming") && (
-            <TaskGroup title="Upcoming" tasks={buckets.upcoming} onSelect={setSelectedTaskId} onPriorityChange={handlePriorityChange} childrenByParent={childrenByParent} expandedIds={expandedIds} onToggleExpand={toggleExpanded} />
+            <TaskGroup title="Upcoming" tasks={buckets.upcoming} onSelect={setSelectedTaskId} onPriorityChange={handlePriorityChange} onProgressChange={handleProgressChange} childrenByParent={childrenByParent} expandedIds={expandedIds} onToggleExpand={toggleExpanded} />
           )}
           {(!bucketFilter || bucketFilter === "onHold") && (
-            <TaskGroup title="On Hold" tasks={buckets.onHold} onSelect={setSelectedTaskId} onPriorityChange={handlePriorityChange} childrenByParent={childrenByParent} expandedIds={expandedIds} onToggleExpand={toggleExpanded} />
+            <TaskGroup title="On Hold" tasks={buckets.onHold} onSelect={setSelectedTaskId} onPriorityChange={handlePriorityChange} onProgressChange={handleProgressChange} childrenByParent={childrenByParent} expandedIds={expandedIds} onToggleExpand={toggleExpanded} />
           )}
           {bucketFilter && buckets[bucketFilter].length === 0 && (
             <motion.div
@@ -631,10 +676,11 @@ const TaskNode: React.FC<{
   depth: number;
   onSelect: (id: string) => void;
   onPriorityChange: (id: number, priority: (typeof PRIORITIES)[number]) => void;
+  onProgressChange: (id: number, progress: number) => void;
   childrenByParent: Map<number, Task[]>;
   expandedIds: Set<number>;
   onToggleExpand: (id: number) => void;
-}> = ({ task, index, depth, onSelect, onPriorityChange, childrenByParent, expandedIds, onToggleExpand }) => {
+}> = ({ task, index, depth, onSelect, onPriorityChange, onProgressChange, childrenByParent, expandedIds, onToggleExpand }) => {
   const children = childrenByParent.get(task.Id) ?? [];
   const hasChildren = children.length > 0;
   const expanded = expandedIds.has(task.Id);
@@ -646,6 +692,7 @@ const TaskNode: React.FC<{
         index={index}
         onClick={() => onSelect(String(task.Id))}
         onPriorityChange={onPriorityChange}
+        onProgressChange={onProgressChange}
         depth={depth}
         hasChildren={hasChildren}
         childCount={children.length}
@@ -662,6 +709,7 @@ const TaskNode: React.FC<{
               depth={depth + 1}
               onSelect={onSelect}
               onPriorityChange={onPriorityChange}
+              onProgressChange={onProgressChange}
               childrenByParent={childrenByParent}
               expandedIds={expandedIds}
               onToggleExpand={onToggleExpand}
@@ -678,10 +726,11 @@ const TaskGroup: React.FC<{
   tasks: Task[];
   onSelect: (id: string) => void;
   onPriorityChange: (id: number, priority: (typeof PRIORITIES)[number]) => void;
+  onProgressChange: (id: number, progress: number) => void;
   childrenByParent: Map<number, Task[]>;
   expandedIds: Set<number>;
   onToggleExpand: (id: number) => void;
-}> = ({ title, tasks, onSelect, onPriorityChange, childrenByParent, expandedIds, onToggleExpand }) => {
+}> = ({ title, tasks, onSelect, onPriorityChange, onProgressChange, childrenByParent, expandedIds, onToggleExpand }) => {
   if (tasks.length === 0) return null;
   return (
     <div className="space-y-2.5">
@@ -701,6 +750,7 @@ const TaskGroup: React.FC<{
             depth={0}
             onSelect={onSelect}
             onPriorityChange={onPriorityChange}
+            onProgressChange={onProgressChange}
             childrenByParent={childrenByParent}
             expandedIds={expandedIds}
             onToggleExpand={onToggleExpand}
