@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -27,9 +28,20 @@ export default function ReturnReasonMaster() {
 
   const [open, setOpen]         = useState(false);
   const [editing, setEditing]   = useState<ReturnReason | null>(null);
-  const [form, setForm]         = useState(EMPTY);
+  // This form only exists inside a Dialog (unlike the other masters' always-
+  // visible inline forms), so a refresh closes it regardless — persisting
+  // the values alone wouldn't be visible again until the dialog reopens.
+  // Rehydrate + reopen together (see the mount effect below) so a refresh
+  // mid-typing actually shows the restored draft, not just silently keeps
+  // it in localStorage.
+  const [form, setForm]         = useDraftForm("return-reason-master", EMPTY, { skip: !!editing });
   const [saving, setSaving]     = useState(false);
   const [deleting, setDeleting] = useState<ReturnReason | null>(null);
+
+  useEffect(() => {
+    if (form.name || form.description) setOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openCreate = () => { setEditing(null); setForm(EMPTY); setOpen(true); };
   const openEdit   = (r: ReturnReason) => {
@@ -179,7 +191,7 @@ export default function ReturnReasonMaster() {
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Return Reason" : "New Return Reason"}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 pt-1">
+          <div className="space-y-4 pt-1" onKeyDown={preventEnterSubmit}>
             <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                 Reason Name <span className="text-red-500">*</span>

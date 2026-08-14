@@ -40,12 +40,12 @@ const PAYMENT_SEARCH_SELECT = `
     np.PChequeNo, np.PChequeLotId, np.PChequeLotNumber, np.PChequeDate,
     np.PChequeAccountNumber, np.PChequeIfsc, np.PIsPostDated, np.PBankID,
     np.PIsChequeCancelled,
-    ISNULL(bm.BName, np.PBankName)  AS BankName,
-    bm.BBranch                      AS BankBranch,
-    cm.ChequeLotNumber              AS LotNumber,
-    cc.CCId                         AS CancelledCheckId
+    ISNULL(bm.LHeadName, np.PBankName)  AS BankName,
+    bm.LBranchName                      AS BankBranch,
+    cm.ChequeLotNumber                  AS LotNumber,
+    cc.CCId                             AS CancelledCheckId
   FROM dbo.NewPayment np
-  LEFT JOIN dbo.BankMaster bm ON bm.BId = np.PBankID
+  LEFT JOIN dbo.AccountHeadMaster bm ON bm.LHeadId = np.PBankID
   LEFT JOIN dbo.ChequeMaster cm ON cm.CId = np.PChequeLotId
   LEFT JOIN dbo.CancelledCheque cc ON cc.PaymentId = np.PPaymentID
   WHERE np.PChequeNo = @ChequeNo AND np.Status NOT IN ('Rejected', 'Deleted')
@@ -69,9 +69,9 @@ async function findLotFallback(pool, chequeNo) {
       SELECT TOP 1
         cm.CId, cm.ChequeLotNumber, cm.ChequeStartNumber, cm.ChequeEndNumber,
         cm.BankId, cm.AccountNumber, cm.IFSCCode,
-        bm.BName AS BankName, bm.BBranch AS BankBranch
+        bm.LHeadName AS BankName, bm.LBranchName AS BankBranch
       FROM dbo.ChequeMaster cm
-      LEFT JOIN dbo.BankMaster bm ON bm.BId = cm.BankId
+      LEFT JOIN dbo.AccountHeadMaster bm ON bm.LHeadId = cm.BankId
       WHERE cm.Status = 1 AND cm.ChequeStartNumber <= @Num AND cm.ChequeEndNumber >= @Num
       ORDER BY cm.CId
     `);
@@ -187,10 +187,10 @@ async function cancelPaymentCheque(pool, { paymentId, chequeNo, reason, userEmai
     .query(`
       SELECT np.PPaymentID, np.PChequeNo, np.PChequeLotId, np.PChequeLotNumber,
              np.PIsChequeCancelled, np.PBankID,
-             ISNULL(bm.BName, np.PBankName) AS BankName,
+             ISNULL(bm.LHeadName, np.PBankName) AS BankName,
              np.PChequeAccountNumber
       FROM dbo.NewPayment np
-      LEFT JOIN dbo.BankMaster bm ON bm.BId = np.PBankID
+      LEFT JOIN dbo.AccountHeadMaster bm ON bm.LHeadId = np.PBankID
       WHERE np.PPaymentID = @PPaymentID
     `);
   const payment = payRes.recordset[0];
@@ -249,9 +249,9 @@ async function cancelLotCheque(pool, { chequeLotId, chequeNo, reason, userEmail 
     .input("CId", sql.Int, chequeLotId)
     .query(`
       SELECT cm.CId, cm.ChequeLotNumber, cm.ChequeStartNumber, cm.ChequeEndNumber,
-             cm.BankId, cm.AccountNumber, bm.BName AS BankName
+             cm.BankId, cm.AccountNumber, bm.LHeadName AS BankName
       FROM dbo.ChequeMaster cm
-      LEFT JOIN dbo.BankMaster bm ON bm.BId = cm.BankId
+      LEFT JOIN dbo.AccountHeadMaster bm ON bm.LHeadId = cm.BankId
       WHERE cm.CId = @CId AND cm.Status = 1
     `);
   const lot = lotRes.recordset[0];

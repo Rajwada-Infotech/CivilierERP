@@ -523,47 +523,13 @@ router.get("/", async (req, res) => {
       `);
     }
 
-    // Application verification — reinstated. The verifier here is checking
-    // the full data entry itself (not a downstream Booking), so this reads
-    // straight off CrmApplication, before any Booking exists. Reject (with
-    // a mandatory note — see crmApplications.js PUT /:id/reject) is the
-    // "revert to fill/re-check" action; the applicant edits and resubmits
-    // via PUT /:id/submit, which loops back here until level 1 clears.
-    if (!module || module === "crm-applications") {
-      queries.push(`
-        SELECT
-          'crm-applications'                    AS Module,
-          'CRM Application'                     AS ModuleLabel,
-          CAST(a.Id AS NVARCHAR)                AS RecordId,
-          a.ApplicationNo                       AS Reference,
-          a.CreatedAt                           AS RecordDate,
-          a.Status,
-          CAST(NULL AS NVARCHAR)                AS ContractorName,
-          a.ApplicantName                       AS SupplierName,
-          a.BookingAmount                       AS Amount,
-          ${NULL_EXTRA}
-          CAST(a.CreatedBy AS NVARCHAR(255))    AS CreatedBy,
-          ''                                    AS ApprovedBy,
-          ''                                    AS ApprovedAt,
-          ISNULL((
-            SELECT TOP 1 CAST(ApproverEmail AS NVARCHAR(255))
-            FROM dbo.ApprovalAuditLog
-            WHERE TableName = 'CrmApplication' AND RecordId = a.Id
-              AND ActionStatus = 'Rejected'
-            ORDER BY ActionAt DESC
-          ), '')                                AS RejectedBy,
-          ISNULL((
-            SELECT TOP 1 CAST(Note AS NVARCHAR(MAX))
-            FROM dbo.ApprovalAuditLog
-            WHERE TableName = 'CrmApplication' AND RecordId = a.Id
-              AND ActionStatus = 'Rejected'
-            ORDER BY ActionAt DESC
-          ), '')                                AS RejectionNote,
-          ISNULL(a.UpdatedAt, a.CreatedAt)      AS LastModified
-        FROM dbo.CrmApplication a
-        WHERE a.Status = 'Pending' AND a.IsActive = 1
-      `);
-    }
+    // Applications no longer have their own approve/reject cycle — they
+    // stay Pending permanently once Submitted, and all real review/approval
+    // happens on the Booking that's auto-created for them instead (see
+    // crmApplications.js PUT /:id/submit, crmBookings.js, and
+    // crmBookingStageService.js). An Application row here would have no
+    // valid action left to take (its approve/reject/checklist routes were
+    // retired) and would never clear, so it's deliberately excluded now.
 
     if (!module || module === "crm-bookings") {
       queries.push(`

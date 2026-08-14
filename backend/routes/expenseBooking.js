@@ -578,6 +578,10 @@ router.get("/options", async (req, res) => {
           -- terms — preferring it here used to silently understate/overstate
           -- the invoice amount for every billing-terms-adjusted booking.
           ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
+          -- TDS withheld at source (0 when not applicable) — the picker
+          -- and payment form both need this to show "what's actually
+          -- payable" (amount − TDS) instead of the gross invoice amount.
+          ISNULL(eb.TDSAmount, 0)         AS tdsAmount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
           ISNULL(e.name, '')              AS companyName,
           ISNULL(eb.EFinYear, '')         AS financialYear,
@@ -586,15 +590,14 @@ router.get("/options", async (req, res) => {
           ISNULL(eb.ETotalPaid, 0)        AS totalPaid,
           ISNULL(eb.ERemainingAmount, ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)))
                                           AS remainingAmount,
+          -- No amount baked in here — the frontend already derives the
+          -- TDS-net payable figure once from amount/tdsAmount and renders
+          -- it itself; duplicating that math into this string invited it
+          -- to drift out of sync (as the gross-amount version here did).
           CONCAT(
             ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))),
             N' — ',
-            COALESCE(proj.name, eb.EProjectName, ''),
-            N' (₹',
-            CAST(CAST(
-              ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))
-            AS BIGINT) AS NVARCHAR(20)),
-            ')'
+            COALESCE(proj.name, eb.EProjectName, '')
           ) AS label
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.enterprise e ON e.id = eb.ECompanyId
@@ -748,6 +751,10 @@ router.get("/options", async (req, res) => {
       supplierName: r.supplierName || "",
       partyId: r.supplierId || null,
       amount: parseFloat(r.amount) || 0,
+      tdsAmount: parseFloat(r.tdsAmount) || 0,
+      totalPaid: parseFloat(r.totalPaid) || 0,
+      remainingAmount: parseFloat(r.remainingAmount) || 0,
+      billStatus: r.billStatus || "",
       companyId: r.companyId || null,
       companyName: r.companyName || "",
       financialYear: r.financialYear || "",
@@ -2649,7 +2656,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
                  @PCreatedAt, @PCreatedBy, @Status)
             `);
           const { syncBillStatus } = require("./newPayment");
-          await syncBillStatus(pool, finalDocNo);
+          await syncBillStatus(pool, sql, finalDocNo);
         }
       }
     }

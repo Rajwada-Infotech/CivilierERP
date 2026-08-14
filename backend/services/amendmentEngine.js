@@ -12,6 +12,7 @@
 const { sql } = require("../db");
 const { MODULE_MAP, GL_POSTERS } = require("./approvalService");
 const { reversePostingBySource } = require("./generalLedger");
+const { syncBillStatus } = require("../utils/syncBillStatus");
 
 // module → the SourceType string that module's own postXApproval() function
 // (services/generalLedger.js) uses when writing GeneralLedgerEntry rows.
@@ -66,6 +67,26 @@ async function applyAmendment(pool, module, refDocId, proposedChanges, actor) {
   );
   if (!result.rowsAffected?.[0]) {
     throw new Error(`Document not found: ${module} #${refDocId}`);
+  }
+
+  // An amendment to an Invoice can change ENetAmount and/or the TDS
+  // snapshot (TDSAmount etc.) — both feed EBillStatus/ETotalPaid/
+  // ERemainingAmount, which this generic column-by-column UPDATE has no
+  // way to know it needs to recompute. Previously these three only ever
+  // got refreshed by the /approve route (once, before any amendment
+  // could exist) or by a payment being made — so an approved invoice
+  // whose TDS was added/changed via an amendment kept showing its
+  // pre-amendment (often pre-TDS) Remaining/Bill Status forever, even
+  // though the invoice's own figures were correctly updated.
+  if (module === "expense-booking") {
+    try {
+      const docRes = await pool.request().input("Eid", sql.Int, refDocId)
+        .query("SELECT EDocNo FROM dbo.ExpenseBooking WHERE Eid = @Eid");
+      const docNo = docRes.recordset[0]?.EDocNo;
+      if (docNo) await syncBillStatus(pool, sql, docNo);
+    } catch (syncErr) {
+      console.warn("syncBillStatus on amendment apply failed (non-fatal):", syncErr.message);
+    }
   }
 
   const sourceType = GL_SOURCE_TYPE[module];

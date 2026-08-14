@@ -41,8 +41,20 @@ async function fetchDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
   return r.ok ? r.json() : null;
 }
+// The merged Data Review checklist — the former Application-level Level-1
+// checklist (KYC, Project/Unit/Rate, Payment Plan, Bank/Deposit, Broker,
+// Source, Documents), now the actual content of this booking's own "Review"
+// workflow stage. See crmBookings.js GET/PUT /:id/checklist/*.
+async function fetchChecklist(id: number): Promise<any> {
+  const r = await fetchWithAuth(`${API}/${id}/checklist`);
+  return r.ok ? r.json() : null;
+}
 async function fetchInvoices(id: number): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/${id}/invoices`);
+  return r.ok ? r.json() : [];
+}
+async function fetchMoneyReceipts(bookingId: number): Promise<any[]> {
+  const r = await fetchWithAuth(`/api/crm/money-receipts?bookingId=${bookingId}`);
   return r.ok ? r.json() : [];
 }
 async function fetchAttachments(id: number): Promise<any[]> {
@@ -135,10 +147,10 @@ function InvoicePdfDialog({ bookingId, invoice, onClose }: { bookingId: number; 
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
-            <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> {invoice.InvoiceNo}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-amber-600 dark:text-amber-400" /> {invoice.InvoiceNo}</DialogTitle>
             {blobUrl && (
               <a href={blobUrl} download={`${invoice.InvoiceNo}.pdf`}
-                className="shrink-0 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 flex items-center gap-1.5">
+                className="shrink-0 px-3 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 flex items-center gap-1.5">
                 <Download size={14} /> Download PDF
               </a>
             )}
@@ -191,6 +203,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchDetail(bookingId),
   });
   const booking = data?.booking;
+  const stageState = data?.stageState;
+  const { data: checklistData, refetch: refetchChecklist } = useQuery({
+    queryKey: ["crm-booking-checklist", bookingId],
+    queryFn: () => fetchChecklist(bookingId),
+  });
+  const checklistItems: any[] = checklistData?.items || [];
+  const checklistAllChecked = !!checklistData?.allChecked;
+  const [checklistBusyKey, setChecklistBusyKey] = useState<string | null>(null);
+  const [checklistFlaggingKey, setChecklistFlaggingKey] = useState<string | null>(null);
+  const [checklistFlagRemark, setChecklistFlagRemark] = useState("");
   // customer is available via data?.customer if needed in future tabs
   const agreement = data?.agreement;
   // Once the booking's Agreement has at least one uploaded document, Unit/
@@ -228,6 +250,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, projectBanks]);
+  // The Payment Mode was already captured on the Application's own Payment
+  // Details step (booking.PaymentMode is copied from it at Booking
+  // creation) — pre-fill this form with it instead of always defaulting to
+  // "Cash" and making staff re-pick something they already told the system
+  // once. Only applies while the form is still untouched (still "Cash",
+  // its own initial value) so it never clobbers a deliberate change.
+  useEffect(() => {
+    if (tab === "Payment & Invoice" && booking?.PaymentMode && payForm.PaymentMode === "Cash" && booking.PaymentMode !== "Cash") {
+      setPayForm((f) => ({ ...f, PaymentMode: booking.PaymentMode }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, booking?.PaymentMode]);
   const { data: invoices = [] } = useQuery({
     queryKey: ["crm-booking-invoices", bookingId],
     queryFn: () => fetchInvoices(bookingId),
@@ -236,6 +270,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     // with no matching invoice, which requires this data to actually be
     // loaded rather than sitting on its stale/empty default.
     enabled: tab === "Payment & Invoice" || tab === "Payment Plan",
+  });
+  const { data: moneyReceipts = [] } = useQuery({
+    queryKey: ["crm-booking-money-receipts", bookingId],
+    queryFn: () => fetchMoneyReceipts(bookingId),
+    enabled: !!bookingId,
   });
   const { data: onAccountData } = useQuery({
     queryKey: ["crm-booking-on-account", bookingId],
@@ -538,23 +577,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     return rows;
   }, [invoices, invoiceSort]);
 
-  const [confirmingChecklist, setConfirmingChecklist] = useState<"unit" | "plan" | null>(null);
-  const handleConfirmChecklistItem = async (item: "unit" | "plan") => {
-    setConfirmingChecklist(item);
-    try {
-      const res = await fetchWithAuth(`${API}/${bookingId}/confirm-${item}`, { method: "PUT" });
-      const resData = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(resData.error || "Confirm failed");
-      toast.success(item === "unit" ? "Unit, Rate & Total Value confirmed" : "Payment Plan & Booking Amount confirmed");
-      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setConfirmingChecklist(null);
-    }
-  };
-
   // Locked/read-only by default (auto-fetched from the Application, itself
   // auto-fetched from the Unit's own default) — this is the deliberate
   // escape hatch for when the deal genuinely needs a different plan than
@@ -586,28 +608,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
-  // Un-confirm a checklist item — for when a conflict or mistake is spotted
-  // after the fact, so staff can re-check rather than being stuck with a
-  // Confirm-only, one-way checklist. Also drops the booking out of the Admin
-  // Approval Inbox (server clears ReadyForApprovalAt) until re-confirmed and
-  // re-submitted via the "Book" action.
-  const handleRevertChecklistItem = async (item: "unit" | "plan") => {
-    if (!window.confirm(`Revert this confirmation? The booking will need to be re-checked and re-submitted for approval.`)) return;
-    setConfirmingChecklist(item);
-    try {
-      const res = await fetchWithAuth(`${API}/${bookingId}/revert-${item}`, { method: "PUT" });
-      const resData = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(resData.error || "Revert failed");
-      toast.success("Confirmation reverted — re-check and re-confirm when ready");
-      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setConfirmingChecklist(null);
-    }
-  };
-
   const activeTabIndex = Math.max(0, TABS.indexOf(tab));
   // MilestoneNo alone isn't a safe key — a parking/extra-charge line item
   // added while a booking briefly had zero milestones yet could have been
@@ -631,17 +631,23 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // on-account deposit — the two numbers are independent.
   const bookingOnAccountBalance = Number(onAccountData?.availableBalance || 0);
   const bookingAmountPaidInFull = bookingAmountDue > 0 && bookingAmountBalance < 1;
-  const mandatoryReady = !!booking?.UnitReviewConfirmed && !!booking?.PlanReviewConfirmed && bookingAmountPaidInFull;
+  // "Unit confirmed" / "Plan confirmed" are no longer separate booking
+  // columns — they ARE the Data Review checklist's own ProjectUnitRate /
+  // PaymentPlanAmounts items being Checked. One source of truth for both
+  // the top progress strip below and the booking-approval gate.
+  const unitConfirmed = checklistItems.find((it: any) => it.ItemKey === "ProjectUnitRate")?.CheckStatus === "Checked";
+  const planConfirmed = checklistItems.find((it: any) => it.ItemKey === "PaymentPlanAmounts")?.CheckStatus === "Checked";
+  const mandatoryReady = checklistAllChecked;
   // Which specific gating step to point staff at, in the order they must be
   // completed — replaces the old generic "complete the checklist" message
-  // with the actual step name and where to go do it, since the 3 gates live
+  // with the actual step name and where to go do it, since the gates live
   // on 3 different tabs (Booking, Payment Plan, Payment & Invoice).
-  const pendingStepMessage = !booking?.UnitReviewConfirmed
-    ? { tab: "Booking" as Tab, text: "Step 1 (Unit & Value) is pending — confirm \"Unit, Rate & Total Value are correct\" on the Booking tab." }
-    : !booking?.PlanReviewConfirmed
-    ? { tab: "Payment Plan" as Tab, text: "Step 2 (Payment Plan) is pending — review and confirm the Payment Plan tab." }
-    : !bookingAmountPaidInFull
-    ? { tab: "Payment & Invoice" as Tab, text: "Step 3 (Booking Amount Paid) is pending — the Booking Amount must be fully paid on the Payment & Invoice tab." }
+  const pendingStepMessage = !unitConfirmed
+    ? { tab: "Booking" as Tab, text: "Step 1 (Unit & Value) is pending — check \"Project, Unit and Rate/SqFt are correct\" on the Booking tab." }
+    : !planConfirmed
+    ? { tab: "Payment Plan" as Tab, text: "Step 2 (Payment Plan) is pending — check the Payment Plan item on the Payment Plan tab." }
+    : !checklistAllChecked
+    ? { tab: "Booking" as Tab, text: "The Data Review checklist still has unchecked items." }
     : null;
 
   const goStep = (dir: 1 | -1) => {
@@ -651,10 +657,94 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const isLastTab = activeTabIndex === TABS.length - 1;
 
   const [bookingRequesting, setBookingRequesting] = useState(false);
+  const [stageActioning, setStageActioning] = useState<"approve" | "reject" | null>(null);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectRemark, setRejectRemark] = useState("");
+  const currentStage = booking?.WorkflowStage || stageState?.WorkflowStage || "Review";
+  const stageLabels: Record<string, string> = {
+    Review: "Data Review",
+    MarketingHeadApproval: "Marketing Head Approval (L1)",
+    DirectorApproval: "Director Approval (L2 — Final)",
+    Confirmed: "Confirmed",
+  };
+  const userRole = String(currentUser?.role || "").toLowerCase();
+  const stageRoles: Record<string, string[]> = {
+    MarketingHeadApproval: ["admin", "super_admin", "marketing_head"],
+    DirectorApproval: ["admin", "super_admin", "director"],
+  };
+  const canActOnStage = booking?.Status === "Pending"
+    && Array.isArray(stageRoles[currentStage])
+    && stageRoles[currentStage].includes(userRole);
+
+  const handleStageApprove = async () => {
+    setStageActioning("approve");
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/approve`, { method: "PUT" });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || "Approval failed");
+      toast.success(resData.confirmed ? "Booking confirmed" : `Approved - moved to ${resData.label || "next stage"}`);
+      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+      qc.invalidateQueries({ queryKey: ["approval-inbox"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setStageActioning(null);
+    }
+  };
+
+  const handleStageReject = async () => {
+    if (!rejectRemark.trim()) {
+      toast.error("Remarks are required when sending a booking back for correction");
+      return;
+    }
+    setStageActioning("reject");
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/reject`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: rejectRemark.trim() }),
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || "Reject failed");
+      toast.success(`Sent back to ${resData.label || "previous stage"}`);
+      setRejectOpen(false);
+      setRejectRemark("");
+      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+      qc.invalidateQueries({ queryKey: ["approval-inbox"] });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setStageActioning(null);
+    }
+  };
+
+  // Data Review checklist actions — check/uncheck/flag/resubmit, one item at
+  // a time, same shape as the Welcome Call and old Application-verify
+  // checklists elsewhere in this app.
+  const fireChecklistAction = async (itemKey: string, action: "check" | "uncheck" | "flag" | "resubmit", remarks?: string) => {
+    setChecklistBusyKey(itemKey);
+    try {
+      const res = await fetchWithAuth(`${API}/${bookingId}/checklist/${itemKey}/${action}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: action === "check" || action === "flag" ? JSON.stringify({ remarks }) : undefined,
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || "Action failed");
+      if (action === "flag") { setChecklistFlaggingKey(null); setChecklistFlagRemark(""); }
+      await refetchChecklist();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setChecklistBusyKey(null);
+    }
+  };
+
   const handleFinalBook = async () => {
-    if (!mandatoryReady) {
-      toast.error("Complete unit review, payment plan review, and booking amount payment before booking approval.");
-      setTab("Payment & Invoice");
+    if (!checklistAllChecked) {
+      toast.error("Complete the data review checklist before booking approval.");
       return;
     }
     if (booking.Status === "Approved") {
@@ -666,7 +756,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const res = await fetchWithAuth(`${API}/${bookingId}/ready-for-approval`, { method: "PUT" });
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Failed to mark ready for approval");
-      toast.success(`Booking confirmed — invoice generated, ${resData.notified || 0} admin(s) notified for final approval`);
+      toast.success(`Data review complete — sent to ${resData.label || "Marketing Head Approval"}`);
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
     } catch (e: any) {
@@ -706,25 +796,31 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   };
 
   const handleRecordPayment = async () => {
-    if (!firstMilestone?.Id) { toast.error("Set the Booking Amount first"); return; }
     if (!payForm.Amount || parseFloat(payForm.Amount) <= 0) { toast.error("Enter a valid amount"); return; }
     setPaySaving(true);
     try {
       const bankName = payForm.DepositBankId
         ? (bankOptions as any[]).find((b: any) => String(b.BId) === payForm.DepositBankId)?.BName
         : undefined;
-      const res = await fetchWithAuth(`${PAY_API}/${firstMilestone.Id}/receipts`, {
+      const res = await fetchWithAuth(`/api/crm/money-receipts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payForm, DepositBankName: bankName }),
+        body: JSON.stringify({
+          BookingId: bookingId,
+          Amount: payForm.Amount,
+          PaymentMode: payForm.PaymentMode,
+          ReceivedDate: payForm.ReceivedDate,
+          TransactionRef: payForm.TransactionRef,
+          ChequeDate: payForm.ChequeDate,
+          DepositBankName: bankName,
+        }),
       });
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Submission failed");
-      toast.success(`Submitted for Finance approval${resData.RPDocNo ? ` — ${resData.RPDocNo}` : ""}. It won't count as paid until Account's Head approves it.`);
+      toast.success(`Money Receipt ${resData.ReceiptNo || ""} created — Pending approval.`);
       setPayForm({ Amount: "", PaymentMode: "Cash", ReceivedDate: "", TransactionRef: "", ChequeDate: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-milestones", String(bookingId)] });
-      qc.invalidateQueries({ queryKey: ["crm-booking-on-account", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", bookingId] });
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -760,103 +856,33 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
+  // This page generates exactly one invoice type: the Booking Amount
+  // invoice (Milestone #1) — the one thing every booking always has and
+  // that staff need right here the moment it's paid+demanded. Every other
+  // invoice (later milestones, Maintenance, Other, On-Account) now belongs
+  // exclusively to the dedicated CRM Invoices page, which lists and
+  // generates across every booking rather than duplicating that flow here
+  // per-booking. Keeping this page single-purpose avoids the same "two
+  // places do the same thing" trap the checklist/payment-form duplication
+  // bugs earlier in this build all came from.
+  const bookingMilestone = milestoneList.find((m: any) => Number(m.MilestoneNo) === 1);
+  const bookingInvoiceReady = !!bookingMilestone && bookingMilestone.Status === "Paid" && bookingMilestone.DemandStatus !== "Pending"
+    && !(invoices as any[]).some((inv: any) => inv.MilestoneId === bookingMilestone.Id);
+  const canGenerateAnything = bookingInvoiceReady;
+
   const openInvoiceDialog = () => {
-    const todayStr = new Date().toLocaleDateString("en-CA"); // yyyy-mm-dd, matches <input type="date">
-    // Booking is the system-owned invoice type — it is only ever created
-    // automatically, the moment the booking payment clears and staff hits
-    // Confirm & Book (see maybeAutoGenerateBookingInvoice on the backend).
-    // This manual dialog is for every other invoice (e.g. milestone-wise
-    // payments after booking), so it never defaults to or offers "Booking".
-    const defaultType = uninvoicedPaidMilestones.length > 0
-      ? "Milestone"
-      : uninvoicedOnAccountPayments.length > 0
-      ? "OnAccount"
-      : "Milestone";
-    setInvoiceForm({ InvoiceType: defaultType, Amount: "", InvoiceDate: todayStr, Description: "", MilestoneId: "", OnAccountPaymentId: "" });
+    setInvoiceForm({ InvoiceType: "Milestone", Amount: "", InvoiceDate: "", Description: "", MilestoneId: bookingMilestone ? String(bookingMilestone.Id) : "", OnAccountPaymentId: "" });
     setInvoiceDialog(true);
   };
 
-  // Milestones that are fully paid but don't have an invoice yet — the only
-  // ones a "Milestone" invoice can legally be raised for. This is what makes
-  // the manual dialog "well synced" rather than a disconnected freehand
-  // entry: amount/date always come from the milestone's real payment record
-  // (enforced again server-side), never typed by staff. Milestone #1
-  // ("Booking") is excluded — it always gets its own auto-generated
-  // 'Booking' invoice the moment the booking payment clears, so offering it
-  // here too would double-invoice the same money received.
-  const uninvoicedPaidMilestones = milestoneList.filter(
-    (m: any) => m.Status === "Paid" && Number(m.MilestoneNo) !== 1
-      && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id)
-  );
-  // The only thing this dialog could possibly do right now is the Booking
-  // invoice — which is never manually creatable (it's 100% auto-generated at
-  // Confirm & Book, see maybeAutoGenerateBookingInvoice) — so the normal
-  // type-select + milestone-select form has nothing real to offer. Showing
-  // it anyway just presented staff with an empty "Select a paid milestone"
-  // dead end; a locked, explanatory panel replaces it in this specific
-  // window only — the instant another milestone becomes eligible, the
-  // regular form comes back automatically.
-  // On-account deposits (money received in excess of what's currently due,
-  // auto-parked into CrmOnAccountPayment) are just as real as a paid
-  // milestone — they're cash already received and must not sit un-invoiced
-  // either. Same "unbooked" shape as uninvoicedPaidMilestones above, folded
-  // into canGenerateAnything below so the header button/dead-end-form
-  // suppression logic treats it the same way.
-  const uninvoicedOnAccountPayments = (onAccountData?.payments || []).filter(
-    (p: any) => !p.InvoiceId && !(invoices as any[]).some((inv: any) => inv.OnAccountPaymentId === p.Id)
-  );
-  const hasBookingInvoice = (invoices as any[]).some((inv: any) => inv.InvoiceType === "Booking");
-  const bookingInvoiceOnly = !hasBookingInvoice && uninvoicedPaidMilestones.length === 0 && uninvoicedOnAccountPayments.length === 0;
-  // Nothing to raise right now: the Booking invoice already exists (nothing
-  // to force), and no other milestone is sitting paid-but-uninvoiced. Hiding
-  // the button here (instead of opening a dialog whose only option is a
-  // dead-end "no paid milestone waiting" dropdown) is what keeps this
-  // action honest — it reappears the moment a milestone payment actually
-  // needs invoicing. Maintenance/Other invoices are ad-hoc and don't belong
-  // at this early booking-review stage either; they become reachable again
-  // once a milestone is genuinely awaiting invoicing.
-  const canGenerateAnything = !hasBookingInvoice || uninvoicedPaidMilestones.length > 0 || uninvoicedOnAccountPayments.length > 0;
-
-  const [forcingBookingInvoice, setForcingBookingInvoice] = useState(false);
-  const handleForceBookingInvoice = async () => {
-    setForcingBookingInvoice(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${bookingId}/invoices/force-booking`, { method: "POST" });
-      const resData = await res.json();
-      if (!res.ok) throw new Error(resData.error);
-      toast.success(`Invoice ${resData.InvoiceNo} generated — visible to the customer in their portal`);
-      setInvoiceDialog(false);
-      qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setForcingBookingInvoice(false);
-    }
-  };
-
   const handleGenerateInvoice = async () => {
-    if (invoiceForm.InvoiceType === "Milestone") {
-      if (!invoiceForm.MilestoneId) { toast.error("Select a milestone"); return; }
-    } else if (invoiceForm.InvoiceType === "OnAccount") {
-      if (!invoiceForm.OnAccountPaymentId) { toast.error("Select an on-account payment"); return; }
-    } else if (!invoiceForm.Amount) {
-      toast.error("Amount is required"); return;
-    }
+    if (!invoiceForm.MilestoneId) { toast.error("Booking milestone not found"); return; }
     setSaving(true);
     try {
-      const body: any = { InvoiceType: invoiceForm.InvoiceType, Description: invoiceForm.Description };
-      if (invoiceForm.InvoiceType === "Milestone") {
-        body.MilestoneId = parseInt(invoiceForm.MilestoneId);
-      } else if (invoiceForm.InvoiceType === "OnAccount") {
-        body.OnAccountPaymentId = parseInt(invoiceForm.OnAccountPaymentId);
-      } else {
-        body.Amount = parseFloat(invoiceForm.Amount);
-        body.InvoiceDate = invoiceForm.InvoiceDate;
-      }
       const res = await fetchWithAuth(`${API}/${bookingId}/invoices`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ InvoiceType: "Milestone", MilestoneId: parseInt(invoiceForm.MilestoneId), Description: invoiceForm.Description }),
       });
       const resData = await res.json();
       if (!res.ok) throw new Error(resData.error);
@@ -870,25 +896,91 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     }
   };
 
-  const [generatingOnAccountId, setGeneratingOnAccountId] = useState<number | null>(null);
-  const handleGenerateOnAccountInvoice = async (onAccountPaymentId: number) => {
-    setGeneratingOnAccountId(onAccountPaymentId);
-    try {
-      const res = await fetchWithAuth(`${API}/${bookingId}/invoices`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ InvoiceType: "OnAccount", OnAccountPaymentId: onAccountPaymentId }),
-      });
-      const resData = await res.json();
-      if (!res.ok) throw new Error(resData.error);
-      toast.success(`Invoice ${resData.InvoiceNo} generated — visible to the customer in their portal`);
-      qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-booking-on-account", bookingId] });
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setGeneratingOnAccountId(null);
-    }
+  // Renders ONE Data Review checklist item — tick box, status, remarks, Flag
+  // for Recheck / resend-for-recheck controls — placed directly inside the
+  // tab/card whose data it actually verifies, instead of one disconnected
+  // "Data Review Checklist" block dumped above the tabs. Same tick/flag/
+  // remarks logic as before (fireChecklistAction et al.), just rendered per
+  // item, in place, card by card. Only interactive while the booking is at
+  // the Review stage; still visible read-only afterward so the verified
+  // state/remarks stay visible in context.
+  //
+  // ProjectUnitRate and PaymentPlanAmounts used to ALSO drive a separate
+  // booking.UnitReviewConfirmed/PlanReviewConfirmed field via a second pair
+  // of confirm-unit/confirm-plan API calls fired alongside this one — two
+  // backend facts for what's really one fact, glued together only by this
+  // component calling both endpoints on the same click. That second system
+  // (columns + routes) is gone; this checkbox is now the single, real
+  // action for both what it visibly checks and what the readiness gate
+  // (checkBookingApprovalReadiness / submitForApproval) actually reads.
+  const renderChecklistItem = (itemKey: string) => {
+    const it = checklistItems.find((c: any) => c.ItemKey === itemKey);
+    if (!it) return null;
+    const interactive = currentStage === "Review";
+
+    return (
+      <div className="rounded-lg border border-border/70 px-3 py-2 bg-muted/10">
+        <div className="flex items-start gap-2">
+          <button
+            type="button"
+            disabled={!interactive || !canEdit || checklistBusyKey === it.ItemKey}
+            onClick={() => fireChecklistAction(it.ItemKey, it.CheckStatus === "Checked" ? "uncheck" : "check")}
+            className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
+              it.CheckStatus === "Checked" ? "bg-emerald-600 border-emerald-600"
+              : it.CheckStatus === "NeedsRecheck" ? "border-red-400 bg-red-50" : "border-border"
+            }`}
+          >
+            {it.CheckStatus === "Checked" && <Check size={10} className="text-white" />}
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium">{it.ItemLabel}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${
+                it.CheckStatus === "Checked" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                : it.CheckStatus === "NeedsRecheck" ? "text-red-600 bg-red-50 border-red-200"
+                : "text-muted-foreground bg-muted/50 border-border"
+              }`}>
+                {it.CheckStatus}
+              </span>
+            </div>
+            {it.Remarks && (
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {it.CheckStatus === "NeedsRecheck" ? "Flagged: " : "Remark: "}{it.Remarks}
+              </p>
+            )}
+            {interactive && canEdit && it.CheckStatus !== "NeedsRecheck" && (
+              checklistFlaggingKey === it.ItemKey ? (
+                <div className="mt-1.5 space-y-1">
+                  <textarea value={checklistFlagRemark} onChange={(e) => setChecklistFlagRemark(e.target.value)}
+                    placeholder="What needs to be fixed? (required)" rows={2}
+                    className="w-full text-[11px] rounded border border-border px-2 py-1 bg-background" />
+                  <div className="flex gap-1.5">
+                    <button disabled={checklistBusyKey === it.ItemKey || !checklistFlagRemark.trim()}
+                      onClick={() => fireChecklistAction(it.ItemKey, "flag", checklistFlagRemark)}
+                      className="text-[11px] px-2 py-0.5 rounded bg-red-600 text-white disabled:opacity-40">
+                      Send for Recheck
+                    </button>
+                    <button onClick={() => setChecklistFlaggingKey(null)} className="text-[11px] px-2 py-0.5 rounded border border-border">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setChecklistFlaggingKey(it.ItemKey)} className="mt-1 text-[10px] text-red-600 hover:underline">
+                  Flag for Recheck
+                </button>
+              )
+            )}
+            {interactive && it.CheckStatus === "NeedsRecheck" && (
+              <button onClick={() => fireChecklistAction(it.ItemKey, "resubmit")} disabled={checklistBusyKey === it.ItemKey}
+                className="mt-1 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 disabled:opacity-40">
+                I've revised this — resend for recheck
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -896,7 +988,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto thin-scroll">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
-            <Building2 size={16} className="text-primary" />
+            <Building2 size={16} className="text-amber-600 dark:text-amber-400" />
             {booking ? `${booking.BookingNo} — ${booking.ApplicantName}` : "Booking Detail"}
           </DialogTitle>
         </DialogHeader>
@@ -905,31 +997,96 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           <div className="py-16 text-center text-muted-foreground text-sm">Loading...</div>
         ) : (
           <>
-            {/* 3-step required flow, always visible regardless of which tab
-                is open — the flat tab bar alone doesn't show that Booking,
-                Payment Plan, and Payment are the only 3 gating steps for
-                the Book action; everything else (Parking & Extra Work,
-                Bank Details, Attachments, Invoice) is supporting detail,
-                not part of the approval path. */}
-            {booking.Status !== "Approved" && (
-              <div className="flex items-center gap-1.5 px-1 py-2 text-xs overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {[
-                  { label: "1. Unit & Value", done: !!booking.UnitReviewConfirmed, t: "Booking" as Tab },
-                  { label: "2. Payment Plan", done: !!booking.PlanReviewConfirmed, t: "Payment Plan" as Tab },
-                  { label: "3. Booking Amount Paid", done: bookingAmountPaidInFull, t: "Payment & Invoice" as Tab },
-                ].map((s, i) => (
-                  <React.Fragment key={s.label}>
-                    <button onClick={() => setTab(s.t)}
-                      className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium shrink-0 ${
-                        s.done ? "text-emerald-700 bg-emerald-50" : tab === s.t ? "text-primary bg-primary/10" : "text-muted-foreground bg-muted/40"
-                      }`}>
-                      {s.done && <Check size={11} />} {s.label}
+            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Current Stage</div>
+                <div className="text-sm font-semibold">{stageLabels[currentStage] || currentStage}</div>
+                {booking.StageRemarks && (
+                  <div className="mt-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                    <span className="font-semibold">Correction remarks: </span>{booking.StageRemarks}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {rejectOpen && (
+              <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60" onClick={() => !stageActioning && setRejectOpen(false)}>
+                <div className="bg-background border border-border rounded-xl p-5 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
+                  <h3 className="text-sm font-semibold">Send Back for Correction</h3>
+                  <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)}
+                    placeholder="Required remarks"
+                    className="w-full min-h-[110px] text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setRejectOpen(false)} disabled={stageActioning !== null}
+                      className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-40">
+                      Cancel
                     </button>
-                    {i < 2 && <ArrowRight size={11} className="text-muted-foreground shrink-0" />}
-                  </React.Fragment>
-                ))}
-                <span className="ml-4 shrink-0 whitespace-nowrap text-muted-foreground">
-                  {mandatoryReady ? "All 3 steps complete — ready to Confirm & Book" : "Complete all 3 to unlock Confirm & Book"}
+                    <button onClick={handleStageReject} disabled={stageActioning !== null || !rejectRemark.trim()}
+                      className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">
+                      {stageActioning === "reject" ? "Sending..." : "Send Back"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 2-step required flow (Unit & Value, Payment Plan — both are
+                Data Review checklist items) plus a 3rd, INFORMATIONAL-ONLY
+                Money Receipt status chip. Money Receipt does not gate
+                the Verify/L1/L2 approval flow — that's the whole point of the
+                decoupled design — but it was invisible from this header
+                before, so staff had no way to tell it existed without
+                clicking into the Payment & Invoice tab. This chip answers
+                "where is the payment record" directly from the summary. */}
+            {booking.Status !== "Approved" && (() => {
+              const latestReceipt = (moneyReceipts as any[])[0];
+              const mrStatus: string = latestReceipt?.Status
+                || (currentStage !== "Review" ? "Not created yet" : "Available once submitted for approval");
+              const mrChipClass = latestReceipt?.Status === "Approved"
+                ? "text-emerald-700 bg-emerald-50"
+                : latestReceipt?.Status === "Bounced"
+                ? "text-red-700 bg-red-50"
+                : latestReceipt?.Status === "Pending"
+                ? "text-amber-700 bg-amber-50"
+                : "text-muted-foreground bg-muted/40";
+              return (
+                <div className="flex items-center gap-1.5 px-1 py-2 text-xs overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {[
+                    { label: "1. Unit & Value", done: unitConfirmed, t: "Booking" as Tab },
+                    { label: "2. Payment Plan", done: planConfirmed, t: "Payment Plan" as Tab },
+                  ].map((s, i) => (
+                    <React.Fragment key={s.label}>
+                      <button onClick={() => setTab(s.t)}
+                        className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium shrink-0 ${
+                          s.done ? "text-emerald-700 bg-emerald-50" : tab === s.t ? "text-primary bg-primary/10" : "text-muted-foreground bg-muted/40"
+                        }`}>
+                        {s.done && <Check size={11} />} {s.label}
+                      </button>
+                      <ArrowRight size={11} className="text-muted-foreground shrink-0" />
+                    </React.Fragment>
+                  ))}
+                  <button onClick={() => setTab("Payment & Invoice")}
+                    title="Not required to book — informational only"
+                    className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium shrink-0 ${mrChipClass}`}>
+                    {latestReceipt?.Status === "Approved" && <Check size={11} />} 3. Money Receipt: {mrStatus}
+                  </button>
+                  <span className="ml-4 shrink-0 whitespace-nowrap text-muted-foreground">
+                    {mandatoryReady ? "Both required steps complete — ready to submit" : "Complete both required steps to submit"}
+                  </span>
+                </div>
+              );
+            })()}
+
+            {/* Overall Data Review progress — a small at-a-glance readout;
+                each item's actual tick/flag/remarks controls now live in
+                the specific tab/card whose data they verify (see
+                renderChecklistItem calls below), not dumped here as one
+                block. */}
+            {currentStage === "Review" && checklistItems.length > 0 && (
+              <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-xs">
+                <span className="font-medium flex items-center gap-1.5"><ClipboardCheck size={13} className="text-primary" /> Data Review Checklist</span>
+                <span className="text-muted-foreground">
+                  {checklistItems.filter((it: any) => it.CheckStatus === "Checked").length}/{checklistItems.length} verified — tick each item on its own tab below
                 </span>
               </div>
             )}
@@ -942,7 +1099,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               {TABS.map((t) => (
                 <button key={t} onClick={() => setTab(t)}
                   className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                    tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                    tab === t ? "border-amber-500 text-amber-600 dark:text-amber-400" : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}>
                   {t}
                 </button>
@@ -985,7 +1142,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     HSN Master row itself (9954AFH/9954OTH/9954EXW). */}
                 <div className="rounded-lg border border-border p-3 space-y-1.5 text-xs">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">GST (fixed — set by HSN Master)</p>
+                    <p className="text-sm font-medium">GST</p>
                     {booking.HsnCode && <span className="text-[11px] font-mono text-muted-foreground">{booking.HsnCode} · {booking.UnitParkingGstRate != null ? `${booking.UnitParkingGstRate}%` : "—"}</span>}
                   </div>
 
@@ -1041,33 +1198,17 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                   <div className="flex items-center justify-between border-t border-border pt-1 font-semibold">
                     <span>Total Amount</span>
-                    <span className="text-primary">{fmt(booking.GrandTotal)}</span>
+                    <span className="text-amber-600 dark:text-amber-400">{fmt(booking.GrandTotal)}</span>
                   </div>
                 </div>
 
-                {booking.Status !== "Approved" && (
-                  <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-                    <p className="text-sm font-medium">Unit, Rate & Total Value are correct</p>
-                    {booking.UnitReviewConfirmed ? (
-                      <div className="flex items-center gap-2">
-                        <span className="flex items-center gap-1 text-xs font-medium text-green-600"><Check size={13} /> Confirmed</span>
-                        {canEdit && (
-                          <button onClick={() => handleRevertChecklistItem("unit")} disabled={confirmingChecklist === "unit"}
-                            className="px-2 py-0.5 text-xs text-amber-700 border border-amber-200 bg-amber-50 rounded-md font-medium hover:bg-amber-100 disabled:opacity-40">
-                            Revert
-                          </button>
-                        )}
-                      </div>
-                    ) : canEdit ? (
-                      <button onClick={() => handleConfirmChecklistItem("unit")} disabled={confirmingChecklist === "unit"}
-                        className="px-2.5 py-1 text-xs border border-border rounded-lg font-medium hover:bg-muted disabled:opacity-40">
-                        {confirmingChecklist === "unit" ? "Confirming..." : "Confirm"}
-                      </button>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">Not confirmed</span>
-                    )}
-                  </div>
-                )}
+                {/* Project, Unit and Rate/SqFt — a single checklist item,
+                    a single action. See renderChecklistItem's own comment
+                    for why there's no longer a separate Confirm button
+                    here. */}
+                {renderChecklistItem("ProjectUnitRate")}
+                {renderChecklistItem("BrokerDetails")}
+                {renderChecklistItem("SourceAssignment")}
               </div>
             )}
 
@@ -1075,10 +1216,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-4 pt-2">
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-primary" /> Payment Plan</h3>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-amber-600 dark:text-amber-400" /> Payment Plan</h3>
                     {!planEditOpen && canEdit && booking.Status !== "Approved" && (
                       <button onClick={() => { setPlanEditOpen(true); setPlanEditValue(booking.PaymentPlanId ? String(booking.PaymentPlanId) : ""); }}
-                        className="text-xs text-primary hover:underline shrink-0">
+                        className="text-xs text-amber-600 dark:text-amber-400 hover:underline shrink-0">
                         Edit
                       </button>
                     )}
@@ -1098,7 +1239,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           Cancel
                         </button>
                         <button onClick={handleSavePaymentPlan} disabled={planSaving}
-                          className="px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                          className="px-2.5 py-1 text-xs text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
                           {planSaving ? "Saving..." : "Save"}
                         </button>
                       </div>
@@ -1125,7 +1266,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   const grandTotal = Number(booking.GrandTotal ?? (unitValue + parkingTotal + extraTotal));
                   return (
                     <div className="rounded-xl border border-border p-4 space-y-2">
-                      <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Total Price Breakdown</h3>
+                      <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-amber-600 dark:text-amber-400" /> Total Price Breakdown</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm">
                         <div className="rounded-lg bg-muted/30 px-2.5 py-2">
                           <div className="text-xs text-muted-foreground mb-0.5">Unit Base</div>
@@ -1143,9 +1284,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           <div className="text-xs text-muted-foreground mb-0.5">Extra incl. GST</div>
                           <div className="font-medium">{fmt(extraTotal)}</div>
                         </div>
-                        <div className="rounded-lg bg-primary/10 px-2.5 py-2">
+                        <div className="rounded-lg bg-amber-500/10 px-2.5 py-2">
                           <div className="text-xs text-muted-foreground mb-0.5">Grand Total</div>
-                          <div className="font-semibold text-primary">{fmt(grandTotal)}</div>
+                          <div className="font-semibold text-amber-600 dark:text-amber-400">{fmt(grandTotal)}</div>
                         </div>
                       </div>
                     </div>
@@ -1195,10 +1336,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 On-Account section above: a milestone that's
                                 fully paid but has no matching invoice yet is
                                 real money sitting un-invoiced. Milestone 1
-                                (Booking) is excluded — it's auto-invoiced on
-                                its own separate path. Read-only here; the
-                                existing "+ Generate Invoice" dialog on the
-                                Payment & Invoice tab already raises it. */}
+                                (Booking) is excluded — that one's generated
+                                from this page's own Payment & Invoice tab;
+                                every later milestone is generated from the
+                                dedicated CRM Invoices page instead. Read-only
+                                here, just a pointer. */}
                             {m.Status === "Paid" && Number(m.MilestoneNo) !== 1
                               && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id) && (
                               <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">
@@ -1214,7 +1356,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   return (
                     <div className="rounded-xl border border-border p-4 space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Payment Breakdown</h3>
+                        <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-amber-600 dark:text-amber-400" /> Payment Breakdown</h3>
                         <span className="text-xs text-muted-foreground">{fmt(totalPaid)} of {fmt(totalDue)} paid — all charges</span>
                       </div>
                       <div className="overflow-x-auto thin-scroll">
@@ -1242,36 +1384,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   );
                 })()}
 
-                {booking.Status !== "Approved" && (
-                  <div className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-                    <p className="text-sm font-medium">Payment Plan is correct</p>
-                    {booking.PlanReviewConfirmed ? (
-                      <div className="flex items-center gap-2">
-                        <span className="flex items-center gap-1 text-xs font-medium text-green-600"><Check size={13} /> Confirmed</span>
-                        {canEdit && (
-                          <button onClick={() => handleRevertChecklistItem("plan")} disabled={confirmingChecklist === "plan"}
-                            className="px-2 py-0.5 text-xs text-amber-700 border border-amber-200 bg-amber-50 rounded-md font-medium hover:bg-amber-100 disabled:opacity-40">
-                            Revert
-                          </button>
-                        )}
-                      </div>
-                    ) : canEdit ? (
-                      <button onClick={() => handleConfirmChecklistItem("plan")} disabled={confirmingChecklist === "plan"}
-                        className="px-2.5 py-1 text-xs border border-border rounded-lg font-medium hover:bg-muted disabled:opacity-40">
-                        {confirmingChecklist === "plan" ? "Confirming..." : "Confirm"}
-                      </button>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">Not confirmed</span>
-                    )}
-                  </div>
-                )}
+                {/* Payment Plan and Token/Booking Amount — a single
+                    checklist item, a single action. See
+                    renderChecklistItem's own comment for why there's no
+                    longer a separate Confirm button here. */}
+                {renderChecklistItem("PaymentPlanAmounts")}
               </div>
             )}
 
             {tab === "Payment & Invoice" && (
               <div className="space-y-3 pt-2">
                 <div className="rounded-xl border border-border p-4 space-y-2">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><CreditCard size={15} className="text-primary" /> Booking Amount</h3>
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><CreditCard size={15} className="text-amber-600 dark:text-amber-400" /> Booking Amount</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                     <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">{bookingAmountDue > 0 ? fmt(bookingAmountDue) : "Not set"}</span></div>
                     <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-emerald-700">{fmt(bookingAmountPaid)}</span></div>
@@ -1321,7 +1445,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     so a booking with none doesn't show an empty card. */}
                 {(onAccountData?.payments || []).length > 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-primary" /> On-Account Payments</h3>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-amber-600 dark:text-amber-400" /> On-Account Payments</h3>
                     <div className="space-y-1.5">
                       {(onAccountData.payments as any[]).map((p: any) => {
                         const inv = (invoices as any[]).find((i: any) => i.OnAccountPaymentId === p.Id)
@@ -1338,7 +1462,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               <div className="flex items-center gap-2 shrink-0">
                                 <span className="flex items-center gap-1 text-xs font-medium text-green-600"><Check size={13} /> Invoiced</span>
                                 <button onClick={() => setPreviewInvoice(inv)}
-                                  className="flex items-center gap-1 text-xs text-primary hover:underline">
+                                  className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline">
                                   <Eye size={12} /> View
                                 </button>
                               </div>
@@ -1348,10 +1472,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   Invoice Generation Pending
                                 </span>
                                 {canEdit && (
-                                  <button onClick={() => handleGenerateOnAccountInvoice(p.Id)} disabled={generatingOnAccountId === p.Id}
-                                    className="px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
-                                    {generatingOnAccountId === p.Id ? "Generating…" : "Generate Invoice"}
-                                  </button>
+                                  <a href={`/crm/invoices?bookingId=${bookingId}`} className="px-2.5 py-1 text-xs border border-border rounded-md font-medium hover:bg-muted">
+                                    Generate from Invoices page
+                                  </a>
                                 )}
                               </div>
                             )}
@@ -1362,10 +1485,26 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 )}
 
-                {canEdit && booking.Status !== "Approved" && !bookingAmountPaidInFull && bookingAmountDue > 0 && (
+                {/* Legacy fallback ONLY — Money Receipt (create -> approve) is
+                    the real path for the Booking Amount now, auto-created
+                    the moment the booking is actually submitted for approval
+                    (Confirm & Book), not merely once the checklist is
+                    complete — see PUT /:id/ready-for-approval. This must
+                    never show before that submission (the server-side gate
+                    would reject it anyway), or a booking still sitting at
+                    Review could get a payment submitted with no
+                    CrmMoneyReceipt attached, and the auto-create trigger
+                    would then create a second, duplicate receipt for the
+                    same money once it's actually submitted. It only exists
+                    for bookings that had already moved past Review before
+                    this feature shipped, so the auto-create trigger never
+                    fired for them. */}
+                {canEdit && booking.Status !== "Approved" && !bookingAmountPaidInFull && bookingAmountDue > 0
+                  && !(Number(firstMilestone?.PendingVerificationAmount) > 0)
+                  && currentStage !== "Review" && moneyReceipts.length === 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-primary" /> Submit Payment for Approval</h3>
-                    <p className="text-[11px] text-muted-foreground">Goes to Finance's Received Payment queue — Account's Head (or admin/super admin) must approve before it counts as paid.</p>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-amber-600 dark:text-amber-400" /> Submit Payment for Approval</h3>
+                    <p className="text-[11px] text-muted-foreground">Creates the Money Receipt for this booking — it goes Pending until Finance/Account's Head approves it.</p>
                     <div className="grid grid-cols-2 gap-2">
                       <input type="number" placeholder={`Amount — Balance Due ${fmt(bookingAmountBalance)}`} value={payForm.Amount}
                         onChange={(e) => setPayForm((f) => ({ ...f, Amount: e.target.value }))}
@@ -1396,11 +1535,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       )}
                     </div>
                     <button onClick={handleRecordPayment} disabled={paySaving || (bankOptions.length > 0 && !payForm.DepositBankId)}
-                      className="w-full py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40">
+                      className="w-full py-2 text-sm font-medium text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
                       {paySaving ? "Submitting..." : `Submit for Approval`}
                     </button>
                   </div>
                 )}
+
+                {renderChecklistItem("BankDepositMode")}
               </div>
             )}
 
@@ -1431,7 +1572,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {/* Parking */}
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Car size={15} className="text-primary" /> Parking Allotments</h3>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Car size={15} className="text-amber-600 dark:text-amber-400" /> Parking Allotments</h3>
                     {(parking as any[]).length > 0 && (
                       <span className="text-xs font-semibold text-foreground">
                         Total {fmt((parking as any[]).reduce((s: number, p: any) => s + Number(p.TotalAmount || 0), 0))}
@@ -1472,7 +1613,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                     </span>
                                   )}
                                   <button onClick={handleAddParking} disabled={chargesSaving}
-                                    className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded font-medium disabled:opacity-40">
+                                    className="px-2 py-1 text-xs text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded font-medium disabled:opacity-40">
                                     Save
                                   </button>
                                   <button onClick={cancelEditParking}
@@ -1509,7 +1650,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
                 {/* Extra Charges */}
                 <div className="rounded-xl border border-border p-4 space-y-2">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-primary" /> Extra Charges</h3>
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-amber-600 dark:text-amber-400" /> Extra Charges</h3>
                   <div className="overflow-x-auto thin-scroll">
                     {(extras as any[]).length === 0 ? (
                       <p className="text-xs text-muted-foreground">No extra charges added yet.</p>
@@ -1535,7 +1676,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                     onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
                                     className="w-20 text-xs border border-border rounded px-1.5 py-1 bg-background" />
                                   <button onClick={handleAddExtra} disabled={chargesSaving}
-                                    className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded font-medium disabled:opacity-40">
+                                    className="px-2 py-1 text-xs text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded font-medium disabled:opacity-40">
                                     Save
                                   </button>
                                   <button onClick={cancelEditExtra}
@@ -1593,7 +1734,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
                           className="w-32 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                         <button onClick={handleAddExtra} disabled={chargesSaving}
-                          className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 shrink-0">
+                          className="px-3 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 shrink-0">
                           {chargesSaving ? "Adding..." : "Add"}
                         </button>
                       </div>
@@ -1695,6 +1836,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     )}
                   </>
                 )}
+
+                {renderChecklistItem("ApplicantKyc")}
               </div>
             )}
 
@@ -1752,24 +1895,60 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </div>
                   </div>
                 )}
+
+                {renderChecklistItem("Documents")}
               </div>
             )}
 
             {tab === "Payment & Invoice" && (
               <div className="space-y-4 pt-4 mt-1 border-t border-border">
+                {/* Money Receipt — auto-generated the moment this booking is
+                    actually submitted for approval (Confirm & Book, PUT
+                    /:id/ready-for-approval), never merely once the Data
+                    Review checklist is complete — a booking can sit fully
+                    checked at Review for a while before staff submit it, and
+                    a receipt must not exist before that real submission. */}
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                  <div className="text-xs">
+                    <span className="font-semibold flex items-center gap-1.5"><FileText size={14} className="text-primary" /> Money Receipt</span>
+                    <span className="text-muted-foreground">
+                      {moneyReceipts.length === 0
+                        ? (currentStage === "Review"
+                          ? "Generated automatically once this booking is submitted for approval (Confirm & Book)."
+                          : "Not created yet.")
+                        : `${moneyReceipts.length} receipt${moneyReceipts.length > 1 ? "s" : ""} — latest ${moneyReceipts[0]?.Status || "Pending"}.`}
+                    </span>
+                  </div>
+                  <a
+                    href={moneyReceipts.length ? `/crm/money-receipts?bookingId=${bookingId}` : undefined}
+                    aria-disabled={!moneyReceipts.length}
+                    className={`shrink-0 px-3 py-1.5 text-xs rounded-lg font-medium ${moneyReceipts.length ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground cursor-not-allowed pointer-events-none"}`}
+                  >
+                    View Receipts
+                  </a>
+                </div>
+
                 <div className="flex items-center justify-between gap-2 pt-3">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={15} className="text-primary" /> Invoices</h3>
-                  {canEdit && booking.Status !== "Approved" && canGenerateAnything && (
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={15} className="text-amber-600 dark:text-amber-400" /> Invoices</h3>
+                  {/* Invoices are manual-only, gated on a milestone's own
+                      Demand — not on whether the booking is still Approved.
+                      That used to hide this button once Approved (a leftover
+                      from the old auto-invoice design, back when Approved
+                      meant "everything already happened automatically"), but
+                      that's backwards now: Approved is exactly when staff
+                      actually need to generate the Booking-amount invoice
+                      and every milestone invoice after it. */}
+                  {canEdit && canGenerateAnything && (
                     <button onClick={openInvoiceDialog}
                       className="px-3 py-1.5 text-xs border border-border rounded-lg font-medium hover:bg-muted">
                       + Generate Invoice
                     </button>
                   )}
                 </div>
-                {booking.Status === "Approved" && (invoices as any[]).length === 0 && (
+                {booking.Status === "Approved" && !canGenerateAnything && (invoices as any[]).length === 0 && (
                   <div className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 font-medium">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-                    Booking confirmed — invoice generation is pending
+                    Booking confirmed — invoice generation is pending a Demand being raised on a milestone
                   </div>
                 )}
                 {(invoices as any[]).length === 0 ? (
@@ -1805,7 +1984,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               <td className="px-2.5 py-2 whitespace-nowrap text-xs">{inv.CreatedByName || "—"}</td>
                               <td className="px-2.5 py-2 whitespace-nowrap">
                                 <button onClick={() => setPreviewInvoice(inv)}
-                                  className="flex items-center gap-1 text-xs text-primary hover:underline">
+                                  className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline">
                                   <Eye size={12} /> View
                                 </button>
                               </td>
@@ -1817,109 +1996,39 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 )}
 
-                {/* Invoice dialog */}
+                {/* Invoice dialog — Booking Amount invoice only, one click.
+                    Every other invoice type lives on the dedicated CRM
+                    Invoices page now. */}
                 {invoiceDialog && (
                   <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60" onClick={() => setInvoiceDialog(false)}>
                     <div className="bg-background border border-border rounded-xl p-6 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
-                      <h3 className="text-sm font-semibold">Generate Invoice</h3>
-                      {!hasBookingInvoice && (
-                        <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs text-sky-800">
-                          <FileText size={14} className="shrink-0 mt-0.5" />
-                          <div className="space-y-1.5 w-full">
-                            <span>
-                              <span className="font-medium">Booking Invoice — auto-generated.</span>{" "}
-                              It's created automatically the moment the Booking Amount is fully paid and you
-                              click <span className="font-medium">Confirm &amp; Book</span> — it never needs to be raised manually here.
-                            </span>
-                            {bookingAmountPaidInFull ? (
-                              <>
-                                <p className="text-amber-700 font-medium">
-                                  The Booking Amount is fully paid but no Booking invoice exists yet — auto-generation
-                                  may not have run. Use this only to recover from that.
-                                </p>
-                                <button onClick={handleForceBookingInvoice} disabled={forcingBookingInvoice}
-                                  className="px-2.5 py-1 text-xs bg-amber-600 text-white rounded-md font-medium hover:bg-amber-700 disabled:opacity-40">
-                                  {forcingBookingInvoice ? "Generating…" : "Force Generate Booking Invoice"}
-                                </button>
-                              </>
-                            ) : (
-                              <span className="text-sky-700">It will auto-generate once the Booking Amount is fully paid.</span>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {bookingInvoiceOnly ? (
-                        <div className="flex justify-end pt-1">
-                          <button onClick={() => setInvoiceDialog(false)}
-                            className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-                            Close
-                          </button>
-                        </div>
+                      <h3 className="text-sm font-semibold">Generate Booking Invoice</h3>
+                      {!canGenerateAnything ? (
+                        <p className="text-xs text-muted-foreground">
+                          The Booking Amount milestone isn't paid-and-demanded yet, or already has an invoice.
+                        </p>
                       ) : (
                         <>
-                          <div className="space-y-2">
-                            <select value={invoiceForm.InvoiceType}
-                              onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceType: e.target.value, MilestoneId: "", OnAccountPaymentId: "", Amount: "", InvoiceDate: f.InvoiceDate }))}
-                              className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                              {uninvoicedPaidMilestones.length > 0 && <option value="Milestone">Milestone Payment</option>}
-                              {uninvoicedOnAccountPayments.length > 0 && <option value="OnAccount">On-Account Payment</option>}
-                              <option value="Maintenance">Maintenance</option>
-                              <option value="Other">Other</option>
-                            </select>
-                            {invoiceForm.InvoiceType === "Milestone" ? (
-                              <>
-                                <select value={invoiceForm.MilestoneId}
-                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, MilestoneId: e.target.value }))}
-                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                                  <option value="">— Select a paid milestone —</option>
-                                  {uninvoicedPaidMilestones.map((m: any) => (
-                                    <option key={m.Id} value={String(m.Id)}>{m.MilestoneName} — {fmt(m.AmountPaid)}</option>
-                                  ))}
-                                </select>
-                                {uninvoicedPaidMilestones.length === 0 && (
-                                  <p className="text-[11px] text-muted-foreground">No paid milestone is waiting on an invoice right now.</p>
-                                )}
-                                <p className="text-[11px] text-muted-foreground">Amount and date are pulled from the milestone's own payment record — not editable here.</p>
-                              </>
-                            ) : invoiceForm.InvoiceType === "OnAccount" ? (
-                              <>
-                                <select value={invoiceForm.OnAccountPaymentId}
-                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, OnAccountPaymentId: e.target.value }))}
-                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                                  <option value="">-- Select an on-account payment --</option>
-                                  {uninvoicedOnAccountPayments.map((p: any) => (
-                                    <option key={p.Id} value={String(p.Id)}>{p.ReceiptNo} - {fmt(p.Amount)}</option>
-                                  ))}
-                                </select>
-                                <p className="text-[11px] text-muted-foreground">Amount and date are pulled from the on-account receipt - not editable here.</p>
-                              </>
-                            ) : (
-                              <>
-                                <input type="number" placeholder="Amount" value={invoiceForm.Amount}
-                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, Amount: e.target.value }))}
-                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                                <input type="date" value={invoiceForm.InvoiceDate}
-                                  onChange={(e) => setInvoiceForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
-                                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                              </>
-                            )}
-                            <input placeholder="Description" value={invoiceForm.Description}
-                              onChange={(e) => setInvoiceForm((f) => ({ ...f, Description: e.target.value }))}
-                              className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                          </div>
-                          <div className="flex justify-end gap-2 pt-1">
-                            <button onClick={() => setInvoiceDialog(false)}
-                              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-                              Cancel
-                            </button>
-                            <button onClick={handleGenerateInvoice}
-                              disabled={saving || (invoiceForm.InvoiceType === "Milestone" && !invoiceForm.MilestoneId) || (invoiceForm.InvoiceType === "OnAccount" && !invoiceForm.OnAccountPaymentId)}
-                              className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                              {saving ? "Generating..." : "Generate"}
-                            </button>
-                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {bookingMilestone.MilestoneName} — {fmt(bookingMilestone.AmountPaid)} paid. Amount and date come from the milestone's own payment record.
+                          </p>
+                          <input placeholder="Description (optional)" value={invoiceForm.Description}
+                            onChange={(e) => setInvoiceForm((f) => ({ ...f, Description: e.target.value }))}
+                            className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                         </>
                       )}
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button onClick={() => setInvoiceDialog(false)}
+                          className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+                          {canGenerateAnything ? "Cancel" : "Close"}
+                        </button>
+                        {canGenerateAnything && (
+                          <button onClick={handleGenerateInvoice} disabled={saving}
+                            className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                            {saving ? "Generating..." : "Generate"}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1930,10 +2039,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               </div>
             )}
 
-            {/* Footer navigation — Previous + (Save & Next, or Confirm & Book
-                on the last tab only), both in the bottom-right cluster. No
-                separate Close button here — the dialog's own "X" (top-right)
-                already covers that. */}
+            {/* Footer navigation — Previous + one dynamic primary action on
+                the last tab only, all in a single bottom-right cluster. This
+                is the ONLY place any stage action lives now — Approve/Reject
+                used to also have their own duplicate buttons up in the
+                header; consolidated here so there's one button per action,
+                its label telling you exactly what stage it's for:
+                Review -> "Verify & Send for Approval", Marketing Head (L1)
+                -> "Approve", Director (L2, final) -> "Final Approve", then
+                "Approved & Booked" once Confirmed. No separate Close button
+                here either — the dialog's own "X" (top-right) covers that. */}
             <div className="flex items-center justify-end gap-3 pt-4 border-t border-border mt-4">
               {isLastTab && !mandatoryReady && booking.Status !== "Approved" && pendingStepMessage && (
                 <button onClick={() => setTab(pendingStepMessage.tab)}
@@ -1951,17 +2066,35 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     className="px-4 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted flex items-center gap-1">
                     Save &amp; Next <ArrowRight size={14} />
                   </button>
-                ) : canEdit && booking.Status !== "Approved" && !booking.ReadyForApprovalAt ? (
-                  <button onClick={handleFinalBook} disabled={bookingRequesting || !mandatoryReady}
-                    title={!mandatoryReady ? pendingStepMessage?.text : undefined}
+                ) : booking.Status === "Approved" ? (
+                  <button disabled
+                    className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium cursor-default flex items-center gap-1">
+                    <Check size={14} /> Approved &amp; Booked
+                  </button>
+                ) : canEdit && currentStage === "Review" ? (
+                  <button onClick={handleFinalBook} disabled={bookingRequesting || !mandatoryReady || !checklistAllChecked}
+                    title={!mandatoryReady || !checklistAllChecked ? pendingStepMessage?.text : undefined}
                     className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">
-                    {bookingRequesting ? "Submitting..." : "Confirm & Book"}
+                    {bookingRequesting ? "Submitting..." : "Verify & Send for Approval"}
                     {!bookingRequesting && <Check size={14} />}
                   </button>
-                ) : canEdit && booking.Status !== "Approved" && booking.ReadyForApprovalAt ? (
+                ) : canActOnStage ? (
+                  <>
+                    <button onClick={() => setRejectOpen(true)} disabled={stageActioning !== null}
+                      className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">
+                      Reject
+                    </button>
+                    <button onClick={handleStageApprove} disabled={stageActioning !== null}
+                      className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 flex items-center gap-1">
+                      {stageActioning === "approve"
+                        ? "Approving..."
+                        : <>{currentStage === "DirectorApproval" ? "Final Approve" : "Approve"} <Check size={14} /></>}
+                    </button>
+                  </>
+                ) : canEdit ? (
                   <button disabled
                     className="px-4 py-1.5 text-sm bg-emerald-100 text-emerald-700 rounded-lg font-medium cursor-default flex items-center gap-1">
-                    <Check size={14} /> Booked — Sent for Approval
+                    <Check size={14} /> Sent for {currentStage === "DirectorApproval" ? "Final (L2) Approval" : "L1 Approval"}
                   </button>
                 ) : null}
               </div>

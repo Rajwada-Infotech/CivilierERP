@@ -48,6 +48,7 @@ import {
   Printer,
 } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import TreeDropdown from "@/components/common/TreeDropdown";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -329,7 +330,9 @@ const CustomerMaster: React.FC = () => {
 
   // ── Local state ────────────────────────────────────────────────────────────
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<CustomerForm>(EMPTY_FORM);
+  const [form, setForm] = useDraftForm<CustomerForm>("customer-master", EMPTY_FORM, {
+    skip: editingId !== null,
+  });
   const [errors, setErrors] = useState<
     Partial<Record<keyof CustomerForm, boolean>>
   >({});
@@ -563,7 +566,7 @@ const CustomerMaster: React.FC = () => {
 
         {/* ── Form Card ── */}
         {rights.canCreate && (
-        <div className="rounded-xl border border-border bg-card shadow-sm">
+        <div className="rounded-xl border border-border bg-card shadow-sm" onKeyDown={preventEnterSubmit}>
           {/* Card header */}
           <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
             <div className="flex items-center gap-3">

@@ -9,7 +9,12 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 const API = "/api/crm/brokerage";
 
 async function fetchPayments(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${API}/payments`); return r.ok ? r.json() : []; } catch { return []; }
+  const r = await fetchWithAuth(`${API}/payments`);
+  if (!r.ok) {
+    const body = await r.json().catch(() => null);
+    throw new Error(body?.error || `Failed to load broker payments (${r.status})`);
+  }
+  return r.json();
 }
 
 // This page is tracking/reporting only. Actually paying a broker happens in
@@ -26,7 +31,7 @@ const CrmBrokerPayments: React.FC = () => {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
 
-  const { data: payments = [], isLoading } = useQuery({ queryKey: ["crm-broker-payments"], queryFn: fetchPayments, staleTime: 30_000 });
+  const { data: payments = [], isLoading, isError, error, refetch } = useQuery({ queryKey: ["crm-broker-payments"], queryFn: fetchPayments, staleTime: 30_000 });
 
   const filtered = useMemo(() =>
     (payments as any[]).filter((p: any) =>
@@ -39,7 +44,7 @@ const CrmBrokerPayments: React.FC = () => {
     .filter((p: any) => p.FinancePaymentStatus === "Paid" || p.FinancePaymentStatus === undefined)
     .reduce((s: number, p: any) => s + Number(p.Amount || 0), 0);
   const totalPending = filtered
-    .filter((p: any) => p.FinancePaymentStatus === "Draft" || p.FinancePaymentStatus === "Pending")
+    .filter((p: any) => p.FinancePaymentStatus === "Draft" || p.FinancePaymentStatus === "Pending" || p.FinancePaymentStatus === "Approved")
     .reduce((s: number, p: any) => s + Number(p.Amount || 0), 0);
 
   const columns: ColumnDef<any, unknown>[] = [
@@ -93,12 +98,14 @@ const CrmBrokerPayments: React.FC = () => {
             placeholder="Search broker, customer, booking..."
             className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
-        <div className="flex items-center gap-1.5 text-sm bg-muted/30 border border-border rounded-lg px-3 py-2">
-          <IndianRupee size={14} className="text-muted-foreground" />
-          <span className="text-muted-foreground">Paid:</span>
-          <span className="font-semibold">₹{totalPaid.toLocaleString("en-IN")}</span>
-        </div>
-        {totalPending > 0 && (
+        {!isError && (
+          <div className="flex items-center gap-1.5 text-sm bg-muted/30 border border-border rounded-lg px-3 py-2">
+            <IndianRupee size={14} className="text-muted-foreground" />
+            <span className="text-muted-foreground">Paid:</span>
+            <span className="font-semibold">₹{totalPaid.toLocaleString("en-IN")}</span>
+          </div>
+        )}
+        {!isError && totalPending > 0 && (
           <div className="flex items-center gap-1.5 text-sm bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
             <IndianRupee size={14} className="text-orange-600" />
             <span className="text-orange-600">Awaiting Finance:</span>
@@ -107,14 +114,26 @@ const CrmBrokerPayments: React.FC = () => {
         )}
       </div>
 
-      <DataTable
-        data={filtered}
-        columns={columns}
-        searchable={false}
-        loading={isLoading}
-        emptyMessage="No broker payments recorded"
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
+      {isError ? (
+        <div className="flex items-center justify-between gap-3 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3">
+          <span>Couldn't load broker payments: {(error as Error)?.message || "unknown error"}</span>
+          <button
+            onClick={() => refetch()}
+            className="text-xs font-medium underline underline-offset-2 hover:no-underline"
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        <DataTable
+          data={filtered}
+          columns={columns}
+          searchable={false}
+          loading={isLoading}
+          emptyMessage="No broker payments recorded"
+          className="rounded-xl border border-border overflow-hidden bg-card"
+        />
+      )}
     </SalesAutoShell>
   );
 };

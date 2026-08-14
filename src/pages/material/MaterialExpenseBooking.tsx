@@ -62,6 +62,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { ExportMenu } from "@/components/ExportMenu";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -137,7 +138,9 @@ import type {
 // from grnTotalAmount + billing terms; everything else falls back to
 // computeBreakdown on the stored basicAmount) — kept in sync so the export
 // never shows a different number than what's on screen.
-function computeEffectiveNet(rec: any): number {
+// GST-inclusive net, before TDS — computeEffectiveNet() below is what the
+// list/export actually display, net of TDS too.
+function computeGrossNet(rec: any): number {
   if (rec.eSourceType === "GRN" && rec.grnTotalAmount != null) {
     const terms =
       rec.billingTerms && rec.billingTerms.length > 0
@@ -155,6 +158,16 @@ function computeEffectiveNet(rec: any): number {
     rec.igstRate ?? 0,
   );
   return rec.netAmount ?? rbd.netAmount;
+}
+
+// What the supplier is actually owed in cash — gross net minus TDS withheld
+// at the invoice. Same "TDS is deducted once, everything downstream reads
+// that figure" principle already applied on the Payment page; this is the
+// list/export view's own copy of it.
+function computeEffectiveNet(rec: any): number {
+  const gross = computeGrossNet(rec);
+  const tds = rec.tdsAmount ?? 0;
+  return Math.max(0, gross - tds);
 }
 
 // Mirrors the visible table's column order exactly (Booking Ref → Vendor →
@@ -242,9 +255,25 @@ export default function MaterialExpenseBooking() {
   const [, setTotalBookedAmount] = useState(0);
   const [view, setView] = useState<PageView>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
+  const [form, setForm] = useDraftForm<Omit<ExpenseRecord, "id">>(
+    "material-expense-booking",
+    blankForm(),
+    { skip: editingId !== null },
+  );
   const [gstEnabled, setGstEnabled] = useState(false);
   const [gstMode, setGstMode] = useState<"cgst_sgst" | "igst">("cgst_sgst");
+
+  // Only reopen on an actual browser reload, not a plain in-app navigation
+  // (e.g. clicking "Invoice" in the sidebar remounts this component too;
+  // without this check, an old leftover draft would hijack that link into
+  // always opening the form instead of the list).
+  useEffect(() => {
+    if (!wasPageReloaded()) return;
+    if (form.bookingName || form.supplier || form.invoiceReference || form.basicAmount) {
+      setView("form");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredProjectOptions = useMemo(() => {
     if (!form.companyId) return projectOptions;
@@ -1566,7 +1595,7 @@ export default function MaterialExpenseBooking() {
       >
         {/* Form View */}
         {view === "form" && (
-          <Card className="border-border shadow-sm">
+          <Card className="border-border shadow-sm" onKeyDown={preventEnterSubmit}>
             <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-indigo-500/[0.06] border-b border-indigo-500/20">
               <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-indigo-500 to-transparent" />
               <div className="flex items-center gap-3 min-w-0">
@@ -2559,36 +2588,10 @@ export default function MaterialExpenseBooking() {
                               // For GRN-linked records, recompute from grnTotalAmount + billing terms
                               // with correct pre/post-GST split (avoids stale ENetAmount from DB).
                               // For all others, use computeBreakdown on stored basicAmount.
-                              const effectiveNet = (() => {
-                                if (
-                                  rec.eSourceType === "GRN" &&
-                                  rec.grnTotalAmount != null
-                                ) {
-                                  const terms =
-                                    rec.billingTerms &&
-                                    rec.billingTerms.length > 0
-                                      ? rec.billingTerms
-                                      : rec.discount
-                                        ? [rec.discount]
-                                        : [];
-                                  return computeGrnNetWithTerms(
-                                    rec.grnTotalAmount,
-                                    terms,
-                                    rec.basicAmount,
-                                  );
-                                }
-                                const rbd = computeBreakdown(
-                                  rec.basicAmount,
-                                  rec.cgstRate,
-                                  rec.sgstRate,
-                                  rec.billingTerms &&
-                                    rec.billingTerms.length > 0
-                                    ? rec.billingTerms
-                                    : rec.discount,
-                                  rec.igstRate ?? 0,
-                                );
-                                return rec.netAmount ?? rbd.netAmount;
-                              })();
+                              // Net of TDS too — matches the export column and the Payment
+                              // page's own "Amount Payable (After TDS)" figure, instead of
+                              // showing the pre-TDS gross like this row used to.
+                              const effectiveNet = computeEffectiveNet(rec);
                               return (
                                 <TableRow
                                   key={

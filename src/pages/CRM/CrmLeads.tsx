@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Search, UserPlus, ExternalLink, Users } from "lucide-react";
+import { Search, UserPlus, ExternalLink, Users, CheckCircle2 } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { useTheme } from "@/contexts/ThemeContext";
 
 const LEADS_API = "/api/sa/leads";
 const CUSTOMER_API = "/api/crm/customers";
@@ -33,6 +34,8 @@ async function fetchCustomers(): Promise<any[]> {
 
 const CrmLeads: React.FC = () => {
   const navigate = useNavigate();
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"Available" | "Used">("Available");
 
@@ -87,14 +90,14 @@ const CrmLeads: React.FC = () => {
         return l._customer ? (
           <button
             onClick={() => navigate(`/crm/customers?customerId=${l._customer.Id}`)}
-            className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border bg-muted/30 hover:bg-muted/50 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
           >
             View Customer <ExternalLink size={11} />
           </button>
         ) : (
           <button
             onClick={() => navigate(`/crm/customers?leadId=${l.Id}`)}
-            className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all"
           >
             <UserPlus size={12} /> Create Customer
           </button>
@@ -102,39 +105,89 @@ const CrmLeads: React.FC = () => {
       } },
   ];
 
+  const glassStyle: React.CSSProperties = {
+    background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
+    border: isDark ? "1px solid rgba(245,158,11,0.15)" : "1px solid rgba(245,158,11,0.18)",
+    backdropFilter: "blur(16px) saturate(150%)",
+    WebkitBackdropFilter: "blur(16px) saturate(150%)",
+    boxShadow: isDark
+      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+      : "0 4px 24px rgba(245,158,11,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+  };
+  const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
+
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Leads"
       subtitle="Converted leads from Sales Automation, waiting to be linked to a CRM Customer"
     >
-      <div className="flex gap-3 flex-wrap items-center">
-        <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/20 p-1">
-          {(["Available", "Used"] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${
-                tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/50"
-              }`}>
-              <Users size={13} /> {t} ({t === "Available" ? available.length : used.length})
-            </button>
-          ))}
+      {/* Toolbar + table live in one continuous card instead of a loose
+          toolbar row floating above a separately-bordered table. */}
+      <div className="rounded-xl overflow-hidden" style={glassStyle}>
+        <div className="flex gap-3 flex-wrap items-center px-4 py-3 border-b" style={{ borderColor }}>
+          <div className="flex items-center gap-1 rounded-lg bg-muted/20 p-1 shrink-0">
+            {(["Available", "Used"] as const).map((t) => (
+              <button key={t} onClick={() => setTab(t)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-medium rounded-lg transition-all ${
+                  tab === t
+                    ? "text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}>
+                {t === "Available" ? <Users size={13} /> : <CheckCircle2 size={13} />} {t} ({t === "Available" ? available.length : used.length})
+              </button>
+            ))}
+          </div>
+          <div className="relative flex-1 min-w-48">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, mobile, lead code..."
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+          </div>
         </div>
-        <div className="relative flex-1 min-w-48">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, mobile, lead code..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
-      </div>
 
-      <DataTable
-        data={filtered}
-        columns={columns}
-        searchable={false}
-        loading={isLoading}
-        emptyMessage={tab === "Available" ? "No converted leads waiting — convert one in Sales Automation first" : "No leads have been linked to a customer yet"}
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
-    </SalesAutoShell>
+        {/* Custom, actionable empty state — DataTable's own emptyMessage is
+            plain text only, and "convert one in Sales Automation" used to
+            be a dead end with no way to actually get there. */}
+        {!isLoading && filtered.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-14 px-6 text-center">
+            <div
+              className="w-11 h-11 rounded-full flex items-center justify-center"
+              style={{ background: "rgba(245,158,11,0.12)" }}
+            >
+              {tab === "Available" ? (
+                <Users size={20} style={{ color: "#f59e0b" }} />
+              ) : (
+                <CheckCircle2 size={20} style={{ color: "#f59e0b" }} />
+              )}
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-heading font-semibold text-foreground">
+                {search
+                  ? "No leads match your search"
+                  : tab === "Available"
+                    ? "No converted leads waiting"
+                    : "No leads linked to a customer yet"}
+              </p>
+              <p className="text-xs text-muted-foreground max-w-sm">
+                {search
+                  ? "Try a different name, mobile number, or lead code."
+                  : tab === "Available"
+                    ? "Leads land here the moment they're marked Converted in Sales Automation."
+                    : "Once a lead is turned into a CRM Customer, it'll show up here for reference."}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <DataTable
+            data={filtered}
+            columns={columns}
+            searchable={false}
+            loading={isLoading}
+            className="border-0"
+          />
+        )}
+      </div>
+    </CrmShell>
   );
 };
 

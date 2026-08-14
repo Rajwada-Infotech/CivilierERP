@@ -2,15 +2,17 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTheme } from "@/contexts/ThemeContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
   Mail, MapPin, IndianRupee, Users2, Briefcase, History, X, PlayCircle, Ban, Lock, Wallet,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useGstRates, computeUnitParkingGst, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
@@ -31,6 +33,9 @@ const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"
 
 const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled", "Expired"];
 const DOC_TYPES = ["IdentityProof", "AddressProof", "PhotoID", "IncomeProof", "Other"];
+// Applications no longer have their own verification checklist or approval
+// cycle at all — that logic merged into the Booking's own "Review" workflow
+// stage (see CrmBookingDetail.tsx / crmBookingStageService.js).
 
 const statusColor: Record<string, string> = {
   Draft:     "text-muted-foreground bg-muted/50 border-border",
@@ -48,7 +53,7 @@ const EMPTY_FORM = {
   Source: "", PlatformId: "", CampaignId: "", AdId: "", ChannelPartnerId: "",
   // ViaBroker is UI-only (never sent to the backend) — it just toggles the
   // broker sub-block; BrokerId being set is what actually matters server-side.
-  ViaBroker: false, BrokerId: "", BrokerageRatePercent: "", BrokerageSplitEnabled: false,
+  ViaBroker: false, BrokerId: "", BrokerageRatePercent: "", BrokeragePaymentPlan: "OneTime",
   Notes: "",
   // Payment Details (Step 6/Details) — these columns already existed on
   // CrmApplication and were already read by handleCreateBooking's retry
@@ -142,6 +147,16 @@ async function fetchBlockPlanTags(): Promise<any[]> {
   try { const r = await fetchWithAuth("/api/block-master"); return r.ok ? r.json() : []; } catch { return []; }
 }
 
+// Admin-editable commission tiers (dbo.CrmBrokerageRateTier, see
+// crmBrokerageRateTiers.js / CrmBrokerageRateTiers.tsx) — this is only a
+// staff-facing preview of the same fallback rate the server itself applies
+// (tierBrokeragePercent in crmWorkflowGuards.js) when no explicit override
+// is typed; it's never used to compute what actually gets saved.
+type RateTier = { MinDealValue: number; MaxDealValue: number | null; RatePercent: number; IsActive: boolean };
+async function fetchBrokerageRateTiers(): Promise<RateTier[]> {
+  try { const r = await fetchWithAuth("/api/crm/brokerage-rate-tiers"); return r.ok ? r.json() : []; } catch { return []; }
+}
+
 // Same shape CrmPaymentPlans.tsx already parses off the list endpoint's
 // MilestonesJson column — reused here so the brief plan-preview card below
 // can compute real ₹ figures instead of just repeating raw %s.
@@ -154,8 +169,8 @@ function parseMilestones(json: string | null | undefined): MilestoneRow[] {
   } catch { return []; }
 }
 
-const inputCls = "w-full text-sm border border-border rounded px-2 py-1.5 bg-background";
-const labelCls = "text-xs text-muted-foreground block mb-1";
+const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40";
+const labelCls = "text-xs text-muted-foreground block mb-1.5";
 
 // Live "cost + GST" preview shown at every point Unit/Parking/Extra Work
 // values are picked — Application's Project/Unit and Parking steps, and
@@ -234,6 +249,8 @@ const CrmApplication: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { currentUser } = useAuth();
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [activeStage, setActiveStage] = useState<Stage>("InProcess");
@@ -262,6 +279,16 @@ const CrmApplication: React.FC = () => {
   // shown, so this can't be unlocked at all past that point (see the
   // Project/Unit tree JSX).
   const [unitLocked, setUnitLocked] = useState(false);
+  // Same lock/Edit pattern as the Project/Unit tree above, applied to the
+  // Payment Details block (Token Amount, Payment Mode, Cheque/Transaction
+  // Ref, Deposited-To bank). Without this, resuming an already-submitted
+  // (Pending) application left every one of those fields sitting wide open
+  // and re-editable with zero friction — an easy way to accidentally
+  // overwrite a figure the customer already confirmed and create a
+  // mismatch between what Finance approved and what's actually on file.
+  // Gated by the same canEditUnitSelection (Draft/Pending only) — once
+  // Approved, no Edit control renders and this can't be unlocked at all.
+  const [paymentLocked, setPaymentLocked] = useState(false);
 
   // (No more planLocked/auto-fetch state — Unit Master no longer has a
   // single "default" plan to silently apply; Payment Plan is always an
@@ -324,6 +351,7 @@ const CrmApplication: React.FC = () => {
   const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 30_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["crm-brokers-dropdown"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
+  const { data: rateTiers = [] } = useQuery({ queryKey: ["crm-brokerage-rate-tiers"], queryFn: fetchBrokerageRateTiers, staleTime: 5 * 60_000 });
   const { data: blockPlanTags = [] } = useQuery({ queryKey: ["crm-app-block-plan-tags"], queryFn: fetchBlockPlanTags, staleTime: 5 * 60_000 });
   const { data: crmGstRates } = useGstRates();
   // Same queryKey ParkingSelectionStep (Step 2) uses for this applicationId
@@ -468,7 +496,20 @@ const CrmApplication: React.FC = () => {
   // application with a blank (optional) Notes field would incorrectly show
   // Resume, while other field combinations could just as easily fail to show
   // it on a genuinely incomplete one. Status is the real answer; stop guessing.
-  const isResumeEditable = (app: any) => !!app && (app.Status === "Draft" || app.Status === "Pending");
+  //
+  // BUG FIX: Status alone isn't enough — a Booking is auto-attempted the
+  // moment an Application is submitted (see PUT /:id/submit), and Status
+  // stays 'Pending' on the Application even after that Booking exists and
+  // is later Approved (Status only ever moves to 'Approved'/'Rejected' via
+  // the Application's own, now-mostly-vestigial transitions). Without also
+  // checking Stage, a fully Converted application (real Booking, possibly
+  // already Approved) still shows Resume — reopening the wizard and
+  // resubmitting tries to book the SAME unit a second time, which the
+  // backend correctly rejects with "This unit is already booked", but the
+  // button should never have been offered in the first place. Stage is
+  // computed server-side from whether a live Booking exists (see APP_SELECT
+  // in crmApplications.js) and is the actual source of truth here.
+  const isResumeEditable = (app: any) => !!app && app.Stage !== "Converted" && (app.Status === "Draft" || app.Status === "Pending");
 
   // Same Draft/Pending gate as isResumeEditable, applied inside the open
   // wizard rather than at the Resume button: null status means a brand-new
@@ -492,7 +533,14 @@ const CrmApplication: React.FC = () => {
   // real Booking's own Cancellation Request flow is the only path from there,
   // so this never shows for an Approved application. The button itself is
   // just a convenience gate; the backend re-checks and is the real guard.
-  const canCancelApplication = (app: any) => !!app && !["Approved", "Cancelled", "Expired"].includes(app.Status);
+  //
+  // BUG FIX: same Stage gap as isResumeEditable above — Status can still
+  // read 'Pending' on an already-Converted application (real Booking exists,
+  // possibly Approved), which incorrectly offered "Cancel Application" here
+  // too, alongside Resume, for a record that isn't cancellable through this
+  // flow anymore — its Booking's own Cancellation Request is the only real
+  // path once converted.
+  const canCancelApplication = (app: any) => !!app && app.Stage !== "Converted" && !["Approved", "Cancelled", "Expired"].includes(app.Status);
 
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.
@@ -610,11 +658,35 @@ const CrmApplication: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPlanBookingAmount]);
 
-  // Preview only — under 1Cr -> 2%, 1Cr and above -> 1%. The real, final
-  // percentage/amount is computed server-side off the Booking's actual
-  // TotalValue once one exists (see maybeAutoCreateBrokerage in
-  // crmWorkflowGuards.js); this just gives staff a rate hint at intake time.
-  const brokerageTierDefault = computedTotal >= 10000000 ? 1 : 2;
+  // Preview only, driven by the real editable tiers (rateTiers, above) —
+  // the real, final percentage/amount is computed server-side off the
+  // Booking's actual TotalValue once one exists (tierBrokeragePercent in
+  // crmWorkflowGuards.js reads the same table); this just gives staff a
+  // rate hint at intake time. Falls back to 2% if tiers haven't loaded yet
+  // or none are configured, matching the server's own fallback.
+  const activeTiers = useMemo(() =>
+    (rateTiers as RateTier[]).filter((t) => t.IsActive).sort((a, b) => a.MinDealValue - b.MinDealValue),
+    [rateTiers]
+  );
+  const brokerageTierDefault = useMemo(() => {
+    const match = [...activeTiers].reverse().find((t) =>
+      computedTotal >= Number(t.MinDealValue) && (t.MaxDealValue == null || computedTotal < Number(t.MaxDealValue))
+    );
+    return match ? Number(match.RatePercent) : 2;
+  }, [activeTiers, computedTotal]);
+  const brokerageTierPreviewText = useMemo(() => {
+    if (!activeTiers.length) return `${brokerageTierDefault}%`;
+    const cr = (v: number) => `₹${(v / 10000000).toFixed(v % 10000000 === 0 ? 0 : 2)}Cr`;
+    const parts = activeTiers.map((t) => {
+      const range = Number(t.MinDealValue) === 0
+        ? `< ${cr(Number(t.MaxDealValue))}`
+        : t.MaxDealValue == null
+        ? `≥ ${cr(Number(t.MinDealValue))}`
+        : `${cr(Number(t.MinDealValue))}–${cr(Number(t.MaxDealValue))}`;
+      return `${range} → ${t.RatePercent}%`;
+    });
+    return `${brokerageTierDefault}% (${parts.join(", ")})`;
+  }, [activeTiers, brokerageTierDefault]);
 
   const resetWizard = () => {
     setForm({ ...EMPTY_FORM });
@@ -625,6 +697,7 @@ const CrmApplication: React.FC = () => {
     // A brand-new application starts with no status of its own.
     setWizardAppStatus(null);
     setUnitLocked(false);
+    setPaymentLocked(false);
   };
 
   // Deep-link from CrmLeads.tsx's "View Application" link (a converted lead
@@ -681,7 +754,7 @@ const CrmApplication: React.FC = () => {
         ViaBroker: !!app.BrokerId,
         BrokerId: app.BrokerId ? String(app.BrokerId) : "",
         BrokerageRatePercent: app.BrokerageRatePercent != null ? String(app.BrokerageRatePercent) : "",
-        BrokerageSplitEnabled: !!app.BrokerageSplitEnabled,
+        BrokeragePaymentPlan: ["OneTime", "TwoPart", "AgreementOnly"].includes(app.BrokeragePaymentPlan) ? app.BrokeragePaymentPlan : "OneTime",
         Notes: app.Notes || "",
         TokenType: app.TokenType || "Percentage",
         TokenValue: app.TokenValue != null ? String(app.TokenValue) : "",
@@ -702,6 +775,13 @@ const CrmApplication: React.FC = () => {
       // Edit is always available here in practice; canEditUnitSelection
       // below still gates it defensively in case that ever changes.
       setUnitLocked(hasProject);
+      // Same idea as the Project/Unit lock just above: if a token
+      // amount/payment mode was already captured on a previous visit to
+      // this step, default to showing it read-only — Edit unlocks it for a
+      // genuine correction. A brand-new application that's never reached
+      // Details yet has nothing to protect, so it opens unlocked.
+      const hasPaymentData = !!app.TokenValue || !!app.PaymentMode;
+      setPaymentLocked(hasPaymentData);
       // CurrentStep is the furthest step this application actually reached
       // (persisted by saveApplicationFields on every "Next" — see
       // handleCreateAndNext/handleBankDetailsNext/handleCoApplicantNext/
@@ -754,7 +834,7 @@ const CrmApplication: React.FC = () => {
         ChannelPartnerId: form.ChannelPartnerId || null,
         BrokerId: form.ViaBroker && form.BrokerId ? parseInt(form.BrokerId) : null,
         BrokerageRatePercent: form.ViaBroker && form.BrokerageRatePercent !== "" ? form.BrokerageRatePercent : null,
-        BrokerageSplitEnabled: form.ViaBroker ? !!form.BrokerageSplitEnabled : false,
+        BrokeragePaymentPlan: form.ViaBroker ? form.BrokeragePaymentPlan : "OneTime",
       };
 
       if (applicationId) {
@@ -979,7 +1059,7 @@ const CrmApplication: React.FC = () => {
           TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
           DepositBankId: a.DepositBankId,
           AssignedTo: a.AssignedTo, Notes: a.Notes,
-          BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokerageSplitEnabled: a.BrokerageSplitEnabled,
+          BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokeragePaymentPlan: a.BrokeragePaymentPlan,
         }),
       });
       const data = await res.json();
@@ -993,48 +1073,52 @@ const CrmApplication: React.FC = () => {
       setCreatingBookingId(null);
     }
   };
-
   const convertedColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "ApplicationNo", header: "App No", size: 110,
+    { accessorKey: "ApplicationNo", header: "App No", size: 120,
       cell: (i) => (
         <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">
           {i.getValue() as string}
         </span>
       ) },
-    { accessorKey: "ApplicantName", header: "Applicant", size: 160,
+    {/* Mobile folded into this cell — same rationale/pattern as
+       inProcessColumns above. Sizes across this set are generous (sum
+       ~1420px) so table-layout:fixed fills a normal desktop card
+       edge-to-edge instead of bunching columns on the left. */
+      accessorKey: "ApplicantName", header: "Applicant", size: 210,
       cell: (i) => (
         <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
-          {i.row.original.LeadUid && <div className="text-xs text-muted-foreground">Lead: {i.row.original.LeadUid}</div>}
+          <div className="text-xs text-muted-foreground">
+            {i.row.original.Mobile}
+            {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
+          </div>
         </div>
       ) },
-    { accessorKey: "Mobile", header: "Mobile", size: 110,
-      cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-muted-foreground">{i.getValue() as string}</span> },
-    { accessorKey: "BookingNo", header: "Booking", size: 140,
+    { accessorKey: "BookingNo", header: "Booking", size: 190,
       cell: (i) => (
         <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
           <div className="font-mono text-xs font-semibold text-foreground">{i.row.original.BookingNo}</div>
           <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-green-600 bg-green-50 border-green-200">{i.row.original.BookingStatus}</span>
         </div>
       ) },
-    { id: "unitProject", header: "Unit / Project", size: 140, enableSorting: false,
+    { id: "unitProject", header: "Unit / Project", size: 220, enableSorting: false,
       cell: (i) => (
         <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">
           {[i.row.original.BookingProjectName, i.row.original.BookingUnitNo].filter(Boolean).join(" · ") || "—"}
         </span>
       ) },
-    { accessorKey: "BookingTotalValue", header: "Value", size: 110,
+    { accessorKey: "BookingTotalValue", header: "Value", size: 150,
       cell: (i) => {
         const val = i.row.original.BookingGrandTotal ?? i.row.original.BookingTotalValue;
         return <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs font-medium">{val ? `₹${Number(val).toLocaleString("en-IN")}` : "—"}</span>;
       } },
-    { accessorKey: "BookingDate", header: "Booked On", size: 110,
+    { accessorKey: "BookingDate", header: "Booked On", size: 130,
       cell: (i) => (
         <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
           {i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}
         </span>
       ) },
-    { id: "actions", header: "", size: 180, enableSorting: false,
+    { id: "actions", header: "", size: 200, enableSorting: false,
       cell: (i) => (
         <div className="flex items-center gap-3 flex-wrap">
           <button onClick={() => navigate(`/crm/bookings?applicationId=${i.row.original.Id}`)}
@@ -1046,22 +1130,30 @@ const CrmApplication: React.FC = () => {
   ];
 
   const inProcessColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "ApplicationNo", header: "App No", size: 110,
+    { accessorKey: "ApplicationNo", header: "App No", size: 120,
       cell: (i) => (
-        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">
+        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
           {i.getValue() as string}
         </span>
       ) },
-    { accessorKey: "ApplicantName", header: "Applicant", size: 150,
+    {/* Mobile folded into this cell (as a second line, same pattern used on
+       CrmLeads/CrmCustomers) instead of its own column — one less dedicated
+       column for a value that's rarely scanned on its own, freeing real
+       width back to the columns people actually compare row-to-row. Sizes
+       across this whole set are generous (sum ~1420px) so table-layout:fixed
+       fills a normal desktop card edge-to-edge instead of leaving the
+       columns bunched on the left with dead space after Date. */
+      accessorKey: "ApplicantName", header: "Applicant", size: 220,
       cell: (i) => (
         <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
-          {i.row.original.LeadUid && <div className="text-xs text-muted-foreground">Lead: {i.row.original.LeadUid}</div>}
+          <div className="text-xs text-muted-foreground">
+            {i.row.original.Mobile}
+            {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
+          </div>
         </div>
       ) },
-    { accessorKey: "Mobile", header: "Mobile", size: 100,
-      cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-muted-foreground">{i.getValue() as string}</span> },
-    { id: "interestedProject", header: "Interested Project", size: 140, enableSorting: false,
+    { id: "interestedProject", header: "Interested Project", size: 220, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
         const typeBit = [r.BhkPreference, r.PropertyType].filter(Boolean).join(" · ") || r.UnitTypeFromMaster || "";
@@ -1071,7 +1163,7 @@ const CrmApplication: React.FC = () => {
           </span>
         );
       } },
-    { accessorKey: "Source", header: "Source", size: 130,
+    { accessorKey: "Source", header: "Source", size: 170,
       cell: (i) => (
         <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">
           <div>{i.row.original.Source || "—"}</div>
@@ -1080,19 +1172,19 @@ const CrmApplication: React.FC = () => {
           </div>
         </div>
       ) },
-    { accessorKey: "RatePerSqFt", header: "Rate", size: 100,
+    { accessorKey: "RatePerSqFt", header: "Rate", size: 130,
       cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">{i.row.original.RatePerSqFt ? `₹${Number(i.row.original.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span> },
-    { accessorKey: "AssigneeName", header: "Assigned To", size: 110,
+    { accessorKey: "AssigneeName", header: "Assigned To", size: 140,
       cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-sm">{(i.getValue() as string) || "—"}</span> },
-    { accessorKey: "Status", header: "Status", size: 100,
+    { accessorKey: "Status", header: "Status", size: 110,
       cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
-    { accessorKey: "CreatedAt", header: "Date", size: 100,
+    { accessorKey: "CreatedAt", header: "Date", size: 110,
       cell: (i) => (
         <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
           {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
         </span>
       ) },
-    { id: "actions", header: "", size: 230, enableSorting: false,
+    { id: "actions", header: "", size: 200, enableSorting: false,
       cell: (i) => {
         const a = i.row.original;
         const canResume = activeStage === "InProcess" && isResumeEditable(a);
@@ -1177,7 +1269,7 @@ const CrmApplication: React.FC = () => {
                 210px cell) was what made this column look broken. */}
             {activeStage === "InProcess" && a.Status === "Pending" && (
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <Clock size={10} /> Pending admin approval
+                <Clock size={10} /> Submitted — booking not yet created
               </span>
             )}
             {activeStage !== "InProcess" && !canCancelApplication(a) && (
@@ -1188,13 +1280,24 @@ const CrmApplication: React.FC = () => {
       } },
   ];
 
+  const glassStyle: React.CSSProperties = {
+    background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
+    border: isDark ? "1px solid rgba(245,158,11,0.15)" : "1px solid rgba(245,158,11,0.18)",
+    backdropFilter: "blur(16px) saturate(150%)",
+    WebkitBackdropFilter: "blur(16px) saturate(150%)",
+    boxShadow: isDark
+      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+      : "0 4px 24px rgba(245,158,11,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+  };
+  const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
+
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Applications"
       subtitle="Every detail captured once, here — Bookings is review-only from this point on"
       action={
         <button onClick={() => { resetWizard(); setDialogOpen(true); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
+          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
           <Plus size={14} /> New Application
         </button>
       }
@@ -1207,69 +1310,85 @@ const CrmApplication: React.FC = () => {
           { label: "Not Converted", value: stageCounts.NotConverted, dot: "bg-red-400" },
           { label: "Conversion Rate", value: `${conversionRate}%`, dot: "bg-violet-500" },
         ].map(({ label, value, dot }) => (
-          <div key={label} className="rounded-xl border border-border bg-card p-4">
-            <div className={`w-2 h-2 rounded-full ${dot} mb-3`} />
-            <p className="text-2xl font-bold font-heading text-foreground leading-none">{value}</p>
+          <div key={label} className="rounded-xl p-3.5" style={glassStyle}>
+            <div className={`w-2 h-2 rounded-full ${dot} mb-2.5`} />
+            <p className="text-xl font-bold font-heading text-foreground leading-none">{value}</p>
             <p className="text-[11px] text-muted-foreground mt-1">{label}</p>
           </div>
         ))}
       </div>
 
-      {/* ── Stage tabs ── */}
-      <div className="flex items-center gap-1.5 border-b border-border">
-        {STAGES.map((stg) => {
-          const Icon = stageIcon[stg];
-          const active = activeStage === stg;
-          return (
-            <button key={stg} onClick={() => setActiveStage(stg)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                active ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}>
-              <Icon size={14} /> {stageLabel[stg]}
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
-                {stageCounts[stg]}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Filters */}
-      <div className="flex gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-48">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, mobile, app no..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+      {/* ── Stage tabs + filters + table, one continuous card instead of
+          loose elements each carrying their own spacing/borders. ── */}
+      <div className="rounded-xl overflow-hidden" style={glassStyle}>
+        {/* overflow-x-auto alone was silently promoting overflow-y from its
+            default "visible" to "auto" too (CSS overflow spec: an axis left
+            visible force-computes to auto once the other axis isn't visible)
+            — any sub-pixel height overflow from the icon/badge buttons then
+            popped a real, native vertical scrollbar on this row. That was
+            the actual "scroller" bug, not the status <select> (which was a
+            separate, already-fixed issue) or any page/dialog layout
+            overflow. overflow-y-hidden pins the vertical axis so only
+            intentional horizontal scrolling (narrow screens, many stages)
+            can ever occur here. */}
+        <div className="flex items-center gap-1 px-3 pt-2.5 overflow-x-auto overflow-y-hidden border-b" style={{ borderColor }}>
+          {STAGES.map((stg) => {
+            const Icon = stageIcon[stg];
+            const active = activeStage === stg;
+            return (
+              <button key={stg} onClick={() => setActiveStage(stg)}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-medium border-b-2 -mb-px transition-colors shrink-0 ${
+                  active ? "border-amber-500 text-amber-600 dark:text-amber-400" : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}>
+                <Icon size={14} /> {stageLabel[stg]}
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${active ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-muted text-muted-foreground"}`}>
+                  {stageCounts[stg]}
+                </span>
+              </button>
+            );
+          })}
         </div>
-        {activeStage !== "Converted" && (
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
-            <option value="All">All Statuses</option>
-            {STATUSES.map((s) => <option key={s}>{s}</option>)}
-          </select>
-        )}
-      </div>
 
-      {/* ── Table — sortable via DataTable; filtering stays the purpose-built
-          search box + status/stage controls above, so DataTable's own global
-          search is disabled to avoid a second, redundant search box. ── */}
-      <DataTable
-        data={filtered}
-        columns={activeStage === "Converted" ? convertedColumns : inProcessColumns}
-        searchable={false}
-        loading={isLoading}
-        emptyMessage={activeStage === "Converted" ? "No converted applications yet" : activeStage === "NotConverted" ? "No rejected/cancelled applications" : "No applications in process"}
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
+        <div className="flex gap-3 flex-wrap items-center px-3.5 py-3 border-b" style={{ borderColor }}>
+          <div className="relative flex-1 min-w-48">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, mobile, app no..."
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+          </div>
+          {activeStage !== "Converted" && (
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-amber-500/40">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All Statuses</SelectItem>
+                {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
+        {/* Table — sortable via DataTable; filtering stays the purpose-built
+            search box + status/stage controls above, so DataTable's own
+            global search is disabled to avoid a second, redundant search box. */}
+        <DataTable
+          data={filtered}
+          columns={activeStage === "Converted" ? convertedColumns : inProcessColumns}
+          searchable={false}
+          loading={isLoading}
+          emptyMessage={activeStage === "Converted" ? "No converted applications yet" : activeStage === "NotConverted" ? "No rejected/cancelled applications" : "No applications in process"}
+          className="border-0"
+        />
+      </div>
 
       {/* New Application Dialog — 5-step wizard: what the customer is
           applying for (unit/parking/KYC/docs). No money changes hands or
           gets recorded here — that's entirely the Booking page's job. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetWizard(); } }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-heading">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6 gap-4">
+          <DialogHeader className="space-y-0.5">
+            <DialogTitle className="font-heading text-base font-bold">
               New CRM Application {applicationNo ? `— ${applicationNo}` : ""}
             </DialogTitle>
           </DialogHeader>
@@ -1280,7 +1399,7 @@ const CrmApplication: React.FC = () => {
               and Bank/KYC again. A step beyond what's been reached yet isn't
               clickable — steps 2-6 all need applicationId (created in step 1)
               and Bank/KYC intentionally still gates via its own Next/Save. */}
-          <div className="flex items-center gap-1.5 text-xs flex-wrap">
+          <div className="flex items-center gap-2 text-xs flex-wrap">
             {["Project/Unit", "Parking", "Extra Work", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => {
               const stepNum = i + 1;
               const reachable = stepNum === 1 || (!!applicationId && stepNum <= maxStepReached);
@@ -1291,8 +1410,10 @@ const CrmApplication: React.FC = () => {
                     type="button"
                     onClick={() => reachable && setStep(stepNum)}
                     disabled={!reachable}
-                    className={`flex items-center gap-1.5 px-2 py-1 rounded-full font-medium transition-colors ${
-                      step === stepNum ? "bg-primary text-primary-foreground" : step > stepNum ? "text-green-600" : "text-muted-foreground"
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full font-heading font-medium transition-colors ${
+                      step === stepNum
+                        ? "text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600"
+                        : step > stepNum ? "text-green-600" : "text-muted-foreground"
                     } ${reachable ? "cursor-pointer hover:opacity-80" : "cursor-not-allowed opacity-60"}`}>
                     {step > stepNum ? <CheckCircle2 size={12} /> : <span className="w-4 text-center">{stepNum}</span>}
                     {label}
@@ -1313,7 +1434,7 @@ const CrmApplication: React.FC = () => {
                 <div className="flex items-center justify-between mb-1">
                   <label className={labelCls}>Customer *</label>
                   <a href="/crm/customers" target="_blank" rel="noreferrer"
-                    className="text-xs text-primary hover:underline flex items-center gap-1">
+                    className="text-xs text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1">
                     <ExternalLink size={11} /> New Customer
                   </a>
                 </div>
@@ -1326,292 +1447,324 @@ const CrmApplication: React.FC = () => {
                 </select>
                 {selectedCustomer && (
                   <div className="mt-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs space-y-0.5">
-                    <div className="flex items-center gap-1.5 font-medium text-foreground"><IdCard size={12} className="text-primary" /> {selectedCustomer.CustomerName}</div>
+                    <div className="flex items-center gap-1.5 font-medium text-foreground"><IdCard size={12} className="text-amber-500" /> {selectedCustomer.CustomerName}</div>
                     <div className="text-muted-foreground">{selectedCustomer.Mobile}{selectedCustomer.Email ? ` · ${selectedCustomer.Email}` : ""}</div>
                     <div className="text-muted-foreground">PAN: {selectedCustomer.PanNo || "—"} · {selectedCustomer.Address || "No address on file"}</div>
                   </div>
                 )}
               </div>
 
-              {/* Tree: Company > Project > Block > Floor > Unit. Locked
-                  (read-only-styled, disabled) once a pick is already saved,
-                  same as Source below — "Edit" unlocks it for changes made
-                  before approval. Once the application is past Draft/Pending
-                  (canEditUnitSelection false), Edit never renders at all and
-                  every field here stays permanently disabled — a real
-                  Booking either exists or is expected the moment it's
-                  Approved, so the unit pick can't move anymore. */}
-              <div className="rounded-lg border border-border p-3 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-foreground block">Project / Unit (tree)</label>
-                  {!!applicationId && (
-                    canEditUnitSelection ? (
-                      unitLocked && (
-                        <button type="button" onClick={() => setUnitLocked(false)}
-                          className="text-xs text-primary hover:underline shrink-0">
-                          Edit
-                        </button>
+              {/* Two columns from here on — left is the tree pick itself,
+                  right is everything that pick unlocks (GST, Payment Plan,
+                  Date/Rate/Value, Broker). Keeping all of it in one column
+                  was what made this step tall enough to need a scroller;
+                  splitting it left/right uses the wider dialog instead of
+                  stacking everything vertically. */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Left: Company > Project > Block > Floor > Unit. Locked
+                    (read-only-styled, disabled) once a pick is already
+                    saved, same as Source below — "Edit" unlocks it for
+                    changes made before approval. Once the application is
+                    past Draft/Pending (canEditUnitSelection false), Edit
+                    never renders at all and every field here stays
+                    permanently disabled — a real Booking either exists or
+                    is expected the moment it's Approved, so the unit pick
+                    can't move anymore. */}
+                <div className="rounded-xl border border-border p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-heading font-semibold text-foreground block">Project / Unit (tree)</label>
+                    {!!applicationId && (
+                      canEditUnitSelection ? (
+                        unitLocked && (
+                          <button type="button" onClick={() => setUnitLocked(false)}
+                            className="text-xs text-amber-600 dark:text-amber-400 hover:underline shrink-0">
+                            Edit
+                          </button>
+                        )
+                      ) : (
+                        <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
+                          <Lock size={11} /> Locked ({wizardAppStatus})
+                        </span>
                       )
-                    ) : (
-                      <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
-                        <Lock size={11} /> Locked ({wizardAppStatus})
-                      </span>
-                    )
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className={labelCls}>Company *</label>
-                    <select value={form.CompanyId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
-                      onChange={(e) => {
-                        setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
-                      }}
-                      className={inputCls}>
-                      <option value="">Select company</option>
-                      {(companies as any[]).map((c: any) => <option key={c.Id} value={String(c.Id)}>{c.Name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Project *</label>
-                    <select value={form.ProjectId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
-                      onChange={(e) => {
-                        setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
-                      }}
-                      className={inputCls}>
-                      <option value="">Select project</option>
-                      {(projectsForCompany as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Block / Tower</label>
-                    <select value={form.BlockId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
-                      onChange={(e) => {
-                        setForm((f) => ({ ...f, BlockId: e.target.value, FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
-                      }}
-                      className={inputCls}>
-                      <option value="">Select block</option>
-                      {blocksForProject.map((b) => <option key={b.Id} value={b.Id}>{b.Name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Floor</label>
-                    <select value={form.FloorNo} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
-                      onChange={(e) => {
-                        setForm((f) => ({ ...f, FloorNo: e.target.value, PreferredUnitId: "", PaymentPlanId: "" }));
-                      }}
-                      className={inputCls}>
-                      <option value="">Select floor</option>
-                      {floorsForBlock.map((fl) => <option key={fl} value={fl}>Floor {fl}</option>)}
-                    </select>
-                  </div>
-                  <div className="col-span-2">
-                    <label className={labelCls}>Unit *</label>
-                    <select value={form.PreferredUnitId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
-                      onChange={(e) => {
-                        // Unit can be picked before Block/Floor are chosen —
-                        // the dropdown already falls back to the full
-                        // project's unit list when they're empty (see
-                        // unitsForBlock/unitsForFloor). Whichever way it was
-                        // reached, backfill Block/Floor from the picked
-                        // unit's own record so downstream logic that keys off
-                        // them (Parking's blockId scoping, Block-tagged
-                        // Payment Plans) still narrows correctly instead of
-                        // silently staying project-wide.
-                        const picked = (unitsForProject as any[]).find((u: any) => String(u.Id) === e.target.value);
-                        setForm((f) => ({
-                          ...f,
-                          PreferredUnitId: e.target.value,
-                          BlockId: picked?.BlockId != null ? String(picked.BlockId) : f.BlockId,
-                          FloorNo: picked?.FloorNo != null ? String(picked.FloorNo) : f.FloorNo,
-                          PaymentPlanId: "",
-                        }));
-                      }}
-                      className={inputCls}>
-                      <option value="">Select unit</option>
-                      {(unitsForFloor as any[]).map((u: any) => (
-                        <option key={u.Id} value={String(u.Id)}>{u.UnitName} · {u.UnitType || "—"} · {u.AreaSqFt ? `${u.AreaSqFt} sqft` : "—"}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {/* Brief unit price — the unit's own name/type/area is
-                    already visible in the Unit dropdown right above, so
-                    this only needs to show the derived ₹ math itself. */}
-                {selectedUnit && (
-                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
-                    <IndianRupee size={11} className="text-primary shrink-0" />
-                    {form.RatePerSqFt && computedTotal ? (
-                      <span>
-                        {selectedUnit.AreaSqFt} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">₹{computedTotal.toLocaleString("en-IN")}</span>
-                      </span>
-                    ) : (
-                      <span>Enter Rate (₹/sqft) below to see the full price.</span>
                     )}
                   </div>
-                )}
-
-                {/* GST preview — live from the moment a Rate is entered,
-                    including any Parking already picked on Step 2 in this
-                    same application, so staff see the real combined bracket
-                    from the very start, not just at the very end. */}
-                {form.RatePerSqFt && computedTotal ? (
-                  <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
-                ) : null}
-
-                {/* Payment Plan — mandatory the moment a unit is picked.
-                    Options are this unit's own tagged plans (set in Unit
-                    Master); if the unit has none tagged, every active plan
-                    is offered instead. Not re-selectable on the Booking
-                    page — this is the one place it's chosen. */}
-                {form.PreferredUnitId && (
-                  <div className="pt-2">
-                    <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
-                    <select value={form.PaymentPlanId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
-                      onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
-                      <option value="">Select a payment plan</option>
-                      {applicablePaymentPlans.map((p: any) => (
-                        <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
-                      ))}
-                    </select>
-                    {!unitTaggedPaymentPlans.length && blockTaggedPaymentPlans.length > 0 && (
-                      <p className="text-[11px] text-muted-foreground mt-1">This unit has no payment plans of its own — showing its Block's tagged plans.</p>
-                    )}
-                    {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && projectTaggedPaymentPlans.length > 0 && (
-                      <p className="text-[11px] text-muted-foreground mt-1">This unit's Block has no payment plans of its own — showing its Project's tagged plans.</p>
-                    )}
-                    {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && !projectTaggedPaymentPlans.length && (
-                      <p className="text-[11px] text-muted-foreground mt-1">No payment plans tagged anywhere in this unit's hierarchy — showing every active plan instead.</p>
-                    )}
-
-                    {/* Brief plan breakdown — Booking is the plan's own
-                        fixed ₹ (never a %), everything after it splits
-                        100% of (Total Value - Booking) the same way
-                        generateMilestonesForBooking computes it for a real
-                        Booking. Purely a preview here — nothing is saved
-                        until the actual Booking is created. */}
-                    {selectedPaymentPlan && selectedPlanMilestones.length > 0 && (
-                      <div className="mt-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 space-y-1">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>Booking</span>
-                          <span className="font-semibold text-foreground">₹{selectedPlanBookingAmount.toLocaleString("en-IN")}</span>
-                        </div>
-                        {selectedPlanMilestones.slice(1).map((m, i) => (
-                          <div key={i} className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span className="truncate pr-2">{m.name} <span className="text-[10px]">({m.pct}%)</span></span>
-                            <span className="font-semibold text-foreground shrink-0">
-                              {computedTotal ? `₹${Math.round((selectedPlanRemainder * m.pct) / 100).toLocaleString("en-IN")}` : "—"}
-                            </span>
-                          </div>
-                        ))}
-                        {!computedTotal && (
-                          <p className="text-[10px] text-muted-foreground pt-0.5">Enter Rate (₹/sqft) to see ₹ amounts for each step.</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className={labelCls}>Date of Apply</label>
-                  <input type="date" value={form.DateOfApply} onChange={(e) => setForm((f) => ({ ...f, DateOfApply: e.target.value }))} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Rate (₹/sqft) <span className="text-destructive">*</span></label>
-                  <input type="number" value={form.RatePerSqFt} onChange={(e) => setForm((f) => ({ ...f, RatePerSqFt: e.target.value }))} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Est. Total Value</label>
-                  <input type="text" readOnly value={computedTotal ? `₹${computedTotal.toLocaleString("en-IN")}` : "—"}
-                    className={`${inputCls} bg-muted/30 text-muted-foreground`} />
-                </div>
-              </div>
-
-
-              {/* Broker — separate from Source/Channel Partner. A deal can
-                  come from a Referral source AND still be brokered; the two
-                  concepts are unrelated (see CrmBrokerageMaster). The broker
-                  is introduced right here, at Application time — always
-                  picked from Broker Master (AccountHeadMaster, LHeadType=BR),
-                  never a fresh Customer-level concept. His own identity
-                  (name/phone/PAN/RERA) is never re-typed, only ever selected
-                  and shown read-only. The ONLY editable field on this whole
-                  block is the per-deal commission override % — everything
-                  else is fetched, not entered. The rate here is captured now
-                  but only becomes a real commission schedule once Milestone
-                  #1 is paid (maybeAutoCreateBrokerage), at which point it's
-                  split into one tranche per payment milestone, each
-                  unlocking as that milestone is paid — not a manual toggle
-                  here. */}
-              <div className="rounded-lg border border-border p-3 space-y-3">
-                <label className="flex items-center gap-2 text-xs font-semibold text-foreground">
-                  <input type="checkbox" checked={form.ViaBroker}
-                    onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "" }) }))} />
-                  Via Broker
-                </label>
-                {form.ViaBroker && (
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className={labelCls}>Broker (from Broker Master)</label>
-                      <select value={form.BrokerId} onChange={(e) => setForm((f) => ({ ...f, BrokerId: e.target.value }))} className={inputCls}>
-                        <option value="">Select broker</option>
-                        {(brokers as any[]).map((b: any) => <option key={b.LHeadId} value={String(b.LHeadId)}>{b.LHeadName}</option>)}
+                      <label className={labelCls}>Company *</label>
+                      <select value={form.CompanyId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
+                        }}
+                        className={inputCls}>
+                        <option value="">Select company</option>
+                        {(companies as any[]).map((c: any) => <option key={c.Id} value={String(c.Id)}>{c.Name}</option>)}
                       </select>
                     </div>
-
-                    {/* Read-only, auto-fetched from Broker Master the moment a
-                        broker is on the form — mirrors the Supplier info card
-                        pattern used on Purchase Orders (PurchaseOrderMaster.tsx).
-                        Nothing in here is ever an editable input. */}
-                    {selectedBroker && (
-                      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-muted/20 border border-border p-3 text-sm">
-                        {selectedBroker.LHeadPhone && (
-                          <div>
-                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
-                            <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5"><Phone size={12} className="text-muted-foreground" />{selectedBroker.LHeadPhone}</dd>
-                          </div>
-                        )}
-                        {selectedBroker.LHeadPan && (
-                          <div>
-                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">PAN</dt>
-                            <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" />{selectedBroker.LHeadPan}</dd>
-                          </div>
-                        )}
-                        {selectedBroker.LHeadRera && (
-                          <div>
-                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">RERA No.</dt>
-                            <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><FileBadge size={12} className="text-muted-foreground" />{selectedBroker.LHeadRera}</dd>
-                          </div>
-                        )}
-                        {selectedBroker.LHeadPaymentTerms && (
-                          <div>
-                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Payment Terms</dt>
-                            <dd className="text-foreground font-medium mt-0.5">{selectedBroker.LHeadPaymentTerms}</dd>
-                          </div>
-                        )}
-                      </dl>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className={labelCls}>Default rate (preview)</label>
-                        <input readOnly value={`${brokerageTierDefault}% (< 1 Cr → 2%, ≥ 1 Cr → 1%)`}
-                          className={`${inputCls} bg-muted/30 text-muted-foreground`} />
-                      </div>
-                      <div>
-                        <label className={labelCls}>Commission override % (only if this deal needs a custom rate)</label>
-                        <input type="number" step="0.01" min="0" max="100" value={form.BrokerageRatePercent}
-                          onChange={(e) => setForm((f) => ({ ...f, BrokerageRatePercent: e.target.value }))}
-                          placeholder={String(brokerageTierDefault)} className={inputCls} />
-                      </div>
+                    <div>
+                      <label className={labelCls}>Project *</label>
+                      <select value={form.ProjectId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
+                        }}
+                        className={inputCls}>
+                        <option value="">Select project</option>
+                        {(projectsForCompany as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+                      </select>
                     </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      Commission is paid out one milestone at a time, following the same schedule as the customer's own payments — unlocking as each milestone is paid.
-                    </p>
+                    <div>
+                      <label className={labelCls}>Block / Tower</label>
+                      <select value={form.BlockId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, BlockId: e.target.value, FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
+                        }}
+                        className={inputCls}>
+                        <option value="">Select block</option>
+                        {blocksForProject.map((b) => <option key={b.Id} value={b.Id}>{b.Name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Floor</label>
+                      <select value={form.FloorNo} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, FloorNo: e.target.value, PreferredUnitId: "", PaymentPlanId: "" }));
+                        }}
+                        className={inputCls}>
+                        <option value="">Select floor</option>
+                        {floorsForBlock.map((fl) => <option key={fl} value={fl}>Floor {fl}</option>)}
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <label className={labelCls}>Unit *</label>
+                      <select value={form.PreferredUnitId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                        onChange={(e) => {
+                          // Unit can be picked before Block/Floor are chosen —
+                          // the dropdown already falls back to the full
+                          // project's unit list when they're empty (see
+                          // unitsForBlock/unitsForFloor). Whichever way it was
+                          // reached, backfill Block/Floor from the picked
+                          // unit's own record so downstream logic that keys off
+                          // them (Parking's blockId scoping, Block-tagged
+                          // Payment Plans) still narrows correctly instead of
+                          // silently staying project-wide.
+                          const picked = (unitsForProject as any[]).find((u: any) => String(u.Id) === e.target.value);
+                          setForm((f) => ({
+                            ...f,
+                            PreferredUnitId: e.target.value,
+                            BlockId: picked?.BlockId != null ? String(picked.BlockId) : f.BlockId,
+                            FloorNo: picked?.FloorNo != null ? String(picked.FloorNo) : f.FloorNo,
+                            PaymentPlanId: "",
+                          }));
+                        }}
+                        className={inputCls}>
+                        <option value="">Select unit</option>
+                        {(unitsForFloor as any[]).map((u: any) => (
+                          <option key={u.Id} value={String(u.Id)}>{u.UnitName} · {u.UnitType || "—"} · {u.AreaSqFt ? `${u.AreaSqFt} sqft` : "—"}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                )}
+
+                  {/* Brief unit price — the unit's own name/type/area is
+                      already visible in the Unit dropdown right above, so
+                      this only needs to show the derived ₹ math itself. */}
+                  {selectedUnit && (
+                    <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
+                      <IndianRupee size={11} className="text-amber-500 shrink-0" />
+                      {form.RatePerSqFt && computedTotal ? (
+                        <span>
+                          {selectedUnit.AreaSqFt} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">₹{computedTotal.toLocaleString("en-IN")}</span>
+                        </span>
+                      ) : (
+                        <span>Enter Rate (₹/sqft) to see the full price.</span>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className={labelCls}>Date of Apply</label>
+                      <input type="date" value={form.DateOfApply} onChange={(e) => setForm((f) => ({ ...f, DateOfApply: e.target.value }))} className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Rate (₹/sqft) <span className="text-destructive">*</span></label>
+                      <input type="number" value={form.RatePerSqFt} onChange={(e) => setForm((f) => ({ ...f, RatePerSqFt: e.target.value }))} className={inputCls} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Est. Total Value</label>
+                      <input type="text" readOnly value={computedTotal ? `₹${computedTotal.toLocaleString("en-IN")}` : "—"}
+                        className={`${inputCls} bg-muted/30 text-muted-foreground`} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right: everything the unit pick unlocks — GST preview,
+                    Payment Plan, and Broker. */}
+                <div className="space-y-4">
+                  {/* GST preview — live from the moment a Rate is entered,
+                      including any Parking already picked on Step 2 in this
+                      same application, so staff see the real combined
+                      bracket from the very start, not just at the very end. */}
+                  {form.RatePerSqFt && computedTotal ? (
+                    <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
+                  ) : null}
+
+                  {/* Payment Plan — mandatory the moment a unit is picked.
+                      Options are this unit's own tagged plans (set in Unit
+                      Master); if the unit has none tagged, every active plan
+                      is offered instead. Not re-selectable on the Booking
+                      page — this is the one place it's chosen. */}
+                  {form.PreferredUnitId && (
+                    <div className="rounded-xl border border-border p-4 space-y-2">
+                      <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
+                      <select value={form.PaymentPlanId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                        onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
+                        <option value="">Select a payment plan</option>
+                        {applicablePaymentPlans.map((p: any) => (
+                          <option key={p.Id} value={String(p.Id)}>{p.PlanName}</option>
+                        ))}
+                      </select>
+                      {!unitTaggedPaymentPlans.length && blockTaggedPaymentPlans.length > 0 && (
+                        <p className="text-[11px] text-muted-foreground">This unit has no payment plans of its own — showing its Block's tagged plans.</p>
+                      )}
+                      {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && projectTaggedPaymentPlans.length > 0 && (
+                        <p className="text-[11px] text-muted-foreground">This unit's Block has no payment plans of its own — showing its Project's tagged plans.</p>
+                      )}
+                      {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && !projectTaggedPaymentPlans.length && (
+                        <p className="text-[11px] text-muted-foreground">No payment plans tagged anywhere in this unit's hierarchy — showing every active plan instead.</p>
+                      )}
+
+                      {/* Brief plan breakdown — Booking is the plan's own
+                          fixed ₹ (never a %), everything after it splits
+                          100% of (Total Value - Booking) the same way
+                          generateMilestonesForBooking computes it for a real
+                          Booking. Purely a preview here — nothing is saved
+                          until the actual Booking is created. */}
+                      {selectedPaymentPlan && selectedPlanMilestones.length > 0 && (
+                        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 space-y-1">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>Booking</span>
+                            <span className="font-semibold text-foreground">₹{selectedPlanBookingAmount.toLocaleString("en-IN")}</span>
+                          </div>
+                          {selectedPlanMilestones.slice(1).map((m, i) => (
+                            <div key={i} className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span className="truncate pr-2">{m.name} <span className="text-[10px]">({m.pct}%)</span></span>
+                              <span className="font-semibold text-foreground shrink-0">
+                                {computedTotal ? `₹${Math.round((selectedPlanRemainder * m.pct) / 100).toLocaleString("en-IN")}` : "—"}
+                              </span>
+                            </div>
+                          ))}
+                          {!computedTotal && (
+                            <p className="text-[10px] text-muted-foreground pt-0.5">Enter Rate (₹/sqft) to see ₹ amounts for each step.</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Broker — separate from Source/Channel Partner. A deal
+                      can come from a Referral source AND still be brokered;
+                      the two concepts are unrelated (see
+                      CrmBrokerageMaster). The broker is introduced right
+                      here, at Application time — always picked from Broker
+                      Master (AccountHeadMaster, LHeadType=BR), never a fresh
+                      Customer-level concept. His own identity (name/phone/
+                      PAN/RERA) is never re-typed, only ever selected and
+                      shown read-only. The ONLY editable field on this whole
+                      block is the per-deal commission override % —
+                      everything else is fetched, not entered. The rate here
+                      is captured now but only becomes a real commission
+                      schedule once Milestone #1 is paid
+                      (maybeAutoCreateBrokerage), at which point it's split
+                      into one tranche per payment milestone, each unlocking
+                      as that milestone is paid — not a manual toggle here. */}
+                  <div className="rounded-xl border border-border p-4 space-y-3">
+                    <label className="flex items-center gap-2 text-xs font-heading font-semibold text-foreground">
+                      <input type="checkbox" checked={form.ViaBroker}
+                        onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "" }) }))} />
+                      Via Broker
+                    </label>
+                    {form.ViaBroker && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className={labelCls}>Broker (from Broker Master)</label>
+                          <select value={form.BrokerId} onChange={(e) => setForm((f) => ({ ...f, BrokerId: e.target.value }))} className={inputCls}>
+                            <option value="">Select broker</option>
+                            {(brokers as any[]).map((b: any) => <option key={b.LHeadId} value={String(b.LHeadId)}>{b.LHeadName}</option>)}
+                          </select>
+                        </div>
+
+                        {/* Read-only, auto-fetched from Broker Master the moment a
+                            broker is on the form — mirrors the Supplier info card
+                            pattern used on Purchase Orders (PurchaseOrderMaster.tsx).
+                            Nothing in here is ever an editable input. */}
+                        {selectedBroker && (
+                          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-muted/20 border border-border p-3 text-sm">
+                            {selectedBroker.LHeadPhone && (
+                              <div>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
+                                <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5"><Phone size={12} className="text-muted-foreground" />{selectedBroker.LHeadPhone}</dd>
+                              </div>
+                            )}
+                            {selectedBroker.LHeadPan && (
+                              <div>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">PAN</dt>
+                                <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" />{selectedBroker.LHeadPan}</dd>
+                              </div>
+                            )}
+                            {selectedBroker.LHeadRera && (
+                              <div>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">RERA No.</dt>
+                                <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><FileBadge size={12} className="text-muted-foreground" />{selectedBroker.LHeadRera}</dd>
+                              </div>
+                            )}
+                            {selectedBroker.LHeadPaymentTerms && (
+                              <div>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Payment Terms</dt>
+                                <dd className="text-foreground font-medium mt-0.5">{selectedBroker.LHeadPaymentTerms}</dd>
+                              </div>
+                            )}
+                          </dl>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className={labelCls}>Default Rate (Preview)</label>
+                            <input readOnly value={`${brokerageTierDefault}% (< 1 Cr → 2%, ≥ 1 Cr → 1%)`}
+                              className={`${inputCls} bg-muted/30 text-muted-foreground`} />
+                          </div>
+                          <div>
+                            <label className={labelCls}>Commission Override %</label>
+                            <input type="number" step="0.01" min="0" max="100" value={form.BrokerageRatePercent}
+                              onChange={(e) => setForm((f) => ({ ...f, BrokerageRatePercent: e.target.value }))}
+                              placeholder={String(brokerageTierDefault)} className={inputCls} />
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground -mt-1.5">
+                          Only fill in the override if this specific deal needs a custom commission rate — otherwise the default above applies.
+                        </p>
+
+                        <div>
+                          <label className={labelCls}>Payout Plan</label>
+                          <select value={form.BrokeragePaymentPlan}
+                            onChange={(e) => setForm((f) => ({ ...f, BrokeragePaymentPlan: e.target.value }))}
+                            className={inputCls}>
+                            <option value="OneTime">One-time — full commission once Booking Amount is paid</option>
+                            <option value="TwoPart">Two-part — half on Booking Amount, half on Agreement Executed</option>
+                            <option value="AgreementOnly">Agreement-only — full commission on Agreement Executed</option>
+                          </select>
+                        </div>
+
+                        <p className="text-[11px] text-muted-foreground">
+                          {form.BrokeragePaymentPlan === "TwoPart"
+                            ? "Half the commission is released as soon as the Booking Amount is paid; the other half is held until the Agreement is Executed."
+                            : form.BrokeragePaymentPlan === "AgreementOnly"
+                            ? "The full commission is held until the Agreement is Executed — nothing is released at booking."
+                            : "The full commission is released as soon as the Booking Amount is paid — no further tranches."}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -1734,9 +1887,35 @@ const CrmApplication: React.FC = () => {
                   wrote them until now. Kept here on Details (not a new step,
                   not folded into Bank/KYC) since it belongs with the final
                   review right before Submit, once Project/Unit is known and
-                  the bank picker can be project-scoped. */}
+                  the bank picker can be project-scoped.
+
+                  Locked (read-only-styled, disabled) once a figure is
+                  already saved here — same Edit-to-unlock pattern as the
+                  Project/Unit tree above, and for the same reason: this is
+                  money already confirmed with the customer, not something
+                  that should be one stray click away from being silently
+                  overwritten every time the wizard is reopened. Stays
+                  editable (Edit always available) through Draft/Pending;
+                  once Approved, canEditUnitSelection goes false and the
+                  Edit control disappears for good. */}
               <div className="rounded-lg border border-border p-3 space-y-2.5">
-                <label className="text-xs font-semibold text-foreground block">Payment Details</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-foreground block">Payment Details</label>
+                  {!!applicationId && (
+                    canEditUnitSelection ? (
+                      paymentLocked && (
+                        <button type="button" onClick={() => setPaymentLocked(false)}
+                          className="text-xs text-primary hover:underline shrink-0">
+                          Edit
+                        </button>
+                      )
+                    ) : (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
+                        <Lock size={11} /> Locked ({wizardAppStatus})
+                      </span>
+                    )
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>Token Type</label>
@@ -1746,7 +1925,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Token (Booking) Amount (₹)</label>
-                    <input type="number" value={form.TokenValue}
+                    <input type="number" value={form.TokenValue} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                       onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))}
                       placeholder={selectedPlanBookingAmount ? String(selectedPlanBookingAmount) : undefined}
                       className={inputCls} />
@@ -1761,7 +1940,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Payment Mode</label>
-                    <select value={form.PaymentMode}
+                    <select value={form.PaymentMode} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                       onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value, ChequeNo: "", ChequeDate: "", TransactionRef: "" }))}
                       className={inputCls}>
                       <option value="">Select</option>
@@ -1778,13 +1957,13 @@ const CrmApplication: React.FC = () => {
                     <>
                       <div>
                         <label className={labelCls}>Cheque Number</label>
-                        <input type="text" value={form.ChequeNo}
+                        <input type="text" value={form.ChequeNo} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                           onChange={(e) => setForm((f) => ({ ...f, ChequeNo: e.target.value }))}
                           className={inputCls} />
                       </div>
                       <div>
                         <label className={labelCls}>Cheque Date</label>
-                        <input type="date" value={form.ChequeDate}
+                        <input type="date" value={form.ChequeDate} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                           onChange={(e) => setForm((f) => ({ ...f, ChequeDate: e.target.value }))}
                           className={inputCls} />
                       </div>
@@ -1795,7 +1974,7 @@ const CrmApplication: React.FC = () => {
                       <label className={labelCls}>
                         {form.PaymentMode === "Home Loan" ? "Loan Disbursement Ref" : form.PaymentMode === "Other" ? "Reference / Details" : "Transaction Ref / UTR"}
                       </label>
-                      <input type="text" value={form.TransactionRef}
+                      <input type="text" value={form.TransactionRef} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
                         onChange={(e) => setForm((f) => ({ ...f, TransactionRef: e.target.value }))}
                         className={inputCls} />
                     </div>
@@ -1804,7 +1983,8 @@ const CrmApplication: React.FC = () => {
                     <label className={labelCls}>
                       Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}{bankOptions.length > 0 ? " *" : ""}
                     </label>
-                    <select value={form.DepositBankId} onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
+                    <select value={form.DepositBankId} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
+                      onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
                       className={inputCls}>
                       <option value="">— Select company bank —</option>
                       {(bankOptions as any[]).map((b: any) => (
@@ -1821,9 +2001,10 @@ const CrmApplication: React.FC = () => {
                   rows={4} className={`${inputCls} resize-none`} />
               </div>
               <p className="text-xs text-muted-foreground">
-                This application is <span className="font-medium text-foreground">Pending</span> admin approval.
-                Only an admin/super admin can approve or reject it. Approval creates the Booking as Pending — the
+                Submitting creates the Booking immediately — there's no separate admin approval step. The
                 payment plan, booking amount and payment itself are all handled on the Booking page from there.
+                If the unit is unavailable at the moment of submit, the Application still saves as Pending and
+                you can retry booking creation from the list.
               </p>
             </div>
           )}
@@ -1832,53 +2013,53 @@ const CrmApplication: React.FC = () => {
             <button
               onClick={() => step > 1 && setStep(step - 1)}
               disabled={step === 1}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors disabled:opacity-30 flex items-center gap-1">
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all disabled:opacity-30">
               <ChevronLeft size={14} /> Back
             </button>
             <div className="flex gap-2">
               <button onClick={() => { setDialogOpen(false); resetWizard(); }}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
                 Cancel
               </button>
               {step === 1 && (
                 <button onClick={handleCreateAndNext} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors flex items-center gap-1">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
                   {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
                 </button>
               )}
               {step === 2 && (
                 <button onClick={() => advanceStep(3)}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 3 && (
                 <button onClick={() => advanceStep(4)}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 4 && (
                 <button onClick={handleBankDetailsNext} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors flex items-center gap-1">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
                   {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
                 </button>
               )}
               {step === 5 && (
                 <button onClick={() => advanceStep(6)}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 6 && (
                 <button onClick={() => advanceStep(7)}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-1">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 7 && (
                 <button onClick={handleFinalSave} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
                   {saving ? "Submitting..." : "Submit Application"}
                 </button>
               )}
@@ -2063,6 +2244,9 @@ const CrmApplication: React.FC = () => {
                   {a.BrokerName && (
                     <div className="pt-2 border-t border-border text-xs">
                       <span className="text-muted-foreground">Broker:</span> {a.BrokerName} {a.BrokerageRatePercent != null && `(${a.BrokerageRatePercent}%)`}
+                      {a.BrokeragePaymentPlan && a.BrokeragePaymentPlan !== "OneTime" && (
+                        <span className="text-muted-foreground"> · {a.BrokeragePaymentPlan === "TwoPart" ? "Two-part payout" : "Agreement-only payout"}</span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2077,6 +2261,11 @@ const CrmApplication: React.FC = () => {
                     </div>
                   </div>
                 </div>
+
+                {/* No separate Application-level verification anymore — the
+                    Application's own checklist merged into its Booking's
+                    "Review" workflow stage (see CrmBookingDetail.tsx). The
+                    "Linked Booking" card below is where that now lives. */}
 
                 {booking && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
@@ -2193,7 +2382,7 @@ const CrmApplication: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

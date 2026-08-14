@@ -2,11 +2,11 @@ import React, { useState, useMemo, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Plus, Search, ChevronRight, IdCard, IndianRupee, Lock, Pencil, BookUser,
-  User, MapPin, Briefcase, FileText,
+  User, MapPin, Briefcase, FileText, UserPlus,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -166,15 +166,15 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
+      <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
+        <DialogHeader className="space-y-0.5">
+          <DialogTitle className="font-heading text-base font-bold flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">
-              <IdCard size={16} className="text-primary" /> {customer.CustomerNo} — Edit Customer
+              <IdCard size={16} className="text-amber-500" /> {customer.CustomerNo} — Edit Customer
             </span>
             {locked ? (
               <button onClick={() => setLocked(false)}
-                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0">
                 <Pencil size={12} /> Edit
               </button>
             ) : (
@@ -186,15 +186,21 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
         </DialogHeader>
 
         {locked && (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5">
             <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
           </div>
         )}
 
-        <div className="space-y-4">
-          <div className="rounded-xl border border-border p-4 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5"><User size={14} className="text-primary" /> Personal Details</h3>
-            <div className="grid grid-cols-2 gap-3">
+        {/* Core identity fields — same compact two-column layout as New
+            Customer: Personal + Financial merged into one 3-col section on
+            the left, Address + Notes on the right, so the fixed field set
+            fits on one screen. */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="rounded-xl border border-border p-3 space-y-2">
+            <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
+              <User size={13} className="text-amber-500" /> Personal &amp; Financial Details
+            </h3>
+            <div className="grid grid-cols-3 gap-2.5">
               {[
                 { key: "CustomerName", label: "Customer Name *", type: "text" },
                 { key: "Mobile", label: "Mobile *", type: "text" },
@@ -203,26 +209,11 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
                 { key: "PanNo", label: "PAN Number *", type: "text" },
                 { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                 { key: "DateOfBirth", label: "Date of Birth", type: "date" },
-              ].map(({ key, label, type }) => (
-                <div key={key}>
-                  <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                  <input type={type} value={(form as any)[key]} readOnly={locked}
-                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                    className={inputCls} />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border p-4 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5"><Briefcase size={14} className="text-primary" /> Financial Profile</h3>
-            <div className="grid grid-cols-2 gap-3">
-              {[
                 { key: "Occupation", label: "Occupation", type: "text" },
                 { key: "AnnualIncome", label: "Annual Income", type: "number" },
               ].map(({ key, label, type }) => (
                 <div key={key}>
-                  <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+                  <label className="text-xs text-muted-foreground block mb-0.5">{label}</label>
                   <input type={type} value={(form as any)[key]} readOnly={locked}
                     onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                     className={inputCls} />
@@ -231,49 +222,64 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
             </div>
           </div>
 
-          <div className="rounded-xl border border-border p-4 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5"><MapPin size={14} className="text-primary" /> Address</h3>
-            <AddressFields form={form} setForm={setForm} readOnly={locked} inputCls={inputCls} />
-          </div>
-
-          {/* Co-applicants are now managed at the Application level, not on the Customer record.
-               Each Application has its own independent co-applicants — use the Co-Applicant
-               tab in the Application wizard to add them. */}
-
-          <div className="rounded-xl border border-border p-4 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={14} className="text-primary" /> Notes</h3>
-            <textarea value={form.Notes} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-              rows={2} className={`${inputCls} resize-none`} />
-          </div>
-
-          {customer.outstanding && Number(customer.outstanding.TotalDue) > 0 && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 space-y-2">
-              <h3 className="text-sm font-semibold text-amber-800 flex items-center gap-1.5"><IndianRupee size={14} /> Outstanding — across every booking</h3>
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                <div><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">₹{Number(customer.outstanding.TotalDue).toLocaleString("en-IN")}</span></div>
-                <div><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-green-700">₹{Number(customer.outstanding.TotalPaid).toLocaleString("en-IN")}</span></div>
-                <div><span className="text-muted-foreground block">Outstanding</span><span className="font-semibold text-amber-700">₹{Number(customer.outstanding.TotalOutstanding).toLocaleString("en-IN")}</span></div>
-              </div>
+          <div className="space-y-3">
+            <div className="rounded-xl border border-border p-3 space-y-2">
+              <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
+                <MapPin size={13} className="text-amber-500" /> Address
+              </h3>
+              <AddressFields form={form} setForm={setForm} readOnly={locked} inputCls={inputCls} />
             </div>
-          )}
 
-          {customer.applications?.length > 0 && (
-            <div className="rounded-xl border border-border p-4 space-y-2">
-              <h3 className="text-sm font-semibold flex items-center gap-1.5"><IdCard size={14} className="text-primary" /> Applications filed by this customer ({customer.applications.length})</h3>
-              <div className="space-y-1.5">
-                {customer.applications.map((a: any) => (
-                  <div key={a.Id} className="flex items-center justify-between text-xs">
-                    <span className="font-mono text-primary">{a.ApplicationNo}</span>
-                    <span className="text-muted-foreground">{a.Status}</span>
-                    {a.BookingNo && <span className="text-green-600">→ {a.BookingNo}</span>}
-                  </div>
-                ))}
-              </div>
+            {/* Co-applicants are now managed at the Application level, not on the Customer record.
+                 Each Application has its own independent co-applicants — use the Co-Applicant
+                 tab in the Application wizard to add them. */}
+
+            <div className="rounded-xl border border-border p-3 space-y-2">
+              <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
+                <FileText size={13} className="text-amber-500" /> Notes
+              </h3>
+              <textarea value={form.Notes} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
+                rows={2} className={`${inputCls} resize-none`} />
             </div>
-          )}
+          </div>
         </div>
 
-        <div className="flex justify-end gap-2 pt-3 border-t border-border">
+        {/* Outstanding + Applications side by side (not stacked, and not
+            crammed into the right column above) — this is what was still
+            forcing a scroller: two variable-height blocks stacking under an
+            already-full-height column. Applications also scrolls internally
+            past a handful of rows instead of growing the dialog further. */}
+        {(customer.outstanding && Number(customer.outstanding.TotalDue) > 0) || customer.applications?.length > 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {customer.outstanding && Number(customer.outstanding.TotalDue) > 0 ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-amber-700 dark:text-amber-400"><IndianRupee size={13} /> Outstanding</h3>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">₹{Number(customer.outstanding.TotalDue).toLocaleString("en-IN")}</span></div>
+                  <div><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-green-700">₹{Number(customer.outstanding.TotalPaid).toLocaleString("en-IN")}</span></div>
+                  <div><span className="text-muted-foreground block">Outstanding</span><span className="font-semibold text-amber-700">₹{Number(customer.outstanding.TotalOutstanding).toLocaleString("en-IN")}</span></div>
+                </div>
+              </div>
+            ) : <div />}
+
+            {customer.applications?.length > 0 && (
+              <div className="rounded-xl border border-border p-3 space-y-2">
+                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground"><IdCard size={13} className="text-amber-500" /> Applications ({customer.applications.length})</h3>
+                <div className="space-y-1.5 max-h-20 overflow-y-auto thin-scroll">
+                  {customer.applications.map((a: any) => (
+                    <div key={a.Id} className="flex items-center justify-between text-xs">
+                      <span className="font-mono text-amber-600 dark:text-amber-400">{a.ApplicationNo}</span>
+                      <span className="text-muted-foreground">{a.Status}</span>
+                      {a.BookingNo && <span className="text-green-600">→ {a.BookingNo}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        <div className="flex justify-end gap-2 pt-2.5 border-t border-border">
           {locked ? (
             <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
           ) : (
@@ -459,18 +465,18 @@ const CrmCustomers: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Customers"
       subtitle="The master identity record every Application is built on — name, KYC, address, co-applicant"
       action={
         <div className="flex items-center gap-2">
           <button onClick={() => navigate("/masters/customers")}
             title="Every CRM customer auto-creates/syncs a matching ledger head here for Finance/GL"
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm font-medium rounded-lg hover:bg-muted transition-colors">
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <BookUser size={14} /> Customer Ledger (Master)
           </button>
           <button onClick={() => setDialogOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
             <Plus size={14} /> New Customer
           </button>
         </div>
@@ -480,7 +486,7 @@ const CrmCustomers: React.FC = () => {
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
         <input value={search} onChange={(e) => setSearch(e.target.value)}
           placeholder="Search name, mobile, PAN, customer no..."
-          className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+          className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
       </div>
 
       <DataTable
@@ -492,86 +498,95 @@ const CrmCustomers: React.FC = () => {
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
 
-      {/* New Customer Dialog */}
+      {/* New Customer Dialog — wide two-column layout, compact enough to
+          fit the whole field set on one screen without an inner scroller. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-heading">New Customer</DialogTitle>
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
+          <DialogHeader className="space-y-0.5">
+            <DialogTitle className="font-heading text-base font-bold flex items-center gap-2">
+              <UserPlus size={16} className="text-amber-500" /> New Customer
+            </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Link to Existing Lead (optional)</label>
-              <select value={form.LeadId} onChange={(e) => handleLeadChange(e.target.value)}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">— Walk-in / New Customer —</option>
-                {availableLeads.map((l: any) => (
-                  <option key={l.Id} value={String(l.Id)}>{l.CustomerName} · {l.Mobile} · {l.LeadUid}</option>
-                ))}
-              </select>
-              {form.LeadId && <p className="text-xs text-green-600 mt-1">Name, mobile and email prefilled from lead — only converted leads are listed</p>}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { key: "CustomerName", label: "Customer Name *", type: "text" },
-                { key: "Mobile", label: "Mobile *", type: "text" },
-                { key: "AltMobile", label: "Alternate Mobile", type: "text" },
-                { key: "Email", label: "Email", type: "email" },
-                { key: "PanNo", label: "PAN Number *", type: "text" },
-                { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
-                { key: "DateOfBirth", label: "Date of Birth", type: "date" },
-              ].map(({ key, label, type }) => (
-                <div key={key}>
-                  <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                  <input type={type} value={(form as any)[key]}
-                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Link to Existing Lead (optional)</label>
+            <select value={form.LeadId} onChange={(e) => handleLeadChange(e.target.value)}
+              className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40">
+              <option value="">— Walk-in / New Customer —</option>
+              {availableLeads.map((l: any) => (
+                <option key={l.Id} value={String(l.Id)}>{l.CustomerName} · {l.Mobile} · {l.LeadUid}</option>
               ))}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { key: "Occupation", label: "Occupation", type: "text" },
-                { key: "AnnualIncome", label: "Annual Income", type: "number" },
-              ].map(({ key, label, type }) => (
-                <div key={key}>
-                  <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                  <input type={type} value={(form as any)[key]}
-                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                </div>
-              ))}
-            </div>
-
-            <AddressFields
-              form={form}
-              setForm={setForm}
-              readOnly={false}
-              inputCls="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
-            />
-
-            {/* Co-applicants moved to the Application wizard — Add Co-Applicant tab */}
-
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-              <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-            </div>
-
-            <p className="text-xs text-muted-foreground">
-              Name, Mobile, PAN and Permanent Address are required — every Application will auto-fetch its details from this record.
-            </p>
+            </select>
+            {form.LeadId && <p className="text-xs text-green-600 mt-1">Name, mobile and email prefilled from lead — only converted leads are listed</p>}
           </div>
 
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {/* Left column: identity + financial profile, merged into one
+                3-column section — 9 fields fit in 3 rows instead of the old
+                2-column layout's 4+1 rows across two separate cards. */}
+            <div className="rounded-xl border border-border p-3 space-y-2">
+              <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
+                <User size={13} className="text-amber-500" /> Personal &amp; Financial Details
+              </h3>
+              <div className="grid grid-cols-3 gap-2.5">
+                {[
+                  { key: "CustomerName", label: "Customer Name *", type: "text" },
+                  { key: "Mobile", label: "Mobile *", type: "text" },
+                  { key: "AltMobile", label: "Alternate Mobile", type: "text" },
+                  { key: "Email", label: "Email", type: "email" },
+                  { key: "PanNo", label: "PAN Number *", type: "text" },
+                  { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
+                  { key: "DateOfBirth", label: "Date of Birth", type: "date" },
+                  { key: "Occupation", label: "Occupation", type: "text" },
+                  { key: "AnnualIncome", label: "Annual Income", type: "number" },
+                ].map(({ key, label, type }) => (
+                  <div key={key}>
+                    <label className="text-xs text-muted-foreground block mb-0.5">{label}</label>
+                    <input type={type} value={(form as any)[key]}
+                      onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                      className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Right column: address + notes */}
+            <div className="space-y-3">
+              <div className="rounded-xl border border-border p-3 space-y-2">
+                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
+                  <MapPin size={13} className="text-amber-500" /> Address
+                </h3>
+                <AddressFields
+                  form={form}
+                  setForm={setForm}
+                  readOnly={false}
+                  inputCls="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+                />
+              </div>
+
+              {/* Co-applicants moved to the Application wizard — Add Co-Applicant tab */}
+
+              <div className="rounded-xl border border-border p-3 space-y-2">
+                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
+                  <FileText size={13} className="text-amber-500" /> Notes
+                </h3>
+                <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
+                  rows={2} className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+              </div>
+            </div>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Name, Mobile, PAN and Permanent Address are required — every Application will auto-fetch its details from this record.
+          </p>
+
+          <div className="flex justify-end gap-2 pt-2.5 border-t border-border">
             <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
               Cancel
             </button>
             <button onClick={handleCreate} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
+              className="px-4 py-1.5 text-sm text-white rounded-lg font-medium shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
               {saving ? "Registering..." : "Register Customer"}
             </button>
           </div>
@@ -585,7 +600,7 @@ const CrmCustomers: React.FC = () => {
           onSaved={() => qc.invalidateQueries({ queryKey: ["crm-customers"] })}
         />
       )}
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

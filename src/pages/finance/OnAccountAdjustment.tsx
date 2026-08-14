@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { preventEnterSubmit } from "@/hooks/useDraftForm";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -187,6 +188,7 @@ function AdjustDialog({
       <div
         className="relative z-10 w-full max-w-3xl rounded-2xl border border-border bg-card shadow-2xl overflow-hidden max-h-[92dvh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={preventEnterSubmit}
       >
         {/* Header */}
         <div className="shrink-0 flex items-start justify-between px-5 py-4 border-b border-border">

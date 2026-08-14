@@ -133,6 +133,7 @@ const ReceivedPayment = lazy(() => import("./pages/finance/ReceivedPayment"));
 const TrialBalance = lazy(() => import("./pages/finance/TrialBalance"));
 const BalanceSheet = lazy(() => import("./pages/finance/BalanceSheet"));
 const ProfitAndLoss = lazy(() => import("./pages/finance/ProfitAndLoss"));
+const YearEndClose = lazy(() => import("./pages/finance/YearEndClose"));
 const BalanceEnquiry = lazy(() => import("./pages/finance/BalanceEnquiry"));
 const JournalVoucher = lazy(() => import("./pages/finance/JournalVoucher"));
 const FundTransfer = lazy(() => import("./pages/finance/FundTransfer"));
@@ -353,12 +354,17 @@ const SaRoleMaster = lazy(() => import("./pages/SalesAutomation/SaRoleMaster"));
 // ── CRM Module ────────────────────────────────────────────────────────────────
 const CrmCustomers         = lazy(() => import("./pages/CRM/CrmCustomers"));
 const CrmApplication       = lazy(() => import("./pages/CRM/CrmApplication"));
+// Dedicated Level-1 verification screen — see ApprovalInbox.tsx's
+// "crm-applications" navPath and CrmApplication.tsx's "Open Verification"
+// button, both of which now link here instead of the old inline checklist.
 const CrmBooking           = lazy(() => import("./pages/CRM/CrmBooking"));
 const CrmWelcomeCall       = lazy(() => import("./pages/CRM/CrmWelcomeCall"));
 const CrmAgreement         = lazy(() => import("./pages/CRM/CrmAgreement"));
 const CrmAgreementPapers   = lazy(() => import("./pages/CRM/CrmAgreementPapers"));
 const CrmPaymentMilestones = lazy(() => import("./pages/CRM/CrmPaymentMilestones"));
 const CrmDemands           = lazy(() => import("./pages/CRM/CrmDemands"));
+const CrmMoneyReceipts     = lazy(() => import("./pages/CRM/CrmMoneyReceipts"));
+const CrmInvoices          = lazy(() => import("./pages/CRM/CrmInvoices"));
 const CrmHandover          = lazy(() => import("./pages/CRM/CrmHandover"));
 const CrmServiceTickets    = lazy(() => import("./pages/CRM/CrmServiceTickets"));
 const CrmCancellations     = lazy(() => import("./pages/CRM/CrmCancellations"));
@@ -380,6 +386,7 @@ const CrmBrokerage         = lazy(() => import("./pages/CRM/CrmBrokerage"));
 const CrmPaymentPlans      = lazy(() => import("./pages/CRM/CrmPaymentPlans"));
 const CrmProjectAutoSetup  = lazy(() => import("./pages/CRM/CrmProjectAutoSetup"));
 const CrmMilestoneMaster   = lazy(() => import("./pages/CRM/CrmMilestoneMaster"));
+const CrmBrokerageRateTiers = lazy(() => import("./pages/CRM/CrmBrokerageRateTiers"));
 const CrmBrokerMaster      = lazy(() => import("./pages/CRM/CrmBrokerMaster"));
 const CrmBrokerPayments    = lazy(() => import("./pages/CRM/CrmBrokerPayments"));
 const PortalLogin          = lazy(() => import("./pages/CrmCustomerPortal/PortalLogin"));
@@ -676,6 +683,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="balance-enquiry">
             <BalanceEnquiry />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/finance/year-end-close"
+        element={
+          <ProtectedRoute pageKey="year-end-close">
+            <YearEndClose />
           </ProtectedRoute>
         }
       />
@@ -1936,6 +1951,8 @@ function AppRoutes() {
       <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-documents"><CrmAgreementPapers /></ProtectedRoute>} />
       <Route path="/crm/payments"         element={<ProtectedRoute pageKey="crm-payments"><CrmPaymentMilestones /></ProtectedRoute>} />
       <Route path="/crm/demands"          element={<ProtectedRoute pageKey="crm-payments"><CrmDemands /></ProtectedRoute>} />
+      <Route path="/crm/money-receipts"   element={<ProtectedRoute pageKey="crm-money-receipts"><CrmMoneyReceipts /></ProtectedRoute>} />
+      <Route path="/crm/invoices"         element={<ProtectedRoute pageKey="crm-invoices"><CrmInvoices /></ProtectedRoute>} />
       <Route path="/crm/handover"         element={<ProtectedRoute pageKey="crm-handover"><CrmHandover /></ProtectedRoute>} />
       <Route path="/crm/service-tickets"  element={<ProtectedRoute pageKey="crm-service-tickets"><CrmServiceTickets /></ProtectedRoute>} />
       <Route path="/crm/cancellations"    element={<ProtectedRoute pageKey="crm-cancellations"><CrmCancellations /></ProtectedRoute>} />
@@ -1977,6 +1994,7 @@ function AppRoutes() {
       <Route path="/crm/setup/pending-tasks"       element={<ProtectedRoute pageKey="followup-pending-tasks"><PendingTasksPage /></ProtectedRoute>} />
       <Route path="/crm/setup/reminders"           element={<ProtectedRoute pageKey="followup-reminders"><FollowupReminders /></ProtectedRoute>} />
       <Route path="/crm/milestone-master"      element={<ProtectedRoute pageKey="crm-milestone-master"><CrmMilestoneMaster /></ProtectedRoute>} />
+      <Route path="/crm/brokerage-rate-tiers"  element={<ProtectedRoute pageKey="crm-brokerage-rate-tiers"><CrmBrokerageRateTiers /></ProtectedRoute>} />
       <Route path="/masters/brokers"           element={<ProtectedRoute pageKey="broker-master"><CrmBrokerMaster /></ProtectedRoute>} />
       <Route path="/crm/broker-payments"       element={<ProtectedRoute pageKey="crm-brokerage"><CrmBrokerPayments /></ProtectedRoute>} />
       <Route path="/crm/parking-booking"       element={<ProtectedRoute pageKey="crm-parking-booking"><CrmParkingBookingPage /></ProtectedRoute>} />
