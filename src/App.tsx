@@ -120,6 +120,9 @@ const LoanSanction = lazy(() => import("./pages/loan/LoanSanction"));
 const CivilWorkDprDashboard = lazy(
   () => import("./pages/civilworkdpr/CivilWorkDprDashboard"),
 );
+const CivilWorkDprWorkDone = lazy(
+  () => import("./pages/civilworkdpr/WorkDone"),
+);
 const DependencyTracker = lazy(
   () => import("./pages/civilworkdpr/DependencyTracker"),
 );
@@ -835,6 +838,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-dashboard">
             <CivilWorkDprDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/work-done"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-work-done">
+            <CivilWorkDprWorkDone />
           </ProtectedRoute>
         }
       />

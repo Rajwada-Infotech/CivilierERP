@@ -1,4 +1,4 @@
-import { Chart2, Hierarchy, Building3, Profile2User } from "iconsax-react";
+import { Chart2, Hierarchy, Building3, Profile2User, TaskSquare } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const civilWorkDprNavItems: NavItem[] = [
@@ -8,6 +8,12 @@ export const civilWorkDprNavItems: NavItem[] = [
     path: "/civilworkdpr",
     pageKey: "civilworkdpr-dashboard",
     isDashboard: true,
+  },
+  {
+    label: "Work Done",
+    icon: TaskSquare,
+    path: "/civilworkdpr/work-done",
+    pageKey: "civilworkdpr-work-done",
   },
   {
     label: "Dependency",
