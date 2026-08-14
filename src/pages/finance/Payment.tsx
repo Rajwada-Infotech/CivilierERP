@@ -2,7 +2,7 @@ import React from "react";
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams, useLocation } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
+import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -268,8 +268,13 @@ const Payment: React.FC = () => {
     }
   };
 
-  // Reopen the form view if a draft was restored from localStorage on mount
+  // Reopen the form view if a draft was restored from localStorage — but
+  // only on an actual browser reload, not a plain in-app navigation (e.g.
+  // clicking "Payment" in the sidebar remounts this component too; without
+  // this check, an old leftover draft would hijack that link into always
+  // opening the form instead of the list).
   useEffect(() => {
+    if (!wasPageReloaded()) return;
     if (form.paymentName || form.paidTo || form.amount || form.notes) {
       setView("form");
     }

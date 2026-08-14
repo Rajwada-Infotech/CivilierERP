@@ -2,7 +2,7 @@ import React from "react";
 import { useState, useEffect, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { preventEnterSubmit } from "@/hooks/useDraftForm";
+import { preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -206,7 +206,10 @@ export default function JournalVoucher() {
             (l: JournalVoucherLineUI) =>
               l.LHeadId != null || (l.DebitAmount || 0) > 0 || (l.CreditAmount || 0) > 0 || !!l.Narration?.trim(),
           );
-        if (hasContent) setDialogOpen(true);
+        // Only reopen the dialog on an actual browser reload — not a plain
+        // in-app navigation, which would otherwise let an old leftover
+        // draft hijack the sidebar link into always opening the dialog.
+        if (hasContent && wasPageReloaded()) setDialogOpen(true);
       }
     } catch {
       // Corrupt/unparseable draft — proceed with a clean form.

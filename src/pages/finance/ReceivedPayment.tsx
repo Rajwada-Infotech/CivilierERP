@@ -6,7 +6,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
+import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -364,7 +364,12 @@ export default function ReceivedPaymentPage() {
     skip: editingId !== null,
   });
 
+  // Only reopen on an actual browser reload, not a plain in-app navigation
+  // (e.g. clicking "Received Payment" in the sidebar remounts this
+  // component too; without this check, an old leftover draft would hijack
+  // that link into always opening the form instead of the list).
   useEffect(() => {
+    if (!wasPageReloaded()) return;
     const hasContent = Object.keys(EMPTY_FORM).some(
       (k) => String((form as any)[k] ?? "") !== String((EMPTY_FORM as any)[k] ?? ""),
     );
