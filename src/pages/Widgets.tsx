@@ -1,15 +1,21 @@
 import type React from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { useTheme } from "@/contexts/ThemeContext";
 import {
   getWidgetCatalog,
   getWidgetsDashboard,
+  getWidgetMetricsCatalog,
+  getWidgetMetric,
   type WidgetCatalogItem,
   type WidgetsDashboardData,
+  type WidgetMetricDef,
+  type WidgetMetricData,
 } from "@/api/widgetsApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -32,8 +38,28 @@ import {
   RefreshCw,
   Calculator,
   Truck,
+  Search,
+  ChevronDown,
+  Database,
   X,
 } from "lucide-react";
+
+// ─── CATEGORY COLORS — the catalog already carries a `category` per widget
+// (from dbo.WidgetCatalog) that the old flat grid never used at all. Color-
+// coding by category turns that into a real scanning aid without needing
+// literal grouped sections, which would look sparse — most categories here
+// only have 1-2 widgets.
+const CATEGORY_COLORS: Record<string, string> = {
+  Charts: "#6366f1",
+  KPIs: "#f59e0b",
+  Data: "#3b82f6",
+  Planning: "#10b981",
+  Alerts: "#ef4444",
+  Activity: "#a855f7",
+  Geo: "#06b6d4",
+  Tools: "#ec4899",
+};
+const DEFAULT_CATEGORY_COLOR = "#3b82f6";
 
 // ─── WIDGET REGISTRY — single source of truth ─────────────────────────────────
 // key must exactly match what WidgetsRights.tsx stores in the DB
@@ -74,6 +100,206 @@ function Spinner() {
     <div className="flex items-center justify-center h-40">
       <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATA-SOURCE CONNECTION — lets Bar/Line/Pie/Stat Card widgets be pointed at
+// real Finance/Material/Engineering/CRM metrics (backend/routes/
+// widgetMetrics.js) instead of only the one fixed task/user dataset. Falls
+// back to each widget's original hardcoded data when nothing is selected,
+// so this is additive — no existing behavior changes until a user picks one.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const MODULE_COLORS: Record<string, string> = {
+  Finance: "#6366f1",
+  Material: "#10b981",
+  Engineering: "#f97316",
+  CRM: "#a855f7",
+};
+
+/** Persists which metric a given widget instance is pointed at — same
+ * localStorage-based per-browser persistence convention already used for
+ * draft-form state elsewhere in this app (see src/hooks/useDraftForm.ts). */
+function useMetricSelection(widgetKey: string) {
+  const storageKey = `widget-metric:${widgetKey}`;
+  const [metricKey, setMetricKeyState] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(storageKey);
+    } catch {
+      return null;
+    }
+  });
+  const setMetricKey = (key: string | null) => {
+    setMetricKeyState(key);
+    try {
+      if (key) localStorage.setItem(storageKey, key);
+      else localStorage.removeItem(storageKey);
+    } catch {
+      // localStorage unavailable — selection just won't persist across reloads.
+    }
+  };
+  return [metricKey, setMetricKey] as const;
+}
+
+function useMetricsCatalog() {
+  const { data = [], isLoading } = useQuery<WidgetMetricDef[]>({
+    queryKey: ["widget-metrics-catalog"],
+    queryFn: getWidgetMetricsCatalog,
+    staleTime: 10 * 60 * 1000,
+  });
+  return { metrics: data, loading: isLoading };
+}
+
+function useMetricData(metricKey: string | null) {
+  const { data, isLoading, isError } = useQuery<WidgetMetricData>({
+    queryKey: ["widget-metric", metricKey],
+    queryFn: () => getWidgetMetric(metricKey as string),
+    enabled: !!metricKey,
+    staleTime: 60_000,
+  });
+  return { metric: data, loading: isLoading, error: isError };
+}
+
+/** Dropdown that lets a widget be pointed at any catalog metric of the
+ * given `type` (only metrics that widget can actually render), grouped by
+ * module so "which Finance metric" etc. is easy to scan. */
+function MetricPicker({
+  type,
+  value,
+  onChange,
+}: {
+  type: WidgetMetricDef["type"];
+  value: string | null;
+  onChange: (key: string | null) => void;
+}) {
+  const { metrics, loading } = useMetricsCatalog();
+  const options = metrics.filter((m) => m.type === type);
+  const byModule = new Map<string, WidgetMetricDef[]>();
+  for (const m of options) {
+    if (!byModule.has(m.module)) byModule.set(m.module, []);
+    byModule.get(m.module)!.push(m);
+  }
+  const selected = options.find((m) => m.key === value);
+
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-1.5 mb-2">
+        <Database size={11} className="text-muted-foreground/60" />
+        <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground/60">
+          Data Source
+        </span>
+      </div>
+      <div className="relative">
+        <select
+          value={value ?? ""}
+          disabled={loading}
+          onChange={(e) => onChange(e.target.value || null)}
+          className="w-full appearance-none h-8 pl-2.5 pr-7 rounded-lg border border-border bg-card/60 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors disabled:opacity-50"
+        >
+          <option value="">Default (built-in)</option>
+          {Array.from(byModule.entries()).map(([mod, opts]) => (
+            <optgroup key={mod} label={mod}>
+              {opts.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <ChevronDown
+          size={12}
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+        />
+      </div>
+      {selected && (
+        <span
+          className="inline-block mt-1.5 text-[9px] font-heading font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded-full"
+          style={{
+            color: MODULE_COLORS[selected.module] || DEFAULT_CATEGORY_COLOR,
+            background: `${MODULE_COLORS[selected.module] || DEFAULT_CATEGORY_COLOR}14`,
+          }}
+        >
+          {selected.module}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── WIDGET TILE — glass card matching AdminGlassCard's language, with a
+// category-colored icon badge, the catalog's own description (previously
+// unused), and a category pill for at-a-glance scanning. ────────────────────
+function WidgetTile({
+  icon: Icon,
+  label,
+  description,
+  category,
+  color,
+  onClick,
+}: {
+  icon: React.ElementType;
+  label: string;
+  description: string;
+  category: string;
+  color: string;
+  onClick: () => void;
+}) {
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
+
+  return (
+    <motion.button
+      onClick={onClick}
+      whileHover={{ y: -2, scale: 1.01 }}
+      whileTap={{ scale: 0.98 }}
+      className="group relative text-left rounded-xl overflow-hidden h-full w-full flex flex-col"
+      style={{
+        background: isDark ? "rgba(8,14,28,0.5)" : "rgba(255,255,255,0.75)",
+        border: `1px solid ${color}28`,
+        backdropFilter: "blur(16px) saturate(150%)",
+        WebkitBackdropFilter: "blur(16px) saturate(150%)",
+        boxShadow: isDark
+          ? "0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+          : "0 4px 20px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+      }}
+    >
+      <div
+        className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+        style={{ background: `linear-gradient(135deg, ${color}14 0%, transparent 60%)` }}
+      />
+      <div
+        className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full"
+        style={{ background: color }}
+      />
+      <div className="relative z-10 p-4 flex flex-col gap-3 h-full">
+        <div className="flex items-start justify-between gap-2">
+          <div
+            className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+            style={{ background: `${color}18`, border: `1px solid ${color}30` }}
+          >
+            <Icon size={17} style={{ color }} />
+          </div>
+          {category && (
+            <span
+              className="text-[9px] font-heading font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded-full shrink-0"
+              style={{ color, background: `${color}14` }}
+            >
+              {category}
+            </span>
+          )}
+        </div>
+        <div>
+          <p className="text-sm font-heading font-bold text-foreground">{label}</p>
+          {description && (
+            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+              {description}
+            </p>
+          )}
+        </div>
+      </div>
+    </motion.button>
   );
 }
 
@@ -128,71 +354,97 @@ function useAllowedWidgets() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function BarChartWidget() {
+  const [metricKey, setMetricKey] = useMetricSelection("bar-chart-2");
+  const { metric, loading: metricLoading } = useMetricData(metricKey);
   const { data, loading } = useWidgetsData();
-  if (loading) return <Spinner />;
+
+  const connected = metricKey && metric?.type === "timeseries";
+  const fmtVal = connected && metric.unit === "currency" ? fmtCur : fmtNum;
+
   const flow = data?.trends?.dailyFlow || [];
-  const items = flow.length
-    ? flow.map((f: any) => ({
-        label: f.date?.slice(5) || "—",
-        value: f.activityCount || 0,
-      }))
+  const fallbackItems = flow.length
+    ? flow.map((f: any) => ({ label: f.date?.slice(5) || "—", value: f.activityCount || 0 }))
     : [{ label: "No data", value: 0 }];
-  const max = Math.max(...items.map((d: any) => d.value), 1);
+
+  const items = connected
+    ? metric.labels.map((d, i) => ({ label: d.slice(5), value: metric.series[0]?.data[i] ?? 0 }))
+    : fallbackItems;
+  const seriesLabel = connected ? metric.series[0]?.name : "System activity — last 7 days";
+  const max = Math.max(...items.map((d) => d.value), 1);
+  const showLoading = connected ? metricLoading : loading;
+
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        System activity — last 7 days
-      </p>
-      <div className="flex items-end gap-2 h-44">
-        {items.map((d: any, i: number) => (
-          <div key={i} className="flex-1 flex flex-col items-center gap-1">
-            <span className="text-[10px] text-muted-foreground">{d.value}</span>
-            <div
-              className="w-full rounded-t-md bg-primary/70 hover:bg-primary transition-all"
-              style={{ height: `${Math.max(4, (d.value / max) * 140)}px` }}
-            />
-            <span className="text-[10px] text-muted-foreground">{d.label}</span>
+      <MetricPicker type="timeseries" value={metricKey} onChange={setMetricKey} />
+      {showLoading ? (
+        <Spinner />
+      ) : (
+        <>
+          <p className="text-sm text-muted-foreground">{seriesLabel}</p>
+          <div className="flex items-end gap-2 h-44">
+            {items.map((d, i) => (
+              <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                <span className="text-[10px] text-muted-foreground">
+                  {connected ? fmtVal(d.value) : d.value}
+                </span>
+                <div
+                  className="w-full rounded-t-md bg-primary/70 hover:bg-primary transition-all"
+                  style={{ height: `${Math.max(4, (d.value / max) * 140)}px` }}
+                />
+                <span className="text-[10px] text-muted-foreground">{d.label}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <p className="text-xs text-muted-foreground text-center">
-        Total: {fmtNum(items.reduce((s: number, d: any) => s + d.value, 0))}{" "}
-        actions
-      </p>
+          <p className="text-xs text-muted-foreground text-center">
+            Total: {fmtVal(items.reduce((s, d) => s + d.value, 0))}
+            {!connected && " actions"}
+          </p>
+        </>
+      )}
     </div>
   );
 }
 
 function LineChartWidget() {
+  const [metricKey, setMetricKey] = useMetricSelection("trending-up");
+  const { metric, loading: metricLoading } = useMetricData(metricKey);
   const { data, loading } = useWidgetsData();
-  if (loading) return <Spinner />;
+
+  const connected = metricKey && metric?.type === "timeseries";
+  const fmtVal = connected && metric.unit === "currency" ? fmtCur : fmtNum;
+
   const flow = data?.trends?.dailyFlow || [];
-  if (!flow.length)
+  const fallbackSeries = [
+    { name: "Activity", color: "#34d399", data: flow.map((f: any) => f.activityCount || 0) },
+    { name: "Tasks", color: "#818cf8", data: flow.map((f: any) => f.tasksCreated || 0) },
+  ];
+  const labels = connected ? metric.labels : flow.map((f: any) => f.date || "—");
+  const series = connected
+    ? metric.series.map((s, i) => ({ ...s, color: s.color || ["#34d399", "#818cf8"][i % 2] }))
+    : fallbackSeries;
+  const title = connected ? metric.label : "Tasks vs Activity — 7 days";
+  const showLoading = connected ? metricLoading : loading;
+
+  if (showLoading) return <Spinner />;
+  if (!labels.length)
     return (
       <p className="text-sm text-muted-foreground text-center py-10">
         No trend data.
       </p>
     );
-  const items = flow.map((f: any) => ({
-    label: f.date?.slice(5) || "—",
-    tasks: f.tasksCreated || 0,
-    activity: f.activityCount || 0,
-  }));
+
+  const shortLabels = labels.map((d) => d.slice(5));
   const W = 300,
     H = 150,
     pad = 20;
-  const maxVal = Math.max(
-    ...items.map((d: any) => Math.max(d.tasks, d.activity)),
-    1,
-  );
+  const maxVal = Math.max(...series.flatMap((s) => s.data), 1);
   const px = (i: number) =>
-    pad + (i / Math.max(items.length - 1, 1)) * (W - pad * 2);
+    pad + (i / Math.max(shortLabels.length - 1, 1)) * (W - pad * 2);
   const py = (v: number) => H - pad - (v / maxVal) * (H - pad * 2);
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        Tasks vs Activity — 7 days
-      </p>
+      <MetricPicker type="timeseries" value={metricKey} onChange={setMetricKey} />
+      <p className="text-sm text-muted-foreground">{title}</p>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
         {[0.25, 0.5, 0.75, 1].map((r) => (
           <line
@@ -206,30 +458,22 @@ function LineChartWidget() {
             strokeDasharray="4 4"
           />
         ))}
-        <polyline
-          fill="none"
-          stroke="#34d399"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          points={items
-            .map((d: any, i: number) => `${px(i)},${py(d.activity)}`)
-            .join(" ")}
-        />
-        <polyline
-          fill="none"
-          stroke="#818cf8"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          points={items
-            .map((d: any, i: number) => `${px(i)},${py(d.tasks)}`)
-            .join(" ")}
-        />
-        {items.map((d: any, i: number) => (
+        {series.map((s) => (
+          <polyline
+            key={s.name}
+            fill="none"
+            stroke={s.color}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            points={s.data.map((v, i) => `${px(i)},${py(v)}`).join(" ")}
+          />
+        ))}
+        {shortLabels.map((label, i) => (
           <g key={i}>
-            <circle cx={px(i)} cy={py(d.activity)} r="3" fill="#34d399" />
-            <circle cx={px(i)} cy={py(d.tasks)} r="3" fill="#818cf8" />
+            {series.map((s) => (
+              <circle key={s.name} cx={px(i)} cy={py(s.data[i] ?? 0)} r="3" fill={s.color} />
+            ))}
             <text
               x={px(i)}
               y={H - 4}
@@ -238,41 +482,64 @@ function LineChartWidget() {
               fill="currentColor"
               opacity="0.5"
             >
-              {d.label}
+              {label}
             </text>
           </g>
         ))}
       </svg>
       <div className="flex gap-4 justify-center text-xs">
-        <span className="flex items-center gap-1">
-          <span className="w-3 h-0.5 bg-emerald-400 inline-block rounded" />{" "}
-          Activity
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="w-3 h-0.5 bg-violet-400 inline-block rounded" />{" "}
-          Tasks
-        </span>
+        {series.map((s) => (
+          <span key={s.name} className="flex items-center gap-1">
+            <span
+              className="w-3 h-0.5 inline-block rounded"
+              style={{ background: s.color }}
+            />
+            {s.name}
+            {connected && (
+              <span className="text-muted-foreground/60">
+                ({fmtVal(s.data.reduce((a, b) => a + b, 0))})
+              </span>
+            )}
+          </span>
+        ))}
       </div>
     </div>
   );
 }
 
 function PieChartWidget() {
+  const [metricKey, setMetricKey] = useMetricSelection("pie-chart");
+  const { metric, loading: metricLoading } = useMetricData(metricKey);
   const { data, loading } = useWidgetsData();
-  if (loading) return <Spinner />;
+
+  const connected = metricKey && metric?.type === "breakdown";
+  const fmtVal = connected && metric.unit === "currency" ? fmtCur : (n: number) => String(n);
+
   const s = data?.summary;
-  const slices = [
+  const fallbackSlices = [
     { label: "Open", value: s?.openTasks || 0, color: "#60a5fa" },
     { label: "In Progress", value: s?.inProgressTasks || 0, color: "#a78bfa" },
     { label: "Closed", value: s?.closedTasks || 0, color: "#34d399" },
     { label: "Reviewed", value: s?.reviewedTasks || 0, color: "#2dd4bf" },
   ].filter((sl) => sl.value > 0);
+
+  const slices = connected
+    ? metric.slices.filter((sl) => sl.value > 0).map((sl) => ({ label: sl.name, value: sl.value, color: sl.color }))
+    : fallbackSlices;
+  const totalLabel = connected ? metric.label : "Total";
+  const showLoading = connected ? metricLoading : loading;
+
+  if (showLoading) return <Spinner />;
+
   const total = slices.reduce((acc, sl) => acc + sl.value, 0);
   if (!total)
     return (
-      <p className="text-sm text-muted-foreground text-center py-10">
-        No task data available.
-      </p>
+      <div className="space-y-3">
+        <MetricPicker type="breakdown" value={metricKey} onChange={setMetricKey} />
+        <p className="text-sm text-muted-foreground text-center py-10">
+          No data available.
+        </p>
+      </div>
     );
   let cum = 0;
   const paths = slices.map((sl) => {
@@ -291,35 +558,41 @@ function PieChartWidget() {
     };
   });
   return (
-    <div className="flex flex-col sm:flex-row items-center gap-6">
-      <svg viewBox="0 0 180 180" className="w-36 h-36 shrink-0">
-        {paths.map((p, i) => (
-          <path key={i} d={p.d} fill={p.color} opacity="0.85" />
-        ))}
-      </svg>
-      <div className="space-y-2">
-        {slices.map((sl) => (
-          <div key={sl.label} className="flex items-center gap-2 text-sm">
-            <span
-              className="w-3 h-3 rounded-full shrink-0"
-              style={{ background: sl.color }}
-            />
-            <span className="text-muted-foreground">{sl.label}</span>
-            <span className="font-bold ml-auto">{sl.value}</span>
-          </div>
-        ))}
-        <p className="text-xs text-muted-foreground pt-1">
-          Total: {total} tasks
-        </p>
+    <div className="space-y-4">
+      <MetricPicker type="breakdown" value={metricKey} onChange={setMetricKey} />
+      <div className="flex flex-col sm:flex-row items-center gap-6">
+        <svg viewBox="0 0 180 180" className="w-36 h-36 shrink-0">
+          {paths.map((p, i) => (
+            <path key={i} d={p.d} fill={p.color} opacity="0.85" />
+          ))}
+        </svg>
+        <div className="space-y-2">
+          {slices.map((sl) => (
+            <div key={sl.label} className="flex items-center gap-2 text-sm">
+              <span
+                className="w-3 h-3 rounded-full shrink-0"
+                style={{ background: sl.color }}
+              />
+              <span className="text-muted-foreground">{sl.label}</span>
+              <span className="font-bold ml-auto">{fmtVal(sl.value)}</span>
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground pt-1">
+            {connected ? totalLabel : `Total: ${total} tasks`}
+          </p>
+        </div>
       </div>
     </div>
   );
 }
 
 function StatCardWidget() {
+  const [metricKey, setMetricKey] = useMetricSelection("hash");
+  const { metric, loading: metricLoading } = useMetricData(metricKey);
   const { data, loading } = useWidgetsData();
   if (loading) return <Spinner />;
   const s = data?.summary;
+  const connected = metricKey && metric?.type === "stat";
   const cards = [
     {
       label: "Total Users",
@@ -363,13 +636,37 @@ function StatCardWidget() {
     },
   ];
   return (
-    <div className="grid grid-cols-2 gap-3">
-      {cards.map((c) => (
-        <div key={c.label} className="bg-muted/20 rounded-xl p-3 space-y-1">
-          <p className="text-xs text-muted-foreground">{c.label}</p>
-          <p className={`text-lg font-bold ${c.color}`}>{c.value}</p>
-        </div>
-      ))}
+    <div className="space-y-4">
+      <MetricPicker type="stat" value={metricKey} onChange={setMetricKey} />
+      {connected && (
+        metricLoading ? (
+          <Spinner />
+        ) : metric?.type === "stat" ? (
+          <div
+            className="rounded-xl p-4 space-y-1"
+            style={{
+              background: `${MODULE_COLORS[metric.module] || DEFAULT_CATEGORY_COLOR}12`,
+              border: `1px solid ${MODULE_COLORS[metric.module] || DEFAULT_CATEGORY_COLOR}30`,
+            }}
+          >
+            <p className="text-xs text-muted-foreground">{metric.label}</p>
+            <p
+              className="text-3xl font-bold font-heading"
+              style={{ color: MODULE_COLORS[metric.module] || DEFAULT_CATEGORY_COLOR }}
+            >
+              {metric.format === "currency" ? fmtCur(metric.value) : fmtNum(metric.value)}
+            </p>
+          </div>
+        ) : null
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        {cards.map((c) => (
+          <div key={c.label} className="bg-muted/20 rounded-xl p-3 space-y-1">
+            <p className="text-xs text-muted-foreground">{c.label}</p>
+            <p className={`text-lg font-bold ${c.color}`}>{c.value}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1186,6 +1483,26 @@ const Widgets = () => {
     (w) => (!allowedSet || allowedSet.has(w.key)) && widgetComponents[w.key],
   );
 
+  const [query, setQuery] = useState("");
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+
+  const categories = useMemo(
+    () => Array.from(new Set(visibleWidgets.map((w) => w.category).filter(Boolean))),
+    [visibleWidgets],
+  );
+
+  const filteredWidgets = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return visibleWidgets.filter((w) => {
+      if (activeCategory && w.category !== activeCategory) return false;
+      if (!q) return true;
+      return (
+        w.label.toLowerCase().includes(q) ||
+        w.description.toLowerCase().includes(q)
+      );
+    });
+  }, [visibleWidgets, activeCategory, query]);
+
   const safeSelected =
     selected && (!allowedSet || allowedSet.has(selected)) ? selected : null;
   const ActiveWidget = safeSelected ? widgetComponents[safeSelected] : null;
@@ -1252,39 +1569,113 @@ const Widgets = () => {
             <X size={14} /> Back to all widgets
           </button>
         </div>
+      ) : visibleWidgets.length === 0 ? (
+        <div className="text-center py-16 space-y-3">
+          <Puzzle size={32} className="text-muted-foreground/40 mx-auto" />
+          <p className="text-sm text-muted-foreground">
+            No widgets are enabled for your account.
+          </p>
+          <p className="text-xs text-muted-foreground/60">
+            Contact your administrator to enable widget access.
+          </p>
+        </div>
       ) : (
-        <>
-          {visibleWidgets.length === 0 ? (
+        <div className="space-y-5">
+          {/* ── Search + category filter ─────────────────────────────────── */}
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+            <div className="relative flex-1 sm:max-w-xs">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search widgets…"
+                className="w-full h-9 pl-9 pr-8 rounded-lg border border-border bg-card/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
+              />
+              {query && (
+                <button
+                  onClick={() => setQuery("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            {categories.length > 1 && (
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => setActiveCategory(null)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ${
+                    activeCategory === null
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "text-muted-foreground border-border hover:bg-muted/40"
+                  }`}
+                >
+                  All
+                </button>
+                {categories.map((cat) => {
+                  const color = CATEGORY_COLORS[cat] || DEFAULT_CATEGORY_COLOR;
+                  const active = activeCategory === cat;
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setActiveCategory(active ? null : cat)}
+                      className="px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all"
+                      style={
+                        active
+                          ? { background: color, borderColor: color, color: "#fff" }
+                          : { color, borderColor: `${color}40`, background: `${color}0d` }
+                      }
+                    >
+                      {cat}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* ── Widget grid ───────────────────────────────────────────────── */}
+          {filteredWidgets.length === 0 ? (
             <div className="text-center py-16 space-y-3">
-              <Puzzle size={32} className="text-muted-foreground/40 mx-auto" />
+              <Search size={32} className="text-muted-foreground/40 mx-auto" />
               <p className="text-sm text-muted-foreground">
-                No widgets are enabled for your account.
-              </p>
-              <p className="text-xs text-muted-foreground/60">
-                Contact your administrator to enable widget access.
+                No widgets match {query ? `"${query}"` : "this category"}.
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-              {visibleWidgets.map(({ iconKey, key, label }) => {
-                const Icon = widgetIcons[iconKey] || Puzzle;
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setSelected(key)}
-                    className="flex flex-col items-center gap-2 p-5 rounded-lg border border-border bg-card
-                    transition-all hover:bg-accent/10 hover:shadow-md hover:-translate-y-0.5 hover:border-primary"
-                  >
-                    <Icon size={28} className="text-primary" />
-                    <span className="text-xs text-muted-foreground font-heading">
-                      {label}
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <AnimatePresence mode="popLayout">
+                {filteredWidgets.map(({ iconKey, key, label, description, category }) => {
+                  const Icon = widgetIcons[iconKey] || Puzzle;
+                  const color = CATEGORY_COLORS[category] || DEFAULT_CATEGORY_COLOR;
+                  return (
+                    <motion.div
+                      key={key}
+                      layout
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.15 }}
+                      className="h-full"
+                    >
+                      <WidgetTile
+                        icon={Icon}
+                        label={label}
+                        description={description}
+                        category={category}
+                        color={color}
+                        onClick={() => setSelected(key)}
+                      />
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
             </div>
           )}
-        </>
+        </div>
       )}
       </AdminShell>
     </>
