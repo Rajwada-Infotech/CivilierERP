@@ -113,3 +113,27 @@ export function preventEnterSubmit(e: React.KeyboardEvent<HTMLElement>) {
   if (tag === "TEXTAREA" || tag === "BUTTON") return;
   e.preventDefault();
 }
+
+/**
+ * True only for the page load that was an actual browser reload (F5,
+ * ctrl+R, refresh button) — false for a fresh navigation, a back/forward,
+ * and critically, every ordinary React Router route change (a route click
+ * unmounts/remounts the page component but never triggers a new top-level
+ * navigation entry, so this stays false throughout an SPA session).
+ *
+ * A page's "reopen the form if a draft was restored" mount effect must gate
+ * on this — without it, that effect fires on every single mount, so simply
+ * clicking the page's own sidebar link while an old, possibly days-stale
+ * draft still sits in localStorage silently hijacks the link into always
+ * opening the form instead of the list.
+ */
+export function wasPageReloaded(): boolean {
+  try {
+    const [entry] = performance.getEntriesByType(
+      "navigation",
+    ) as PerformanceNavigationTiming[];
+    return entry?.type === "reload";
+  } catch {
+    return false;
+  }
+}

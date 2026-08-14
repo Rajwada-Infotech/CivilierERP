@@ -1725,8 +1725,8 @@ router.get("/detail/:id", async (req, res) => {
 });
 
 // ── GET /chain/:expenseRef — all payment attempts for one invoice ─────────────
-router.get("/chain/:expenseRef", async (req, res) => {
-  const expenseRef = req.params.expenseRef;
+router.get(/^\/chain\/(.+)$/, async (req, res) => {
+  const expenseRef = decodeURIComponent(req.params[0]);
   if (!expenseRef) return res.status(400).json({ error: "expenseRef is required" });
   try {
     const pool = getPool();
@@ -1859,8 +1859,8 @@ router.get("/tds-preview", async (req, res) => {
 });
 
 // ── Chain-wide Posting: all payments for an invoice ────────────────────────
-router.get("/chain-posting/:expenseRef", async (req, res) => {
-  const expenseRef = decodeURIComponent(req.params.expenseRef);
+router.get(/^\/chain-posting\/(.+)$/, async (req, res) => {
+  const expenseRef = decodeURIComponent(req.params[0]);
   if (!expenseRef) return res.status(400).json({ error: "No expenseRef" });
   try {
     const pool = getPool();

@@ -62,7 +62,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
+import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { ExportMenu } from "@/components/ExportMenu";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -263,7 +263,12 @@ export default function MaterialExpenseBooking() {
   const [gstEnabled, setGstEnabled] = useState(false);
   const [gstMode, setGstMode] = useState<"cgst_sgst" | "igst">("cgst_sgst");
 
+  // Only reopen on an actual browser reload, not a plain in-app navigation
+  // (e.g. clicking "Invoice" in the sidebar remounts this component too;
+  // without this check, an old leftover draft would hijack that link into
+  // always opening the form instead of the list).
   useEffect(() => {
+    if (!wasPageReloaded()) return;
     if (form.bookingName || form.supplier || form.invoiceReference || form.basicAmount) {
       setView("form");
     }

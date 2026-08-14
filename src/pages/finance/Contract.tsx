@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
+import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import {
   Plus, X, Check, FileText, Upload, Eye,
   RefreshCw, Search, Trash2, ArrowLeft, ChevronDown,
@@ -150,7 +150,12 @@ export default function Contract() {
     skip: editingId !== null,
   });
 
+  // Only reopen on an actual browser reload, not a plain in-app navigation
+  // (e.g. clicking "Contract" in the sidebar remounts this component too;
+  // without this check, an old leftover draft would hijack that link into
+  // always opening the form instead of the list).
   useEffect(() => {
+    if (!wasPageReloaded()) return;
     if (form.docNo || form.reason || form.natureOfContract || form.contractAmount) {
       setViewMode("form");
     }

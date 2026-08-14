@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { preventEnterSubmit } from "@/hooks/useDraftForm";
+import { preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -569,7 +569,10 @@ export default function FundTransfer() {
         if (d.digitalRefNumber) setDigitalRefNumber(d.digitalRefNumber);
         const hasContent =
           !!d.sourceCompanyId || !!d.destCompanyId || !!d.amount || !!d.narration?.trim() || !!d.mode;
-        if (hasContent) setDialogOpen(true);
+        // Only reopen the dialog on an actual browser reload — not a plain
+        // in-app navigation, which would otherwise let an old leftover
+        // draft hijack the sidebar link into always opening the dialog.
+        if (hasContent && wasPageReloaded()) setDialogOpen(true);
       }
     } catch {
       // Corrupt/unparseable draft — proceed with a clean form.
