@@ -5,7 +5,9 @@ import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getRoomInstancesForUnit } from "@/api/unitBhkConfigApi";
-import { Hammer, Layers, Building2, LayoutGrid, DoorOpen, MapPin } from "lucide-react";
+import { getDependencyMasters, getDependencyMaster, type DependencyMasterListRow } from "@/api/dependencyMasterApi";
+import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/components/ActivityChainPreview";
+import { Hammer, Layers, Building2, LayoutGrid, DoorOpen, MapPin, GitBranch, Loader2, Tag } from "lucide-react";
 
 // ── Field styling — same cyan-accent convention as the rest of the Civil
 // Work DPR module (see WorkerAttendance.tsx's inputCls). ────────────────────

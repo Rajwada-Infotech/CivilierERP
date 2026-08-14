@@ -18,7 +18,6 @@ import {
   ArrowUpRight,
   AlertCircle,
   CheckCircle2,
-  Clock,
   GitBranch,
   BarChart3,
   Sparkles,
@@ -229,7 +228,7 @@ export default function CivilWorkDprDashboard() {
       >
         {/* KPI Cards */}
         <GlassSection title="Overview" icon={ClipboardList} accentColor={ACCENT}>
-          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <GlassCard
               label="Active Activities"
               value={fmtNum(data.activities.activeCount)}
@@ -245,14 +244,6 @@ export default function CivilWorkDprDashboard() {
               icon={HardHat}
               accentColor="#3b82f6"
               onClick={() => navigate("/civilworkdpr/contractor-register")}
-            />
-            <GlassCard
-              label="Pending Review"
-              value={fmtNum(data.progress.pendingReviewCount)}
-              sub="Awaiting engineer sign-off"
-              icon={Clock}
-              accentColor="#f59e0b"
-              onClick={() => navigate("/civilworkdpr/dependency")}
             />
             <GlassCard
               label="Labour on Site Today"
@@ -315,7 +306,7 @@ export default function CivilWorkDprDashboard() {
                   </span>
                 </div>
                 <button
-                  onClick={() => navigate("/civilworkdpr/dependency")}
+                  onClick={() => navigate("/civilworkdpr/contractor-register")}
                   className="text-[10px] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: ACCENT }}
                 >
