@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { CivilWorkDprShell, CivilWorkDprGlassCard } from "@/components/civilworkdpr/CivilWorkDprShell";
 import {
   GitBranch,
   Edit2,
@@ -16,6 +17,11 @@ import {
   Building2,
   ClipboardList,
   Plus,
+  Users2,
+  TrendingUp,
+  ClockAlert,
+  History,
+  ArrowUpRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -36,6 +42,16 @@ import {
   type WorkProgressPayload,
 } from "@/api/workProgressApi";
 import { getUsers } from "@/api/userApi";
+// The Engineering module's Dependency Master (/masters/dependency) is the
+// actual source of "which activities depend on which, in what order, for
+// which scope" — this page previously only tracked worker/progress logging
+// with no link to those defined chains at all. Pulled in read-only here
+// (same list-row + expand-to-chain components the admin page itself uses,
+// not a re-implementation) so a chain is visible right where its progress
+// is being logged, instead of two disconnected pages.
+import { getDependencyMasters, type DependencyMasterListRow } from "@/api/dependencyMasterApi";
+import { useDependencyMasterList } from "@/pages/masters/DependencyMaster/hooks/useDependencyMasterList";
+import { DependencyMasterListItem } from "@/pages/masters/DependencyMaster/components/DependencyMasterListItem";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
@@ -112,7 +128,17 @@ const EMPTY_FORM: WorkProgressPayload = {
 
 const DependencyTracker: React.FC = () => {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const rights = usePageRights("civilworkdpr-dependency");
+
+  // Defined dependency chains (Engineering's Dependency Master) — read-only
+  // here, filtered to the active project tab below.
+  const { data: dependencyMasters = [], isLoading: loadingDependencyMasters } = useQuery({
+    queryKey: ["dependencyMastersForCivilDpr"],
+    queryFn: getDependencyMasters,
+    staleTime: 60 * 1000,
+  });
+  const depList = useDependencyMasterList();
 
   // A project's "work in progress" is the set of Contractor Register
   // allocations against it — each allocation is one (Activity, Contractor)
@@ -155,6 +181,10 @@ const DependencyTracker: React.FC = () => {
 
   const activeProjectLabel = (projects as any[]).find((p) => p.id === activeProjectId)?.label as string | undefined;
 
+  const dependencyChainsForProject: DependencyMasterListRow[] = dependencyMasters.filter(
+    (d) => d.projectId === activeProjectId && d.isActive,
+  );
+
   // Worker count per project — shown on each project chip so you can see
   // which projects actually have activity going on before switching tabs.
   const workerCountByProject = new Map<number, number>();
@@ -196,6 +226,18 @@ const DependencyTracker: React.FC = () => {
       latestByAllocation.set(entry.allocationId, entry);
     }
   }
+
+  // Summary strip for this project tab — same "give the page some visual
+  // weight instead of a bare list" treatment as the other module pages.
+  const activityCount = allocationsByActivity.size;
+  const workerCount = allocationsForProject.length;
+  const avgProgress = latestByAllocation.size
+    ? Math.round(
+        Array.from(latestByAllocation.values()).reduce((s, e) => s + (e.percentageProgress || 0), 0) /
+          latestByAllocation.size,
+      )
+    : 0;
+  const pendingReviewCount = progressEntries.filter((e) => e.reviewStatus === "Pending").length;
 
   const [form, setFormState] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -552,80 +594,176 @@ const DependencyTracker: React.FC = () => {
           </div>
         ) : (
           <>
-            {/* ── Activities in progress on this project, grouped — an Activity
-                 can have several workers, each logging their own progress ── */}
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-heading font-semibold text-foreground">
-                Activities in Progress
-              </h2>
-              {rights.canCreate && (
-                <button
-                  onClick={openAddDialog}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-cyan-500/30 text-cyan-600 hover:bg-cyan-500/10"
-                >
-                  <Plus size={13} /> Add
-                </button>
-              )}
+            {/* ── Summary strip for this project tab ── */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <CivilWorkDprGlassCard label="Activities" value={activityCount} icon={ClipboardList} accentColor="#0891b2" />
+              <CivilWorkDprGlassCard label="Workers Assigned" value={workerCount} icon={Users2} accentColor="#3b82f6" />
+              <CivilWorkDprGlassCard label="Avg. Progress" value={`${avgProgress}%`} icon={TrendingUp} accentColor="#10b981" />
+              <CivilWorkDprGlassCard label="Pending Review" value={pendingReviewCount} icon={ClockAlert} accentColor="#f59e0b" />
             </div>
-            <div className="space-y-3">
-              {allocationsByActivity.size === 0 ? (
-                <div className="rounded-xl border border-dashed border-border p-6 text-center text-muted-foreground text-sm">
-                  No workers assigned to any activity on this project yet.
+
+            {/* ── Defined dependency chains for this project, pulled straight
+                 from Engineering's Dependency Master — the actual "what
+                 order must these activities happen in" definitions, not
+                 re-entered here. Read-only: expand a chain to see its
+                 ladder, "Manage" jumps to the real admin page to edit. ── */}
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="flex items-center justify-between gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
+                <span className="flex items-center gap-2 text-sm font-heading font-semibold text-foreground">
+                  <GitBranch size={14} className="text-cyan-600 dark:text-cyan-400" />
+                  Dependency Chains
+                  {dependencyChainsForProject.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-mono">
+                      {dependencyChainsForProject.length}
+                    </span>
+                  )}
+                </span>
+                <button
+                  onClick={() => navigate("/masters/dependency")}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-cyan-600 dark:text-cyan-400 hover:underline"
+                >
+                  Manage in Dependency Master <ArrowUpRight size={12} />
+                </button>
+              </div>
+              {loadingDependencyMasters ? (
+                <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
+                  <Loader2 size={14} className="animate-spin" /> Loading dependency chains…
+                </div>
+              ) : dependencyChainsForProject.length === 0 ? (
+                <div className="flex flex-col items-center gap-3 py-10 px-6 text-center">
+                  <div className="w-11 h-11 rounded-full flex items-center justify-center bg-cyan-500/10">
+                    <GitBranch size={20} className="text-cyan-600 dark:text-cyan-400" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-heading font-semibold text-foreground">No dependency chains defined for this project</p>
+                    <p className="text-xs text-muted-foreground max-w-sm">
+                      Define which activities must happen in what order (per Tower / Floor / Flat / Room) in the Dependency Master.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => navigate("/masters/dependency")}
+                    className="mt-1 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-cyan-500 to-teal-400 hover:opacity-90 transition-opacity"
+                  >
+                    <Plus size={13} /> Define a Dependency Chain
+                  </button>
                 </div>
               ) : (
-                Array.from(allocationsByActivity.entries()).map(([activityId, workers]) => (
-                  <div key={activityId} className="rounded-xl border border-border bg-card overflow-hidden">
-                    <div className="px-4 py-2.5 bg-muted/40 border-b border-border flex items-center gap-2">
-                      <HardHat size={13} className="text-cyan-500 shrink-0" />
-                      <span className="text-sm font-medium text-foreground">
-                        {workers[0].activityName || "—"}
-                      </span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-mono ml-1">
-                        {workers.length} worker{workers.length > 1 ? "s" : ""}
-                      </span>
-                    </div>
-                    <div className="divide-y divide-border/50">
-                      {workers.map((a) => {
-                        const latest = latestByAllocation.get(a.id);
-                        return (
-                          <div key={a.id} className="flex items-center gap-3 px-4 py-2.5">
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm text-foreground truncate">
-                                {a.contractorName || "—"}
-                              </p>
-                            </div>
-                            {latest && (
-                              <div className="flex items-center gap-2 w-32 shrink-0">
-                                <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                                  <div
-                                    className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500"
-                                    style={{ width: `${Math.min(100, latest.percentageProgress || 0)}%` }}
-                                  />
-                                </div>
-                                <span className="text-xs font-mono text-muted-foreground w-9 text-right">
-                                  {latest.percentageProgress || 0}%
-                                </span>
-                              </div>
-                            )}
-                            {rights.canCreate && (
-                              <button
-                                onClick={() => openLogDialog(a)}
-                                className="px-2.5 py-1 rounded-lg text-[11px] font-medium border border-cyan-500/30 text-cyan-600 hover:bg-cyan-500/10 shrink-0 whitespace-nowrap"
-                              >
-                                Log Progress
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+                <div className="p-3 space-y-2">
+                  {dependencyChainsForProject.map((row) => (
+                    <DependencyMasterListItem
+                      key={row.id}
+                      row={row}
+                      isExpanded={depList.expandedId === row.id}
+                      isLoading={depList.loadingId === row.id}
+                      cached={depList.getCached(row.id)}
+                      onToggle={() => depList.toggle(row.id)}
+                      canEdit={false}
+                      canDelete={false}
+                      onEdit={() => {}}
+                      onDelete={() => {}}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ── Activities in progress on this project, grouped — an Activity
+                 can have several workers, each logging their own progress ── */}
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="flex items-center justify-between gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
+                <span className="flex items-center gap-2 text-sm font-heading font-semibold text-foreground">
+                  <HardHat size={14} className="text-cyan-600 dark:text-cyan-400" />
+                  Activities in Progress
+                </span>
+                {rights.canCreate && (
+                  <button
+                    onClick={openAddDialog}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-cyan-500 to-teal-400 hover:opacity-90 transition-opacity"
+                  >
+                    <Plus size={13} /> Add
+                  </button>
+                )}
+              </div>
+              {allocationsByActivity.size === 0 ? (
+                <div className="flex flex-col items-center gap-3 py-12 px-6 text-center">
+                  <div className="w-11 h-11 rounded-full flex items-center justify-center bg-cyan-500/10">
+                    <HardHat size={20} className="text-cyan-600 dark:text-cyan-400" />
                   </div>
-                ))
+                  <div className="space-y-1">
+                    <p className="text-sm font-heading font-semibold text-foreground">No workers assigned yet</p>
+                    <p className="text-xs text-muted-foreground max-w-sm">
+                      Assign a contractor to an activity on this project to start tracking progress.
+                    </p>
+                  </div>
+                  {rights.canCreate && (
+                    <button
+                      onClick={openAddDialog}
+                      className="mt-1 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-cyan-500 to-teal-400 hover:opacity-90 transition-opacity"
+                    >
+                      <Plus size={13} /> Assign a Worker
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="p-4 space-y-3">
+                  {Array.from(allocationsByActivity.entries()).map(([activityId, workers]) => (
+                    <div key={activityId} className="rounded-xl border border-border bg-background overflow-hidden">
+                      <div className="px-4 py-2.5 bg-muted/40 border-b border-border flex items-center gap-2">
+                        <HardHat size={13} className="text-cyan-500 shrink-0" />
+                        <span className="text-sm font-medium text-foreground">
+                          {workers[0].activityName || "—"}
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-mono ml-1">
+                          {workers.length} worker{workers.length > 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      <div className="divide-y divide-border/50">
+                        {workers.map((a) => {
+                          const latest = latestByAllocation.get(a.id);
+                          return (
+                            <div key={a.id} className="flex items-center gap-3 px-4 py-2.5">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm text-foreground truncate">
+                                  {a.contractorName || "—"}
+                                </p>
+                              </div>
+                              {latest && (
+                                <div className="flex items-center gap-2 w-32 shrink-0">
+                                  <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                                    <div
+                                      className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500"
+                                      style={{ width: `${Math.min(100, latest.percentageProgress || 0)}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-xs font-mono text-muted-foreground w-9 text-right">
+                                    {latest.percentageProgress || 0}%
+                                  </span>
+                                </div>
+                              )}
+                              {rights.canCreate && (
+                                <button
+                                  onClick={() => openLogDialog(a)}
+                                  className="px-2.5 py-1 rounded-lg text-[11px] font-medium border border-cyan-500/30 text-cyan-600 hover:bg-cyan-500/10 shrink-0 whitespace-nowrap"
+                                >
+                                  Log Progress
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 
             {/* ── History & review table ── */}
-            <div className="rounded-xl border border-border bg-card p-4">
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
+                <History size={14} className="text-cyan-600 dark:text-cyan-400" />
+                <span className="text-sm font-heading font-semibold text-foreground">Progress History & Review</span>
+              </div>
               <DataTable
                 data={progressEntries}
                 columns={COLUMNS}
