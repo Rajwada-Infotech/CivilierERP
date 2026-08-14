@@ -1,6 +1,11 @@
-import { Chart2, Hierarchy, Building3, Profile2User, TaskSquare, Grid2, Category } from "iconsax-react";
+import { Chart2, Hierarchy, Building3, Profile2User, TaskSquare } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
+// Room Composition and Room Categories are reachable from the TopNavbar's
+// quick-access "Setup" menu (civilWorkDprSetupItems, same as Engineering's
+// Activity/Dependency masters) rather than duplicated here — matching the
+// existing convention every other module already follows (Follow-Up's own
+// Department Master is likewise not repeated in FollowupSidebar.ts).
 export const civilWorkDprNavItems: NavItem[] = [
   {
     label: "Dashboard",
@@ -14,18 +19,6 @@ export const civilWorkDprNavItems: NavItem[] = [
     icon: TaskSquare,
     path: "/civilworkdpr/work-done",
     pageKey: "civilworkdpr-work-done",
-  },
-  {
-    label: "Room Composition",
-    icon: Grid2,
-    path: "/civilworkdpr/room-composition",
-    pageKey: "room-composition-builder",
-  },
-  {
-    label: "Room Categories",
-    icon: Category,
-    path: "/civilworkdpr/room-category-master",
-    pageKey: "room-category-master",
   },
   {
     label: "Dependency",
