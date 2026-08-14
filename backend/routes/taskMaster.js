@@ -68,7 +68,8 @@ router.get("/", cache("task-master", 60), async (req, res) => {
         t.ParentTaskId, pt.TaskNo AS ParentTaskNo, pt.Subject AS ParentTaskSubject,
         t.ReminderAt,
         t.EntryTypeId, et.EntryType AS EntryTypeLabel,
-        t.LinkedTypeOfDocId, ltd.Prefix AS LinkedTypeOfDocPrefix, ltd.Description AS LinkedTypeOfDocLabel
+        t.LinkedTypeOfDocId, ltd.Prefix AS LinkedTypeOfDocPrefix, ltd.Description AS LinkedTypeOfDocLabel,
+        t.LinkedDocRecordId, t.LinkedDocNo
       FROM dbo.TaskMaster t
       LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
@@ -217,7 +218,8 @@ router.get("/:id", async (req, res) => {
         t.ParentTaskId, pt.TaskNo AS ParentTaskNo, pt.Subject AS ParentTaskSubject,
         t.ReminderAt,
         t.EntryTypeId, et.EntryType AS EntryTypeLabel,
-        t.LinkedTypeOfDocId, ltd.Prefix AS LinkedTypeOfDocPrefix, ltd.Description AS LinkedTypeOfDocLabel
+        t.LinkedTypeOfDocId, ltd.Prefix AS LinkedTypeOfDocPrefix, ltd.Description AS LinkedTypeOfDocLabel,
+        t.LinkedDocRecordId, t.LinkedDocNo
       FROM dbo.TaskMaster t
       LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
@@ -255,6 +257,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
     CaseCompanyId, CaseProjectId, CaseFinYearId, CaseDocumentNumber,
     TypeOfDocId, AssignedTo, ParentTaskId, ReminderAt, EntryTypeId, LinkedTypeOfDocId,
+    LinkedDocRecordId, LinkedDocNo,
   } = req.body;
 
   if (!Subject?.trim()) return res.status(400).json({ error: "Subject is required" });
@@ -324,17 +327,21 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("ReminderAt", sql.DateTime2, ReminderAt || null)
       .input("EntryTypeId", sql.UniqueIdentifier, EntryTypeId || null)
       .input("LinkedTypeOfDocId", sql.Int, linkedTypeOfDocId)
+      .input("LinkedDocRecordId", sql.Int, LinkedDocRecordId ? parseInt(LinkedDocRecordId, 10) : null)
+      .input("LinkedDocNo", sql.NVarChar(50), LinkedDocNo || null)
       .input("CreatedBy", sql.Int, createdBy)
       .query(`
         INSERT INTO dbo.TaskMaster (
           TaskNo, Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
           CaseCompanyId, CaseProjectId, CaseFinYearId, CaseDocumentNumber, TypeOfDocId, AssignedTo,
-          ParentTaskId, ReminderAt, EntryTypeId, LinkedTypeOfDocId, CreatedBy, CreatedAt
+          ParentTaskId, ReminderAt, EntryTypeId, LinkedTypeOfDocId, LinkedDocRecordId, LinkedDocNo,
+          CreatedBy, CreatedAt
         )
         VALUES (
           @TaskNo, @Subject, @Details, @Department, @DueDate, @CaseNumber, @Priority, @Status,
           @CaseCompanyId, @CaseProjectId, @CaseFinYearId, @CaseDocumentNumber, @TypeOfDocId, @AssignedTo,
-          @ParentTaskId, @ReminderAt, @EntryTypeId, @LinkedTypeOfDocId, @CreatedBy, SYSUTCDATETIME()
+          @ParentTaskId, @ReminderAt, @EntryTypeId, @LinkedTypeOfDocId, @LinkedDocRecordId, @LinkedDocNo,
+          @CreatedBy, SYSUTCDATETIME()
         );
         SELECT SCOPE_IDENTITY() AS Id;
       `);
@@ -356,6 +363,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
     CaseCompanyId, CaseProjectId, CaseFinYearId, CaseDocumentNumber, AssignedTo,
     ParentTaskId, ReminderAt, EntryTypeId, LinkedTypeOfDocId,
+    LinkedDocRecordId, LinkedDocNo,
   } = req.body;
 
   if (!Subject?.trim()) return res.status(400).json({ error: "Subject is required" });
@@ -411,6 +419,8 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("ReminderAt", sql.DateTime2, ReminderAt || null)
       .input("EntryTypeId", sql.UniqueIdentifier, EntryTypeId || null)
       .input("LinkedTypeOfDocId", sql.Int, linkedTypeOfDocId)
+      .input("LinkedDocRecordId", sql.Int, LinkedDocRecordId ? parseInt(LinkedDocRecordId, 10) : null)
+      .input("LinkedDocNo", sql.NVarChar(50), LinkedDocNo || null)
       .input("UpdatedBy", sql.Int, updatedBy)
       .query(`
         UPDATE dbo.TaskMaster SET
@@ -420,6 +430,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           CaseFinYearId = @CaseFinYearId, CaseDocumentNumber = @CaseDocumentNumber,
           AssignedTo = @AssignedTo, ParentTaskId = @ParentTaskId, ReminderAt = @ReminderAt,
           EntryTypeId = @EntryTypeId, LinkedTypeOfDocId = @LinkedTypeOfDocId,
+          LinkedDocRecordId = @LinkedDocRecordId, LinkedDocNo = @LinkedDocNo,
           UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);

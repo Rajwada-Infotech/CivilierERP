@@ -162,6 +162,7 @@ const ALL_ROUTES = [
   { path: "/api/payment-terms", file: "./routes/vendorPaymentTerm" },
   { path: "/api/profit-center", file: "./routes/profitCenter" },
   { path: "/api/document-type", file: "./routes/document-type" },
+  { path: "/api/doc-selector", file: "./routes/docSelector" },
   { path: "/api/fin-year", file: "./routes/finYear" },
   { path: "/api/general-ledger", file: "./routes/generalLedger" },
   { path: "/api/hsn", file: "./routes/hsn" },
