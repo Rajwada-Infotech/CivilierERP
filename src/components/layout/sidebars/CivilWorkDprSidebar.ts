@@ -15,7 +15,7 @@ export const civilWorkDprNavItems: NavItem[] = [
     isDashboard: true,
   },
   {
-    label: "Work Done",
+    label: "Work Reporting",
     icon: TaskSquare,
     path: "/civilworkdpr/work-done",
     pageKey: "civilworkdpr-work-done",

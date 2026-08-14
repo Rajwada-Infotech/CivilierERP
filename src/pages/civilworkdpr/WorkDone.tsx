@@ -105,6 +105,42 @@ export default function WorkDone() {
     return unitsForTower.filter((u: any) => String(u.FloorNo) === form.FloorNo);
   }, [unitsForTower, form.FloorNo]);
 
+  // Dependency link — appears once a Room is selected. Work Reporting's
+  // "Room" is a synthetic per-category instance (RoomCompositionBuilder's
+  // category+quantity model, no real dbo.RoomMaster row behind it — see
+  // RoomInstance's {key,label} shape), while a Dependency Master's own scope
+  // is tied to a real RoomMaster row. The two "Room" concepts can't be
+  // cross-referenced, so matching is scoped to Project/Tower/Floor/Unit —
+  // the levels both sides genuinely share — and the user picks the specific
+  // chain themselves rather than the page guessing a Room match that isn't
+  // really there.
+  const [linkedDependencyId, setLinkedDependencyId] = useState<string>("");
+  const { data: allDependencies = [], isLoading: loadingDependencies } = useQuery({
+    queryKey: ["civilworkdpr-work-done-dependencies"],
+    queryFn: getDependencyMasters,
+    staleTime: 60 * 1000,
+    enabled: !!form.RoomId,
+  });
+  const matchingDependencies = useMemo(() => {
+    if (!form.RoomId) return [];
+    return (allDependencies as DependencyMasterListRow[]).filter(
+      (d) =>
+        String(d.projectId) === form.ProjectId &&
+        String(d.towerId) === form.BlockId &&
+        String(d.floor) === form.FloorNo &&
+        String(d.flatId) === form.UnitId,
+    );
+  }, [allDependencies, form.ProjectId, form.BlockId, form.FloorNo, form.UnitId, form.RoomId]);
+  const linkedDependency = useMemo(
+    () => matchingDependencies.find((d) => String(d.id) === linkedDependencyId) || null,
+    [matchingDependencies, linkedDependencyId],
+  );
+  const { data: linkedDependencyDetail, isLoading: loadingDependencyDetail } = useQuery({
+    queryKey: ["civilworkdpr-work-done-dependency-detail", linkedDependencyId],
+    queryFn: () => getDependencyMaster(parseInt(linkedDependencyId, 10)),
+    enabled: !!linkedDependencyId,
+  });
+
   const selectedUnit = useMemo(
     () => (units as any[]).find((u: any) => String(u.Id) === form.UnitId) || null,
     [units, form.UnitId],
@@ -131,25 +167,39 @@ export default function WorkDone() {
 
   // Changing any parent level clears every level below it — nothing
   // dependent is ever left pointing at a selection that no longer applies.
-  const handleProjectChange = (v: string) =>
+  // The linked dependency is scoped to Project/Tower/Floor/Unit too, so it
+  // resets right alongside them.
+  const handleProjectChange = (v: string) => {
     setForm({ ProjectId: v, BlockId: "", FloorNo: "", UnitId: "", RoomId: "" });
-  const handleTowerChange = (v: string) =>
+    setLinkedDependencyId("");
+  };
+  const handleTowerChange = (v: string) => {
     setForm((f) => ({ ...f, BlockId: v, FloorNo: "", UnitId: "", RoomId: "" }));
-  const handleFloorChange = (v: string) =>
+    setLinkedDependencyId("");
+  };
+  const handleFloorChange = (v: string) => {
     setForm((f) => ({ ...f, FloorNo: v, UnitId: "", RoomId: "" }));
-  const handleUnitChange = (v: string) =>
+    setLinkedDependencyId("");
+  };
+  const handleUnitChange = (v: string) => {
     setForm((f) => ({ ...f, UnitId: v, RoomId: "" }));
+    setLinkedDependencyId("");
+  };
+  const handleRoomChange = (v: string) => {
+    setForm((f) => ({ ...f, RoomId: v }));
+    setLinkedDependencyId("");
+  };
 
   return (
     <>
       <Breadcrumbs
         items={[
           { label: "Civil Work DPR", path: "/civilworkdpr" },
-          { label: "Work Done" },
+          { label: "Work Reporting" },
         ]}
       />
       <CivilWorkDprShell
-        title="Work Done"
+        title="Work Reporting"
         subtitle="Tag a work-done entry to the exact Project / Tower / Floor / Unit"
         icon={Hammer}
       >
@@ -263,7 +313,7 @@ export default function WorkDone() {
                   </label>
                   <select
                     value={form.RoomId}
-                    onChange={(e) => setForm((f) => ({ ...f, RoomId: e.target.value }))}
+                    onChange={(e) => handleRoomChange(e.target.value)}
                     disabled={!form.UnitId || loadingRooms || roomInstances.length === 0}
                     className={inputCls}
                   >
@@ -298,6 +348,80 @@ export default function WorkDone() {
                     <> — {selectedUnit.UnitName}</>
                   </span>
                 </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Link Dependency — appears once a Room is picked above. Scoped to
+            Project/Tower/Floor/Unit (see the note by matchingDependencies)
+            rather than an exact Room match, since Work Reporting's Room is
+            synthetic and Dependency Master's isn't. */}
+        {rights.canView && form.RoomId && (
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
+              <GitBranch size={14} className="text-cyan-600 dark:text-cyan-400" />
+              <span className="text-sm font-heading font-semibold text-foreground">
+                Link Dependency
+              </span>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {loadingDependencies ? (
+                <div className="w-full h-10 rounded-lg border border-border bg-muted/30 animate-pulse" />
+              ) : matchingDependencies.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center text-sm text-muted-foreground">
+                  No dependency chains are configured for this unit yet.{" "}
+                  <a href="/masters/dependency/new" className="text-cyan-600 dark:text-cyan-400 hover:underline font-medium">
+                    Set one up in Dependency Master
+                  </a>
+                  .
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className={labelCls}>
+                      <Tag size={11} /> Dependency Chain
+                    </label>
+                    <select
+                      value={linkedDependencyId}
+                      onChange={(e) => setLinkedDependencyId(e.target.value)}
+                      className={inputCls}
+                    >
+                      <option value="">Select a dependency chain…</option>
+                      {matchingDependencies.map((d) => (
+                        <option key={d.id} value={String(d.id)}>
+                          {d.alias} — {d.roomName || "Room"} — {d.workType} ({d.activityCount} step{d.activityCount === 1 ? "" : "s"})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {linkedDependency && (
+                    <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-4 py-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-foreground">{linkedDependency.alias}</span>
+                        <span
+                          className={`text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
+                            linkedDependency.workType === "INTERNAL"
+                              ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
+                              : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+                          }`}
+                        >
+                          {linkedDependency.workType}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{linkedDependency.scopePath}</p>
+                      {loadingDependencyDetail ? (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                          <Loader2 size={12} className="animate-spin" /> Loading activity chain…
+                        </div>
+                      ) : (
+                        <ActivityChainPreview rungs={linkedDependencyDetail?.activities ?? []} />
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

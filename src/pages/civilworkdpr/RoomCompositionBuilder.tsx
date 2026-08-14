@@ -1,145 +1,123 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getRoomCategoryOptions, type RoomCategory } from "@/api/roomCategoryMasterApi";
-import { getUnitBhkConfig, saveUnitBhkConfig, type BhkType } from "@/api/unitBhkConfigApi";
-import { Building2, Layers, LayoutGrid, DoorOpen, Grid3x3, Minus, Plus, Save } from "lucide-react";
+import {
+  getBhkTemplate,
+  saveBhkTemplate,
+  getLayoutTypes,
+  addLayoutType,
+  type BhkType,
+} from "@/api/unitBhkConfigApi";
+import { Grid3x3, Home, Minus, Plus, Save, X } from "lucide-react";
 
-const inputCls =
-  "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
 const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1.5";
 
-const BHK_TYPES: BhkType[] = ["1BHK", "2BHK", "3BHK", "4BHK"];
-const UNIT_API = "/api/unit-master";
-
-async function fetchProjects(): Promise<{ Id: number; Name: string }[]> {
-  try {
-    const r = await fetchWithAuth(`${UNIT_API}/projects`);
-    return r.ok ? r.json() : [];
-  } catch {
-    return [];
-  }
-}
-async function fetchUnits(): Promise<any[]> {
-  try {
-    const r = await fetchWithAuth(`${UNIT_API}?isActive=1`);
-    return r.ok ? r.json() : [];
-  } catch {
-    return [];
-  }
-}
-
-interface PickerState {
-  ProjectId: string;
-  BlockId: string;
-  FloorNo: string;
-  UnitId: string;
-}
-const EMPTY_PICKER: PickerState = { ProjectId: "", BlockId: "", FloorNo: "", UnitId: "" };
+// A real layout can reasonably have a handful of any one room category —
+// even a big custom Duplex/Triplex template — but not a typo like "40
+// bedrooms" in a 1BHK. Mirrored server-side in unitBhkConfig.js's
+// POST /template/:bhkType so this can't be bypassed by calling the API
+// directly.
+const MAX_ROOM_QTY = 10;
 
 export default function RoomCompositionBuilder() {
   const rights = usePageRights("room-composition-builder");
   const qc = useQueryClient();
-  const [picker, setPicker] = useState<PickerState>(EMPTY_PICKER);
-  const [bhkType, setBhkType] = useState<BhkType | "">("");
+  const [bhkType, setBhkType] = useState<BhkType | null>(null);
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [saving, setSaving] = useState(false);
+  const [addingType, setAddingType] = useState(false);
+  const [newTypeLabel, setNewTypeLabel] = useState("");
+  const [addingSaving, setAddingSaving] = useState(false);
+  const newTypeInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: projects = [], isLoading: loadingProjects } = useQuery({
-    queryKey: ["room-comp-projects"],
-    queryFn: fetchProjects,
-    staleTime: 5 * 60 * 1000,
+  const { data: layoutTypes = [], isLoading: loadingTypes } = useQuery({
+    queryKey: ["layout-types"],
+    queryFn: getLayoutTypes,
+    staleTime: 60 * 1000,
   });
-  const { data: units = [], isLoading: loadingUnits } = useQuery({
-    queryKey: ["room-comp-units"],
-    queryFn: fetchUnits,
-    staleTime: 5 * 60 * 1000,
-  });
+
+  // Default to the first available type as soon as the list loads, so the
+  // composition panel below always has something selected.
+  useEffect(() => {
+    if (!bhkType && layoutTypes.length > 0) setBhkType(layoutTypes[0].typeKey);
+  }, [bhkType, layoutTypes]);
+
+  useEffect(() => {
+    if (addingType) newTypeInputRef.current?.focus();
+  }, [addingType]);
+
   const { data: categories = [], isLoading: loadingCategories } = useQuery({
     queryKey: ["room-categories-options"],
     queryFn: getRoomCategoryOptions,
     staleTime: 5 * 60 * 1000,
   });
-  const loadingMasters = loadingProjects || loadingUnits || loadingCategories;
 
-  // Same Project -> Tower -> Floor -> Unit cascade as the Work Done page,
-  // reused here for the same reason: find the exact Unit without scrolling
-  // through every unit in every project.
-  const unitsForProject = useMemo(() => {
-    if (!picker.ProjectId) return [];
-    return (units as any[]).filter((u: any) => String(u.ProjectId) === picker.ProjectId);
-  }, [units, picker.ProjectId]);
-  const towersForProject = useMemo(() => {
-    const map = new Map<string, string>();
-    unitsForProject.forEach((u: any) => { if (u.BlockId != null) map.set(String(u.BlockId), u.BlockName); });
-    return Array.from(map, ([Id, Name]) => ({ Id, Name }));
-  }, [unitsForProject]);
-  const unitsForTower = useMemo(() => {
-    if (!picker.BlockId) return [];
-    return unitsForProject.filter((u: any) => String(u.BlockId) === picker.BlockId);
-  }, [unitsForProject, picker.BlockId]);
-  const floorsForTower = useMemo(() => {
-    const set = new Set<string>();
-    unitsForTower.forEach((u: any) => { if (u.FloorNo != null) set.add(String(u.FloorNo)); });
-    return Array.from(set).sort((a, b) => Number(a) - Number(b));
-  }, [unitsForTower]);
-  const unitsForFloor = useMemo(() => {
-    if (!picker.FloorNo) return [];
-    return unitsForTower.filter((u: any) => String(u.FloorNo) === picker.FloorNo);
-  }, [unitsForTower, picker.FloorNo]);
-
-  const selectedUnitId = picker.UnitId ? parseInt(picker.UnitId, 10) : null;
-  const { data: existingConfig, isFetching: loadingConfig } = useQuery({
-    queryKey: ["unit-bhk-config", selectedUnitId],
-    queryFn: () => getUnitBhkConfig(selectedUnitId as number),
-    enabled: !!selectedUnitId,
+  const { data: template, isFetching: loadingTemplate } = useQuery({
+    queryKey: ["bhk-template", bhkType],
+    queryFn: () => getBhkTemplate(bhkType as string),
+    enabled: !!bhkType,
   });
 
-  // Pre-fill BHK + quantities whenever a Unit with an existing config is
-  // picked; a fresh Unit starts every active category at 0.
+  // Pre-fill quantities whenever a layout type with an existing template is
+  // picked; a fresh type starts every active category at 0.
   useEffect(() => {
-    if (!selectedUnitId) { setBhkType(""); setQuantities({}); return; }
-    if (existingConfig?.config) {
-      setBhkType(existingConfig.config.bhkType);
+    if (template?.config) {
       const q: Record<number, number> = {};
-      existingConfig.composition.forEach((c) => { q[c.roomCategoryId] = c.quantity; });
+      template.composition.forEach((c) => { q[c.roomCategoryId] = c.quantity; });
       setQuantities(q);
-    } else if (!loadingConfig) {
-      setBhkType("");
+    } else if (!loadingTemplate) {
       setQuantities({});
     }
-  }, [selectedUnitId, existingConfig, loadingConfig]);
+  }, [template, loadingTemplate]);
 
-  const handleProjectChange = (v: string) => setPicker({ ProjectId: v, BlockId: "", FloorNo: "", UnitId: "" });
-  const handleTowerChange = (v: string) => setPicker((p) => ({ ...p, BlockId: v, FloorNo: "", UnitId: "" }));
-  const handleFloorChange = (v: string) => setPicker((p) => ({ ...p, FloorNo: v, UnitId: "" }));
-  const handleUnitChange = (v: string) => setPicker((p) => ({ ...p, UnitId: v }));
-
-  const setQty = (categoryId: number, next: number) =>
+  const setQty = (categoryId: number, next: number) => {
+    if (next > MAX_ROOM_QTY) {
+      toast.error(`${MAX_ROOM_QTY} is the most of one room category a single unit can have.`);
+      next = MAX_ROOM_QTY;
+    }
     setQuantities((q) => ({ ...q, [categoryId]: Math.max(0, next) }));
+  };
+
+  const selectedLabel = layoutTypes.find((t) => t.typeKey === bhkType)?.label ?? bhkType ?? "";
 
   const handleSave = async () => {
-    if (!selectedUnitId) { toast.error("Select a Unit first"); return; }
-    if (!bhkType) { toast.error("Select a BHK type"); return; }
+    if (!bhkType) return;
     setSaving(true);
     try {
-      await saveUnitBhkConfig(selectedUnitId, {
-        bhkType,
+      await saveBhkTemplate(bhkType, {
         composition: (categories as RoomCategory[]).map((c) => ({
           roomCategoryId: c.id,
           quantity: quantities[c.id] ?? 0,
         })),
       });
-      toast.success("Room composition saved");
-      qc.invalidateQueries({ queryKey: ["unit-bhk-config", selectedUnitId] });
+      toast.success(`${selectedLabel} template saved`);
+      qc.invalidateQueries({ queryKey: ["bhk-template", bhkType] });
     } catch (e: any) {
       toast.error(e.message ?? "Save failed");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAddType = async () => {
+    const label = newTypeLabel.trim();
+    if (!label) return;
+    setAddingSaving(true);
+    try {
+      const created = await addLayoutType(label);
+      toast.success(`"${created.label}" added`);
+      await qc.invalidateQueries({ queryKey: ["layout-types"] });
+      setBhkType(created.typeKey);
+      setNewTypeLabel("");
+      setAddingType(false);
+    } catch (e: any) {
+      toast.error(e.message ?? "Couldn't add type");
+    } finally {
+      setAddingSaving(false);
     }
   };
 
@@ -155,7 +133,7 @@ export default function RoomCompositionBuilder() {
       />
       <CivilWorkDprShell
         title="Room Composition"
-        subtitle="Set a Unit's BHK type and how many of each room category it has"
+        subtitle="One room layout template per type — every unit of that type inherits it automatically"
         icon={Grid3x3}
       >
         {!rights.canView ? (
@@ -164,95 +142,137 @@ export default function RoomCompositionBuilder() {
           </div>
         ) : (
           <>
-            {/* ── Unit picker ── */}
+            {/* ── Layout type selector — the 4 BHK defaults plus any custom
+                types (Duplex, Triplex, ...) added below. ── */}
             <div className="rounded-xl border border-border bg-card overflow-hidden">
               <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
-                <DoorOpen size={14} className="text-cyan-600 dark:text-cyan-400" />
-                <span className="text-sm font-heading font-semibold text-foreground">Unit</span>
+                <Home size={14} className="text-cyan-600 dark:text-cyan-400" />
+                <span className="text-sm font-heading font-semibold text-foreground">Layout Type</span>
               </div>
-              <div className="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div>
-                  <label className={labelCls}><Building2 size={11} /> Project</label>
-                  <select value={picker.ProjectId} onChange={(e) => handleProjectChange(e.target.value)} disabled={loadingMasters} className={inputCls}>
-                    <option value="">Select project…</option>
-                    {(projects as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}><Layers size={11} /> Tower</label>
-                  <select value={picker.BlockId} onChange={(e) => handleTowerChange(e.target.value)} disabled={!picker.ProjectId} className={inputCls}>
-                    <option value="">{!picker.ProjectId ? "Select a project first" : "Select tower…"}</option>
-                    {towersForProject.map((t) => <option key={t.Id} value={t.Id}>{t.Name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}><LayoutGrid size={11} /> Floor</label>
-                  <select value={picker.FloorNo} onChange={(e) => handleFloorChange(e.target.value)} disabled={!picker.BlockId} className={inputCls}>
-                    <option value="">{!picker.BlockId ? "Select a tower first" : "Select floor…"}</option>
-                    {floorsForTower.map((fl) => <option key={fl} value={fl}>Floor {fl}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}><DoorOpen size={11} /> Unit</label>
-                  <select value={picker.UnitId} onChange={(e) => handleUnitChange(e.target.value)} disabled={!picker.FloorNo} className={inputCls}>
-                    <option value="">{!picker.FloorNo ? "Select a floor first" : "Select unit…"}</option>
-                    {unitsForFloor.map((u: any) => <option key={u.Id} value={String(u.Id)}>{u.UnitName}</option>)}
-                  </select>
-                </div>
+              <div className="p-5">
+                {loadingTypes ? (
+                  <div className="flex flex-wrap gap-2">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="h-8 w-20 rounded-lg border border-border bg-muted/30 animate-pulse" />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {layoutTypes.map((t) => (
+                      <button
+                        key={t.typeKey}
+                        type="button"
+                        onClick={() => setBhkType(t.typeKey)}
+                        className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border transition-all ${
+                          bhkType === t.typeKey
+                            ? "border-cyan-500 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400"
+                            : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+
+                    {addingType ? (
+                      <div className="flex items-center gap-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/5 px-1.5 py-1">
+                        <input
+                          ref={newTypeInputRef}
+                          value={newTypeLabel}
+                          onChange={(e) => setNewTypeLabel(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") { e.preventDefault(); handleAddType(); }
+                            if (e.key === "Escape") { setAddingType(false); setNewTypeLabel(""); }
+                          }}
+                          placeholder="e.g. Duplex"
+                          maxLength={50}
+                          disabled={addingSaving}
+                          className="w-28 h-6 px-2 rounded-md text-xs bg-background border border-border focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddType}
+                          disabled={addingSaving || !newTypeLabel.trim()}
+                          className="w-6 h-6 shrink-0 rounded-md bg-cyan-500 text-white flex items-center justify-center hover:bg-cyan-600 disabled:opacity-40 transition-colors"
+                          title="Add"
+                        >
+                          <Plus size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setAddingType(false); setNewTypeLabel(""); }}
+                          disabled={addingSaving}
+                          className="w-6 h-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center transition-colors"
+                          title="Cancel"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      rights.canCreate && (
+                        <button
+                          type="button"
+                          onClick={() => setAddingType(true)}
+                          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-dashed border-border text-muted-foreground hover:text-cyan-600 dark:hover:text-cyan-400 hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all"
+                        >
+                          <Plus size={13} /> Add Type
+                        </button>
+                      )
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* ── BHK + composition ── */}
-            {selectedUnitId && (
+            {/* ── Composition ── */}
+            {bhkType && (
               <div className="rounded-xl border border-border bg-card overflow-hidden">
                 <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
                   <Grid3x3 size={14} className="text-cyan-600 dark:text-cyan-400" />
-                  <span className="text-sm font-heading font-semibold text-foreground">BHK & Room Composition</span>
+                  <span className="text-sm font-heading font-semibold text-foreground">
+                    {selectedLabel} Room Composition
+                  </span>
                 </div>
                 <div className="p-5 space-y-5">
-                  {loadingConfig ? (
+                  {loadingTemplate || loadingCategories ? (
                     <div className="h-24 rounded-lg border border-border bg-muted/30 animate-pulse" />
                   ) : (
                     <>
-                      <div className="max-w-xs">
-                        <label className={labelCls}>BHK Type <span className="text-red-500">*</span></label>
-                        <select value={bhkType} onChange={(e) => setBhkType(e.target.value as BhkType)} className={inputCls}>
-                          <option value="">Select BHK type…</option>
-                          {BHK_TYPES.map((b) => <option key={b} value={b}>{b}</option>)}
-                        </select>
-                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        This layout applies to every unit tagged {selectedLabel} across every project,
+                        tower, and floor — set it once here instead of per unit.
+                      </p>
 
                       <div className="space-y-2">
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                          Room Categories
-                        </p>
+                        <p className={labelCls}>Room Categories</p>
                         {(categories as RoomCategory[]).length === 0 ? (
                           <p className="text-sm text-muted-foreground">
                             No active room categories yet — add some in Room Category Master first.
                           </p>
                         ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                             {(categories as RoomCategory[]).map((c) => {
                               const qty = quantities[c.id] ?? 0;
                               return (
-                                <div key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3.5 py-2.5">
-                                  <span className="text-sm font-medium text-foreground">{c.alias}</span>
-                                  <div className="flex items-center gap-2 shrink-0">
+                                <div key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-1.5">
+                                  <span className="text-xs font-heading font-semibold text-foreground">{c.alias}</span>
+                                  <div className="flex items-center gap-1.5 shrink-0">
                                     <button
                                       type="button"
                                       onClick={() => setQty(c.id, qty - 1)}
                                       disabled={qty <= 0}
-                                      className="w-7 h-7 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-30"
+                                      className="w-6 h-6 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-30"
                                     >
-                                      <Minus size={12} />
+                                      <Minus size={11} />
                                     </button>
-                                    <span className="w-6 text-center text-sm font-semibold tabular-nums">{qty}</span>
+                                    <span className="w-5 text-center text-xs font-semibold tabular-nums">{qty}</span>
                                     <button
                                       type="button"
                                       onClick={() => setQty(c.id, qty + 1)}
-                                      className="w-7 h-7 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                      disabled={qty >= MAX_ROOM_QTY}
+                                      title={qty >= MAX_ROOM_QTY ? `Max ${MAX_ROOM_QTY} per category` : undefined}
+                                      className="w-6 h-6 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-30"
                                     >
-                                      <Plus size={12} />
+                                      <Plus size={11} />
                                     </button>
                                   </div>
                                 </div>
@@ -270,9 +290,9 @@ export default function RoomCompositionBuilder() {
                           <button
                             onClick={handleSave}
                             disabled={saving}
-                            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-cyan-500 to-teal-400 text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-cyan-500 to-teal-400 hover:opacity-90 disabled:opacity-50 transition-all"
                           >
-                            <Save size={14} /> {saving ? "Saving…" : "Save Composition"}
+                            <Save size={13} /> {saving ? "Saving…" : `Save ${selectedLabel} Template`}
                           </button>
                         )}
                       </div>
