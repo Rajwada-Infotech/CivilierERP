@@ -561,10 +561,18 @@ export default function ChequeCancellation() {
                           <td className="px-3 py-3 align-middle">{r.ChequeLotNumber ?? "—"}</td>
                           <td className="px-3 py-3 align-middle">{r.BankName ?? "—"}</td>
                           <td className="px-3 py-3 font-mono align-middle">{r.AccountNumber ?? "—"}</td>
-                          <td className="px-3 py-3 align-middle">{r.DocNo ?? "—"}</td>
-                          <td className="px-3 py-3 align-middle">{r.PCompanyName ?? r.PCompany ?? "—"}</td>
-                          <td className="px-3 py-3 align-middle">{r.PProject ?? "—"}</td>
-                          <td className="px-3 py-3 align-middle">{r.PAmount != null ? formatINR(r.PAmount) : "—"}</td>
+                          {r.PaymentId == null ? (
+                            <td className="px-3 py-3 align-middle text-muted-foreground italic" colSpan={4}>
+                              Cancelled directly from cheque book — never issued against a payment
+                            </td>
+                          ) : (
+                            <>
+                              <td className="px-3 py-3 align-middle">{r.DocNo ?? "—"}</td>
+                              <td className="px-3 py-3 align-middle">{r.PCompanyName ?? r.PCompany ?? "—"}</td>
+                              <td className="px-3 py-3 align-middle">{r.PProject ?? "—"}</td>
+                              <td className="px-3 py-3 align-middle">{r.PAmount != null ? formatINR(r.PAmount) : "—"}</td>
+                            </>
+                          )}
                           <td className="px-3 py-3 text-muted-foreground align-middle">{r.Reason ?? "—"}</td>
                           <td className="px-3 py-3 align-middle">{r.CancelledBy ?? "—"}</td>
                           <td className="px-3 py-3 whitespace-nowrap align-middle">{fmt(r.CancelledAt)}</td>
