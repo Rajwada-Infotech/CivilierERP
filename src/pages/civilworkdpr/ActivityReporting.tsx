@@ -169,7 +169,7 @@ export default function ActivityReporting() {
                                 <td className="px-3 py-3">
                                   <span className="flex items-center gap-1.5 text-xs text-foreground">
                                     <UserRound size={11} className="text-muted-foreground shrink-0" />
-                                    {row.engineerName || <span className="text-muted-foreground italic">Unassigned</span>}
+                                    {row.engineerNames || <span className="text-muted-foreground italic">Unassigned</span>}
                                   </span>
                                 </td>
                                 <td className="px-3 py-3">

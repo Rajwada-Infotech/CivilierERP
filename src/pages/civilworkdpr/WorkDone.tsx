@@ -24,6 +24,8 @@ import {
   UserRound,
   CalendarDays,
   ListChecks,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -107,7 +109,7 @@ const EMPTY_FORM: WorkDoneLocationForm = { ProjectId: "", BlockId: "", FloorNo: 
 export default function WorkDone() {
   const rights = usePageRights("civilworkdpr-work-done");
   const [form, setForm] = useState<WorkDoneLocationForm>(EMPTY_FORM);
-  const [activeRung, setActiveRung] = useState<LadderActivity | null>(null);
+  const [activeAssignment, setActiveAssignment] = useState<{ rung: LadderActivity; chain: DependencyMasterListRow } | null>(null);
 
   // Dependency Chains browser — every chain with its allocated room and a
   // Pending/Done read on each of its activities, shown up front with no
@@ -139,6 +141,26 @@ export default function WorkDone() {
     allAssignments.forEach((a) => map.set(a.rungId, a));
     return map;
   }, [allAssignments]);
+
+  // Group chains by the room they're allocated to — a room with several
+  // chains (e.g. Bedroom 1 having both a Flooring Sequence and a Snag
+  // Rectification chain) now shows as one collapsible cluster instead of
+  // scattered rows, same grouping convention as GRN's PO grouping.
+  const chainGroupsByRoom = useMemo(() => {
+    const groups = new Map<
+      string,
+      { key: string; scopePath: string; projectName: string | null; chains: { chain: DependencyMasterListRow; index: number }[] }
+    >();
+    (allChains as DependencyMasterListRow[]).forEach((chain, index) => {
+      const key = chain.scopePath;
+      if (!groups.has(key)) groups.set(key, { key, scopePath: key, projectName: chain.projectName, chains: [] });
+      groups.get(key)!.chains.push({ chain, index });
+    });
+    return Array.from(groups.values());
+  }, [allChains]);
+  const [collapsedChainGroups, setCollapsedChainGroups] = useState<Record<string, boolean>>({});
+  const toggleChainGroup = (key: string) =>
+    setCollapsedChainGroups((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const { data: projects = [], isLoading: loadingProjects } = useQuery({
     queryKey: ["civilworkdpr-work-done-projects"],
@@ -291,83 +313,6 @@ export default function WorkDone() {
           </div>
         ) : (
           <>
-            {/* Dependency Chains browser — every chain, its allocated room,
-                and a Pending/Done read on each activity, with no
-                Project/Tower/Floor/Unit selection needed. Click an
-                activity to open the same assign/edit popup used below. */}
-            {allChains.length > 0 && (
-              <div className="rounded-xl border border-border bg-card overflow-hidden">
-                <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
-                  <GitBranch size={14} className="text-cyan-600 dark:text-cyan-400" />
-                  <span className="text-sm font-heading font-semibold text-foreground">Dependency Chains</span>
-                </div>
-                <div className="divide-y divide-border">
-                  {(allChains as DependencyMasterListRow[]).map((chain, i) => {
-                    const detail = chainDetailQueries[i]?.data;
-                    const rungs = detail?.activities ?? [];
-                    return (
-                      <div key={chain.id} className="px-5 py-4 space-y-2.5">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <span className="text-sm font-semibold text-foreground">{chain.alias}</span>
-                            <span
-                              className={`ml-2 text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
-                                chain.workType === "INTERNAL"
-                                  ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
-                                  : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                              }`}
-                            >
-                              {chain.workType}
-                            </span>
-                          </div>
-                          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <MapPin size={11} className="shrink-0" />
-                            {chain.scopePath}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {rungs.length === 0 ? (
-                            <span className="text-xs text-muted-foreground italic">Loading activities…</span>
-                          ) : (
-                            rungs.map((rung) => {
-                              const assignment = rung.rungId != null ? allAssignmentByRungId.get(rung.rungId) : undefined;
-                              const done = assignment?.status === "COMPLETED";
-                              return (
-                                <button
-                                  key={rung.rungId ?? rung.activityId}
-                                  type="button"
-                                  onClick={() => setActiveRung(rung)}
-                                  className={`flex items-center gap-1.5 rounded-full border pl-2 pr-2.5 py-1 text-xs transition-colors ${
-                                    done
-                                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                                      : "border-border bg-muted/40 text-foreground hover:bg-muted"
-                                  }`}
-                                  title="Assign engineer & material"
-                                >
-                                  <span className="font-medium">
-                                    {rung.sequenceNo}. {rung.activityName}
-                                  </span>
-                                  <span
-                                    className={`text-[9px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
-                                      done
-                                        ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
-                                        : "bg-slate-500/15 text-slate-600 dark:text-slate-400"
-                                    }`}
-                                  >
-                                    {done ? "Done" : "Pending"}
-                                  </span>
-                                </button>
-                              );
-                            })
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
               <MapPin size={14} className="text-cyan-600 dark:text-cyan-400" />
@@ -514,6 +459,109 @@ export default function WorkDone() {
               </div>
             </div>
           </div>
+
+          {/* Dependency Chains browser — every chain grouped by the room
+              it's allocated to, each activity showing a Pending/Done read,
+              with no Project/Tower/Floor/Unit selection needed. Click an
+              activity to open the same assign/edit popup used below. */}
+          {allChains.length > 0 && (
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
+                <GitBranch size={14} className="text-cyan-600 dark:text-cyan-400" />
+                <span className="text-sm font-heading font-semibold text-foreground">Dependency Chains</span>
+              </div>
+              <div className="divide-y divide-border">
+                {chainGroupsByRoom.map((group) => {
+                  const collapsed = !!collapsedChainGroups[group.key];
+                  return (
+                    <div key={group.key}>
+                      {/* Group header — every chain allocated to this room */}
+                      <button
+                        type="button"
+                        onClick={() => toggleChainGroup(group.key)}
+                        className="w-full flex items-center gap-2.5 px-5 py-3 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+                      >
+                        {collapsed ? (
+                          <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                        ) : (
+                          <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                        )}
+                        <MapPin size={13} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
+                        <span className="text-sm font-heading font-semibold text-foreground truncate">
+                          {group.projectName ? `${group.projectName} > ` : ""}
+                          {group.scopePath}
+                        </span>
+                        <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+                          {group.chains.length} chain{group.chains.length !== 1 ? "s" : ""}
+                        </span>
+                      </button>
+
+                      {!collapsed && (
+                        <div className="divide-y divide-border">
+                          {group.chains.map(({ chain, index }) => {
+                            const detail = chainDetailQueries[index]?.data;
+                            const rungs = detail?.activities ?? [];
+                            return (
+                              <div key={chain.id} className="px-5 py-4 space-y-2.5">
+                                <div>
+                                  <span className="text-sm font-semibold text-foreground">{chain.alias}</span>
+                                  <span
+                                    className={`ml-2 text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                      chain.workType === "INTERNAL"
+                                        ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
+                                        : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+                                    }`}
+                                  >
+                                    {chain.workType}
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {rungs.length === 0 ? (
+                                    <span className="text-xs text-muted-foreground italic">Loading activities…</span>
+                                  ) : (
+                                    rungs.map((rung) => {
+                                      const assignment = rung.rungId != null ? allAssignmentByRungId.get(rung.rungId) : undefined;
+                                      const done = assignment?.status === "COMPLETED";
+                                      return (
+                                        <button
+                                          key={rung.rungId ?? rung.activityId}
+                                          type="button"
+                                          onClick={() => setActiveAssignment({ rung, chain })}
+                                          className={`flex items-center gap-1.5 rounded-full border pl-2 pr-2.5 py-1 text-xs transition-colors ${
+                                            done
+                                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                              : "border-border bg-muted/40 text-foreground hover:bg-muted"
+                                          }`}
+                                          title="Assign engineer & material"
+                                        >
+                                          <span className="font-medium">
+                                            {rung.sequenceNo}. {rung.activityName}
+                                          </span>
+                                          <span
+                                            className={`text-[9px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                              done
+                                                ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                                                : "bg-slate-500/15 text-slate-600 dark:text-slate-400"
+                                            }`}
+                                          >
+                                            {done ? "Done" : "Pending"}
+                                          </span>
+                                        </button>
+                                      );
+                                    })
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           </>
         )}
 
@@ -583,7 +631,7 @@ export default function WorkDone() {
                       ) : (
                         <ActivityChainPreview
                           rungs={linkedDependencyDetail?.activities ?? []}
-                          onRungClick={(rung) => setActiveRung(rung)}
+                          onRungClick={(rung) => setActiveAssignment({ rung, chain: linkedDependency })}
                         />
                       )}
                     </div>
@@ -631,7 +679,7 @@ export default function WorkDone() {
                                       <td className="px-3 py-3">
                                         <span className="flex items-center gap-1.5 text-xs text-foreground">
                                           <UserRound size={11} className="text-muted-foreground shrink-0" />
-                                          {assignment.engineerName || (
+                                          {assignment.engineerNames || (
                                             <span className="text-muted-foreground italic">Unassigned</span>
                                           )}
                                         </span>
@@ -683,7 +731,13 @@ export default function WorkDone() {
           </div>
         )}
       </CivilWorkDprShell>
-      {activeRung && <RungAssignmentModal rung={activeRung} onClose={() => setActiveRung(null)} />}
+      {activeAssignment && (
+        <RungAssignmentModal
+          rung={activeAssignment.rung}
+          chain={activeAssignment.chain}
+          onClose={() => setActiveAssignment(null)}
+        />
+      )}
     </>
   );
 }

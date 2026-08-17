@@ -7,6 +7,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 
 const STATUS_VALUES = new Set(["PENDING", "IN_PROGRESS", "HOLD", "CANCELLED", "APPROVED", "REWORK", "COMPLETED"]);
+const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
 
 // GET / — every rung that has been assigned an engineer/material at least
 // once. Two callers share this: the Activity Reporting page (full list,
@@ -32,8 +33,13 @@ router.get(
       SELECT
         daa.Id AS assignmentId,
         daa.DependencyMasterActivityId AS rungId,
-        daa.EngineerId AS engineerId, u.name AS engineerName,
         daa.StartDate AS startDate,
+        daa.Days AS days,
+        daa.EndDate AS endDate,
+        daa.LabourSource AS labourSource,
+        daa.MaterialSource AS materialSource,
+        daa.Description AS description,
+        daa.Remarks AS remarks,
         daa.Status AS status,
         daa.UpdatedAt AS updatedAt,
         dma.SequenceNo AS sequenceNo,
@@ -44,6 +50,12 @@ router.get(
         dm.Floor AS floor,
         dm.FlatId AS flatId, um.UnitName AS flatName,
         CONCAT(ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor, ' > ', ISNULL(um.UnitName, '—')) AS scopePath,
+        (
+          SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+          FROM dbo.DependencyActivityEngineer dae
+          JOIN dbo.users u ON u.id = dae.EngineerId
+          WHERE dae.AssignmentId = daa.Id
+        ) AS engineerNames,
         (
           SELECT img.M_Name AS name, dammat.Quantity AS quantity, img.M_UOM AS uom
           FROM dbo.DependencyActivityMaterial dammat
@@ -56,7 +68,6 @@ router.get(
       JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
       JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
-      LEFT JOIN dbo.users       u  ON u.id = daa.EngineerId
       LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
@@ -132,6 +143,40 @@ router.get("/engineers", authMiddleware, async (req, res) => {
   }
 });
 
+// GET /contractors?projectId= — contractors for the "Labour/Material Given
+// By" pickers, sourced from Contractor Master (dbo.AccountHeadMaster WHERE
+// LHeadType='C'). Prefers contractors already allocated to this project
+// (dbo.ContractorAllocation) so the list stays project-relevant where that
+// data exists, but falls back to the full Contractor Master roster when the
+// project has no allocations yet — an empty dropdown because nobody's
+// gotten around to recording an allocation is worse than an unscoped list.
+router.get("/contractors", authMiddleware, async (req, res) => {
+  const projectId = parseInt(req.query.projectId, 10);
+  if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
+  try {
+    const pool = await getPool();
+    const scoped = await pool.request().input("projectId", sql.Int, projectId).query(`
+      SELECT DISTINCT ahm.LHeadId AS id, ahm.LHeadName AS name
+      FROM dbo.ContractorAllocation ca
+      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = ca.ContractorLHeadId
+      WHERE ca.ProjectId = @projectId AND ISNULL(ahm.LHeadStatus, 1) = 1
+      ORDER BY ahm.LHeadName ASC
+    `);
+    if (scoped.recordset.length) return res.json(scoped.recordset);
+
+    const all = await pool.request().query(`
+      SELECT LHeadId AS id, LHeadName AS name
+      FROM dbo.AccountHeadMaster
+      WHERE LHeadType = 'C' AND ISNULL(LHeadStatus, 1) = 1
+      ORDER BY LHeadName ASC
+    `);
+    res.json(all.recordset);
+  } catch (err) {
+    console.error("[dependency-activity-assignment] GET /contractors error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /:rungId — the existing assignment (if any) for one
 // DependencyMasterActivity row, plus the candidate material list sourced
 // from that rung's own ActivityItems links (Activity Master's "linked
@@ -159,18 +204,28 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
     `);
 
     const assignRes = await pool.request().input("rungId", sql.Int, rungId).query(`
-      SELECT Id AS assignmentId, EngineerId AS engineerId, StartDate AS startDate
+      SELECT
+        Id AS assignmentId, StartDate AS startDate, Days AS days, EndDate AS endDate,
+        LabourSource AS labourSource, MaterialSource AS materialSource,
+        LabourContractorId AS labourContractorId, MaterialContractorId AS materialContractorId,
+        Description AS description, Remarks AS remarks
       FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId
     `);
     const assignment = assignRes.recordset[0] || null;
 
     let materials = [];
+    let engineerIds = [];
     if (assignment) {
       const matRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
         SELECT ItemId AS itemId, Quantity AS quantity
         FROM dbo.DependencyActivityMaterial WHERE AssignmentId = @assignmentId
       `);
       materials = matRes.recordset;
+
+      const engRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
+        SELECT EngineerId AS engineerId FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @assignmentId
+      `);
+      engineerIds = engRes.recordset.map((r) => r.engineerId);
     }
 
     res.json({
@@ -178,8 +233,16 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
       candidateItems: itemsRes.recordset,
       assignment: assignment
         ? {
-            engineerId: assignment.engineerId,
+            engineerIds,
             startDate: assignment.startDate,
+            days: assignment.days,
+            endDate: assignment.endDate,
+            labourSource: assignment.labourSource,
+            materialSource: assignment.materialSource,
+            labourContractorId: assignment.labourContractorId,
+            materialContractorId: assignment.materialContractorId,
+            description: assignment.description,
+            remarks: assignment.remarks,
             materials,
           }
         : null,
@@ -190,17 +253,30 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
   }
 });
 
-// POST /:rungId — upsert the assignment for one rung: engineer, start date,
-// and a material+quantity list. Always replaces the material rows wholesale
-// (delete + reinsert) rather than diffing — the list is short (an
-// activity's own linked items) so this is simpler and avoids partial-update
-// bugs.
+// POST /:rungId — upsert the assignment for one rung: engineers, start
+// date/duration/end date, labour & material source, description, remarks,
+// and a material+quantity list. Engineers and materials are always replaced
+// wholesale (delete + reinsert) rather than diffed — both lists are short,
+// so this is simpler and avoids partial-update bugs.
 router.post("/:rungId", authMiddleware, async (req, res) => {
   const rungId = parseInt(req.params.rungId, 10);
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
 
-  const { engineerId, startDate, materials } = req.body;
+  const {
+    engineerIds, startDate, days, endDate, labourSource, materialSource,
+    labourContractorId, materialContractorId, description, remarks, materials,
+  } = req.body;
+
+  if (engineerIds != null && !Array.isArray(engineerIds)) {
+    return res.status(400).json({ error: "engineerIds must be an array" });
+  }
   if (!Array.isArray(materials)) return res.status(400).json({ error: "materials must be an array" });
+  if (labourSource && !SOURCE_VALUES.has(labourSource)) {
+    return res.status(400).json({ error: `labourSource must be one of: ${[...SOURCE_VALUES].join(", ")}` });
+  }
+  if (materialSource && !SOURCE_VALUES.has(materialSource)) {
+    return res.status(400).json({ error: `materialSource must be one of: ${[...SOURCE_VALUES].join(", ")}` });
+  }
 
   const actor = req.user?.email || req.user?.name || "system";
 
@@ -214,36 +290,50 @@ router.post("/:rungId", authMiddleware, async (req, res) => {
     const existing = await pool.request().input("rungId", sql.Int, rungId)
       .query(`SELECT Id FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId`);
 
+    const fieldInputs = (request) =>
+      request
+        .input("startDate", sql.Date, startDate || null)
+        .input("days", sql.Int, Number.isFinite(days) ? days : null)
+        .input("endDate", sql.Date, endDate || null)
+        .input("labourSource", sql.NVarChar(20), labourSource || null)
+        .input("materialSource", sql.NVarChar(20), materialSource || null)
+        .input("labourContractorId", sql.Int, Number.isFinite(labourContractorId) ? labourContractorId : null)
+        .input("materialContractorId", sql.Int, Number.isFinite(materialContractorId) ? materialContractorId : null)
+        .input("description", sql.NVarChar(500), description || null)
+        .input("remarks", sql.NVarChar(1000), remarks || null);
+
     let assignmentId;
     if (existing.recordset.length) {
       assignmentId = existing.recordset[0].Id;
-      await pool.request()
+      await fieldInputs(pool.request())
         .input("id", sql.Int, assignmentId)
-        .input("engineerId", sql.Int, engineerId || null)
-        .input("startDate", sql.Date, startDate || null)
         .input("updatedBy", sql.NVarChar(200), actor)
         .query(`
           UPDATE dbo.DependencyActivityAssignment
-          SET EngineerId = @engineerId, StartDate = @startDate, UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
+          SET StartDate = @startDate, Days = @days, EndDate = @endDate,
+              LabourSource = @labourSource, MaterialSource = @materialSource,
+              LabourContractorId = @labourContractorId, MaterialContractorId = @materialContractorId,
+              Description = @description, Remarks = @remarks,
+              UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);
     } else {
-      const inserted = await pool.request()
+      const inserted = await fieldInputs(pool.request())
         .input("rungId", sql.Int, rungId)
-        .input("engineerId", sql.Int, engineerId || null)
-        .input("startDate", sql.Date, startDate || null)
         .input("createdBy", sql.NVarChar(200), actor)
         .query(`
-          INSERT INTO dbo.DependencyActivityAssignment (DependencyMasterActivityId, EngineerId, StartDate, CreatedBy)
+          INSERT INTO dbo.DependencyActivityAssignment
+            (DependencyMasterActivityId, StartDate, Days, EndDate, LabourSource, MaterialSource,
+             LabourContractorId, MaterialContractorId, Description, Remarks, CreatedBy)
           OUTPUT INSERTED.Id AS id
-          VALUES (@rungId, @engineerId, @startDate, @createdBy)
+          VALUES (@rungId, @startDate, @days, @endDate, @labourSource, @materialSource,
+                  @labourContractorId, @materialContractorId, @description, @remarks, @createdBy)
         `);
       assignmentId = inserted.recordset[0].id;
     }
 
     await pool.request().input("assignmentId", sql.Int, assignmentId)
       .query(`DELETE FROM dbo.DependencyActivityMaterial WHERE AssignmentId = @assignmentId`);
-
     for (const row of materials) {
       const itemId = row.itemId;
       const quantity = parseFloat(row.quantity);
@@ -255,6 +345,20 @@ router.post("/:rungId", authMiddleware, async (req, res) => {
         .query(`
           INSERT INTO dbo.DependencyActivityMaterial (AssignmentId, ItemId, Quantity)
           VALUES (@assignmentId, @itemId, @quantity)
+        `);
+    }
+
+    await pool.request().input("assignmentId", sql.Int, assignmentId)
+      .query(`DELETE FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @assignmentId`);
+    for (const engineerId of engineerIds || []) {
+      const id = parseInt(engineerId, 10);
+      if (!Number.isFinite(id)) continue;
+      await pool.request()
+        .input("assignmentId", sql.Int, assignmentId)
+        .input("engineerId", sql.Int, id)
+        .query(`
+          INSERT INTO dbo.DependencyActivityEngineer (AssignmentId, EngineerId)
+          VALUES (@assignmentId, @engineerId)
         `);
     }
 

@@ -33,25 +33,64 @@ export interface AssignmentMaterial {
   quantity: number;
 }
 
+// A rung can be staffed by more than one engineer, and either the labour or
+// the material for it can come from the project's own crew/stock rather
+// than a contractor's — SourceType captures that as a plain classification
+// (no FK to a specific contractor), shown as a badge in the UI.
+export const SOURCE_TYPES = ["CONTRACTOR", "DEVELOPER"] as const;
+export type SourceType = (typeof SOURCE_TYPES)[number];
+export const SOURCE_META: Record<SourceType, { label: string; className: string }> = {
+  CONTRACTOR: { label: "Contractor", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
+  DEVELOPER: { label: "Developer", className: "bg-violet-500/10 text-violet-600 dark:text-violet-400" },
+};
+
+export interface Contractor {
+  id: number;
+  name: string;
+}
+
 export interface RungAssignmentDetail {
   rungId: number;
   candidateItems: CandidateItem[];
   assignment: {
-    engineerId: number | null;
+    engineerIds: number[];
     startDate: string | null;
+    days: number | null;
+    endDate: string | null;
+    labourSource: SourceType | null;
+    materialSource: SourceType | null;
+    labourContractorId: number | null;
+    materialContractorId: number | null;
+    description: string | null;
+    remarks: string | null;
     materials: AssignmentMaterial[];
   } | null;
 }
 
 export interface RungAssignmentPayload {
-  engineerId: number | null;
+  engineerIds: number[];
   startDate: string | null;
+  days: number | null;
+  endDate: string | null;
+  labourSource: SourceType | null;
+  materialSource: SourceType | null;
+  labourContractorId: number | null;
+  materialContractorId: number | null;
+  description: string | null;
+  remarks: string | null;
   materials: AssignmentMaterial[];
 }
 
 export const getEngineers = async (): Promise<Engineer[]> => {
   const res = await fetchWithAuth(`${BASE}/engineers`);
   return handleResponse<Engineer[]>(res);
+};
+
+// Contractors already allocated to the given project (see
+// ContractorAllocation), for the Labour/Material "Given By" pickers.
+export const getProjectContractors = async (projectId: number): Promise<Contractor[]> => {
+  const res = await fetchWithAuth(`${BASE}/contractors?projectId=${projectId}`);
+  return handleResponse<Contractor[]>(res);
 };
 
 export const getRungAssignment = async (rungId: number): Promise<RungAssignmentDetail> => {
@@ -102,9 +141,14 @@ export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; c
 export interface ReportedAssignment {
   assignmentId: number;
   rungId: number;
-  engineerId: number | null;
-  engineerName: string | null;
+  engineerNames: string | null;
   startDate: string | null;
+  days: number | null;
+  endDate: string | null;
+  labourSource: SourceType | null;
+  materialSource: SourceType | null;
+  description: string | null;
+  remarks: string | null;
   status: AssignmentStatus;
   updatedAt: string;
   sequenceNo: number;
