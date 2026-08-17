@@ -344,6 +344,13 @@ const followupSetupItems = [
     color: "text-cyan-500",
     pageKey: "followup-department-master",
   },
+  {
+    icon: Tag,
+    label: "Tag Master",
+    path: "/followup/setup/tag-master",
+    color: "text-pink-500",
+    pageKey: "followup-tag-master",
+  },
 ];
 
 const engineeringSetupItems = [

@@ -1,7 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PauseCircle, PlayCircle, XCircle, Download, Upload, ListPlus, CornerDownRight, ChevronRight, ChevronDown, AlarmClock } from "lucide-react";
+import { PauseCircle, PlayCircle, XCircle, Download, Upload, ListPlus, CornerDownRight, ChevronRight, ChevronDown, AlarmClock, ChevronsUpDown, Check, Loader2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -13,7 +13,18 @@ import {
 } from "@/components/MasterPage";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 
 const API = "/api/task-master";
 const PRIORITIES = ["Very Important", "Important", "Normal"];
@@ -273,6 +284,201 @@ async function fetchAllDocTypes(): Promise<AnyModuleDocType[]> {
   return res.json().catch(() => ([]));
 }
 
+// Which module labels GET /api/doc-selector can actually search (see
+// backend/routes/docSelector.js's DOC_MODULE_MAP) — fetched once so the
+// frontend never hardcodes a second copy of that list.
+async function fetchDocSelectorModules(): Promise<string[]> {
+  const res = await fetchWithAuth("/api/doc-selector/modules");
+  if (!res.ok) return [];
+  return res.json().catch(() => ([]));
+}
+
+interface DocOption {
+  id: number;
+  label: string;
+  date: string | null;
+  companyId: number | null;
+  projectId: number | null;
+  company: string | null;
+  project: string | null;
+}
+
+// Generic async search-as-you-type combobox — Popover + Command (cmdk),
+// same shape as the one already hand-rolled in src/pages/ticket/CreateTicket.tsx.
+// shouldFilter={false} on <Command> because the options it's given are
+// already server-filtered by the caller's search query; cmdk's own fuzzy
+// filter would otherwise re-filter (and often hide) already-relevant results.
+const SearchCombobox: React.FC<{
+  value: string;
+  onSelect: (value: string) => void;
+  options: DocOption[];
+  search: string;
+  onSearchChange: (v: string) => void;
+  placeholder: string;
+  emptyLabel: string;
+  loading?: boolean;
+  disabled?: boolean;
+}> = ({ value, onSelect, options, search, onSearchChange, placeholder, emptyLabel, loading, disabled }) => {
+  const [open, setOpen] = React.useState(false);
+  const selected = options.find((o) => String(o.id) === value);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled}
+          className={cn(
+            "w-full justify-between font-normal h-9 bg-muted border-border hover:bg-muted",
+            !selected && "text-muted-foreground",
+          )}
+        >
+          <span className="truncate">{selected ? selected.label : placeholder}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command shouldFilter={false}>
+          <CommandInput
+            value={search}
+            onValueChange={onSearchChange}
+            placeholder="Type to search…"
+          />
+          <CommandList>
+            {loading ? (
+              <div className="flex items-center justify-center py-6 gap-2 text-muted-foreground text-xs">
+                <Loader2 size={13} className="animate-spin" /> Searching…
+              </div>
+            ) : (
+              <>
+                <CommandEmpty>{emptyLabel}</CommandEmpty>
+                <CommandGroup>
+                  {options.map((opt) => (
+                    <CommandItem
+                      key={opt.id}
+                      value={String(opt.id)}
+                      onSelect={() => {
+                        onSelect(String(opt.id));
+                        setOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4 shrink-0",
+                          value === String(opt.id) ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <span className="flex flex-col min-w-0">
+                        <span className="truncate">{opt.label}</span>
+                        <span className="text-xs text-muted-foreground truncate">
+                          {[
+                            opt.date ? new Date(opt.date).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : null,
+                            opt.company,
+                            opt.project,
+                          ].filter(Boolean).join(" · ")}
+                        </span>
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+// "Document Number" doc selector — dependent, searchable combobox over REAL
+// document rows (an actual PO/GRN/Work Order/... record), not just the
+// dbo.TypeOfDoc *definition* linkedTypeOfDocId points at. The chain is:
+// Entry Type -> Type of Doc -> (its links_to label resolves a module) ->
+// Doc Selector searches that module's real records, itself narrowed by
+// Company/Project if those are already set (a two-way filter, not strictly
+// one-way — see backend/routes/docSelector.js).
+const DocSelectorField: React.FC<{
+  value: unknown;
+  onChange: (v: unknown) => void;
+  formData: Record<string, unknown>;
+}> = ({ value, onChange, formData }) => {
+  const linkedTypeOfDocId = (formData.linkedTypeOfDocId as string) || "";
+  const allDocTypes = (formData.__allDocTypes as AnyModuleDocType[]) ?? [];
+  const supportedModules = (formData.__docSelectorModules as string[]) ?? [];
+  const docCacheRef = formData.__docCacheRef as React.MutableRefObject<Map<string, DocOption>> | undefined;
+  const companyId = (formData.caseCompanyId as string) || "";
+  const projectId = (formData.caseProjectId as string) || "";
+
+  const selectedDocType = allDocTypes.find((d) => String(d.TypeOfDocId) === linkedTypeOfDocId);
+  const linksTo = selectedDocType?.links_to || "";
+  const moduleKey = supportedModules.find((m) => linksTo.includes(m));
+
+  const [search, setSearch] = React.useState("");
+  const [debouncedSearch, setDebouncedSearch] = React.useState("");
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: options = [], isFetching } = useQuery({
+    queryKey: ["doc-selector", moduleKey, companyId, projectId, debouncedSearch],
+    queryFn: async () => {
+      const params = new URLSearchParams({ module: moduleKey! });
+      if (companyId) params.set("companyId", companyId);
+      if (projectId) params.set("projectId", projectId);
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      const res = await fetchWithAuth(`/api/doc-selector?${params.toString()}`);
+      if (!res.ok) return [];
+      return (await res.json().catch(() => [])) as DocOption[];
+    },
+    enabled: !!moduleKey,
+    staleTime: 15 * 1000,
+  });
+
+  // Feed the parent's onFieldChange (entryTypeId/linkedTypeOfDocId/linkedDocId
+  // handling in the main component) enough info to auto-fill Company/Project
+  // once a document is picked, without a second round trip.
+  React.useEffect(() => {
+    if (!docCacheRef) return;
+    for (const o of options) docCacheRef.current.set(String(o.id), o);
+  }, [options, docCacheRef]);
+
+  if (!linkedTypeOfDocId) {
+    return (
+      <div className="w-full h-9 px-3 flex items-center rounded-lg text-sm text-muted-foreground bg-muted/60 border border-border cursor-not-allowed">
+        Select a Type of Doc first
+      </div>
+    );
+  }
+  if (!moduleKey) {
+    return (
+      <div className="w-full h-9 px-3 flex items-center rounded-lg text-sm text-muted-foreground bg-muted/60 border border-border cursor-not-allowed">
+        No documents required for this entry type
+      </div>
+    );
+  }
+
+  return (
+    <SearchCombobox
+      value={(value as string) || ""}
+      onSelect={(v) => onChange(v)}
+      options={options}
+      search={search}
+      onSearchChange={setSearch}
+      placeholder={`Select a ${moduleKey}…`}
+      emptyLabel={
+        companyId || projectId
+          ? `No ${moduleKey}s found for the selected Company/Project — try clearing filters.`
+          : `No ${moduleKey}s found.`
+      }
+      loading={isFetching}
+    />
+  );
+};
+
 const fields: FieldDef[] = [
   {
     name: "typeOfDocId",
@@ -310,6 +516,17 @@ const fields: FieldDef[] = [
           label: `${d.Prefix} — ${d.Description || d.links_to || "Untitled"}`,
         }));
     },
+  },
+  {
+    // Dependent, searchable combobox over REAL document rows (an actual PO,
+    // GRN, Work Order, ... record) in whichever module the selected Type of
+    // Doc's links_to resolves to. Disabled until Type of Doc is chosen; also
+    // reacts to Company/Project once those are set (narrows the search).
+    // See DocSelectorField above and backend/routes/docSelector.js.
+    name: "linkedDocId",
+    label: "Linked Document",
+    type: "custom",
+    render: (props) => <DocSelectorField {...props} />,
   },
   {
     name: "caseCompanyId",
@@ -476,6 +693,18 @@ const TaskMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: docSelectorModules = [] } = useQuery<string[]>({
+    queryKey: ["doc-selector-modules"],
+    queryFn: fetchDocSelectorModules,
+    staleTime: 30 * 60 * 1000,
+  });
+
+  // Populated by DocSelectorField as it fetches search results, read by
+  // onFieldChange below to auto-fill Company/Project/label once a document
+  // is picked — a plain ref (not state) since it's a pure lookup cache, not
+  // something that should itself trigger a re-render.
+  const docCacheRef = React.useRef<Map<string, DocOption>>(new Map());
+
   const flatMapped: RecordWithId[] = React.useMemo(() => {
     if (!Array.isArray(tasks)) return [];
     return tasks.map((t) => ({
@@ -512,6 +741,8 @@ const TaskMaster: React.FC = () => {
         t.LinkedTypeOfDocPrefix || t.LinkedTypeOfDocLabel
           ? `${t.LinkedTypeOfDocPrefix ?? ""}${t.LinkedTypeOfDocPrefix && t.LinkedTypeOfDocLabel ? " — " : ""}${t.LinkedTypeOfDocLabel ?? ""}`
           : "",
+      linkedDocId: t.LinkedDocRecordId ? String(t.LinkedDocRecordId) : "",
+      linkedDocNo: t.LinkedDocNo ?? "",
     }));
   }, [tasks]);
 
@@ -553,8 +784,10 @@ const TaskMaster: React.FC = () => {
       __taskDocTypes: taskDocTypes,
       __nextFallbackTaskNo: nextFallbackTaskNo,
       __allDocTypes: allDocTypes,
+      __docSelectorModules: docSelectorModules,
+      __docCacheRef: docCacheRef,
     }),
-    [allProjects, taskDocTypes, nextFallbackTaskNo, allDocTypes],
+    [allProjects, taskDocTypes, nextFallbackTaskNo, allDocTypes, docSelectorModules],
   );
 
   const toPayload = (r: Record<string, any>) => ({
@@ -585,6 +818,8 @@ const TaskMaster: React.FC = () => {
     ReminderAt: r.reminderAt ? new Date(r.reminderAt).toISOString() : null,
     EntryTypeId: r.entryTypeId || null,
     LinkedTypeOfDocId: r.linkedTypeOfDocId ? parseInt(r.linkedTypeOfDocId) : null,
+    LinkedDocRecordId: r.linkedDocId ? parseInt(r.linkedDocId) : null,
+    LinkedDocNo: r.linkedDocNo?.trim() || null,
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
@@ -899,10 +1134,31 @@ const TaskMaster: React.FC = () => {
           }}
           onFieldChange={(form, fieldName) => {
             if (fieldName === "caseCompanyId") {
-              return { ...form, caseProjectId: "" };
+              // A doc already picked under the old Company no longer applies.
+              return { ...form, caseProjectId: "", linkedDocId: "", linkedDocNo: "" };
+            }
+            if (fieldName === "caseProjectId") {
+              return { ...form, linkedDocId: "", linkedDocNo: "" };
             }
             if (fieldName === "entryTypeId") {
-              return { ...form, linkedTypeOfDocId: "" };
+              // Doc Selector, and the Company/Project it usually derives,
+              // all depend on Entry Type -> Type of Doc -> module.
+              return { ...form, linkedTypeOfDocId: "", linkedDocId: "", linkedDocNo: "", caseCompanyId: "", caseProjectId: "" };
+            }
+            if (fieldName === "linkedTypeOfDocId") {
+              // Module changed — whatever was picked in the Doc Selector no
+              // longer belongs to the right table.
+              return { ...form, linkedDocId: "", linkedDocNo: "" };
+            }
+            if (fieldName === "linkedDocId") {
+              const picked = form.linkedDocId ? docCacheRef.current.get(String(form.linkedDocId)) : null;
+              if (!picked) return { ...form, linkedDocNo: "" };
+              return {
+                ...form,
+                linkedDocNo: picked.label,
+                caseCompanyId: picked.companyId ? String(picked.companyId) : form.caseCompanyId,
+                caseProjectId: picked.projectId ? String(picked.projectId) : form.caseProjectId,
+              };
             }
             return form;
           }}
@@ -930,6 +1186,7 @@ const TaskMaster: React.FC = () => {
               { key: "parentTaskNo", label: "Parent Task" },
               { key: "entryTypeLabel", label: "Entry Type" },
               { key: "linkedTypeOfDocLabel", label: "Type of Doc" },
+              { key: "linkedDocNo", label: "Linked Document" },
               { key: "createdByName", label: "Created By" },
             ],
           }}

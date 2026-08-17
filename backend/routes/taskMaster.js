@@ -7,6 +7,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const { lockNextDocNumber, currentFinYear } = require("../utils/docNumberLock");
+const { computeProgressMap } = require("../utils/taskProgress");
 const multer = require("multer");
 const path = require("path");
 
@@ -68,7 +69,9 @@ router.get("/", cache("task-master", 60), async (req, res) => {
         t.ParentTaskId, pt.TaskNo AS ParentTaskNo, pt.Subject AS ParentTaskSubject,
         t.ReminderAt,
         t.EntryTypeId, et.EntryType AS EntryTypeLabel,
-        t.LinkedTypeOfDocId, ltd.Prefix AS LinkedTypeOfDocPrefix, ltd.Description AS LinkedTypeOfDocLabel
+        t.LinkedTypeOfDocId, ltd.Prefix AS LinkedTypeOfDocPrefix, ltd.Description AS LinkedTypeOfDocLabel,
+        t.LinkedDocRecordId, t.LinkedDocNo,
+        t.Progress
       FROM dbo.TaskMaster t
       LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
@@ -82,7 +85,8 @@ router.get("/", cache("task-master", 60), async (req, res) => {
       WHERE t.IsDeleted = 0
       ORDER BY t.CreatedAt DESC
     `);
-    res.json(result.recordset);
+    const progressMap = await computeProgressMap(pool);
+    res.json(result.recordset.map((r) => ({ ...r, ...(progressMap.get(r.Id) ?? { EffectiveProgress: r.Progress, HasChildren: false }) })));
   } catch (err) {
     console.error("[task-master] GET error:", err.message);
     res.status(500).json({ error: err.message });
@@ -144,7 +148,8 @@ router.get("/followup-board", cache("task-master-followup-board", 30), async (re
             UNION ALL
             SELECT t.ReminderAt
           ) reminders
-        ) AS NextFollowUpAt
+        ) AS NextFollowUpAt,
+        t.Progress
       FROM dbo.TaskMaster t
       LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
@@ -154,7 +159,36 @@ router.get("/followup-board", cache("task-master-followup-board", 30), async (re
         ${scopeToSelf ? "AND t.AssignedTo = @UserId" : ""}
       ORDER BY t.DueDate ASC
     `);
-    res.json(result.recordset);
+
+    // Tags come from the same TaskMaster-backed data (TaskTags/TagMaster),
+    // merged in here rather than fetched per-card — the board loads every
+    // task's tags in this one extra round trip instead of N+1 requests.
+    const tagsByTask = {};
+    if (result.recordset.length) {
+      const tagsReq = pool.request();
+      if (scopeToSelf) tagsReq.input("UserId", sql.Int, req.user?.userId || null);
+      const tagsResult = await tagsReq.query(`
+        SELECT tt.TaskId, tg.Id, tg.Name
+        FROM dbo.TaskTags tt
+        JOIN dbo.TagMaster tg ON tg.Id = tt.TagId
+        WHERE tt.TaskId IN (
+          SELECT t.Id FROM dbo.TaskMaster t
+          WHERE t.IsDeleted = 0 AND t.Status IN ('Active', 'Hold') AND t.DueDate IS NOT NULL
+            ${scopeToSelf ? "AND t.AssignedTo = @UserId" : ""}
+        )
+        ORDER BY tg.Name
+      `);
+      for (const row of tagsResult.recordset) {
+        (tagsByTask[row.TaskId] ||= []).push({ Id: row.Id, Name: row.Name });
+      }
+    }
+
+    const progressMap = await computeProgressMap(pool);
+    res.json(result.recordset.map((r) => ({
+      ...r,
+      Tags: tagsByTask[r.Id] || [],
+      ...(progressMap.get(r.Id) ?? { EffectiveProgress: r.Progress, HasChildren: false }),
+    })));
   } catch (err) {
     console.error("[task-master] GET followup-board error:", err.message);
     res.status(500).json({ error: err.message });
@@ -178,7 +212,8 @@ router.get("/closed-board", cache("task-master-closed-board", 30), async (req, r
         t.CaseNumber, t.Priority, t.Status,
         co.name AS CaseCompanyName, pr.name AS CaseProjectName, fy.FName AS CaseFinYearName,
         t.ParentTaskId, pt.TaskNo AS ParentTaskNo, pt.Subject AS ParentTaskSubject,
-        t.UpdatedAt AS ClosedAt
+        t.UpdatedAt AS ClosedAt,
+        t.Progress
       FROM dbo.TaskMaster t
       LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
@@ -188,7 +223,33 @@ router.get("/closed-board", cache("task-master-closed-board", 30), async (req, r
         ${scopeToSelf ? "AND t.AssignedTo = @UserId" : ""}
       ORDER BY t.UpdatedAt DESC
     `);
-    res.json(result.recordset);
+
+    const tagsByTask = {};
+    if (result.recordset.length) {
+      const tagsReq = pool.request();
+      if (scopeToSelf) tagsReq.input("UserId", sql.Int, req.user?.userId || null);
+      const tagsResult = await tagsReq.query(`
+        SELECT tt.TaskId, tg.Id, tg.Name
+        FROM dbo.TaskTags tt
+        JOIN dbo.TagMaster tg ON tg.Id = tt.TagId
+        WHERE tt.TaskId IN (
+          SELECT t.Id FROM dbo.TaskMaster t
+          WHERE t.IsDeleted = 0 AND t.Status = 'Closed'
+            ${scopeToSelf ? "AND t.AssignedTo = @UserId" : ""}
+        )
+        ORDER BY tg.Name
+      `);
+      for (const row of tagsResult.recordset) {
+        (tagsByTask[row.TaskId] ||= []).push({ Id: row.Id, Name: row.Name });
+      }
+    }
+
+    const progressMap = await computeProgressMap(pool);
+    res.json(result.recordset.map((r) => ({
+      ...r,
+      Tags: tagsByTask[r.Id] || [],
+      ...(progressMap.get(r.Id) ?? { EffectiveProgress: r.Progress, HasChildren: false }),
+    })));
   } catch (err) {
     console.error("[task-master] GET closed-board error:", err.message);
     res.status(500).json({ error: err.message });
@@ -217,7 +278,9 @@ router.get("/:id", async (req, res) => {
         t.ParentTaskId, pt.TaskNo AS ParentTaskNo, pt.Subject AS ParentTaskSubject,
         t.ReminderAt,
         t.EntryTypeId, et.EntryType AS EntryTypeLabel,
-        t.LinkedTypeOfDocId, ltd.Prefix AS LinkedTypeOfDocPrefix, ltd.Description AS LinkedTypeOfDocLabel
+        t.LinkedTypeOfDocId, ltd.Prefix AS LinkedTypeOfDocPrefix, ltd.Description AS LinkedTypeOfDocLabel,
+        t.LinkedDocRecordId, t.LinkedDocNo,
+        t.Progress
       FROM dbo.TaskMaster t
       LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
@@ -232,6 +295,8 @@ router.get("/:id", async (req, res) => {
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Task not found" });
     const task = result.recordset[0];
+    const progressMap = await computeProgressMap(pool);
+    Object.assign(task, progressMap.get(task.Id) ?? { EffectiveProgress: task.Progress, HasChildren: false });
     // Same rule as /followup-board: a non-privileged user can't fetch a task
     // (and by extension its follow-ups/chat/files via the drawer) assigned
     // to someone else, even by guessing/typing the id directly.
@@ -255,6 +320,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
     CaseCompanyId, CaseProjectId, CaseFinYearId, CaseDocumentNumber,
     TypeOfDocId, AssignedTo, ParentTaskId, ReminderAt, EntryTypeId, LinkedTypeOfDocId,
+    LinkedDocRecordId, LinkedDocNo,
   } = req.body;
 
   if (!Subject?.trim()) return res.status(400).json({ error: "Subject is required" });
@@ -324,17 +390,21 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("ReminderAt", sql.DateTime2, ReminderAt || null)
       .input("EntryTypeId", sql.UniqueIdentifier, EntryTypeId || null)
       .input("LinkedTypeOfDocId", sql.Int, linkedTypeOfDocId)
+      .input("LinkedDocRecordId", sql.Int, LinkedDocRecordId ? parseInt(LinkedDocRecordId, 10) : null)
+      .input("LinkedDocNo", sql.NVarChar(50), LinkedDocNo || null)
       .input("CreatedBy", sql.Int, createdBy)
       .query(`
         INSERT INTO dbo.TaskMaster (
           TaskNo, Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
           CaseCompanyId, CaseProjectId, CaseFinYearId, CaseDocumentNumber, TypeOfDocId, AssignedTo,
-          ParentTaskId, ReminderAt, EntryTypeId, LinkedTypeOfDocId, CreatedBy, CreatedAt
+          ParentTaskId, ReminderAt, EntryTypeId, LinkedTypeOfDocId, LinkedDocRecordId, LinkedDocNo,
+          CreatedBy, CreatedAt
         )
         VALUES (
           @TaskNo, @Subject, @Details, @Department, @DueDate, @CaseNumber, @Priority, @Status,
           @CaseCompanyId, @CaseProjectId, @CaseFinYearId, @CaseDocumentNumber, @TypeOfDocId, @AssignedTo,
-          @ParentTaskId, @ReminderAt, @EntryTypeId, @LinkedTypeOfDocId, @CreatedBy, SYSUTCDATETIME()
+          @ParentTaskId, @ReminderAt, @EntryTypeId, @LinkedTypeOfDocId, @LinkedDocRecordId, @LinkedDocNo,
+          @CreatedBy, SYSUTCDATETIME()
         );
         SELECT SCOPE_IDENTITY() AS Id;
       `);
@@ -356,6 +426,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     Subject, Details, Department, DueDate, CaseNumber, Priority, Status,
     CaseCompanyId, CaseProjectId, CaseFinYearId, CaseDocumentNumber, AssignedTo,
     ParentTaskId, ReminderAt, EntryTypeId, LinkedTypeOfDocId,
+    LinkedDocRecordId, LinkedDocNo,
   } = req.body;
 
   if (!Subject?.trim()) return res.status(400).json({ error: "Subject is required" });
@@ -411,6 +482,8 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("ReminderAt", sql.DateTime2, ReminderAt || null)
       .input("EntryTypeId", sql.UniqueIdentifier, EntryTypeId || null)
       .input("LinkedTypeOfDocId", sql.Int, linkedTypeOfDocId)
+      .input("LinkedDocRecordId", sql.Int, LinkedDocRecordId ? parseInt(LinkedDocRecordId, 10) : null)
+      .input("LinkedDocNo", sql.NVarChar(50), LinkedDocNo || null)
       .input("UpdatedBy", sql.Int, updatedBy)
       .query(`
         UPDATE dbo.TaskMaster SET
@@ -420,6 +493,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           CaseFinYearId = @CaseFinYearId, CaseDocumentNumber = @CaseDocumentNumber,
           AssignedTo = @AssignedTo, ParentTaskId = @ParentTaskId, ReminderAt = @ReminderAt,
           EntryTypeId = @EntryTypeId, LinkedTypeOfDocId = @LinkedTypeOfDocId,
+          LinkedDocRecordId = @LinkedDocRecordId, LinkedDocNo = @LinkedDocNo,
           UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
       `);
@@ -451,7 +525,17 @@ router.patch("/:id/status", allowRoles("admin", "super_admin", "dba"), async (re
       .input("Id", sql.Int, id)
       .input("Status", sql.NVarChar(20), Status)
       .input("UpdatedBy", sql.Int, updatedBy)
-      .query("UPDATE dbo.TaskMaster SET Status = @Status, UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME() WHERE Id = @Id");
+      // Closing a task any other way (this button, not just dragging the
+      // progress slider to 100%) should also read as 100% complete —
+      // otherwise a "Closed" task could sit at some stale partial % in
+      // reports/dashboards.
+      .query(`
+        UPDATE dbo.TaskMaster SET
+          Status = @Status,
+          Progress = CASE WHEN @Status = 'Closed' THEN 100 ELSE Progress END,
+          UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME()
+        WHERE Id = @Id
+      `);
     await bumpTaskCaches();
     res.json({ message: `Task "${existing.recordset[0].TaskNo}" marked ${Status}` });
   } catch (err) {
@@ -485,6 +569,171 @@ router.patch("/:id/priority", allowRoles("admin", "super_admin", "dba"), async (
     console.error("[task-master] PATCH priority error:", err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// PATCH /:id/progress — the drag-slider on the task card/drawer. No
+// allowRoles gate, matching follow-ups/chat/tags on this file (day-to-day
+// task work any assigned user does), not the admin-only status/priority
+// row actions.
+//
+// A task with sub-tasks doesn't get its own manual progress — its
+// EffectiveProgress (see the GET queries below) is the average of its
+// children's Progress instead, so setting it directly here would just be
+// silently overwritten on the next read. Reject it outright so the client
+// gets a clear reason rather than a value that mysteriously reverts.
+router.patch("/:id/progress", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  const progress = Number(req.body?.Progress);
+  if (!Number.isFinite(progress) || progress < 0 || progress > 100 || !Number.isInteger(progress)) {
+    return res.status(400).json({ error: "Progress must be a whole number between 0 and 100" });
+  }
+  const updatedBy = req.user?.userId || null;
+  try {
+    const pool = getPool();
+    const existing = await pool.request().input("Id", sql.Int, id)
+      .query("SELECT TaskNo FROM dbo.TaskMaster WHERE Id = @Id AND IsDeleted = 0");
+    if (!existing.recordset.length) return res.status(404).json({ error: "Task not found" });
+
+    const hasChildren = await pool.request().input("Id", sql.Int, id)
+      .query("SELECT TOP 1 1 AS x FROM dbo.TaskMaster WHERE ParentTaskId = @Id AND IsDeleted = 0");
+    if (hasChildren.recordset.length) {
+      return res.status(409).json({ error: "This task's progress is calculated automatically from its sub-tasks." });
+    }
+
+    const result = await pool
+      .request()
+      .input("Id", sql.Int, id)
+      .input("Progress", sql.Int, progress)
+      .input("UpdatedBy", sql.Int, updatedBy)
+      .query(`
+        UPDATE dbo.TaskMaster SET
+          Progress = @Progress,
+          Status = CASE WHEN @Progress = 100 THEN 'Closed' ELSE Status END,
+          UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME()
+        WHERE Id = @Id;
+        SELECT Status FROM dbo.TaskMaster WHERE Id = @Id;
+      `);
+    await bumpTaskCaches();
+    res.json({
+      message: progress === 100 ? `Task "${existing.recordset[0].TaskNo}" marked Completed` : "Progress updated",
+      Progress: progress,
+      Status: result.recordset[0]?.Status,
+    });
+  } catch (err) {
+    console.error("[task-master] PATCH progress error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Tags ─────────────────────────────────────────────────────────────────────
+
+router.get("/:id/tags", async (req, res) => {
+  const taskId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(taskId) || taskId <= 0) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("TaskId", sql.Int, taskId).query(`
+      SELECT tg.Id, tg.Name
+      FROM dbo.TaskTags tt
+      JOIN dbo.TagMaster tg ON tg.Id = tt.TagId
+      WHERE tt.TaskId = @TaskId
+      ORDER BY tg.Name
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[task-master] GET tags error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /:id/tags — full sync from a client-supplied tag-name list (the
+// drawer's picker is a "select existing or type a new one" combobox, so it
+// always sends the complete desired set rather than one add/remove at a
+// time). Any name that doesn't already exist in TagMaster is created here —
+// that's the "create a new tag instantly" requirement — so the same tag
+// becomes selectable on other tasks and shows up in Tag Master immediately.
+router.put("/:id/tags", async (req, res) => {
+  const taskId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(taskId) || taskId <= 0) return res.status(400).json({ error: "Invalid id" });
+  const { TagNames } = req.body;
+  if (!Array.isArray(TagNames)) return res.status(400).json({ error: "TagNames must be an array" });
+
+  // Case-insensitive de-dupe of the incoming names, dropping blanks.
+  const seen = new Set();
+  const names = [];
+  for (const raw of TagNames) {
+    const trimmed = String(raw ?? "").trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(trimmed);
+  }
+  if (names.length > 50) return res.status(400).json({ error: "A task can have at most 50 tags" });
+
+  const userId = req.user?.userId || null;
+  const pool = getPool();
+  const task = await pool.request().input("Id", sql.Int, taskId)
+    .query("SELECT Id FROM dbo.TaskMaster WHERE Id = @Id AND IsDeleted = 0");
+  if (!task.recordset.length) return res.status(404).json({ error: "Task not found" });
+
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const tagIds = [];
+    for (const name of names) {
+      const existing = await tx.request().input("Name", sql.NVarChar(60), name)
+        .query("SELECT Id FROM dbo.TagMaster WHERE LOWER(Name) = LOWER(@Name)");
+      if (existing.recordset.length) {
+        tagIds.push(existing.recordset[0].Id);
+      } else {
+        const created = await tx.request()
+          .input("Name", sql.NVarChar(60), name)
+          .input("CreatedBy", sql.Int, userId)
+          .query(`
+            INSERT INTO dbo.TagMaster (Name, IsActive, CreatedBy, CreatedAt)
+            VALUES (@Name, 1, @CreatedBy, SYSUTCDATETIME());
+            SELECT SCOPE_IDENTITY() AS Id;
+          `);
+        tagIds.push(created.recordset[0].Id);
+      }
+    }
+
+    await tx.request().input("TaskId", sql.Int, taskId).query("DELETE FROM dbo.TaskTags WHERE TaskId = @TaskId");
+    for (const tagId of tagIds) {
+      await tx.request()
+        .input("TaskId", sql.Int, taskId)
+        .input("TagId", sql.Int, tagId)
+        .input("CreatedBy", sql.Int, userId)
+        .query(`
+          INSERT INTO dbo.TaskTags (TaskId, TagId, CreatedBy, CreatedAt)
+          VALUES (@TaskId, @TagId, @CreatedBy, SYSUTCDATETIME())
+        `);
+    }
+
+    await tx.commit();
+  } catch (err) {
+    await tx.rollback();
+    console.error("[task-master] PUT tags error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+
+  try {
+    await bumpCacheVersion("tag-master-active");
+    await bumpTaskCaches();
+  } catch {
+    /* non-fatal — the board/tags lists just serve stale data for a bit */
+  }
+
+  const result = await pool.request().input("TaskId", sql.Int, taskId).query(`
+    SELECT tg.Id, tg.Name
+    FROM dbo.TaskTags tt
+    JOIN dbo.TagMaster tg ON tg.Id = tt.TagId
+    WHERE tt.TaskId = @TaskId
+    ORDER BY tg.Name
+  `);
+  res.json(result.recordset);
 });
 
 // ── Follow-up timeline ──────────────────────────────────────────────────────
