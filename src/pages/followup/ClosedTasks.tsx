@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Search, CheckCircle2, ClipboardList } from "lucide-react";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { TaskDrawer } from "@/components/followup/TaskDrawer";
+import { ProgressBar } from "@/components/followup/ProgressBar";
 import { ExportMenu } from "@/components/ExportMenu";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -41,6 +42,10 @@ interface ClosedTask {
   ParentTaskNo: string | null;
   ParentTaskSubject: string | null;
   ClosedAt: string | null;
+  Tags: { Id: number; Name: string }[];
+  Progress: number;
+  EffectiveProgress: number;
+  HasChildren: boolean;
 }
 
 async function fetchClosedBoard(): Promise<ClosedTask[]> {
@@ -132,6 +137,24 @@ const ClosedTaskCard: React.FC<{ task: ClosedTask; index: number; onClick: () =>
       <p className="text-xs font-medium text-muted-foreground">
         {task.ClosedAt ? `Closed ${formatDate(task.ClosedAt)}` : "Closed"}
       </p>
+      {/* Read-only here — a closed task reads as complete; edit progress
+          from the drawer/active board instead of implying you can reopen
+          it by dragging this bar back down. */}
+      <ProgressBar value={task.EffectiveProgress ?? task.Progress ?? 100} onCommit={() => {}} disabled size="sm" />
+      {task.Tags?.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {task.Tags.map((tag) => (
+            <span
+              key={tag.Id}
+              className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium truncate max-w-[110px]"
+              style={{ background: "rgba(13,148,136,0.12)", border: "1px solid rgba(13,148,136,0.3)", color: ACCENT }}
+              title={tag.Name}
+            >
+              {tag.Name}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="flex items-center gap-1.5 pt-1">
         <span
           className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md border"
@@ -174,6 +197,7 @@ const ClosedTasks: React.FC = () => {
         t.CaseProjectName,
         t.CaseFinYearName,
         t.ClosedAt ? formatDate(t.ClosedAt) : null,
+        ...(t.Tags?.map((tag) => tag.Name) ?? []),
       ];
       return haystack.some((field) => field?.toString().toLowerCase().includes(q));
     });
