@@ -243,6 +243,7 @@ const ALL_ROUTES = [
   { path: "/api/unit-master", file: "./routes/unitMaster" },
   { path: "/api/room-master", file: "./routes/roomMaster" },
   { path: "/api/room-category-master", file: "./routes/roomCategoryMaster" },
+  { path: "/api/activity-checkpoint", file: "./routes/activityCheckpoint" },
   { path: "/api/unit-bhk-config", file: "./routes/unitBhkConfig" },
   { path: "/api/payment-plan-master", file: "./routes/paymentPlanMaster" },
   { path: "/api/parking-master", file: "./routes/parkingMaster" },
