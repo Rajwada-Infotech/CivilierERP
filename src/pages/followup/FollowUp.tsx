@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { Search, Flame, Clock3, CalendarDays, ArrowRight, ClipboardList, Pause, Check, ChevronRight, ChevronDown, CornerDownRight, CheckCircle2 } from "lucide-react";
+import { Search, Flame, Clock3, CalendarDays, ArrowRight, ClipboardList, Pause, Check, ChevronRight, ChevronDown, CornerDownRight, CheckCircle2, XCircle } from "lucide-react";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { TaskDrawer } from "@/components/followup/TaskDrawer";
 import { ProgressBar } from "@/components/followup/ProgressBar";
@@ -56,6 +56,17 @@ async function fetchFollowUpBoard(): Promise<Task[]> {
 // page at /followup/close-tasks (src/pages/followup/ClosedTasks.tsx).
 async function fetchClosedCount(): Promise<number> {
   const res = await fetchWithAuth(`${API}/closed-board`);
+  if (!res.ok) return 0;
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+// Same reasoning as fetchClosedCount — Cancelled tasks live entirely outside
+// the Active/Hold board, kept as their own separate history rather than
+// mixed into Closed, so cancelling a task never quietly inflates the
+// "Completed" count. Full list lives at /followup/cancelled-tasks.
+async function fetchCancelledCount(): Promise<number> {
+  const res = await fetchWithAuth(`${API}/cancelled-board`);
   if (!res.ok) return 0;
   const rows = await res.json().catch(() => []);
   return Array.isArray(rows) ? rows.length : 0;
@@ -351,6 +362,12 @@ const FollowUp: React.FC = () => {
     staleTime: 60 * 1000,
   });
 
+  const { data: cancelledCount = 0 } = useQuery({
+    queryKey: ["cancelled-board-count"],
+    queryFn: fetchCancelledCount,
+    staleTime: 60 * 1000,
+  });
+
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
     return tasks.filter((t) => {
@@ -425,20 +442,21 @@ const FollowUp: React.FC = () => {
   const totalActive =
     buckets.overdue.length + buckets.dueToday.length + buckets.upcoming.length + buckets.onHold.length;
 
-  const handleStatusChange = async (id: string, status: string) => {
+  const handleStatusChange = async (id: string, status: string, cancelReasonId?: string) => {
     const res = await fetchWithAuth(`${API}/${id}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ Status: status }),
+      body: JSON.stringify({ Status: status, CancelReasonId: cancelReasonId }),
     });
     if (!res.ok) {
       toast.error((await res.json().catch(() => ({}))).error || "Failed to update status");
       return;
     }
-    toast.success(`Task marked ${status}`);
+    toast.success(status === "Cancel" ? "Task cancelled" : `Task marked ${status}`);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["followup-board"] }),
       queryClient.invalidateQueries({ queryKey: ["followup-task", id] }),
+      queryClient.invalidateQueries({ queryKey: ["cancelled-board-count"] }),
     ]);
   };
 
@@ -584,6 +602,15 @@ const FollowUp: React.FC = () => {
           delay={0.25}
           active={false}
           onClick={() => navigate("/followup/close-tasks")}
+        />
+        <StatCard
+          label="Cancelled"
+          count={cancelledCount}
+          icon={XCircle}
+          color="#ef4444"
+          delay={0.3}
+          active={false}
+          onClick={() => navigate("/followup/cancelled-tasks")}
         />
       </div>
 

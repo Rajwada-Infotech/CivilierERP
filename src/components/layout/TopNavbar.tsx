@@ -47,6 +47,7 @@ import {
   Wand2,
   Percent,
   GitBranch,
+  XCircle,
 } from "lucide-react";
 import {
   Crown,
@@ -350,6 +351,13 @@ const followupSetupItems = [
     path: "/followup/setup/tag-master",
     color: "text-pink-500",
     pageKey: "followup-tag-master",
+  },
+  {
+    icon: XCircle,
+    label: "Cancel Template",
+    path: "/followup/setup/cancel-template",
+    color: "text-red-500",
+    pageKey: "followup-cancel-template-master",
   },
 ];
 

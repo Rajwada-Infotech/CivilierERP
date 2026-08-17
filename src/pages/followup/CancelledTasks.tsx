@@ -2,10 +2,9 @@ import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { Search, CheckCircle2, ClipboardList } from "lucide-react";
+import { Search, XCircle, ClipboardList } from "lucide-react";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { TaskDrawer } from "@/components/followup/TaskDrawer";
-import { ProgressBar } from "@/components/followup/ProgressBar";
 import { ExportMenu } from "@/components/ExportMenu";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -15,9 +14,12 @@ const API = "/api/task-master";
 const PRIORITIES = ["Very Important", "Important", "Normal"] as const;
 
 // Same teal identity as the rest of the Follow-Up module — kept in sync
-// deliberately (see FollowUp.tsx/FollowupShell.tsx).
+// deliberately (see FollowUp.tsx/FollowupShell.tsx). Cancelled cards use a
+// red accent for the left rail/status pill instead, matching TaskDrawer's
+// own cancellation styling.
 const ACCENT = "#0d9488";
 const ACCENT_SOFT = "#2dd4bf";
+const CANCEL_RED = "#ef4444";
 
 const PRIORITY_COLORS: Record<(typeof PRIORITIES)[number], string> = {
   "Very Important": "#ef4444",
@@ -25,7 +27,7 @@ const PRIORITY_COLORS: Record<(typeof PRIORITIES)[number], string> = {
   Normal: "#3b82f6",
 };
 
-interface ClosedTask {
+interface CancelledTask {
   Id: number;
   TaskNo: string;
   Subject: string;
@@ -41,16 +43,18 @@ interface ClosedTask {
   ParentTaskId: number | null;
   ParentTaskNo: string | null;
   ParentTaskSubject: string | null;
-  ClosedAt: string | null;
+  CancelledAt: string | null;
+  CancelReasonId: number | null;
+  CancelReasonLabel: string | null;
+  CancelledBy: number | null;
+  CancelledByName: string | null;
   Tags: { Id: number; Name: string }[];
   Progress: number;
-  EffectiveProgress: number;
-  HasChildren: boolean;
 }
 
-async function fetchClosedBoard(): Promise<ClosedTask[]> {
-  const res = await fetchWithAuth(`${API}/closed-board`);
-  if (!res.ok) throw new Error("Failed to fetch closed tasks");
+async function fetchCancelledBoard(): Promise<CancelledTask[]> {
+  const res = await fetchWithAuth(`${API}/cancelled-board`);
+  if (!res.ok) throw new Error("Failed to fetch cancelled tasks");
   return res.json().catch(() => []);
 }
 
@@ -83,7 +87,7 @@ function useGlass() {
   return { isDark, glassCard };
 }
 
-const ClosedTaskCard: React.FC<{ task: ClosedTask; index: number; onClick: () => void }> = ({
+const CancelledTaskCard: React.FC<{ task: CancelledTask; index: number; onClick: () => void }> = ({
   task,
   index,
   onClick,
@@ -111,7 +115,7 @@ const ClosedTaskCard: React.FC<{ task: ClosedTask; index: number; onClick: () =>
     >
       <div
         className="absolute left-0 top-0 bottom-0 w-0.5"
-        style={{ background: "linear-gradient(to bottom, transparent 10%, #64748b 30%, #64748b 70%, transparent 90%)" }}
+        style={{ background: `linear-gradient(to bottom, transparent 10%, ${CANCEL_RED} 30%, ${CANCEL_RED} 70%, transparent 90%)` }}
       />
       <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest">
@@ -119,9 +123,9 @@ const ClosedTaskCard: React.FC<{ task: ClosedTask; index: number; onClick: () =>
         </span>
         <span
           className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
-          style={{ background: "rgba(100,116,139,0.14)", color: "#64748b" }}
+          style={{ background: "rgba(239,68,68,0.12)", color: CANCEL_RED }}
         >
-          <CheckCircle2 size={10} /> Closed
+          <XCircle size={10} /> Cancelled
         </span>
       </div>
       <p className="text-sm font-semibold text-foreground truncate">{task.Subject}</p>
@@ -135,12 +139,18 @@ const ClosedTaskCard: React.FC<{ task: ClosedTask; index: number; onClick: () =>
         <p className="text-xs text-muted-foreground truncate">{task.CaseProjectName}</p>
       )}
       <p className="text-xs font-medium text-muted-foreground">
-        {task.ClosedAt ? `Closed ${formatDate(task.ClosedAt)}` : "Closed"}
+        {task.CancelledAt ? `Cancelled ${formatDate(task.CancelledAt)}` : "Cancelled"}
+        {task.CancelledByName ? ` · ${task.CancelledByName}` : ""}
       </p>
-      {/* Read-only here — a closed task reads as complete; edit progress
-          from the drawer/active board instead of implying you can reopen
-          it by dragging this bar back down. */}
-      <ProgressBar value={task.EffectiveProgress ?? task.Progress ?? 100} onCommit={() => {}} disabled size="sm" />
+      {task.CancelReasonLabel && (
+        <p
+          className="text-[11px] px-2 py-1 rounded-lg"
+          style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)", color: "inherit" }}
+        >
+          <span className="text-muted-foreground">Reason: </span>
+          {task.CancelReasonLabel}
+        </p>
+      )}
       {task.Tags?.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {task.Tags.map((tag) => (
@@ -170,15 +180,15 @@ const ClosedTaskCard: React.FC<{ task: ClosedTask; index: number; onClick: () =>
   );
 };
 
-const ClosedTasks: React.FC = () => {
+const CancelledTasks: React.FC = () => {
   const queryClient = useQueryClient();
   const { glassCard } = useGlass();
   const [search, setSearch] = React.useState("");
   const [selectedTaskId, setSelectedTaskId] = React.useState<string | null>(null);
 
   const { data: tasks = [], isLoading } = useQuery({
-    queryKey: ["closed-board"],
-    queryFn: fetchClosedBoard,
+    queryKey: ["cancelled-board"],
+    queryFn: fetchCancelledBoard,
     staleTime: 60 * 1000,
   });
 
@@ -196,7 +206,9 @@ const ClosedTasks: React.FC = () => {
         t.CaseCompanyName,
         t.CaseProjectName,
         t.CaseFinYearName,
-        t.ClosedAt ? formatDate(t.ClosedAt) : null,
+        t.CancelReasonLabel,
+        t.CancelledByName,
+        t.CancelledAt ? formatDate(t.CancelledAt) : null,
         ...(t.Tags?.map((tag) => tag.Name) ?? []),
       ];
       return haystack.some((field) => field?.toString().toLowerCase().includes(q));
@@ -215,9 +227,9 @@ const ClosedTasks: React.FC = () => {
     }
     toast.success(status === "Cancel" ? "Task cancelled" : `Task marked ${status}`);
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["closed-board"] }),
-      queryClient.invalidateQueries({ queryKey: ["followup-task", id] }),
+      queryClient.invalidateQueries({ queryKey: ["cancelled-board"] }),
       queryClient.invalidateQueries({ queryKey: ["cancelled-board-count"] }),
+      queryClient.invalidateQueries({ queryKey: ["followup-task", id] }),
     ]);
   };
 
@@ -230,20 +242,22 @@ const ClosedTasks: React.FC = () => {
     { header: "Priority", accessor: "Priority" },
     { header: "Company", accessor: "CaseCompanyName" },
     { header: "Project", accessor: "CaseProjectName" },
-    { header: "Closed At", accessor: "ClosedAt" },
+    { header: "Cancel Reason", accessor: "CancelReasonLabel" },
+    { header: "Cancelled By", accessor: "CancelledByName" },
+    { header: "Cancelled At", accessor: "CancelledAt" },
   ];
 
   return (
     <FollowupShell
-      title="Close Task"
-      subtitle="All tasks that have been closed"
-      icon={CheckCircle2}
+      title="Cancelled Tasks"
+      subtitle="All tasks that have been cancelled — kept for history and reports"
+      icon={XCircle}
       action={
         <ExportMenu
           data={filtered as unknown as Record<string, unknown>[]}
           columns={exportColumns}
-          title="Closed Tasks"
-          filename="closed-tasks"
+          title="Cancelled Tasks"
+          filename="cancelled-tasks"
           disabled={filtered.length === 0}
         />
       }
@@ -260,7 +274,7 @@ const ClosedTasks: React.FC = () => {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search closed tasks…"
+          placeholder="Search cancelled tasks…"
           className="w-full pl-10 pr-3 py-3 text-sm bg-transparent focus:outline-none placeholder:text-muted-foreground"
         />
       </motion.div>
@@ -285,21 +299,21 @@ const ClosedTasks: React.FC = () => {
           >
             <ClipboardList size={18} style={{ color: ACCENT_SOFT }} />
           </div>
-          <p className="text-sm font-medium text-foreground">No closed tasks</p>
-          <p className="text-xs text-muted-foreground">Tasks you close from the Follow-Up drawer show up here.</p>
+          <p className="text-sm font-medium text-foreground">No cancelled tasks</p>
+          <p className="text-xs text-muted-foreground">Tasks you cancel from the Follow-Up drawer show up here.</p>
         </motion.div>
       ) : (
         <div className="space-y-2.5">
           <div className="flex items-center gap-2">
-            <p className="text-[11px] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT_SOFT }}>
-              Closed
+            <p className="text-[11px] font-heading font-semibold uppercase tracking-widest" style={{ color: CANCEL_RED }}>
+              Cancelled
             </p>
             <span className="text-[10px] text-muted-foreground">{filtered.length}</span>
-            <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, rgba(13,148,136,0.25), transparent)" }} />
+            <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, rgba(239,68,68,0.25), transparent)" }} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filtered.map((t, i) => (
-              <ClosedTaskCard key={t.Id} task={t} index={i} onClick={() => setSelectedTaskId(String(t.Id))} />
+              <CancelledTaskCard key={t.Id} task={t} index={i} onClick={() => setSelectedTaskId(String(t.Id))} />
             ))}
           </div>
         </div>
@@ -314,4 +328,4 @@ const ClosedTasks: React.FC = () => {
   );
 };
 
-export default ClosedTasks;
+export default CancelledTasks;
