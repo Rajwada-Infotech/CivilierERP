@@ -215,6 +215,7 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
 
     let materials = [];
     let engineerIds = [];
+    let checkpoints = [];
     if (assignment) {
       const matRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
         SELECT ItemId AS itemId, Quantity AS quantity
@@ -226,10 +227,18 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         SELECT EngineerId AS engineerId FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @assignmentId
       `);
       engineerIds = engRes.recordset.map((r) => r.engineerId);
+
+      const cpRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
+        SELECT Id AS id, CheckpointId AS checkpointId, FieldName AS fieldName, SortOrder AS sortOrder, IsChecked AS isChecked
+        FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @assignmentId
+        ORDER BY SortOrder ASC, Id ASC
+      `);
+      checkpoints = cpRes.recordset.map((c) => ({ ...c, isChecked: !!c.isChecked }));
     }
 
     res.json({
       rungId,
+      activityId,
       candidateItems: itemsRes.recordset,
       assignment: assignment
         ? {
@@ -244,6 +253,7 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
             description: assignment.description,
             remarks: assignment.remarks,
             materials,
+            checkpoints,
           }
         : null,
     });
@@ -264,13 +274,16 @@ router.post("/:rungId", authMiddleware, async (req, res) => {
 
   const {
     engineerIds, startDate, days, endDate, labourSource, materialSource,
-    labourContractorId, materialContractorId, description, remarks, materials,
+    labourContractorId, materialContractorId, description, remarks, materials, checkpoints,
   } = req.body;
 
   if (engineerIds != null && !Array.isArray(engineerIds)) {
     return res.status(400).json({ error: "engineerIds must be an array" });
   }
   if (!Array.isArray(materials)) return res.status(400).json({ error: "materials must be an array" });
+  if (checkpoints != null && !Array.isArray(checkpoints)) {
+    return res.status(400).json({ error: "checkpoints must be an array" });
+  }
   if (labourSource && !SOURCE_VALUES.has(labourSource)) {
     return res.status(400).json({ error: `labourSource must be one of: ${[...SOURCE_VALUES].join(", ")}` });
   }
@@ -359,6 +372,28 @@ router.post("/:rungId", authMiddleware, async (req, res) => {
         .query(`
           INSERT INTO dbo.DependencyActivityEngineer (AssignmentId, EngineerId)
           VALUES (@assignmentId, @engineerId)
+        `);
+    }
+
+    await pool.request().input("assignmentId", sql.Int, assignmentId)
+      .query(`DELETE FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @assignmentId`);
+    let cpSort = 0;
+    for (const row of checkpoints || []) {
+      const fieldName = String(row.fieldName || "").trim();
+      if (!fieldName) continue;
+      cpSort += 10;
+      await pool.request()
+        .input("assignmentId", sql.Int, assignmentId)
+        .input("checkpointId", sql.Int, Number.isFinite(row.checkpointId) ? row.checkpointId : null)
+        .input("fieldName", sql.NVarChar(200), fieldName)
+        .input("sortOrder", sql.Int, cpSort)
+        .input("isChecked", sql.Bit, !!row.isChecked)
+        .input("checkedAt", sql.DateTime2, row.isChecked ? new Date() : null)
+        .input("checkedBy", sql.NVarChar(200), row.isChecked ? actor : null)
+        .query(`
+          INSERT INTO dbo.DependencyActivityCheckpoint
+            (AssignmentId, CheckpointId, FieldName, SortOrder, IsChecked, CheckedAt, CheckedBy)
+          VALUES (@assignmentId, @checkpointId, @fieldName, @sortOrder, @isChecked, @checkedAt, @checkedBy)
         `);
     }
 

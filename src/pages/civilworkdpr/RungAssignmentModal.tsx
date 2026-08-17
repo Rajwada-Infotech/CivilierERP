@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown } from "lucide-react";
+import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Flag, Trash2, Check } from "lucide-react";
 import type { LadderActivity, DependencyMasterListRow } from "@/api/dependencyMasterApi";
 import {
   getEngineers,
@@ -10,9 +10,11 @@ import {
   saveRungAssignment,
   SOURCE_META,
   type AssignmentMaterial,
+  type AssignmentCheckpoint,
   type SourceType,
   type Engineer,
 } from "@/api/dependencyActivityAssignmentApi";
+import { getActivityCheckpoints } from "@/api/activityCheckpointApi";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -128,6 +130,8 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   const [descriptionTouched, setDescriptionTouched] = useState(false);
   const [remarks, setRemarks] = useState<string>("");
   const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const [checkpoints, setCheckpoints] = useState<AssignmentCheckpoint[]>([]);
+  const [loadingCheckpoints, setLoadingCheckpoints] = useState(false);
 
   const { data: engineers = [] } = useQuery({
     queryKey: ["dependency-activity-assignment-engineers"],
@@ -170,8 +174,45 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     const qtyMap: Record<string, string> = {};
     for (const m of a.materials) qtyMap[m.itemId] = String(m.quantity);
     setQuantities(qtyMap);
+    setCheckpoints(a.checkpoints || []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail]);
+
+  // Pulls the activity's checkpoint template from Work Checkpoint Master
+  // and appends any not already attached here (matched by checkpointId, or
+  // by name for ones added before a checkpointId existed) — never
+  // duplicates, never clobbers checked state already on the list.
+  const handleAddCheckpoints = async () => {
+    setLoadingCheckpoints(true);
+    try {
+      const template = await getActivityCheckpoints(rung.activityId);
+      if (!template.length) {
+        toast.error("No checkpoints configured for this activity in Work Checkpoint Master.");
+        return;
+      }
+      setCheckpoints((prev) => {
+        const existingIds = new Set(prev.map((c) => c.checkpointId).filter((id): id is number => id != null));
+        const existingNames = new Set(prev.map((c) => c.fieldName.toLowerCase()));
+        const additions = template
+          .filter((t) => !existingIds.has(t.id) && !existingNames.has(t.fieldName.toLowerCase()))
+          .map((t): AssignmentCheckpoint => ({ checkpointId: t.id, fieldName: t.fieldName, isChecked: false }));
+        if (!additions.length) {
+          toast("All of this activity's checkpoints are already on the list.");
+          return prev;
+        }
+        return [...prev, ...additions];
+      });
+    } catch (e: any) {
+      toast.error(e.message ?? "Couldn't load checkpoints");
+    } finally {
+      setLoadingCheckpoints(false);
+    }
+  };
+
+  const toggleCheckpoint = (index: number) =>
+    setCheckpoints((prev) => prev.map((c, i) => (i === index ? { ...c, isChecked: !c.isChecked } : c)));
+  const removeCheckpoint = (index: number) =>
+    setCheckpoints((prev) => prev.filter((_, i) => i !== index));
 
   // Days drives End Date whenever Start Date is known; editing End Date
   // directly recomputes Days the other way — whichever field the user last
@@ -211,6 +252,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
         description: description || null,
         remarks: remarks || null,
         materials,
+        checkpoints,
       });
     },
     onSuccess: () => {
@@ -412,6 +454,68 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         className="w-20 px-2 py-1.5 rounded-md text-xs bg-background border border-border text-foreground text-right focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
                       />
                       {item.uom && <span className="text-[10px] text-muted-foreground w-8 shrink-0">{item.uom}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Checkpoints — pulled from Work Checkpoint Master, tracked
+                milestone-style per rung. */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className={`${labelCls} mb-0`}>
+                  <ListChecks size={11} /> Checkpoints
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAddCheckpoints}
+                  disabled={loadingCheckpoints}
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 h-auto rounded-lg border border-dashed border-border text-muted-foreground hover:text-cyan-600 dark:hover:text-cyan-400 hover:border-cyan-500/50 hover:bg-cyan-500/5 disabled:opacity-50 transition-all"
+                >
+                  {loadingCheckpoints ? <Loader2 size={12} className="animate-spin" /> : <Flag size={12} />}
+                  Add Checkpoints
+                </button>
+              </div>
+              {checkpoints.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic py-1.5">
+                  No checkpoints on this rung yet — click "Add Checkpoints" to pull them from Work Checkpoint Master.
+                </p>
+              ) : (
+                <div className="space-y-0">
+                  {checkpoints.map((cp, i) => (
+                    <div key={`${cp.checkpointId ?? "custom"}-${i}`} className="flex items-start gap-3">
+                      {/* Milestone rail — filled circle + connecting line */}
+                      <div className="flex flex-col items-center shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => toggleCheckpoint(i)}
+                          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                            cp.isChecked
+                              ? "bg-emerald-500 border-emerald-500 text-white"
+                              : "bg-background border-border text-transparent hover:border-cyan-500/50"
+                          }`}
+                          title={cp.isChecked ? "Mark incomplete" : "Mark complete"}
+                        >
+                          <Check size={11} strokeWidth={3} />
+                        </button>
+                        {i < checkpoints.length - 1 && (
+                          <div className={`w-0.5 flex-1 min-h-[18px] ${cp.isChecked ? "bg-emerald-500/40" : "bg-border"}`} />
+                        )}
+                      </div>
+                      <div className="flex-1 flex items-center justify-between gap-2 pb-3 pt-0.5">
+                        <span className={`text-sm ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
+                          {cp.fieldName}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeCheckpoint(i)}
+                          className="p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+                          title="Remove"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>

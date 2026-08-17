@@ -132,6 +132,9 @@ const RoomCategoryMaster = lazy(
 const RoomCompositionBuilder = lazy(
   () => import("./pages/civilworkdpr/RoomCompositionBuilder"),
 );
+const WorkCheckpointMaster = lazy(
+  () => import("./pages/civilworkdpr/WorkCheckpointMaster"),
+);
 const DependencyTracker = lazy(
   () => import("./pages/civilworkdpr/DependencyTracker"),
 );
@@ -886,6 +889,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="room-composition-builder">
             <RoomCompositionBuilder />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/work-checkpoint-master"
+        element={
+          <ProtectedRoute pageKey="work-checkpoint-master">
+            <WorkCheckpointMaster />
           </ProtectedRoute>
         }
       />
