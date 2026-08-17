@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useAuth } from "@/contexts/AuthContext";
+import { translateError } from "@/lib/translateError";
 
 const API = "/api/crm/welcome-calls";
 const CO_API = "/api/crm/co-applicants";
@@ -909,6 +910,8 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       invalidateQueue();
       qc.invalidateQueries({ queryKey: ["crm-welcome-calls-history"] });
       qc.invalidateQueries({ queryKey: ["crm-communication"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
 
       // Auto-flow: every logged call is seeded into the Communication Log
       // server-side already — once the customer is actually Welcomed, hand
@@ -918,11 +921,20 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
         toast.success("Welcome call logged — continuing in Communication Log");
         onClose();
         navigate(`/crm/communication?bookingId=${booking.BookingId}`);
+      } else if (["NotReachable", "Busy", "SwitchedOff", "VoiceMail"].includes(form.Outcome)) {
+        // Auto-set next call date to tomorrow so the booking doesn't
+        // silently fall out of queue without a follow-up scheduled.
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setMinutes(tomorrow.getMinutes() - tomorrow.getTimezoneOffset());
+        const tomorrowStr = tomorrow.toISOString().slice(0, 16);
+        setForm((f) => ({ ...f, NextCallDate: f.NextCallDate || tomorrowStr }));
+        toast.info("Call logged. Next call auto-scheduled for tomorrow — edit if needed.");
       } else {
         toast.success("Welcome call logged");
       }
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -1069,6 +1081,21 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
             treatment as CrmBookingDetail.tsx's Data Review Checklist strip. */}
         <ChecklistProgressBar vc={vcState.vc} bookingId={booking.BookingId} />
 
+        {/* F3 — Escalation banner: fires when customer has been unreachable 3+ consecutive times */}
+        {(callContext?.consecutiveNonReached ?? 0) >= 3 && (
+          <div className="flex items-start gap-3 rounded-xl border border-red-300 bg-red-50 dark:bg-red-950/30 px-4 py-3">
+            <AlertTriangle size={16} className="text-red-600 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-700">
+                Customer unreachable — {callContext!.consecutiveNonReached} consecutive attempt{callContext!.consecutiveNonReached !== 1 ? "s" : ""}
+              </p>
+              <p className="text-xs text-red-600 mt-0.5">
+                Consider escalating to a manager or trying a different contact method before logging another attempt.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Split from the middle: Log Call is the one thing staff are
             actively doing on every single call, so it stays permanently on
             screen on the left — never buried behind a tab click mid-call.
@@ -1119,12 +1146,34 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs text-muted-foreground block mb-1">
-                    Duration (seconds) {timerSeconds > 0 && !form.DurationSeconds ? <span className="text-emerald-600">(from timer)</span> : ""}
+                    Duration {timerSeconds > 0 && !form.DurationSeconds ? <span className="text-emerald-600">(from timer — edit if needed)</span> : ""}
                   </label>
-                  <input type="number" value={form.DurationSeconds}
-                    onChange={(e) => setForm((f) => ({ ...f, DurationSeconds: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
-                    placeholder={timerSeconds > 0 ? String(timerSeconds) : "e.g. 180"} />
+                  {/* MM:SS picker — converts to seconds on change */}
+                  <div className="flex items-center gap-1.5">
+                    <input type="number" min={0} max={999}
+                      value={form.DurationSeconds ? String(Math.floor(Number(form.DurationSeconds) / 60)) : timerSeconds > 0 ? String(Math.floor(timerSeconds / 60)) : ""}
+                      onChange={(e) => {
+                        const mm = Math.max(0, Number(e.target.value) || 0);
+                        const ss = form.DurationSeconds ? Number(form.DurationSeconds) % 60 : timerSeconds % 60;
+                        setForm((f) => ({ ...f, DurationSeconds: String(mm * 60 + ss) }));
+                      }}
+                      placeholder="MM"
+                      className="w-16 text-sm border border-border rounded px-2 py-1.5 bg-background text-center" />
+                    <span className="text-muted-foreground font-semibold">:</span>
+                    <input type="number" min={0} max={59}
+                      value={form.DurationSeconds ? String(Number(form.DurationSeconds) % 60).padStart(2, "0") : timerSeconds > 0 ? String(timerSeconds % 60).padStart(2, "0") : ""}
+                      onChange={(e) => {
+                        const ss = Math.min(59, Math.max(0, Number(e.target.value) || 0));
+                        const mm = form.DurationSeconds ? Math.floor(Number(form.DurationSeconds) / 60) : Math.floor(timerSeconds / 60);
+                        setForm((f) => ({ ...f, DurationSeconds: String(mm * 60 + ss) }));
+                      }}
+                      placeholder="SS"
+                      className="w-16 text-sm border border-border rounded px-2 py-1.5 bg-background text-center" />
+                    <span className="text-xs text-muted-foreground ml-1">min : sec</span>
+                    {form.DurationSeconds && Number(form.DurationSeconds) > 0 && (
+                      <span className="text-xs text-muted-foreground ml-auto">{Number(form.DurationSeconds)}s total</span>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1889,14 +1938,27 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Duration</label>
-                <div className="relative">
-                  <input type="number" min={0} value={form.DurationSeconds} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, DurationSeconds: e.target.value }))}
-                    className={`${inputCls} pr-16`} placeholder="seconds" />
-                  {form.DurationSeconds && Number(form.DurationSeconds) > 0 && (
-                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">
-                      {Math.floor(Number(form.DurationSeconds) / 60)}m {Number(form.DurationSeconds) % 60}s
-                    </span>
-                  )}
+                <div className="flex items-center gap-1.5">
+                  <input type="number" min={0} max={999} disabled={locked}
+                    value={form.DurationSeconds ? String(Math.floor(Number(form.DurationSeconds) / 60)) : ""}
+                    onChange={(e) => {
+                      const mm = Math.max(0, Number(e.target.value) || 0);
+                      const ss = form.DurationSeconds ? Number(form.DurationSeconds) % 60 : 0;
+                      setForm((f) => ({ ...f, DurationSeconds: String(mm * 60 + ss) }));
+                    }}
+                    placeholder="MM"
+                    className={`w-14 text-sm border border-border rounded px-2 py-1.5 bg-background text-center ${locked ? "opacity-70 cursor-not-allowed" : ""}`} />
+                  <span className="text-muted-foreground font-semibold">:</span>
+                  <input type="number" min={0} max={59} disabled={locked}
+                    value={form.DurationSeconds ? String(Number(form.DurationSeconds) % 60).padStart(2, "0") : ""}
+                    onChange={(e) => {
+                      const ss = Math.min(59, Math.max(0, Number(e.target.value) || 0));
+                      const mm = form.DurationSeconds ? Math.floor(Number(form.DurationSeconds) / 60) : 0;
+                      setForm((f) => ({ ...f, DurationSeconds: String(mm * 60 + ss) }));
+                    }}
+                    placeholder="SS"
+                    className={`w-14 text-sm border border-border rounded px-2 py-1.5 bg-background text-center ${locked ? "opacity-70 cursor-not-allowed" : ""}`} />
+                  <span className="text-xs text-muted-foreground">m:s</span>
                 </div>
               </div>
             </div>

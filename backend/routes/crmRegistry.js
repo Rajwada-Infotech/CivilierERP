@@ -139,6 +139,9 @@ router.put("/:id/complete", requirePageRight("crm-registry", "edit"), async (req
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmRegistry WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Registry not found" });
     if (cur.recordset[0].Status === "Completed") return res.status(400).json({ error: "Already completed" });
+    if (cur.recordset[0].Status !== "Scheduled") {
+      return res.status(400).json({ error: "Registry must be Scheduled (appointment date recorded) before it can be marked Completed" });
+    }
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 

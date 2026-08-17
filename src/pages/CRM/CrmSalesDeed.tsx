@@ -2,13 +2,14 @@ import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
+import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { formatINR } from "@/utils/formatCurrency";
 import {
-  Plus, CheckCircle2, AlertTriangle, XCircle, ExternalLink, Lock, Pencil, ScrollText,
+  Plus, CheckCircle2, AlertTriangle, XCircle, ExternalLink, Lock, Pencil, ScrollText, RotateCcw,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
@@ -105,7 +106,7 @@ const CrmSalesDeed: React.FC = () => {
   const [savingProgress, setSavingProgress] = useState(false);
   const [sendingToCustomer, setSendingToCustomer] = useState(false);
 
-  const { data: deeds = [], isLoading } = useQuery({ queryKey: ["crm-sales-deed"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: deeds = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-sales-deed"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: context, isFetching: contextLoading } = useQuery({
     queryKey: ["crm-sales-deed-context", form.BookingId],
@@ -165,8 +166,10 @@ const CrmSalesDeed: React.FC = () => {
       setDialogOpen(false);
       setForm({ ...EMPTY_FORM });
       qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -204,8 +207,9 @@ const CrmSalesDeed: React.FC = () => {
       toast.success("Deed details updated");
       setDeedFormEditing(false);
       qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSavingDeed(false);
     }
@@ -224,8 +228,12 @@ const CrmSalesDeed: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
       toast.success(`Deed status: ${data.status}`);
       qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      // Deed approval changes handover eligibility and dashboard KPIs
+      qc.invalidateQueries({ queryKey: ["crm-handover-eligible"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSavingProgress(false);
     }
@@ -247,8 +255,11 @@ const CrmSalesDeed: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
       toast.success("Sent to customer for approval");
       qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      // Customer sent → dashboard "deeds awaiting customer" count changes
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSendingToCustomer(false);
     }
@@ -274,6 +285,15 @@ const CrmSalesDeed: React.FC = () => {
       cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
     { accessorKey: "Status", header: "Status", size: 110,
       cell: (i) => <StatusBadge status={i.row.original.Status} /> },
+    { id: "customerApproval", header: "Customer Approval", size: 140, enableSorting: false,
+      cell: (i) => {
+        const d = i.row.original;
+        return d.CustomerApprovalStatus && d.CustomerApprovalStatus !== "NotSent" ? (
+          <StatusBadge status={d.CustomerApprovalStatus} cfg={APPROVAL_CFG} />
+        ) : (
+          <span className="text-xs text-muted-foreground">Not sent</span>
+        );
+      } },
     { id: "directorApproval", header: "Director Approval", size: 140, enableSorting: false,
       cell: (i) => {
         const d = i.row.original;
@@ -292,14 +312,23 @@ const CrmSalesDeed: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Sale Deed"
       subtitle="Deed execution and registration tracking"
       action={
-        <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-          <Plus size={14} /> New Deed
-        </button>
+        <div className="flex items-center gap-3">
+          {dataUpdatedAt > 0 && (
+            <button onClick={() => refetch()} disabled={isFetching}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
+              <RotateCcw size={12} className={isFetching ? "animate-spin" : ""} />
+              {isFetching ? "Refreshing…" : "Refresh"}
+            </button>
+          )}
+          <button onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            <Plus size={14} /> New Deed
+          </button>
+        </div>
       }
     >
       <DataTable
@@ -589,7 +618,7 @@ const CrmSalesDeed: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

@@ -39,7 +39,8 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
         b.Id AS BookingId, b.BookingNo, b.UnitNo, b.ProjectName, b.BookingDate,
         a.ApplicantName, a.Mobile,
         last.Id AS LastCallId, last.Outcome AS LastOutcome, last.CallDate AS LastCallDate,
-        last.NextCallDate
+        last.NextCallDate,
+        streak.ConsecutiveNonReached
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       OUTER APPLY (
@@ -48,6 +49,16 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
         WHERE BookingId = b.Id
         ORDER BY CallDate DESC, CreatedAt DESC
       ) last
+      OUTER APPLY (
+        SELECT COUNT(*) AS ConsecutiveNonReached
+        FROM (
+          SELECT TOP 100 Outcome
+          FROM dbo.CrmWelcomeCall
+          WHERE BookingId = b.Id
+          ORDER BY CallDate DESC, CreatedAt DESC
+        ) recent
+        WHERE recent.Outcome IN ('NotReachable','Busy','SwitchedOff','VoiceMail')
+      ) streak
       WHERE b.Status = 'Approved' AND b.IsActive = 1
         AND (
           last.Id IS NULL
@@ -131,7 +142,7 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId);
 
-    const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes] = await Promise.all([
+    const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, streakRes] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId).query(`
         SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.BookingAmount, b.GrandTotal,
                b.ParkingTotal, b.ExtraChargesTotal, b.UnitGstAmount,
@@ -170,6 +181,15 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
         .query("SELECT ReceiptNo, Amount, AppliedAmount, Status FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
       pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT ISNULL(SUM(Amount), 0) AS MRTotal FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status IN ('Pending','Approved')"),
+      pool.request().input("bid", sql.Int, bookingId).query(`
+        SELECT COUNT(*) AS ConsecutiveNonReached
+        FROM (
+          SELECT TOP 100 Outcome
+          FROM dbo.CrmWelcomeCall WHERE BookingId = @bid
+          ORDER BY CallDate DESC, CreatedAt DESC
+        ) recent
+        WHERE recent.Outcome IN ('NotReachable','Busy','SwitchedOff','VoiceMail')
+      `),
     ]);
     if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
 
@@ -187,6 +207,7 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
       loan: loanRes.recordset[0] || null,
       onAccount: { payments: oaRes.recordset, availableBalance: onAccountBalance },
       mrReceived,
+      consecutiveNonReached: streakRes.recordset[0]?.ConsecutiveNonReached ?? 0,
     });
   } catch (e) {
     console.error("[crm-welcome-calls] GET /:bookingId/call-context error:", e.message);

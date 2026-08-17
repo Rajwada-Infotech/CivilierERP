@@ -2,9 +2,10 @@ import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
+import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, CalendarClock, CheckCircle2 } from "lucide-react";
+import { Plus, CalendarClock, CheckCircle2, RotateCcw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -40,7 +41,7 @@ const CrmRegistry: React.FC = () => {
   const [completeId, setCompleteId] = useState<number | null>(null);
   const [completedDate, setCompletedDate] = useState(() => new Date().toISOString().slice(0, 10));
 
-  const { data: rows = [], isLoading } = useQuery({ queryKey: ["crm-registry"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-registry"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
 
   const trackedBookingIds = new Set((rows as any[]).map((r: any) => r.BookingId));
@@ -72,8 +73,10 @@ const CrmRegistry: React.FC = () => {
       setDialogOpen(false);
       setBookingId("");
       qc.invalidateQueries({ queryKey: ["crm-registry"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -92,8 +95,10 @@ const CrmRegistry: React.FC = () => {
       setScheduleId(null);
       setScheduledDate("");
       qc.invalidateQueries({ queryKey: ["crm-registry"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -109,8 +114,10 @@ const CrmRegistry: React.FC = () => {
       toast.success("Registry completed — RegistrationNo can now be recorded on the Sales Deed");
       setCompleteId(null);
       qc.invalidateQueries({ queryKey: ["crm-registry"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -140,23 +147,34 @@ const CrmRegistry: React.FC = () => {
                 <CalendarClock size={11} /> Schedule
               </button>
             )}
-            <button onClick={() => setCompleteId(r.Id)} className="flex items-center gap-1 text-xs text-green-700 hover:underline">
-              <CheckCircle2 size={11} /> Mark Completed
-            </button>
+            {r.Status === "Scheduled" && (
+              <button onClick={() => setCompleteId(r.Id)} className="flex items-center gap-1 text-xs text-green-700 hover:underline">
+                <CheckCircle2 size={11} /> Mark Completed
+              </button>
+            )}
           </div>
         );
       } },
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Registry"
       subtitle="Deed registration at the Sub-Registrar Office — gated on Query Payment being confirmed"
       action={
-        <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-          <Plus size={14} /> Start Registry
-        </button>
+        <div className="flex items-center gap-3">
+          {dataUpdatedAt > 0 && (
+            <button onClick={() => refetch()} disabled={isFetching}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
+              <RotateCcw size={12} className={isFetching ? "animate-spin" : ""} />
+              {isFetching ? "Refreshing…" : "Refresh"}
+            </button>
+          )}
+          <button onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            <Plus size={14} /> Start Registry
+          </button>
+        </div>
       }
     >
       <DataTable
@@ -220,7 +238,7 @@ const CrmRegistry: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

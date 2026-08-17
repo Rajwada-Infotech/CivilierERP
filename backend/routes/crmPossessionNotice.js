@@ -205,4 +205,41 @@ router.put("/:id/mark-disputed", requirePageRight("crm-possession-notice", "edit
   }
 });
 
+// PUT /:id/retract-dispute — Disputed -> Draft. Allows staff to address the
+// customer's concern and re-issue the notice. Without this, a Disputed notice
+// permanently blocks the booking from reaching Handover.
+router.put("/:id/retract-dispute", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const b = req.body || {};
+    if (!b.RetractReason?.trim()) {
+      return res.status(400).json({ error: "RetractReason is required — document how the dispute was resolved" });
+    }
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status FROM dbo.CrmPossessionNotice WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
+    if (cur.recordset[0].Status !== "Disputed") {
+      return res.status(400).json({ error: `Can only retract a Disputed notice (current status: '${cur.recordset[0].Status}')` });
+    }
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("reason", sql.NVarChar(sql.MAX), b.RetractReason.trim())
+      .input("ub", sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmPossessionNotice SET
+          Status = 'Draft', DisputedAt = NULL, DisputeReason = NULL,
+          Notes = ISNULL(Notes + CHAR(10), '') + 'Dispute retracted: ' + @reason,
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    res.json({ success: true, status: "Draft" });
+  } catch (e) {
+    console.error("[crm-possession-notice] retract-dispute error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

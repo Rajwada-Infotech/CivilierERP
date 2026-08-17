@@ -210,6 +210,9 @@ router.post("/:id/confirm", requirePageRight("crm-query-payment", "edit"), async
     if (!cur.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
     const row = cur.recordset[0];
     if (row.Status === "Confirmed") return res.status(400).json({ error: "Already confirmed" });
+    if (row.Status !== "InfoSent") {
+      return res.status(400).json({ error: "Payment details must be sent to the customer (InfoSent) before confirming — the customer must know what they paid and why" });
+    }
     const activeErr = await requireActiveBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 

@@ -2,15 +2,16 @@ import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { translateError } from "@/lib/translateError";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { formatINR } from "@/utils/formatCurrency";
 import {
   Plus, Send, CheckCircle2, Paperclip, AlertTriangle, ReceiptIndianRupee,
-  ChevronLeft, ChevronRight, Check, Upload, X, FileText, Image as ImageIcon,
+  ChevronLeft, ChevronRight, Check, Upload, X, FileText, Image as ImageIcon, RotateCcw,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
@@ -153,7 +154,7 @@ const CrmQueryPayment: React.FC = () => {
   const infoInputRef = useRef<HTMLInputElement>(null);
   const proofInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: rows = [], isLoading } = useQuery({ queryKey: ["crm-query-payment"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: rows = [], isLoading, dataUpdatedAt: listUpdatedAt, isFetching: listFetching, refetch: refetchList } = useQuery({ queryKey: ["crm-query-payment"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: detail, refetch: refetchDetail } = useQuery({
     queryKey: ["crm-query-payment-detail", selectedId],
@@ -203,8 +204,10 @@ const CrmQueryPayment: React.FC = () => {
       setDialogOpen(false);
       setBookingId("");
       qc.invalidateQueries({ queryKey: ["crm-query-payment"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -277,8 +280,9 @@ const CrmQueryPayment: React.FC = () => {
       setConfirmSendOpen(false);
       refetchDetail();
       qc.invalidateQueries({ queryKey: ["crm-query-payment"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSendingInfo(false);
     }
@@ -305,8 +309,10 @@ const CrmQueryPayment: React.FC = () => {
       setProofFile(null);
       refetchDetail();
       qc.invalidateQueries({ queryKey: ["crm-query-payment"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setConfirming(false);
     }
@@ -337,14 +343,23 @@ const CrmQueryPayment: React.FC = () => {
   const goPrev = () => setStep((s) => Math.max(1, s - 1));
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Query Payment"
       subtitle="Stamp duty & registration fee paid by the customer directly to the government"
       action={
-        <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-          <Plus size={14} /> Start Query Payment
-        </button>
+        <div className="flex items-center gap-3">
+          {listUpdatedAt > 0 && (
+            <button onClick={() => refetchList()} disabled={listFetching}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
+              <RotateCcw size={12} className={listFetching ? "animate-spin" : ""} />
+              {listFetching ? "Refreshing…" : "Refresh"}
+            </button>
+          )}
+          <button onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            <Plus size={14} /> Start Query Payment
+          </button>
+        </div>
       }
     >
       <DataTable
@@ -602,7 +617,7 @@ const CrmQueryPayment: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

@@ -695,6 +695,8 @@ const CrmAgreement: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
       if (action === "mark-executed") {
         promptNextStep(navigate, "Agreement executed — Legal Milestones and NOC can now begin.", "/crm/legal-milestones", "Go to Legal Milestones");
+      } else if (action === "mark-registered") {
+        promptNextStep(navigate, "Agreement registered — Sales Deed can now be created.", "/crm/sales-deed", "Go to Sales Deed");
       }
     } catch (e: any) {
       toast.error(e.message);

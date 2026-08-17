@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
+import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
 import { formatINR } from "@/utils/formatCurrency";
@@ -149,8 +150,9 @@ const CrmNoc: React.FC = () => {
       setDialogOpen(false);
       setForm({ ...EMPTY_FORM });
       qc.invalidateQueries({ queryKey: ["crm-noc"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -173,8 +175,10 @@ const CrmNoc: React.FC = () => {
       }
 
       qc.invalidateQueries({ queryKey: ["crm-noc"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setMarkingIssued(false);
     }
@@ -211,7 +215,7 @@ const CrmNoc: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — NOC (Organisation & Bank)"
       subtitle="No-objection certificates and bank loan sanction/disbursement tracking"
       action={
@@ -387,7 +391,7 @@ const CrmNoc: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

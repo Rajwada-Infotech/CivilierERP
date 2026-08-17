@@ -14,6 +14,7 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useGstRates, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
+import { BookingLifecycleBar } from "@/components/crm/BookingLifecycleBar";
 
 const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
@@ -221,6 +222,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const { canDoAction, currentUser } = useAuth();
   const isAmendmentApprover = AMENDMENT_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase());
   const canEdit = canDoAction("crm-bookings", "edit");
+  const isSuperAdmin = currentUser?.role === "super_admin";
   const [tab, setTab] = useState<Tab>("Booking");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -546,28 +548,21 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   };
 
   const handleRemoveParking = (id: number) => {
-    if (!legalWorkStarted) {
-      (async () => {
-        try {
-          const res = await fetchWithAuth(`/api/crm/parking/${id}`, { method: "DELETE" });
-          const resData = await res.json();
-          if (!res.ok) throw new Error(resData.error);
-          toast.success("Parking allotment released");
-          invalidateCharges();
-        } catch (e: any) { toast.error(e.message); }
-      })();
-      return;
-    }
+    // Reason is mandatory unconditionally — backend enforces this regardless
+    // of legal-work state. The dialog label adapts to whether it's an
+    // immediate release or an amendment-queue submission.
     setReasonDialog({
       title: "Release Parking Allotment",
-      label: "Legal documents are already under verification. Enter a reason for releasing this parking allotment:",
+      label: legalWorkStarted
+        ? "Legal documents are under verification — this will queue an amendment for approval. State the reason:"
+        : "State the reason for releasing this parking allotment. This is recorded in the audit trail:",
       required: true,
       onConfirm: async (reason) => {
         try {
           const res = await fetchWithAuth(`/api/crm/parking/${id}?reason=${encodeURIComponent(reason.trim())}`, { method: "DELETE" });
           const resData = await res.json();
           if (!res.ok) throw new Error(resData.error);
-          toast.success(resData.pending ? "Amendment request submitted — pending approval" : "Parking allotment released");
+          toast.success(resData.pending ? "Amendment queued — needs sign-off before the slot is released" : "Parking allotment released");
           invalidateCharges();
         } catch (e: any) { toast.error(e.message); }
       },
@@ -1136,6 +1131,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 />
               );
             })()}
+
+            {/* ── Booking Lifecycle Stepper ── */}
+            <BookingLifecycleBar bookingId={booking.Id} />
 
             {rejectOpen && (
               <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60" onClick={() => !stageActioning && setRejectOpen(false)}>
@@ -1797,6 +1795,77 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 )}
 
+                {/* Status summary — at-a-glance health of parking + extras for this booking */}
+                {(() => {
+                  const totalCleared = milestoneList.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+                  const grandTotal = Number(booking?.GrandTotal || 0);
+                  const collectedPct = grandTotal > 0 ? Math.min(100, Math.round((totalCleared / grandTotal) * 100)) : 0;
+                  const parkingCount = (parking as any[]).length;
+                  const extrasCount = (extras as any[]).length;
+                  const hasParking = parkingCount > 0;
+                  const parkingTotal = (parking as any[]).reduce((s: number, p: any) => s + Number(p.TotalAmount || 0), 0);
+                  const extrasTotal = (extras as any[]).reduce((s: number, c: any) => s + Number(c.TotalAmount || 0), 0);
+                  const checks = [
+                    {
+                      label: "Parking allotted",
+                      ok: hasParking,
+                      detail: hasParking ? `${parkingCount} slot${parkingCount > 1 ? "s" : ""} — ${fmt(parkingTotal)}` : "No parking added to this booking",
+                      na: false,
+                    },
+                    {
+                      label: "Extra charges",
+                      ok: extrasCount > 0,
+                      detail: extrasCount > 0 ? `${extrasCount} item${extrasCount > 1 ? "s" : ""} — ${fmt(extrasTotal)}` : "None added",
+                      na: extrasCount === 0,
+                    },
+                    {
+                      label: "Grand total reflects all additions",
+                      ok: grandTotal > 0,
+                      detail: grandTotal > 0 ? `${fmt(grandTotal)} (unit + parking + extras + GST)` : "Grand total not yet computed",
+                      na: false,
+                    },
+                    {
+                      label: "Payment collection in progress",
+                      ok: collectedPct > 0,
+                      detail: collectedPct >= 100 ? "Fully collected" : collectedPct > 0 ? `${fmt(totalCleared)} collected (${collectedPct}% of grand total)` : "No payments received yet",
+                      na: false,
+                    },
+                  ];
+                  return (
+                    <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-2">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Section Status</h3>
+                      {checks.map((c) => (
+                        <div key={c.label} className="flex items-start gap-2.5">
+                          <div className={`mt-0.5 w-4 h-4 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold ${
+                            c.ok ? "bg-green-100 text-green-600" : c.na ? "bg-muted text-muted-foreground" : "bg-amber-100 text-amber-600"
+                          }`}>
+                            {c.ok ? "✓" : c.na ? "—" : "!"}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-xs font-medium">{c.label}</div>
+                            <div className="text-[11px] text-muted-foreground">{c.detail}</div>
+                          </div>
+                        </div>
+                      ))}
+                      {grandTotal > 0 && (
+                        <div className="pt-2 mt-1 border-t border-border space-y-1">
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>Booking collection progress</span>
+                            <span className="font-medium text-foreground">{collectedPct}%</span>
+                          </div>
+                          <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className={`h-1.5 rounded-full transition-all ${collectedPct >= 100 ? "bg-green-500" : collectedPct > 0 ? "bg-amber-400" : "bg-muted-foreground/20"}`}
+                              style={{ width: `${Math.max(collectedPct, 2)}%` }}
+                            />
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">{fmt(totalCleared)} of {fmt(grandTotal)} collected</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* Parking */}
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -1815,14 +1884,19 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         <div key={p.Id} className="rounded-lg border border-border px-3 py-2.5 space-y-2">
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-medium">{p.SlotNo || p.ParkingSlotNo || `Slot #${p.ParkingSlotId ?? "—"}`}</span>
                                 {p.CurrentParkingType && (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40">{p.CurrentParkingType}</span>
                                 )}
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${
-                                  p.PaymentStatus === "Paid" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200"
-                                }`}>{p.PaymentStatus || "Pending"}</span>
+                                {/* Unit-linked parking has no independent payment status —
+                                    its value is merged into the booking's milestone schedule.
+                                    "With Booking" is the only honest label here; "Pending"
+                                    would stay forever until 100% booking settlement. */}
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-blue-600 bg-blue-50 border-blue-200"
+                                  title="Parking cost is included in this booking's grand total and collected via the booking's payment milestones">
+                                  With Booking
+                                </span>
                               </div>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
@@ -1855,10 +1929,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                     className="px-2 py-1 text-xs border border-border rounded text-muted-foreground hover:bg-muted">
                                     Edit
                                   </button>
-                                  <button onClick={() => handleRemoveParking(p.Id)}
-                                    className="px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50">
-                                    Release
-                                  </button>
+                                  {isSuperAdmin && (
+                                    <button onClick={() => handleRemoveParking(p.Id)}
+                                      className="px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50">
+                                      Release
+                                    </button>
+                                  )}
                                 </>
                               ) : null}
                             </div>

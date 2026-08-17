@@ -3,17 +3,19 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Star } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Plus, Search, Star, UserCheck } from "lucide-react";
+import { translateError } from "@/lib/translateError";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
-const API = "/api/crm/service-tickets";
-const BKG_API = "/api/crm/bookings";
+const API         = "/api/crm/service-tickets";
+const BKG_API     = "/api/crm/bookings";
 const SA_LEADS_API = "/api/sa/leads";
 
-const CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Other"];
+const CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Legal", "Modification", "Other"];
 const PRIORITIES = ["Low", "Normal", "High", "Urgent"];
-const STATUSES = ["Open", "Assigned", "InProgress", "Resolved", "Closed", "Reopened"];
+const STATUSES   = ["Open", "Assigned", "InProgress", "Resolved", "Closed", "Reopened"];
 
 const priorityColor: Record<string, string> = {
   Urgent: "text-red-600 bg-red-50 border-red-200",
@@ -49,15 +51,25 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 
 const CrmServiceTickets: React.FC = () => {
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
+  const [search, setSearch]           = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ ...EMPTY_FORM });
-  const [saving, setSaving] = useState(false);
+  const [dialogOpen, setDialogOpen]   = useState(false);
+  const [form, setForm]               = useState({ ...EMPTY_FORM });
+  const [saving, setSaving]           = useState(false);
+
+  // Resolve dialog state
+  const [resolveDialog, setResolveDialog]   = useState(false);
+  const [resolveTicketId, setResolveTicketId] = useState<number | null>(null);
+  const [resolveNotes, setResolveNotes]     = useState("");
+
+  // Reopen dialog state
+  const [reopenDialog, setReopenDialog]   = useState(false);
+  const [reopenTicketId, setReopenTicketId] = useState<number | null>(null);
+  const [reopenReason, setReopenReason]   = useState("");
 
   const { data: tickets = [], isLoading } = useQuery({ queryKey: ["crm-service-tickets"], queryFn: fetchTickets, staleTime: 30_000 });
-  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
-  const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
+  const { data: bookings = [] }           = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  const { data: users = [] }             = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
 
   const filtered = useMemo(() =>
     (tickets as any[]).filter((t: any) => {
@@ -98,27 +110,67 @@ const CrmServiceTickets: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(`Ticket marked ${data.status}`);
+      toast.success(`Ticket ${data.status ?? "updated"}`);
       qc.invalidateQueries({ queryKey: ["crm-service-tickets"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
+    }
+  };
+
+  // Inline assign/reassign — fires PUT /:id with just AssignedTo
+  const handleAssign = async (id: number, userId: string) => {
+    if (!userId) return;
+    try {
+      const res = await fetchWithAuth(`${API}/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ AssignedTo: parseInt(userId) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Ticket assigned");
+      qc.invalidateQueries({ queryKey: ["crm-service-tickets"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
     }
   };
 
   const handleMarkInProgress = (id: number) => runAction(id, "mark-in-progress");
+  const handleClose          = (id: number) => runAction(id, "close");
 
-  const handleResolve = (id: number) => {
-    const notes = window.prompt("Resolution notes:");
-    if (!notes) return;
-    runAction(id, "resolve", { ResolutionNotes: notes });
+  // Open resolve dialog (replaces window.prompt)
+  const openResolveDialog = (id: number) => {
+    setResolveTicketId(id);
+    setResolveNotes("");
+    setResolveDialog(true);
+  };
+  const handleResolveConfirm = async () => {
+    if (!resolveNotes.trim()) { toast.error("Resolution notes are required"); return; }
+    setSaving(true);
+    try {
+      await runAction(resolveTicketId!, "resolve", { ResolutionNotes: resolveNotes.trim() });
+      setResolveDialog(false);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleClose = (id: number) => runAction(id, "close");
-
-  const handleReopen = (id: number) => {
-    const reason = window.prompt("Reason for reopening:");
-    if (!reason) return;
-    runAction(id, "reopen", { Reason: reason });
+  // Open reopen dialog (replaces window.prompt)
+  const openReopenDialog = (id: number) => {
+    setReopenTicketId(id);
+    setReopenReason("");
+    setReopenDialog(true);
+  };
+  const handleReopenConfirm = async () => {
+    if (!reopenReason.trim()) { toast.error("Reason for reopening is required"); return; }
+    setSaving(true);
+    try {
+      await runAction(reopenTicketId!, "reopen", { Reason: reopenReason.trim() });
+      setReopenDialog(false);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const isOverdue = (t: any) => t.SlaDueDate && new Date(t.SlaDueDate) < new Date() && !["Resolved", "Closed"].includes(t.Status);
@@ -146,7 +198,8 @@ const CrmServiceTickets: React.FC = () => {
       ) },
     { accessorKey: "Priority", header: "Priority", size: 90,
       cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${priorityColor[i.row.original.Priority] || ""}`}>{i.row.original.Priority}</span> },
-    { accessorKey: "AssigneeName", header: "Assigned To", size: 110, cell: (i) => <span className="text-sm">{(i.getValue() as string) || "—"}</span> },
+    { accessorKey: "AssigneeName", header: "Assigned To", size: 110,
+      cell: (i) => <span className="text-sm">{(i.getValue() as string) || "—"}</span> },
     { id: "slaDue", header: "SLA Due", size: 140, enableSorting: false,
       cell: (i) => {
         const t = i.row.original;
@@ -166,25 +219,71 @@ const CrmServiceTickets: React.FC = () => {
           <Star size={12} fill="currentColor" /> {i.row.original.CustomerRating}/5
         </span>
       ) : <span>—</span> },
-    { id: "actions", header: "Actions", size: 150, enableSorting: false,
+    { id: "actions", header: "Actions", size: 240, enableSorting: false,
       cell: (i) => {
         const t = i.row.original;
         return (
-          <div className="flex items-center gap-2 whitespace-nowrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Open: Assign dropdown */}
+            {t.Status === "Open" && (
+              <select
+                defaultValue=""
+                onChange={(e) => handleAssign(t.Id, e.target.value)}
+                className="text-xs border border-border rounded px-1.5 py-0.5 bg-background text-muted-foreground hover:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="" disabled>Assign to…</option>
+                {(users as any[]).map((u: any) => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
+                ))}
+              </select>
+            )}
+            {/* Assigned: Start work + Reassign */}
             {t.Status === "Assigned" && (
-              <button onClick={() => handleMarkInProgress(t.Id)} className="text-xs text-primary hover:underline">Start</button>
+              <>
+                <button onClick={() => handleMarkInProgress(t.Id)} className="text-xs text-primary hover:underline">Start</button>
+                <select
+                  defaultValue=""
+                  onChange={(e) => handleAssign(t.Id, e.target.value)}
+                  className="text-xs border border-border rounded px-1.5 py-0.5 bg-background text-muted-foreground hover:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="" disabled>Reassign…</option>
+                  {(users as any[]).map((u: any) => (
+                    <option key={u.value} value={u.value}>{u.label}</option>
+                  ))}
+                </select>
+              </>
             )}
-            {(t.Status === "Assigned" || t.Status === "InProgress") && (
-              <button onClick={() => handleResolve(t.Id)} className="text-xs text-primary hover:underline">Resolve</button>
+            {/* InProgress: Reassign available */}
+            {t.Status === "InProgress" && (
+              <select
+                defaultValue=""
+                onChange={(e) => handleAssign(t.Id, e.target.value)}
+                className="text-xs border border-border rounded px-1.5 py-0.5 bg-background text-muted-foreground hover:border-primary focus:outline-none"
+              >
+                <option value="" disabled>Reassign…</option>
+                {(users as any[]).map((u: any) => (
+                  <option key={u.value} value={u.value}>{u.label}</option>
+                ))}
+              </select>
             )}
+            {/* Assigned/InProgress/Reopened: Resolve */}
+            {["Assigned", "InProgress", "Reopened"].includes(t.Status) && (
+              <button onClick={() => openResolveDialog(t.Id)} className="text-xs text-primary hover:underline">Resolve</button>
+            )}
+            {/* Reopened: also allow restarting to InProgress */}
+            {t.Status === "Reopened" && (
+              <button onClick={() => handleMarkInProgress(t.Id)} className="text-xs text-purple-600 hover:underline">Start Work</button>
+            )}
+            {/* Resolved: Close or Reopen */}
             {t.Status === "Resolved" && (
               <>
                 <button onClick={() => handleClose(t.Id)} className="text-xs text-primary hover:underline">Close</button>
-                <button onClick={() => handleReopen(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
+                <button onClick={() => openReopenDialog(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
               </>
             )}
+            {/* Closed: Reopen only */}
             {t.Status === "Closed" && (
-              <button onClick={() => handleReopen(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
+              <button onClick={() => openReopenDialog(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
             )}
           </div>
         );
@@ -226,6 +325,7 @@ const CrmServiceTickets: React.FC = () => {
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
 
+      {/* ── Raise Ticket dialog ───────────────────────────────────────────── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle className="font-heading">Raise Service Ticket</DialogTitle></DialogHeader>
@@ -263,26 +363,72 @@ const CrmServiceTickets: React.FC = () => {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Description</label>
-              <textarea value={form.Description} onChange={(e) => setForm((f) => ({ ...f, Description: e.target.value }))}
-                rows={3} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+              <Textarea value={form.Description} onChange={(e) => setForm((f) => ({ ...f, Description: e.target.value }))}
+                rows={3} className="w-full text-sm resize-none" />
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Assign To</label>
               <select value={form.AssignedTo} onChange={(e) => setForm((f) => ({ ...f, AssignedTo: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">— Unassigned —</option>
-                {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                {(users as any[]).map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
               </select>
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+          <DialogFooter>
             <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleCreate} disabled={saving}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Raising..." : "Raise Ticket"}
             </button>
-          </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Resolve dialog (replaces window.prompt) ───────────────────────── */}
+      <Dialog open={resolveDialog} onOpenChange={(o) => { if (!o) setResolveDialog(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="font-heading">Resolve Ticket</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground -mt-1">Describe what was done to resolve the issue. This is stored permanently on the ticket.</p>
+          <Textarea
+            value={resolveNotes}
+            onChange={(e) => setResolveNotes(e.target.value)}
+            placeholder="Resolution notes..."
+            rows={4}
+            className="resize-none mt-1"
+          />
+          <DialogFooter>
+            <button onClick={() => setResolveDialog(false)}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleResolveConfirm} disabled={saving}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {saving ? "Resolving..." : "Mark Resolved"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reopen dialog (replaces window.prompt) ────────────────────────── */}
+      <Dialog open={reopenDialog} onOpenChange={(o) => { if (!o) setReopenDialog(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="font-heading">Reopen Ticket</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground -mt-1">Explain why this ticket needs to be reopened. Required for audit trail.</p>
+          <Textarea
+            value={reopenReason}
+            onChange={(e) => setReopenReason(e.target.value)}
+            placeholder="Reason for reopening..."
+            rows={3}
+            className="resize-none mt-1"
+          />
+          <DialogFooter>
+            <button onClick={() => setReopenDialog(false)}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleReopenConfirm} disabled={saving}
+              className="px-4 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">
+              {saving ? "Reopening..." : "Reopen"}
+            </button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </SalesAutoShell>

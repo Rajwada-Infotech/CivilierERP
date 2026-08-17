@@ -1525,4 +1525,186 @@ router.put("/:id/portal/reactivate", requirePageRight("crm-bookings", "edit"), a
   }
 });
 
+// GET /:id/lifecycle — structured step-by-step lifecycle state for one booking.
+// Powers the BookingLifecycleBar component in CrmBookingDetail.
+router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: "Invalid booking id" });
+  try {
+    const pool = getPool();
+
+    const [bkRes, wcRes, agRes, lmRes, sdRes, qpRes, regRes, nocRes, ppRes, pnRes, hoRes] = await Promise.all([
+      // booking itself
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT Id, BookingNo, Status, BookingDate, ApplicationId FROM dbo.CrmBooking WHERE Id = @id"),
+      // welcome call — any 'Welcomed' outcome
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 CallDate, Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = @id AND Outcome = 'Welcomed' ORDER BY CallDate DESC"),
+      // agreement
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, AgreementDate, CreatedAt FROM dbo.CrmAgreement WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // legal milestones
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, CurrentStep, OverallStatus, CreatedAt FROM dbo.CrmLegalMilestone WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // sales deed
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, CustomerApprovalStatus, DirectorApprovalStatus, RegistrationNo, CreatedAt FROM dbo.CrmSalesDeed WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // query payment
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, CreatedAt FROM dbo.CrmQueryPayment WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // registry
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, AppointmentDate, CreatedAt FROM dbo.CrmRegistry WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // NOC
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, NocType, CreatedAt FROM dbo.CrmNoc WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // pre-possession
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, CreatedAt FROM dbo.CrmPrePossession WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // possession notice
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, OfferedDate, CreatedAt FROM dbo.CrmPossessionNotice WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // handover
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, ActualHandoverDate, CreatedAt FROM dbo.CrmHandover WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+    ]);
+
+    if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
+
+    const bk  = bkRes.recordset[0];
+    const wc  = wcRes.recordset[0];
+    const ag  = agRes.recordset[0];
+    const lm  = lmRes.recordset[0];
+    const sd  = sdRes.recordset[0];
+    const qp  = qpRes.recordset[0];
+    const reg = regRes.recordset[0];
+    const noc = nocRes.recordset[0];
+    const pp  = ppRes.recordset[0];
+    const pn  = pnRes.recordset[0];
+    const ho  = hoRes.recordset[0];
+
+    const agDone  = ag  && ["Executed","Registered"].includes(ag.Status);
+    const sdDone  = sd  && sd.CustomerApprovalStatus === "Approved";
+    const qpDone  = qp  && qp.Status === "Confirmed";
+    const ppDone  = pp  && pp.Status === "Ready";
+    const pnDone  = pn  && pn.Status === "Acknowledged";
+    const hoDone  = ho  && ho.Status === "Completed";
+
+    const d = (v) => v ? String(v).slice(0, 10) : null;
+
+    const steps = [
+      {
+        key: "application",
+        label: "Application",
+        status: "done",
+        date: d(bk.BookingDate),
+        link: bk.ApplicationId ? `/crm/applications` : null,
+        blockedBy: null,
+      },
+      {
+        key: "booking",
+        label: "Booking",
+        status: "done",
+        date: d(bk.BookingDate),
+        link: "/crm/booking",
+        blockedBy: null,
+      },
+      {
+        key: "welcome_call",
+        label: "Welcome Call",
+        status: wc ? "done" : "active",
+        date: wc ? d(wc.CallDate) : null,
+        link: "/crm/welcome-call",
+        blockedBy: null,
+      },
+      {
+        key: "agreement",
+        label: "Agreement",
+        status: agDone ? "done" : ag ? "active" : "active",
+        date: agDone ? d(ag.AgreementDate || ag.CreatedAt) : ag ? d(ag.CreatedAt) : null,
+        link: "/crm/agreements",
+        blockedBy: null,
+      },
+      {
+        key: "legal_milestones",
+        label: "Legal Milestones",
+        status: lm && lm.OverallStatus === "Cleared" ? "done"
+               : lm ? "active"
+               : agDone ? "active"
+               : "locked",
+        date: lm ? d(lm.CreatedAt) : null,
+        link: "/crm/legal-milestones",
+        blockedBy: agDone ? null : "Agreement must be Executed first",
+      },
+      {
+        key: "sales_deed",
+        label: "Sales Deed",
+        status: sdDone ? "done" : sd ? "active" : agDone ? "active" : "locked",
+        date: sd ? d(sd.CreatedAt) : null,
+        link: "/crm/sales-deed",
+        blockedBy: agDone ? null : "Agreement must be Executed first",
+      },
+      {
+        key: "noc",
+        label: "NOC",
+        status: noc && noc.Status === "Issued" ? "done"
+               : noc ? "active"
+               : agDone ? "active"
+               : "locked",
+        date: noc ? d(noc.CreatedAt) : null,
+        link: "/crm/noc",
+        blockedBy: agDone ? null : "Agreement must be Executed first",
+      },
+      {
+        key: "query_payment",
+        label: "Query Payment",
+        status: qpDone ? "done" : qp ? "active" : sd ? "active" : "locked",
+        date: qp ? d(qp.CreatedAt) : null,
+        link: "/crm/query-payment",
+        blockedBy: sd ? null : "Sales Deed must be created first",
+      },
+      {
+        key: "registry",
+        label: "Registry",
+        status: reg && reg.Status === "Completed" ? "done"
+               : reg ? "active"
+               : qpDone ? "active"
+               : "locked",
+        date: reg ? d(reg.AppointmentDate || reg.CreatedAt) : null,
+        link: "/crm/registry",
+        blockedBy: qpDone ? null : "Query Payment must be Confirmed first",
+      },
+      {
+        key: "pre_possession",
+        label: "Pre-Possession",
+        status: ppDone ? "done" : pp ? "active" : sdDone ? "active" : "locked",
+        date: pp ? d(pp.CreatedAt) : null,
+        link: "/crm/pre-possession",
+        blockedBy: sdDone ? null : "Customer must approve the Sales Deed first",
+      },
+      {
+        key: "possession_notice",
+        label: "Possession Notice",
+        status: pnDone ? "done" : pn ? "active" : ppDone ? "active" : "locked",
+        date: pn ? d(pn.OfferedDate || pn.CreatedAt) : null,
+        link: "/crm/possession-notice",
+        blockedBy: ppDone ? null : "Pre-Possession inspection must be Ready first",
+      },
+      {
+        key: "handover",
+        label: "Handover",
+        status: hoDone ? "done" : ho ? "active" : pnDone ? "active" : "locked",
+        date: ho ? d(ho.ActualHandoverDate || ho.CreatedAt) : null,
+        link: "/crm/handover",
+        blockedBy: pnDone ? null : "Possession Notice must be Acknowledged first",
+      },
+    ];
+
+    res.json({ BookingId: id, BookingNo: bk.BookingNo, steps });
+  } catch (e) {
+    console.error("[crm-bookings] lifecycle error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
