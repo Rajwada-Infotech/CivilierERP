@@ -49,8 +49,23 @@ export interface Contractor {
   name: string;
 }
 
+// A checkpoint attached to an assignment — pulled in from Work Checkpoint
+// Master's template for the rung's activity, then tracked per-assignment,
+// milestone-style. checkpointId traces back to the master row (null if that
+// row was later deleted); fieldName is snapshotted so a rename/removal
+// there never rewrites what this specific rung was actually checked
+// against.
+export interface AssignmentCheckpoint {
+  id?: number;
+  checkpointId: number | null;
+  fieldName: string;
+  sortOrder?: number;
+  isChecked: boolean;
+}
+
 export interface RungAssignmentDetail {
   rungId: number;
+  activityId: number;
   candidateItems: CandidateItem[];
   assignment: {
     engineerIds: number[];
@@ -64,6 +79,7 @@ export interface RungAssignmentDetail {
     description: string | null;
     remarks: string | null;
     materials: AssignmentMaterial[];
+    checkpoints: AssignmentCheckpoint[];
   } | null;
 }
 
@@ -78,6 +94,7 @@ export interface RungAssignmentPayload {
   materialContractorId: number | null;
   description: string | null;
   remarks: string | null;
+  checkpoints: AssignmentCheckpoint[];
   materials: AssignmentMaterial[];
 }
 
