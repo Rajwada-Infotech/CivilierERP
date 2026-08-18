@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
@@ -15,7 +14,7 @@ const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst } = require("../services/crmGst");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 // Recomputes CrmBooking.ParkingTotal/ExtraChargesTotal/GrandTotal AND the
 // fixed HSN-driven GST (which re-prices every active parking allotment to
