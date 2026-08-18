@@ -14,6 +14,7 @@ export function ExpenseBookingPicker({
   onContractClear,
   loanEmis = [],
   loanEmisLoading = false,
+  loanEmisNoCompany = false,
   selectedLoanEmi = null,
   onLoanEmiSelect,
   onLoanEmiClear,
@@ -29,6 +30,10 @@ export function ExpenseBookingPicker({
   onContractClear?: () => void;
   loanEmis?: any[];
   loanEmisLoading?: boolean;
+  // True when the form has no Company selected yet — the loan EMI list is
+  // scoped per-company, so an empty result here means "pick a company",
+  // not "this company genuinely has nothing outstanding".
+  loanEmisNoCompany?: boolean;
   selectedLoanEmi?: any | null;
   onLoanEmiSelect?: (e: any) => void;
   onLoanEmiClear?: () => void;
@@ -315,6 +320,8 @@ export function ExpenseBookingPicker({
                 <div className="px-4 py-6 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
                   <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> Loading EMIs…
                 </div>
+              ) : loanEmisNoCompany ? (
+                <div className="px-4 py-6 text-center text-xs text-muted-foreground">Select a Company above to see its loan EMIs</div>
               ) : filteredLoanEmis.length === 0 ? (
                 <div className="px-4 py-6 text-center text-xs text-muted-foreground">No pending EMIs</div>
               ) : filteredLoanEmis.map((e: any) => (
