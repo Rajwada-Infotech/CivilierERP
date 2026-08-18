@@ -133,13 +133,19 @@ const fmtDate = (d?: string | null) =>
 
 // What a repayment was actually paid WITH — a Loan EMI is always settled
 // through Finance > Payment first (see migration 340's NewPaymentId link),
-// which is where mode/cheque/bank/reference are genuinely captured. Falls
-// back to null (rendered as nothing) for older rows recorded before that
-// link existed, rather than claiming a mode that isn't on file.
-function paymentInstrumentLabel(p: LoanPayment): string | null {
+// which is where mode/cheque/bank/reference are genuinely captured.
+// Returns:
+//   string  — a human-readable description of the instrument (cheque/NEFT/UPI etc.)
+//   null    — PaymentMode is empty even though NewPaymentId is set (not expected)
+//   "NOT_ON_FILE" — NewPaymentId is null: this row pre-dates migration 340;
+//                   the caller should render "Payment mode not on file" in muted style.
+function paymentInstrumentLabel(p: LoanPayment): string | null | "NOT_ON_FILE" {
+  // BUG 3 FIX: distinguish "no NewPaymentId at all" from "has one but mode blank"
+  if (p.NewPaymentId == null) return "NOT_ON_FILE";
   if (!p.PaymentMode) return null;
   if (p.PaymentMode === "Cheque" || p.PaymentMode === "Post-Dated Cheque") {
-    return p.ChequeNo ? `Cheque #${p.ChequeNo}${p.BankName ? ` (${p.BankName})` : ""}` : p.PaymentMode;
+    const chequeInfo = p.ChequeNo ? `Cheque #${p.ChequeNo}${p.ChequeDate ? ` dated ${new Date(p.ChequeDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}${p.BankName ? ` (${p.BankName})` : ""}` : p.PaymentMode;
+    return chequeInfo;
   }
   const ref = p.NeftNumber || p.UpiTransactionId || p.RtgsReference || p.ImpsReference;
   if (ref) return `${p.PaymentMode} (Ref: ${ref})${p.BankName ? ` — ${p.BankName}` : ""}`;
@@ -701,8 +707,13 @@ export default function LoanSanctionPage() {
 
   const totalEmis = schedule.length;
   const paidEmis = schedule.filter((e) => e.IsPaid).length;
-  const paidAmount = schedule.filter((e) => e.IsPaid).reduce((s, e) => s + Number(e.EMIAmount), 0);
-  const outstandingAmount = schedule.filter((e) => !e.IsPaid).reduce((s, e) => s + Number(e.EMIAmount), 0);
+  // BUG 8 FIX: paidAmount derived from actual LoanPayment transactions
+  // (PrincipalInterestAmount), not from summing IsPaid EMI rows. These can
+  // diverge when a lump-sum payment covers an amount slightly different from
+  // the scheduled EMI sum (rounding, early payoff excess, partial payments).
+  const totalScheduledAmount = schedule.reduce((s, e) => s + Number(e.EMIAmount), 0);
+  const paidAmount = payments.reduce((s, p) => s + Number(p.PrincipalInterestAmount), 0);
+  const outstandingAmount = Math.max(0, Math.round((totalScheduledAmount - paidAmount) * 100) / 100);
   const nextDue = schedule.find((e) => !e.IsPaid) ?? null;
 
   const tabs: { id: typeof tab; label: string; icon: typeof FileText }[] = [
@@ -782,6 +793,21 @@ export default function LoanSanctionPage() {
                     }}
                   >
                     {viewingLoan.LoanType}
+                  </span>
+                )}
+                {/* BUG 9 FIX: perspective badge — tells the user which direction
+                    the money flowed from OUR company's point of view.
+                    Customer Loan → we are the lender → "Loan Given"
+                    Bank Loan     → we are the borrower → "Loan Received"
+                    Inter-Company → could be either; show both party labels */}
+                {viewingLoan && viewingLoan.LoanType === "Customer Loan" && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                    <TrendingUp size={9} /> Loan Given
+                  </span>
+                )}
+                {viewingLoan && viewingLoan.LoanType === "Bank Loan" && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-purple-500/15 text-purple-600 dark:text-purple-400">
+                    <TrendingDown size={9} /> Loan Received
                   </span>
                 )}
                 {viewingLoan && viewingLoan.Status === "Closed" && (
@@ -1717,7 +1743,16 @@ export default function LoanSanctionPage() {
                       key={p.PaymentId}
                       icon={<Receipt size={13} className="text-emerald-500" />}
                       title={`${p.PaymentType === "LumpSum" ? "Lump Sum Payment" : `${p.EmisCovered} EMI${p.EmisCovered === 1 ? "" : "s"} Paid`} — ${p.PaymentRef}`}
-                      subtitle={`${fmt(p.TotalAmount)}${p.LateFee > 0 ? ` (incl. ${fmt(p.LateFee)} late fee)` : ""} · Paid ${fmtDate(p.PaymentDate)}${paymentInstrumentLabel(p) ? ` · ${paymentInstrumentLabel(p)}` : ""}${p.CreatedBy ? ` by ${p.CreatedBy}` : ""}${p.ExcessCredited > 0 ? ` · ${fmt(p.ExcessCredited)} excess credited to lender's on-account` : ""}${p.ClosedLoan ? " · Loan closed" : ""}`}
+                      subtitle={(() => {
+                        const instrLabel = paymentInstrumentLabel(p);
+                        const instrPart = instrLabel === "NOT_ON_FILE"
+                          ? " · Payment mode not on file"
+                          : instrLabel
+                            ? ` · ${instrLabel}`
+                            : "";
+                        const docNoPart = p.PaymentDocNo ? ` · Finance ref: ${p.PaymentDocNo}` : "";
+                        return `${fmt(p.TotalAmount)}${p.LateFee > 0 ? ` (incl. ${fmt(p.LateFee)} late fee)` : ""} · Paid ${fmtDate(p.PaymentDate)}${instrPart}${docNoPart}${p.CreatedBy ? ` by ${p.CreatedBy}` : ""}${p.ExcessCredited > 0 ? ` · ${fmt(p.ExcessCredited)} excess credited to lender's on-account` : ""}${p.ClosedLoan ? " · Loan closed" : ""}`;
+                      })()}
                       done
                       isLast={i === arr.length - 1 && viewingLoan.Status === "Closed"}
                     />

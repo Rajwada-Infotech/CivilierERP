@@ -743,6 +743,11 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
           ],
         });
         await bumpCacheVersion("journal-voucher");
+        // BUG 9 FIX: stamp DisbursedAt — Inter-Company loans auto-post at
+        // sanction time, so disbursement happens immediately on creation.
+        await pool.request()
+          .input("LoanId", sql.Int, loanId)
+          .query("UPDATE dbo.LoanSanction SET DisbursedAt = SYSDATETIME() WHERE LoanId = @LoanId AND DisbursedAt IS NULL");
       }
     }
 
@@ -1121,6 +1126,15 @@ router.post("/:id/post-to-gl", requirePageRight("loan-sanction", "edit"), async 
       legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
     });
 
+    // BUG 9 FIX: stamp DisbursedAt when the GL posting confirms money moved.
+    // Null until then; setting it here (and in the Inter-Company auto-post
+    // path in POST / above) gives the loan a distinct disbursement moment
+    // separate from its sanction date, enabling the "Given vs Received"
+    // lifecycle distinction on the frontend.
+    await pool.request()
+      .input("LoanId", sql.Int, loanId)
+      .query("UPDATE dbo.LoanSanction SET DisbursedAt = SYSDATETIME() WHERE LoanId = @LoanId AND DisbursedAt IS NULL");
+
     await Promise.all([bumpCacheVersion("journal-voucher"), bumpCacheVersion("loan-sanction")]);
     res.json({ jvId, jvNo: finalDocNo, message: "Loan posted to GL successfully." });
   } catch (err) {
@@ -1146,11 +1160,20 @@ router.post("/:id/post-to-gl", requirePageRight("loan-sanction", "edit"), async 
 // own companies, so there's no second set of books to post into: only the
 // LENDER company's side is real. Dr the lender's bank account (cash
 // actually received from the customer), Cr the customer's Loan ledger head
-// (what they still owe shrinks). Guarded the same way the Inter-Company
-// block is — every required id must be present, or this silently no-ops
-// and the repayment still records fine via OnAccountLedger alone.
+// (what they still owe shrinks).
+// Returns { posted: true } on success, or { posted: false, reason } if a
+// required field is missing so the caller can surface a clear warning
+// rather than silently no-oping.
 async function postCustomerLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor }) {
-  if (!loan.LenderCompanyId || !loan.LenderBankAccountId || !loan.BorrowerLHeadId) return;
+  if (!loan.LenderCompanyId || !loan.BorrowerLHeadId) {
+    return { posted: false, reason: "Missing lender company or borrower GL head — GL not posted." };
+  }
+  if (!loan.LenderBankAccountId) {
+    // BUG 7 FIX: Previously silently skipped. Now surfaces a reason so the
+    // caller can warn the user that the repayment was recorded but GL was not
+    // updated — they should tag a Lender Bank A/C on the loan to fix this.
+    return { posted: false, reason: "No Lender Bank A/C is tagged on this loan — repayment recorded but GL not posted. Edit the loan and add a Lender Bank A/C to enable GL postings." };
+  }
   const { postVoucher } = require("../services/generalLedger");
   await postVoucher(pool, {
     voucherNo: paymentRef,
@@ -1164,6 +1187,36 @@ async function postCustomerLoanRepayment(pool, { loan, paymentId, paymentRef, pa
       { lHeadId: loan.BorrowerLHeadId, credit: principalInterestAmount, narration: `${paymentRef} — loan repayment (${loan.LoanNo})` },
     ],
   });
+  return { posted: true };
+}
+
+// Posts a Bank Loan repayment to GL — the borrower company (us) pays the
+// lending bank. Only our own (borrower) company's books are posted:
+//   Dr  the bank's Loan ledger head (LenderLHeadId) — reduces what we owe
+//   Cr  our bank account (BorrowerBankAccountId) — cash goes out to the bank
+// BUG 2 FIX: Previously, Bank Loan repayments had NO GL posting at all.
+// Returns { posted: true } or { posted: false, reason }.
+async function postBankLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor }) {
+  if (!loan.BorrowerCompanyId || !loan.LenderLHeadId) {
+    return { posted: false, reason: "Missing borrower company or lender GL head — Bank Loan GL not posted." };
+  }
+  if (!loan.BorrowerBankAccountId) {
+    return { posted: false, reason: "No Borrower Bank A/C is tagged on this loan — Bank Loan repayment recorded but GL not posted. Edit the loan and add a Borrower Bank A/C." };
+  }
+  const { postVoucher } = require("../services/generalLedger");
+  await postVoucher(pool, {
+    voucherNo: paymentRef,
+    voucherDate: paymentDate,
+    sourceType: "LoanRepayment",
+    sourceId: paymentId,
+    companyId: loan.BorrowerCompanyId,
+    createdBy: actor,
+    legs: [
+      { lHeadId: loan.LenderLHeadId, debit: principalInterestAmount, narration: `${paymentRef} — bank loan repayment (${loan.LoanNo})` },
+      { lHeadId: loan.BorrowerBankAccountId, credit: principalInterestAmount, narration: `${paymentRef} — bank loan repayment sent` },
+    ],
+  });
+  return { posted: true };
 }
 
 // ── POST /:id/pay — flexible repayment: single EMI, multiple EMIs, or a
@@ -1271,7 +1324,27 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
     }
 
     const newTotalPaid = alreadyPaid + principalInterestAmount;
-    const willClose = newTotalPaid >= totalScheduleAmount - 0.01;
+
+    // Closure requires TWO conditions to be simultaneously true:
+    //   1. The running total paid (across all LoanPayment rows) has reached or
+    //      exceeded the full schedule amount (financial payoff).
+    //   2. Every EMI row in LoanEMISchedule will be IsPaid = 1 after this
+    //      payment applies — this payment must mark all remaining EMIs, not
+    //      just some of them, even if the numeric total already matches.
+    //      This prevents an edge case where a rounding excess or an out-of-order
+    //      payment satisfies the numeric threshold while leaving installments
+    //      technically open, creating a "Closed" loan with unpaid EMI rows.
+    // For lump-sum early payoff, emisToUpdate is set to unpaidEmis (all
+    // remaining), so allEmisAfterPayment will be 0 — correct closure.
+    // For a partial EMI selection, some installments stay unpaid even if the
+    // dollar total happens to match — correctly NOT closed.
+    const emisToUpdateForCloseCheck = (isLumpSum && newTotalPaid >= totalScheduleAmount - 0.01)
+      ? unpaidEmis.map((e) => e.EMIId)
+      : emiIdsToMark;
+    const remainingUnpaidAfterPayment = unpaidEmis.filter(
+      (e) => !emisToUpdateForCloseCheck.includes(e.EMIId)
+    ).length;
+    const willClose = newTotalPaid >= totalScheduleAmount - 0.01 && remainingUnpaidAfterPayment === 0;
     const excess = willClose ? Math.max(0, Math.round((newTotalPaid - totalScheduleAmount) * 100) / 100) : 0;
     const totalAmount = Math.round((principalInterestAmount + fee) * 100) / 100;
 
@@ -1299,10 +1372,9 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
       `);
     const paymentId = paymentInsert.recordset[0].PaymentId;
 
-    // If the payoff closes the loan, every remaining EMI is settled by this
-    // payment (that's the whole point of an early lump-sum payoff) —
-    // otherwise, only the specific EMIs this payment actually covers.
-    const emisToUpdate = willClose ? unpaidEmis.map((e) => e.EMIId) : emiIdsToMark;
+    // emisToUpdateForCloseCheck already contains the correct set: either all
+    // remaining unpaid EMIs (lump-sum closure) or just the selected ones.
+    const emisToUpdate = emisToUpdateForCloseCheck;
     for (const emiId of emisToUpdate) {
       await new sql.Request(tx)
         .input("EMIId", sql.Int, emiId)
@@ -1423,9 +1495,29 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
     // Customer Loan: single-sided posting into the LENDER's own books only
     // — a customer has no company books of its own to post the mirror leg
     // into. See postCustomerLoanRepayment above.
+    // BUG 7 FIX: the function now returns { posted, reason } so we can
+    // surface a warning to the user when GL is skipped due to a missing bank
+    // A/C tag, rather than silently no-oping.
+    let glPostingWarning = null;
     if (loan.LoanType === "Customer Loan") {
-      await postCustomerLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor });
-      await bumpCacheVersion("journal-voucher");
+      const glResult = await postCustomerLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor });
+      if (glResult && glResult.posted) {
+        await bumpCacheVersion("journal-voucher");
+      } else if (glResult && !glResult.posted) {
+        glPostingWarning = glResult.reason;
+      }
+    }
+
+    // Bank Loan: posting into the BORROWER (our) company's books only —
+    // the bank has no ledger in our system to post the mirror leg into.
+    // BUG 2 FIX: Bank Loan repayments now post to GL.
+    if (loan.LoanType === "Bank Loan") {
+      const glResult = await postBankLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor });
+      if (glResult && glResult.posted) {
+        await bumpCacheVersion("journal-voucher");
+      } else if (glResult && !glResult.posted) {
+        glPostingWarning = glResult.reason;
+      }
     }
 
     res.status(201).json({
@@ -1434,6 +1526,10 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
       totalAmount,
       loanClosed: willClose,
       excessCredited: excess,
+      // null when GL posted cleanly; non-null string when the repayment was
+      // recorded but GL couldn't post (missing bank A/C tag) — the frontend
+      // should show this as a warning toast so the user knows to fix it.
+      glPostingWarning,
     });
   } catch (err) {
     await tx.rollback().catch(() => {});
@@ -1604,6 +1700,20 @@ router.delete("/:id", requirePageRight("loan-sanction", "delete"), async (req, r
     if (paidRes.recordset[0].cnt > 0) {
       throw Object.assign(
         new Error("This loan has EMI payments already recorded and can't be deleted. Reverse those payments first."),
+        { status: 409 },
+      );
+    }
+
+    // Also guard against LoanPayment rows — a lump-sum partial payment may
+    // exist without any individual EMI being IsPaid yet (e.g. first partial
+    // payment just recorded). Deleting in that state silently erases real
+    // financial history and de-syncs the borrower's On A/C balance.
+    const paymentRowRes = await new sql.Request(tx)
+      .input("LoanId", sql.Int, loanId)
+      .query("SELECT COUNT(*) AS cnt FROM dbo.LoanPayment WHERE LoanId = @LoanId");
+    if (paymentRowRes.recordset[0].cnt > 0) {
+      throw Object.assign(
+        new Error("This loan has repayment transactions recorded and can't be deleted. Reverse those payments first."),
         { status: 409 },
       );
     }

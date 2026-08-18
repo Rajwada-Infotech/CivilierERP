@@ -2019,6 +2019,12 @@ const Payment: React.FC = () => {
                 ? `Loan ${selectedLoanEmi.LoanNo} fully repaid and closed. Ref: ${res.paymentRef}`
                 : `Loan payment settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef}`,
             );
+            // BUG 7 FIX: surface the GL skip warning if the loan is missing a
+            // bank A/C tag so the user knows to fix it (repayment is recorded
+            // but GL was not updated).
+            if (res.glPostingWarning) {
+              toast.warning(`⚠️ GL posting skipped: ${res.glPostingWarning}`, { duration: 8000 });
+            }
             queryClient.invalidateQueries({ queryKey: ["payment-loan-emis"] });
             queryClient.invalidateQueries({ queryKey: ["loan-sanctions"] });
           } catch (loanErr: any) {
