@@ -52,8 +52,8 @@ router.get("/balance/:partyId", requirePageRight("on-account-adjustment", "view"
 });
 
 // ── GET /balance-by-ref/:expenseRef — resolve party from invoice ref, return balance
-router.get("/balance-by-ref/:expenseRef", requirePageRight("on-account-adjustment", "view"), async (req, res) => {
-  const expenseRef = decodeURIComponent(req.params.expenseRef);
+router.get(/^\/balance-by-ref\/(.+)$/, requirePageRight("on-account-adjustment", "view"), async (req, res) => {
+  const expenseRef = decodeURIComponent(req.params[0]);
   try {
     const pool = getPool();
     const party = await resolvePartyFromRef(pool, expenseRef);

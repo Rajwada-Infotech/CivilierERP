@@ -1,6 +1,7 @@
-import React, { useState, useMemo, useRef, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import {
   Plus, X, Check, FileText, Upload, Eye,
   RefreshCw, Search, Trash2, ArrowLeft, ChevronDown,
@@ -137,7 +138,29 @@ export default function Contract() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   // ── form state ───────────────────────────────────────────────────────────────
-  const [form, setForm] = useState(emptyForm());
+  // This form only shows when viewMode === "form" (a full-page swap, not an
+  // always-visible card), so a refresh loses more than just the field
+  // values — it also drops back to the list view. Restore both together:
+  // rehydrate the draft here, then the mount effect below switches back to
+  // "form" view if anything was actually restored. resetForm() below always
+  // seeds finYear from context rather than "", so that has to be the real
+  // "empty" baseline too, or a freshly-reset form looks dirty and gets
+  // persisted right back.
+  const [form, setForm] = useDraftForm("finance-contract", { ...emptyForm(), finYear: ctxFinYear || "" }, {
+    skip: editingId !== null,
+  });
+
+  // Only reopen on an actual browser reload, not a plain in-app navigation
+  // (e.g. clicking "Contract" in the sidebar remounts this component too;
+  // without this check, an old leftover draft would hijack that link into
+  // always opening the form instead of the list).
+  useEffect(() => {
+    if (!wasPageReloaded()) return;
+    if (form.docNo || form.reason || form.natureOfContract || form.contractAmount) {
+      setViewMode("form");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [selectedTCs, setSelectedTCs] = useState<TCRecord[]>([]);
   const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -607,7 +630,7 @@ export default function Contract() {
             </div>
           }
         >
-          <div className="space-y-6">
+          <div className="space-y-6" onKeyDown={preventEnterSubmit}>
 
             {/* ── Document Info ──────────────────────────────────────────────── */}
             <Card className="border-border shadow-sm">

@@ -33,6 +33,11 @@ export interface NavItem {
   isDashboard?: boolean;
   /** Notification-style count shown as a filled badge next to the label. */
   badge?: number;
+  /** Wraps the label onto two lines instead of truncating with an ellipsis —
+   *  for labels too long to read at a glance when cut off (e.g. "Task
+   *  Performance Report"). Leave unset for the default single-line + ellipsis
+   *  behaviour every other nav item uses. */
+  wrapLabel?: boolean;
 }
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
@@ -110,13 +115,17 @@ const NavLabel = ({
   active,
   accentColor,
   className = "",
+  wrap = false,
 }: {
   label: string;
   active: boolean;
   accentColor?: string;
   className?: string;
+  wrap?: boolean;
 }) => (
-  <span className={`relative inline-block min-w-0 max-w-full truncate ${className}`}>
+  <span
+    className={`relative inline-block min-w-0 max-w-full ${wrap ? "line-clamp-2 leading-tight" : "truncate"} ${className}`}
+  >
     <span
       className={`transition-all duration-200 ease-out ${active ? "font-bold" : "font-normal"}`}
       style={active && accentColor ? { color: accentColor } : undefined}
@@ -175,6 +184,7 @@ export const NavButton = ({
           active={isActive}
           accentColor={accentColor}
           className="flex-1 text-left"
+          wrap={item.wrapLabel}
         />
       )}
       {!collapsed && !!item.badge && <Badge count={item.badge} />}

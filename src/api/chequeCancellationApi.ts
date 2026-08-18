@@ -3,17 +3,20 @@ import axios from "./axios";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ChequeSearchResult {
-  PPaymentID: number;
+  // null marks a payment-less match — a cheque number within an active
+  // lot's range that was never issued against any dbo.NewPayment row.
+  // Cancelling it goes through chequeLotId instead of paymentId.
+  PPaymentID: number | null;
   DocNo: string | null;
   PPaymentName: string | null;
   PRemarks: string | null;
-  PAmount: number;
-  PDate: string;
-  PMode: string;
+  PAmount: number | null;
+  PDate: string | null;
+  PMode: string | null;
   PProject: string | null;
   PCompany: string | null;
   PExpenseRef: string | null;
-  Status: string;
+  Status: string | null;
   PChequeNo: string;
   PChequeLotId: number | null;
   PChequeLotNumber: string | null;
@@ -77,13 +80,18 @@ export const bulkSearchCheques = (chequeNumbers: string[]) =>
     .post<BulkSearchResult[]>("/cheque-cancellation/bulk-search", { chequeNumbers })
     .then((r) => r.data);
 
-export const cancelCheque = (paymentId: number, chequeNo: string, reason?: string) =>
+export const cancelCheque = (
+  paymentId: number | null,
+  chequeNo: string,
+  reason?: string,
+  chequeLotId?: number | null,
+) =>
   axios
-    .post<{ message: string }>("/cheque-cancellation", { paymentId, chequeNo, reason })
+    .post<{ message: string }>("/cheque-cancellation", { paymentId, chequeLotId, chequeNo, reason })
     .then((r) => r.data);
 
 export const bulkCancelCheques = (
-  items: { paymentId: number; chequeNo: string }[],
+  items: { paymentId: number | null; chequeLotId?: number | null; chequeNo: string }[],
   reason?: string,
 ) =>
   axios

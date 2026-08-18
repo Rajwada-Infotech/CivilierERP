@@ -135,6 +135,8 @@ router.get("/dashboard", async (req, res) => {
       recentWorkDoneResult,
       workDoneStatusResult,
       projectsResult,
+      woTimelineResult,
+      wdTimelineResult,
     ] = await Promise.all([
       hasWO
         ? pool.request().query(`
@@ -224,12 +226,55 @@ router.get("/dashboard", async (req, res) => {
           FROM dbo.enterprise
           WHERE business_type = 'P'
         `),
+      // ── Work Order value — daily totals, last 14 days ──────────────────
+      hasWO
+        ? pool.request().query(`
+            SELECT
+              CAST(h.DocumentDate AS DATE) AS Day,
+              ISNULL(SUM(h.TotalAmount), 0) AS Amount
+            FROM dbo.WorkOrderHeader h
+            WHERE CAST(h.DocumentDate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+            GROUP BY CAST(h.DocumentDate AS DATE)
+          `)
+        : Promise.resolve({ recordset: [] }),
+      // ── Work Done certified value — daily totals, last 14 days ─────────
+      hasWorkDone
+        ? pool.request().query(`
+            SELECT
+              CAST(DocDate AS DATE) AS Day,
+              ISNULL(SUM(CertifiedAmount), 0) AS Amount
+            FROM dbo.WorkDone
+            WHERE CAST(DocDate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+            GROUP BY CAST(DocDate AS DATE)
+          `)
+        : Promise.resolve({ recordset: [] }),
     ]);
 
     const wo = workOrdersResult.recordset[0] || {};
     const boq = boqResult.recordset[0] || {};
     const wd = workDoneResult.recordset[0] || {};
     const projects = projectsResult.recordset[0] || {};
+
+    // Zero-fill all 14 days — the GROUP BY queries above only return days
+    // that actually had a Work Order/Work Done, so gaps would otherwise
+    // break the line (same pattern as materialDashboard.js's GRN/PO trend).
+    const woByDay = new Map(
+      (woTimelineResult?.recordset ?? []).map((r) => [r.Day.toISOString().slice(0, 10), parseFloat(r.Amount)]),
+    );
+    const wdByDay = new Map(
+      (wdTimelineResult?.recordset ?? []).map((r) => [r.Day.toISOString().slice(0, 10), parseFloat(r.Amount)]),
+    );
+    const timeline = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      timeline.push({
+        date: key,
+        workOrders: woByDay.get(key) ?? 0,
+        workDone: wdByDay.get(key) ?? 0,
+      });
+    }
 
     res.json({
       workOrders: {
@@ -257,6 +302,7 @@ router.get("/dashboard", async (req, res) => {
       recentWorkDone: recentWorkDoneResult.recordset,
       woStatusBreakdown: woStatusResult.recordset,
       workDoneStatusBreakdown: workDoneStatusResult.recordset,
+      timeline,
     });
   } catch (err) {
     console.error("[engineering-dashboard]", err);

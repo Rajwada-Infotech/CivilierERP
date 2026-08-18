@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
+import { preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -536,6 +537,70 @@ export default function FundTransfer() {
     setDigitalRefNumber("");
   };
 
+  // A refresh used to silently drop an in-progress transfer — state here
+  // is spread across many individual useStates rather than one form
+  // object, so it gets the same hand-rolled persistence JournalVoucher.tsx
+  // uses instead of the shared useDraftForm hook. transferDate always has
+  // today's date, so it's excluded from the "is anything actually filled
+  // in" check the same way jvDate is there.
+  const ftDraftKey = "draft-form:fund-transfer";
+  const [ftDraftHydrated, setFtDraftHydrated] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(ftDraftKey);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (d.transferType) setTransferType(d.transferType);
+        if (d.transferDate) setTransferDate(d.transferDate);
+        if (d.sourceCompanyId) setSourceCompanyId(d.sourceCompanyId);
+        if (d.destCompanyId) setDestCompanyId(d.destCompanyId);
+        if (d.sourceBankId) setSourceBankId(d.sourceBankId);
+        if (d.destBankId) setDestBankId(d.destBankId);
+        if (d.amount) setAmount(d.amount);
+        if (d.narration) setNarration(d.narration);
+        if (d.mode) setMode(d.mode);
+        if (d.chequeLotNumber) setChequeLotNumber(d.chequeLotNumber);
+        if (d.chequeNo) setChequeNo(d.chequeNo);
+        if (d.chequeDate) setChequeDate(d.chequeDate);
+        if (d.digitalRefNumber) setDigitalRefNumber(d.digitalRefNumber);
+        const hasContent =
+          !!d.sourceCompanyId || !!d.destCompanyId || !!d.amount || !!d.narration?.trim() || !!d.mode;
+        // Only reopen the dialog on an actual browser reload — not a plain
+        // in-app navigation, which would otherwise let an old leftover
+        // draft hijack the sidebar link into always opening the dialog.
+        if (hasContent && wasPageReloaded()) setDialogOpen(true);
+      }
+    } catch {
+      // Corrupt/unparseable draft — proceed with a clean form.
+    }
+    setFtDraftHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!ftDraftHydrated) return;
+    const isDirty =
+      !!sourceCompanyId || !!destCompanyId || !!amount || !!narration.trim() || !!mode;
+    try {
+      if (isDirty) {
+        localStorage.setItem(
+          ftDraftKey,
+          JSON.stringify({
+            transferType, transferDate, sourceCompanyId, destCompanyId, sourceBankId, destBankId,
+            amount, narration, mode, chequeLotNumber, chequeNo, chequeDate, digitalRefNumber,
+          }),
+        );
+      } else {
+        localStorage.removeItem(ftDraftKey);
+      }
+    } catch {
+      // localStorage unavailable — the draft simply won't persist.
+    }
+  }, [
+    ftDraftHydrated, transferType, transferDate, sourceCompanyId, destCompanyId, sourceBankId,
+    destBankId, amount, narration, mode, chequeLotNumber, chequeNo, chequeDate, digitalRefNumber,
+  ]);
+
   const handleModeChange = (m: FundTransferMode) => {
     setMode(m);
     if (!CHEQUE_MODES.includes(m)) {
@@ -862,7 +927,7 @@ export default function FundTransfer() {
 
       {/* ── New Fund Transfer Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
-        <DialogContent className="max-w-4xl p-0 gap-0 flex flex-col max-h-[96dvh] overflow-hidden">
+        <DialogContent className="max-w-4xl p-0 gap-0 flex flex-col max-h-[96dvh] overflow-hidden" onKeyDown={preventEnterSubmit}>
           <DialogHeader className="shrink-0 px-4 sm:px-7 py-3 sm:py-4 border-b border-border bg-gradient-to-br from-primary/5 via-transparent to-transparent">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 ring-1 ring-primary/20">

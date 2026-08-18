@@ -56,6 +56,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 import { getAccountGroups } from "@/api/accountApi";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useDraftFormSync, preventEnterSubmit } from "@/hooks/useDraftForm";
 
 import {
   DataTable,
@@ -539,6 +540,16 @@ const BankMaster: React.FC = () => {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [viewRow, setViewRow] = useState<BankRecord | null>(null);
 
+  // A refresh used to wipe whatever was typed into the "Add" form —
+  // nothing here persisted it. Restore an in-progress draft on mount, and
+  // keep it synced as the form changes, same fix as SupplierMaster/
+  // ContractorMaster's useDraftForm — this page just owns its form state
+  // via react-hook-form instead of a plain useState, hence the *Sync
+  // variant (reset() is the apply-draft callback).
+  useDraftFormSync("bank-master", form, (draft) => reset(draft), EMPTY, {
+    skip: editingId !== null,
+  });
+
   // ─── Table filter / pagination state ─────────────────────────────────────
   const [search, setSearch] = useState("");
   const [filterBankType, setFilterBankType] = useState("");
@@ -951,6 +962,7 @@ const BankMaster: React.FC = () => {
         {/* ── Form Card ── */}
         {(rights.canCreate || rights.canEdit) && <div
           className="rounded-xl overflow-hidden"
+          onKeyDown={preventEnterSubmit}
           style={{
             background: isDark
               ? "rgba(12,14,22,0.55)"

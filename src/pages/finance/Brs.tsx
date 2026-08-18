@@ -34,6 +34,7 @@ import {
 } from "@/api/brsApi";
 import { useQuery } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
+import { preventEnterSubmit } from "@/hooks/useDraftForm";
 import { getReturnReasonOptions } from "@/api/returnReasonApi";
 import {
   CheckCircle2,
@@ -223,7 +224,7 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5">
+      <div className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5" onKeyDown={preventEnterSubmit}>
         {/* Header */}
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center shrink-0">

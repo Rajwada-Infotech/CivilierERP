@@ -254,9 +254,21 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
   );
-  const [form, setForm] = useState<Record<string, unknown>>(() =>
-    getDefaults(fields),
-  );
+  // A refresh (or an accidental navigation away and back) used to wipe
+  // whatever was typed into the "Add" form — nothing here persisted it.
+  // Restore an in-progress draft on mount so that's no longer lost; scoped
+  // per `title` since each MasterPage instance is a different master.
+  const draftKey = `masterpage-draft:${title}`;
+  const [form, setForm] = useState<Record<string, unknown>>(() => {
+    try {
+      const saved = localStorage.getItem(draftKey);
+      if (saved) return { ...getDefaults(fields), ...JSON.parse(saved) };
+    } catch {
+      // Corrupt/unparseable draft — fall through to a clean form rather
+      // than crash the page over a stale localStorage value.
+    }
+    return getDefaults(fields);
+  });
   const [viewRow, setViewRow] = useState<RecordWithId | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
@@ -506,6 +518,24 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     (k) => String(form[k] ?? "") !== String(defaults[k] ?? "")
   );
 
+  // Keep the draft in sync with what's actually typed — cleared the moment
+  // the form goes back to a clean/default state (a successful save or an
+  // explicit Reset both do this via setForm(defaults), so no separate
+  // "clear on save" call is needed here). Only while adding a new record —
+  // editingId !== null means the form was seeded from an existing row, and
+  // persisting that as a generic "draft" risks it reappearing over a
+  // different row entirely after a refresh.
+  React.useEffect(() => {
+    if (editingId !== null) return;
+    try {
+      if (isDirty) localStorage.setItem(draftKey, JSON.stringify(form));
+      else localStorage.removeItem(draftKey);
+    } catch {
+      // localStorage unavailable (private browsing quota, etc.) — the
+      // draft simply won't persist; nothing else here depends on it.
+    }
+  }, [form, editingId, isDirty, draftKey]);
+
   const canSave = fields.every((f) => !f.required || isFieldFilled(f, form[f.name]));
 
   const filtered = data.filter((row) => {
@@ -537,7 +567,21 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   return (
     <div className="space-y-5">
       {/* ── FORM CARD ── */}
-      {(canCreate || canEdit) && <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
+      {(canCreate || canEdit) && <div
+        className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden"
+        // Enter inside a text/number/date/select field must not act like a
+        // form submit — there's no <form> here, but this still guards
+        // against it acting as one accidentally (e.g. a future <form> wrap,
+        // or a browser/extension quirk). Textareas keep Enter = newline;
+        // buttons (Save/Reset/etc.) keep Enter = activate, since suppressing
+        // that would break keyboard-only use of the form's own actions.
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          const tag = (e.target as HTMLElement).tagName;
+          if (tag === "TEXTAREA" || tag === "BUTTON") return;
+          e.preventDefault();
+        }}
+      >
         {/* Header — title only */}
         <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
           <div>

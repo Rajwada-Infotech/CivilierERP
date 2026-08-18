@@ -172,10 +172,10 @@ router.get("/", async (req, res) => {
           act.activity_name AS ActivityName,
           a.UOMId,
           uom.UOMName,
-          a.Quantity,
+          a.Area              AS Quantity,
           a.Rate,
-          a.Amount,
-          a.CompletionPercentage,
+          a.GrandTotal        AS Amount,
+          NULL                AS CompletionPercentage,
           a.Remarks
         FROM dbo.WorkOrderActivities a
         LEFT JOIN dbo.ActivityMaster ag  ON ag.id  = a.ActivityGroupId

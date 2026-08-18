@@ -1725,8 +1725,8 @@ router.get("/detail/:id", async (req, res) => {
 });
 
 // ── GET /chain/:expenseRef — all payment attempts for one invoice ─────────────
-router.get("/chain/:expenseRef", async (req, res) => {
-  const expenseRef = req.params.expenseRef;
+router.get(/^\/chain\/(.+)$/, async (req, res) => {
+  const expenseRef = decodeURIComponent(req.params[0]);
   if (!expenseRef) return res.status(400).json({ error: "expenseRef is required" });
   try {
     const pool = getPool();
@@ -1859,8 +1859,8 @@ router.get("/tds-preview", async (req, res) => {
 });
 
 // ── Chain-wide Posting: all payments for an invoice ────────────────────────
-router.get("/chain-posting/:expenseRef", async (req, res) => {
-  const expenseRef = decodeURIComponent(req.params.expenseRef);
+router.get(/^\/chain-posting\/(.+)$/, async (req, res) => {
+  const expenseRef = decodeURIComponent(req.params[0]);
   if (!expenseRef) return res.status(400).json({ error: "No expenseRef" });
   try {
     const pool = getPool();
@@ -2102,7 +2102,7 @@ router.get("/:id/posting", async (req, res) => {
 
     // Payment row + bank ledger
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
-      SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
+      SELECT np.PPaymentID, np.DocNo, np.PDate, np.PAmount, np.PMode, np.PExpenseRef,
              np.PBankID, np.PBankName, np.ContractId, np.PPartyId,
              np.TDSId, np.TDSNature, np.TDSName, np.TDSPercentage, np.TDSAmount,
              bank.LHeadName AS BankLedgerName, bank.LHeadCode AS BankLedgerCode,
@@ -2143,7 +2143,7 @@ router.get("/:id/posting", async (req, res) => {
     // system-generated placeholder (there isn't one; every vendor has
     // their own ledger). The row label stays generic; only the LHeadId
     // determines which specific account the posting actually lands in.
-    const { resolvePaymentSupplierHeadId } = require("../services/generalLedger");
+    const { resolvePaymentSupplierHeadId, getGLHeadId, GL_ACCOUNTS } = require("../services/generalLedger");
     const resolvedSupplierId = await resolvePaymentSupplierHeadId(pool, pmt);
     // Mirrors postPaymentApproval in services/generalLedger.js: for an
     // invoice-linked payment, pmt.TDSAmount is only an inherited display
@@ -2151,11 +2151,23 @@ router.get("/:id/posting", async (req, res) => {
     // already withheld as its own liability leg when the INVOICE was
     // posted, so this payment's own GL split must not re-deduct it.
     const tdsAmount = pmt.PExpenseRef ? 0 : Number(pmt.TDSAmount) || 0;
+
+    // Cash-mode payments never carry a PBankID (Payment.tsx disables the
+    // Bank field for Cash) — Cash-in-Hand (migration 339) stands in for the
+    // bank/credit leg instead of leaving it unresolved.
+    let bankAccount = pmt.PBankID
+      ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null }
+      : null;
+    if (!bankAccount && pmt.PMode === "Cash") {
+      const cashHeadId = await getGLHeadId(pool, GL_ACCOUNTS.CASH_IN_HAND).catch(() => null);
+      if (cashHeadId) bankAccount = { id: cashHeadId, label: "Cash-in-Hand A/c", code: null };
+    }
+
     const accounts = {
       supplier: resolvedSupplierId
         ? { id: resolvedSupplierId, label: supplierName ? `Supplier/Creditor Payable — ${supplierName}` : "Supplier / Creditor A/c", code: null }
         : null,
-      bank: pmt.PBankID ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null } : null,
+      bank: bankAccount,
       // TDS (migration 304) — only present when this payment actually
       // deducted TDS; Dr side (supplier/Expense Head) stays at the full
       // amount, the credit side splits into Bank + TDS Payable.
@@ -2166,6 +2178,12 @@ router.get("/:id/posting", async (req, res) => {
     const postedRes = await pool.request().input("SrcId", sql.Int, pmtId)
       .query(`SELECT TOP 1 EntryId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='PaymentPosting' AND SourceId=@SrcId AND IsReversed=0`);
     const isPosted = postedRes.recordset.length > 0;
+
+    const toDateStr = (v) => {
+      if (!v) return null;
+      if (v instanceof Date) return v.toISOString().slice(0, 10);
+      return String(v).slice(0, 10);
+    };
 
     res.json({
       isOnAccount,
@@ -2185,6 +2203,27 @@ router.get("/:id/posting", async (req, res) => {
       netAmount: (parseFloat(pmt.PAmount) || 0) - tdsAmount,
       isPosted,
       jvNo: isPosted ? postedRes.recordset[0].VoucherNo : null,
+      // Payment.tsx's Posting tab renders off `entries[]` (the shape
+      // chain-posting/:expenseRef also returns, for invoice-linked
+      // payments) — wrapping this single payment the same way lets it
+      // reuse that renderer and auto-post effect unchanged instead of
+      // needing a second render path for direct payments.
+      entries: [
+        {
+          date: toDateStr(pmt.PDate),
+          docNo: pmt.DocNo,
+          pmtId: pmt.PPaymentID,
+          type: "payment",
+          amount: parseFloat(pmt.PAmount) || 0,
+          mode: pmt.PMode,
+          isBounced: false,
+          bounceReason: null,
+          tdsAmount,
+          accounts,
+          isPosted,
+          jvNo: isPosted ? postedRes.recordset[0].VoucherNo : null,
+        },
+      ],
     });
   } catch (err) {
     console.error("Payment posting preview error:", err.message);
@@ -2199,7 +2238,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
   try {
     const pool = getPool();
     const userEmail = req.user?.email || req.user?.upn || "system";
-    const { postVoucher, resolvePaymentSupplierHeadId } = require("../services/generalLedger");
+    const { postVoucher, resolvePaymentSupplierHeadId, getGLHeadId, GL_ACCOUNTS } = require("../services/generalLedger");
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
@@ -2229,24 +2268,35 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // ExpenseBooking's supplier → PPartyId) — not a system-generated
     // "supplier"/"creditor" placeholder, which doesn't exist.
     const supplierId = await resolvePaymentSupplierHeadId(pool, pmt);
-    const bankId = pmt.PBankID ? parseInt(pmt.PBankID, 10) : null;
+    const isCash = pmt.PMode === "Cash";
+    let bankId = pmt.PBankID ? parseInt(pmt.PBankID, 10) : null;
+    // Cash-mode payments never carry a PBankID (Payment.tsx disables the
+    // Bank field for Cash) — Cash-in-Hand (migration 339) stands in for the
+    // bank leg instead of hard-failing for lack of one.
+    if (!bankId && isCash) {
+      bankId = await getGLHeadId(pool, GL_ACCOUNTS.CASH_IN_HAND).catch(() => null);
+    }
 
     if (!supplierId) return res.status(422).json({ error: "Could not resolve this payment's supplier/party account." });
-    if (!bankId) return res.status(422).json({ error: "No bank account linked to this payment." });
+    if (!bankId) {
+      return res.status(422).json({
+        error: isCash ? "Cash-in-Hand system ledger not configured." : "No bank account linked to this payment.",
+      });
+    }
     let tdsPayableId = null;
     if (tdsAmount > 0) {
-      const { getGLHeadId } = require("../services/generalLedger");
       const { GL_ACCOUNTS: TDS_GL } = require("../services/tds");
       tdsPayableId = await getGLHeadId(pool, TDS_GL.TDS_PAYABLE).catch(() => null);
       if (!tdsPayableId) return res.status(422).json({ error: "TDS Payable system ledger not configured." });
     }
 
     // TDS (migration 304) — Dr Supplier/Creditor stays at the full amount;
-    // the credit side splits into Bank (net of TDS) + TDS Payable.
+    // the credit side splits into Bank/Cash-in-Hand (net of TDS) + TDS Payable.
     const narrationRef = pmt.PExpenseRef ? `${pmt.DocNo} (${pmt.PExpenseRef})` : pmt.DocNo;
+    const bankNarration = isCash ? "Cash-in-Hand" : `Bank (${pmt.PBankName || pmt.PMode})`;
     const legs = [
       { lHeadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` },
-      { lHeadId: bankId,     debit: 0, credit: amount - tdsAmount, narration: `Payment: ${narrationRef} — Bank (${pmt.PBankName || pmt.PMode})` },
+      { lHeadId: bankId,     debit: 0, credit: amount - tdsAmount, narration: `Payment: ${narrationRef} — ${bankNarration}` },
       ...(tdsAmount > 0
         ? [{ lHeadId: tdsPayableId, debit: 0, credit: tdsAmount, narration: `Payment: ${narrationRef} — TDS Payable` }]
         : []),

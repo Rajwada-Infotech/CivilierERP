@@ -2,6 +2,7 @@ import React from "react";
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams, useLocation } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -158,7 +159,11 @@ const Payment: React.FC = () => {
 
   const [view, setView] = useState<"list" | "form">("list");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<Omit<PaymentRecord, "id">>(blankForm());
+  const [form, setForm] = useDraftForm<Omit<PaymentRecord, "id">>(
+    "finance-payment",
+    blankForm(),
+    { skip: editingId !== null },
+  );
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -262,6 +267,19 @@ const Payment: React.FC = () => {
         .catch(() => {});
     }
   };
+
+  // Reopen the form view if a draft was restored from localStorage — but
+  // only on an actual browser reload, not a plain in-app navigation (e.g.
+  // clicking "Payment" in the sidebar remounts this component too; without
+  // this check, an old leftover draft would hijack that link into always
+  // opening the form instead of the list).
+  useEffect(() => {
+    if (!wasPageReloaded()) return;
+    if (form.paymentName || form.paidTo || form.amount || form.notes) {
+      setView("form");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch payment posting data when posting tab opens
   useEffect(() => {
@@ -1023,21 +1041,29 @@ const Payment: React.FC = () => {
     // Auto-fill Company/Payable To from the loan's own borrower/lender —
     // this is a loan repayment, not a fresh manual entry, so who pays and
     // who gets paid is already on file and shouldn't need re-selecting.
-    // Company only ever gets set from BorrowerCompanyName (never the merged
-    // BorrowerName, which can be a customer) — form.company is matched
-    // against companyOptions by label elsewhere, and a customer name would
-    // never match one, silently leaving Company blank instead of wrong.
-    const matchedCompany = emi.BorrowerCompanyName
-      ? companyOptions.find((c) => c.label === emi.BorrowerCompanyName)
+    //
+    // Inter-Company/Bank Loan: the BORROWER is one of our own companies
+    // (the one settling the debt), and the LENDER is who it's paid to — so
+    // Company = borrower, Payee = lender.
+    //
+    // Customer Loan flips this: the borrower is external (a customer, not
+    // one of our companies), and it's the LENDER whose books this repayment
+    // is actually recorded under — so Company = lender, Payee = the
+    // customer (BorrowerName).
+    const isCustomerLoan = emi.LoanType === "Customer Loan";
+    const companySourceName = isCustomerLoan ? emi.LenderCompanyName : emi.BorrowerCompanyName;
+    const payeeSourceName = isCustomerLoan ? emi.BorrowerName : emi.LenderName;
+    const matchedCompany = companySourceName
+      ? companyOptions.find((c) => c.label === companySourceName)
       : undefined;
     // Payee/Party is a dropdown over AccountHeadMaster Suppliers/
-    // Contractors/Brokers only (see fetchSupplierOptions) — a loan's lender
-    // is a company (or, for a Bank Loan, a bank head), so it's shown as
-    // plain text below instead of forced through that dropdown. Still worth
-    // setting partyId when the name genuinely happens to match a real
-    // ledger option, in case anything downstream keys off it.
-    const matchedParty = emi.LenderName
-      ? supplierOptions.find((s) => s.label === emi.LenderName)
+    // Contractors/Brokers only (see fetchSupplierOptions) — neither a loan's
+    // lender company nor a customer borrower lives in that list, so it's
+    // shown as plain text below instead of forced through that dropdown.
+    // Still worth setting partyId when the name genuinely happens to match
+    // a real ledger option, in case anything downstream keys off it.
+    const matchedParty = payeeSourceName
+      ? supplierOptions.find((s) => s.label === payeeSourceName)
       : undefined;
     setForm((prev) => ({
       ...prev,
@@ -1047,7 +1073,7 @@ const Payment: React.FC = () => {
       contractId: "",
       amount: Number(emi.EMIAmount),
       company: matchedCompany ? matchedCompany.label : prev.company,
-      paidTo: emi.LenderName || prev.paidTo,
+      paidTo: payeeSourceName || prev.paidTo,
       partyId: matchedParty ? matchedParty.id : prev.partyId,
     }));
     // Late fee / loan-specific charges — and now multi-EMI / lump-sum
@@ -2162,6 +2188,7 @@ const Payment: React.FC = () => {
         {view === "form" && (
           <div
             className="rounded-2xl overflow-hidden"
+            onKeyDown={preventEnterSubmit}
             style={{
               background: isDark
                 ? "rgba(12,14,22,0.55)"

@@ -2,6 +2,7 @@ import React from "react";
 import { useState, useEffect, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
+import { preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -177,6 +178,65 @@ export default function JournalVoucher() {
     setCompanyId("");
     setProjectId("");
   };
+
+  // A refresh used to silently drop an in-progress JV — this form's state
+  // is spread across several individual useStates (not one form object,
+  // and emptyLine() mints a fresh random _id every call, which rules out
+  // a generic "diff against empty" check), so it gets its own hand-rolled
+  // persistence rather than the shared useDraftForm hook. Only counts as
+  // "dirty" when something was actually typed/picked — jvDate always has
+  // today's date and lines' _id always differs, so neither is a useful
+  // empty-state signal on its own.
+  const draftKey = "draft-form:journal-voucher";
+  const [draftHydrated, setDraftHydrated] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(draftKey);
+      if (saved) {
+        const draft = JSON.parse(saved);
+        if (draft.jvDate) setJvDate(draft.jvDate);
+        if (draft.narration) setNarration(draft.narration);
+        if (Array.isArray(draft.lines) && draft.lines.length > 0) setLines(draft.lines);
+        if (draft.companyId) setCompanyId(draft.companyId);
+        if (draft.projectId) setProjectId(draft.projectId);
+        const hasContent =
+          !!draft.narration?.trim() ||
+          !!draft.companyId ||
+          (draft.lines || []).some(
+            (l: JournalVoucherLineUI) =>
+              l.LHeadId != null || (l.DebitAmount || 0) > 0 || (l.CreditAmount || 0) > 0 || !!l.Narration?.trim(),
+          );
+        // Only reopen the dialog on an actual browser reload — not a plain
+        // in-app navigation, which would otherwise let an old leftover
+        // draft hijack the sidebar link into always opening the dialog.
+        if (hasContent && wasPageReloaded()) setDialogOpen(true);
+      }
+    } catch {
+      // Corrupt/unparseable draft — proceed with a clean form.
+    }
+    setDraftHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
+    const isDirty =
+      !!narration.trim() ||
+      !!companyId ||
+      !!projectId ||
+      lines.some(
+        (l) => l.LHeadId != null || (l.DebitAmount || 0) > 0 || (l.CreditAmount || 0) > 0 || !!l.Narration?.trim(),
+      );
+    try {
+      if (isDirty) {
+        localStorage.setItem(draftKey, JSON.stringify({ jvDate, narration, lines, companyId, projectId }));
+      } else {
+        localStorage.removeItem(draftKey);
+      }
+    } catch {
+      // localStorage unavailable — the draft simply won't persist.
+    }
+  }, [draftHydrated, jvDate, narration, lines, companyId, projectId]);
 
   const handleApprove = async (id: number) => {
     setActing({ id, action: "approve" });
@@ -530,7 +590,7 @@ export default function JournalVoucher() {
 
       {/* ── New JV Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
-        <DialogContent className="max-w-2xl p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden">
+        <DialogContent className="max-w-2xl p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden" onKeyDown={preventEnterSubmit}>
           <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-border bg-gradient-to-br from-primary/5 via-transparent to-transparent">
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 ring-1 ring-primary/20">

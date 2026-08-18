@@ -147,7 +147,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
     if (!headRes.recordset.length) return res.status(404).json({ error: "Dependency record not found" });
 
     const activitiesRes = await pool.request().input("Id", sql.Int, id).query(`
-      SELECT dma.ActivityId AS activityId, am.activity_name AS activityName, dma.SequenceNo AS sequenceNo,
+      SELECT dma.Id AS rungId, dma.ActivityId AS activityId, am.activity_name AS activityName, dma.SequenceNo AS sequenceNo,
              dma.WorkType AS workType
       FROM dbo.DependencyMasterActivity dma
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId

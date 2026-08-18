@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -355,7 +356,26 @@ export default function ReceivedPaymentPage() {
   const PAGE_SIZE = 20;
 
   // ── Form state ───────────────────────────────────────────────────────────────
-  const [form, setForm] = useState(EMPTY_FORM);
+  // This form only shows when view === "form" (a full-page swap), so a
+  // refresh loses more than field values — it also drops back to the list.
+  // Restore both together: rehydrate here, mount effect below flips view
+  // back to "form" if anything was actually restored.
+  const [form, setForm] = useDraftForm("received-payment", EMPTY_FORM, {
+    skip: editingId !== null,
+  });
+
+  // Only reopen on an actual browser reload, not a plain in-app navigation
+  // (e.g. clicking "Received Payment" in the sidebar remounts this
+  // component too; without this check, an old leftover draft would hijack
+  // that link into always opening the form instead of the list).
+  useEffect(() => {
+    if (!wasPageReloaded()) return;
+    const hasContent = Object.keys(EMPTY_FORM).some(
+      (k) => String((form as any)[k] ?? "") !== String((EMPTY_FORM as any)[k] ?? ""),
+    );
+    if (hasContent) setView("form");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [docNoPreview, setDocNoPreview] = useState("");
   const [docNoLoading, setDocNoLoading] = useState(false);
@@ -1253,6 +1273,7 @@ export default function ReceivedPaymentPage() {
         {view === "form" && (
           <div
             className="rounded-2xl overflow-hidden"
+            onKeyDown={preventEnterSubmit}
             style={{
               background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.80)",
               border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.18)",

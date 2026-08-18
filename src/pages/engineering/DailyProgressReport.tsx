@@ -14,6 +14,8 @@ import { useQuery } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { EngineeringShell } from "@/components/engineering/EngineeringShell";
+import { GlassCard, GlassCardSkeleton } from "@/components/dashboard/GlassShell";
+import { useTheme } from "@/contexts/ThemeContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Calendar,
@@ -30,6 +32,8 @@ import {
   TrendingUp,
   Activity,
 } from "lucide-react";
+
+const ACCENT = "#f97316"; // orange — matches Engineering's ModuleStrip color
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -190,106 +194,43 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ─── Summary Card ─────────────────────────────────────────────────────────────
-
-function SummaryCard({
-  label,
-  count,
-  total,
-  icon: Icon,
-  accent,
-}: {
-  label: string;
-  count: number;
-  total: number;
-  icon: React.ElementType;
-  accent: string;
-}) {
-  return (
-    <div
-      className={`rounded-xl border border-border bg-card p-5 flex flex-col gap-3 relative overflow-hidden`}
-    >
-      <div
-        className={`absolute top-0 right-0 w-24 h-24 rounded-full opacity-5 -translate-y-4 translate-x-4 ${accent}`}
-      />
-      <div className="flex items-center justify-between">
-        <div className={`p-2 rounded-lg ${accent} bg-opacity-10`}>
-          <Icon size={18} className="opacity-80" />
-        </div>
-        <span className="text-xs font-semibold text-muted-foreground border border-border rounded-full px-2 py-0.5">
-          {count} doc{count !== 1 ? "s" : ""}
-        </span>
-      </div>
-      <div>
-        <p className="text-2xl font-bold text-foreground leading-none tabular-nums">
-          {fmt(total)}
-        </p>
-        <p className="text-xs text-muted-foreground mt-1 font-medium">
-          {label}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Grand Total Card ─────────────────────────────────────────────────────────
-
-function GrandTotalCard({
-  summary,
-  date,
-}: {
-  summary: DPRSummary;
-  date: string;
-}) {
-  const totalDocs = summary.boqCount + summary.woCount + summary.wdCount;
-  return (
-    <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-5 flex flex-col gap-3 relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent pointer-events-none" />
-      <div className="flex items-center justify-between">
-        <div className="p-2 rounded-lg bg-primary/10">
-          <TrendingUp size={18} className="text-primary" />
-        </div>
-        <span className="text-xs font-semibold text-primary border border-primary/20 rounded-full px-2 py-0.5">
-          {totalDocs} total
-        </span>
-      </div>
-      <div>
-        <p className="text-3xl font-bold text-primary leading-none tabular-nums">
-          {fmt(summary.grandTotal)}
-        </p>
-        <p className="text-xs text-muted-foreground mt-1 font-medium">
-          Grand Total · {fmtDate(date)}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Section Header ───────────────────────────────────────────────────────────
+// ─── Section Header — internal header bar for a glass-wrapped section,
+//     matching the icon-badge + accent-bar language used across the app
+//     (ChequeCancellation, Payment's PostingCard, EngineeringDashboard's
+//     "Recent Work Orders" card headers) instead of the old two-tone
+//     rounded-t/rounded-b seam between a separate header block and table. ──
 
 function SectionHeader({
   icon: Icon,
   title,
   count,
   total,
-  accent,
+  color,
+  isDark,
 }: {
   icon: React.ElementType;
   title: string;
   count: number;
   total: number;
-  accent: string;
+  color: string;
+  isDark: boolean;
 }) {
   return (
     <div
-      className={`flex items-center justify-between px-4 py-3 rounded-t-xl border border-b-0 border-border ${accent} bg-opacity-5`}
+      className="flex items-center justify-between px-4 py-3 border-b"
+      style={{ borderColor: isDark ? `${color}26` : `${color}1f` }}
     >
       <div className="flex items-center gap-2">
-        <Icon size={16} className="opacity-70" />
-        <h3 className="text-sm font-bold text-foreground tracking-wide">
+        <div
+          className="w-6 h-6 rounded-md flex items-center justify-center"
+          style={{ background: `${color}20` }}
+        >
+          <Icon size={12} style={{ color }} />
+        </div>
+        <h3 className="text-xs font-heading font-bold text-foreground tracking-wide">
           {title}
         </h3>
-        <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
+        <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
           {count}
         </span>
       </div>
@@ -307,7 +248,7 @@ function BOQTable({ rows }: { rows: BOQRow[] }) {
     return <EmptyState label="No BOQ documents found for this date." />;
 
   return (
-    <div className="border border-border border-t-0 rounded-b-xl overflow-hidden">
+    <div className="overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -407,7 +348,7 @@ function WorkOrderTable({ rows }: { rows: WorkOrderRow[] }) {
     return <EmptyState label="No Work Order documents found for this date." />;
 
   return (
-    <div className="border border-border border-t-0 rounded-b-xl overflow-hidden">
+    <div className="overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -650,7 +591,7 @@ function WorkDoneTable({ rows }: { rows: WorkDoneRow[] }) {
     return <EmptyState label="No Work Done documents found for this date." />;
 
   return (
-    <div className="border border-border border-t-0 rounded-b-xl overflow-hidden">
+    <div className="overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -786,7 +727,7 @@ function WorkDoneTable({ rows }: { rows: WorkDoneRow[] }) {
 
 function EmptyState({ label }: { label: string }) {
   return (
-    <div className="border border-border border-t-0 rounded-b-xl bg-muted/10 py-10 text-center">
+    <div className="bg-muted/10 py-10 text-center">
       <AlertCircle
         size={28}
         className="mx-auto text-muted-foreground/40 mb-2"
@@ -1269,6 +1210,18 @@ export default function DailyProgressReport() {
   const rights = usePageRights("daily-progress-report");
   const [date, setDate] = useState(todayStr());
   const printRef = useRef<HTMLDivElement>(null);
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
+
+  const sectionGlass = {
+    background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
+    border: isDark ? `1px solid ${ACCENT}26` : `1px solid ${ACCENT}2e`,
+    backdropFilter: "blur(16px) saturate(150%)",
+    WebkitBackdropFilter: "blur(16px) saturate(150%)",
+    boxShadow: isDark
+      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+      : `0 4px 24px ${ACCENT}0f, inset 0 1px 0 rgba(255,255,255,0.9)`,
+  };
 
   const { data, isLoading, isError, error, refetch, isFetching } =
     useQuery<DPRResponse>({
@@ -1355,10 +1308,7 @@ export default function DailyProgressReport() {
       {isLoading && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div
-              key={i}
-              className="rounded-xl border border-border bg-card p-5 h-24 animate-pulse bg-muted/30"
-            />
+            <GlassCardSkeleton key={i} />
           ))}
         </div>
       )}
@@ -1382,28 +1332,34 @@ export default function DailyProgressReport() {
       {data && (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <SummaryCard
+            <GlassCard
               label="BOQ Documents"
-              count={data.summary.boqCount}
-              total={data.summary.boqTotal}
+              value={fmt(data.summary.boqTotal)}
+              sub={`${data.summary.boqCount} doc${data.summary.boqCount !== 1 ? "s" : ""}`}
               icon={Layers}
-              accent="bg-blue-500 text-blue-600"
+              accentColor="#3b82f6"
             />
-            <SummaryCard
+            <GlassCard
               label="Work Orders"
-              count={data.summary.woCount}
-              total={data.summary.woTotal}
+              value={fmt(data.summary.woTotal)}
+              sub={`${data.summary.woCount} doc${data.summary.woCount !== 1 ? "s" : ""}`}
               icon={HardHat}
-              accent="bg-orange-500 text-orange-600"
+              accentColor={ACCENT}
             />
-            <SummaryCard
+            <GlassCard
               label="Work Done"
-              count={data.summary.wdCount}
-              total={data.summary.wdTotal}
+              value={fmt(data.summary.wdTotal)}
+              sub={`${data.summary.wdCount} doc${data.summary.wdCount !== 1 ? "s" : ""}`}
               icon={Hammer}
-              accent="bg-emerald-500 text-emerald-600"
+              accentColor="#10b981"
             />
-            <GrandTotalCard summary={data.summary} date={data.date} />
+            <GlassCard
+              label="Grand Total"
+              value={fmt(data.summary.grandTotal)}
+              sub={`${data.summary.boqCount + data.summary.woCount + data.summary.wdCount} total · ${fmtDate(data.date)}`}
+              icon={TrendingUp}
+              accentColor="#8b5cf6"
+            />
           </div>
 
           {/* Date info strip */}
@@ -1422,37 +1378,40 @@ export default function DailyProgressReport() {
           </div>
 
           {/* ── BOQ Section ── */}
-          <div>
+          <div className="rounded-xl overflow-hidden" style={sectionGlass}>
             <SectionHeader
               icon={Layers}
               title="BOQ — Bill of Quantities"
               count={data.summary.boqCount}
               total={data.summary.boqTotal}
-              accent="bg-blue-500/5 text-blue-600"
+              color="#3b82f6"
+              isDark={isDark}
             />
             <BOQTable rows={data.boq} />
           </div>
 
           {/* ── Work Orders Section ── */}
-          <div>
+          <div className="rounded-xl overflow-hidden" style={sectionGlass}>
             <SectionHeader
               icon={HardHat}
               title="Work Orders"
               count={data.summary.woCount}
               total={data.summary.woTotal}
-              accent="bg-orange-500/5 text-orange-600"
+              color={ACCENT}
+              isDark={isDark}
             />
             <WorkOrderTable rows={data.workOrders} />
           </div>
 
           {/* ── Work Done Section ── */}
-          <div>
+          <div className="rounded-xl overflow-hidden" style={sectionGlass}>
             <SectionHeader
               icon={Hammer}
               title="Work Done"
               count={data.summary.wdCount}
               total={data.summary.wdTotal}
-              accent="bg-emerald-500/5 text-emerald-600"
+              color="#10b981"
+              isDark={isDark}
             />
             <WorkDoneTable rows={data.workDone} />
           </div>
