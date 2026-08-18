@@ -527,6 +527,13 @@ async function createLoanSanctionInternal(payload, createdBy) {
     dueDate,
     purpose,
     remarks,
+    paymentMode,
+    chequeLotId,
+    chequeLotNumber,
+    chequeNo,
+    chequeDate,
+    isPostDated,
+    digitalRefNumber,
   } = payload;
 
   if (!loanType || !LOAN_TYPES.includes(loanType)) {
@@ -615,16 +622,23 @@ async function createLoanSanctionInternal(payload, createdBy) {
       .input("TenureMonths", sql.Int, tenureMonths != null && tenureMonths !== "" ? parseInt(tenureMonths, 10) : null)
       .input("Purpose", sql.NVarChar(500), purpose || null)
       .input("Remarks", sql.NVarChar(500), remarks || null)
+      .input("PaymentMode", sql.NVarChar(30), paymentMode || null)
+      .input("ChequeLotId", sql.Int, chequeLotId ? parseInt(chequeLotId, 10) : null)
+      .input("ChequeLotNumber", sql.NVarChar(50), chequeLotNumber || null)
+      .input("ChequeNo", sql.NVarChar(20), chequeNo || null)
+      .input("ChequeDate", sql.Date, chequeDate || null)
+      .input("IsPostDated", sql.Bit, isPostDated ? 1 : 0)
+      .input("DigitalRefNumber", sql.NVarChar(100), digitalRefNumber || null)
       .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
         INSERT INTO dbo.LoanSanction
           (LoanNo, LoanType, LoanDocNo, LenderCompanyId, LenderBankId, LenderBankAccountId, BorrowerCompanyId, BorrowerCustomerId,
            BorrowerCustomerSource, BorrowerBankAccountId, LoanDate, Amount, HasInterest, InterestType, InterestRate, TenureMonths,
-           Purpose, Status, Remarks, CreatedBy, CreatedAt)
+           Purpose, Status, Remarks, PaymentMode, ChequeLotId, ChequeLotNumber, ChequeNo, ChequeDate, IsPostDated, DigitalRefNumber, CreatedBy, CreatedAt)
         OUTPUT INSERTED.LoanId
         VALUES
           (@LoanNo, @LoanType, @LoanDocNo, @LenderCompanyId, @LenderBankId, @LenderBankAccountId, @BorrowerCompanyId, @BorrowerCustomerId,
            @BorrowerCustomerSource, @BorrowerBankAccountId, @LoanDate, @Amount, @HasInterest, @InterestType, @InterestRate, @TenureMonths,
-           @Purpose, 'Sanctioned', @Remarks, @CreatedBy, SYSDATETIME())
+           @Purpose, 'Sanctioned', @Remarks, @PaymentMode, @ChequeLotId, @ChequeLotNumber, @ChequeNo, @ChequeDate, @IsPostDated, @DigitalRefNumber, @CreatedBy, SYSDATETIME())
       `);
     const loanId = insertResult.recordset[0].LoanId;
     const loanNo = `LN-${String(loanId).padStart(6, "0")}`;

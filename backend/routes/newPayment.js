@@ -439,6 +439,15 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
       `);
     ftUsedRes.recordset.forEach((r) => usedSet.add(String(r.ChequeNo)));
 
+    // Same for Loan Sanctions
+    const lsUsedRes = await pool.request().input("ChequeLotId", sql.Int, lotId)
+      .query(`
+        SELECT ChequeNo FROM dbo.LoanSanction
+        WHERE ChequeLotId = @ChequeLotId AND ChequeNo IS NOT NULL
+          AND Status NOT IN ('Rejected', 'Deleted', 'Closed')
+      `);
+    lsUsedRes.recordset.forEach((r) => usedSet.add(String(r.ChequeNo)));
+
     // Cancelled cheques are permanently blocked from reissue even though
     // cancellation detaches the originating payment's PChequeLotId (so they
     // no longer show up in usedSet above) — see chequeCancellation.js.
@@ -532,6 +541,21 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
         .json({ error: "Cheque number already used in a Fund Transfer" });
     }
 
+    // Also block if a Loan Sanction claimed this number from this lot.
+    const lsDupRes = await pool
+      .request()
+      .input("ChequeLotId", sql.Int, lotId)
+      .input("ChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
+        SELECT COUNT(*) AS cnt FROM dbo.LoanSanction
+        WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo
+          AND Status NOT IN ('Rejected', 'Deleted')
+      `);
+    if (lsDupRes.recordset[0].cnt > 0) {
+      return res
+        .status(409)
+        .json({ error: "Cheque number already used in a Loan Sanction" });
+    }
+
     // Cancelled cheques are permanently blocked — cancellation detaches
     // PChequeLotId from the payment row, so the check above alone wouldn't
     // catch a previously-cancelled number being picked again.
@@ -555,6 +579,9 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
           WHERE PChequeLotId = @PChequeLotId AND PChequeNo IS NOT NULL
             AND Status NOT IN ('Rejected', 'Deleted')) +
         (SELECT COUNT(*) FROM dbo.FundTransfer
+          WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
+            AND Status NOT IN ('Rejected', 'Deleted')) +
+        (SELECT COUNT(*) FROM dbo.LoanSanction
           WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
             AND Status NOT IN ('Rejected', 'Deleted')) AS usedCount
     `);

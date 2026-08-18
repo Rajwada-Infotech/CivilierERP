@@ -120,6 +120,13 @@ const EMPTY_FORM = {
   dueDate: "",
   purpose: "",
   remarks: "",
+  paymentMode: "Cash" as string,
+  chequeLotId: "",
+  chequeLotNumber: "",
+  chequeNo: "",
+  chequeDate: "",
+  isPostDated: false,
+  digitalRefNumber: "",
 };
 
 const fmt = (n: number | null | undefined) =>
@@ -507,6 +514,13 @@ export default function LoanSanctionPage() {
         dueDate: isInterCompanyType && !form.hasInterest ? form.dueDate || null : null,
         purpose: form.purpose || null,
         remarks: form.remarks || null,
+        paymentMode: form.paymentMode || null,
+        chequeLotId: form.chequeLotId || null,
+        chequeLotNumber: form.chequeLotNumber || null,
+        chequeNo: form.chequeNo || null,
+        chequeDate: form.chequeDate || null,
+        isPostDated: form.isPostDated,
+        digitalRefNumber: form.digitalRefNumber || null,
       });
       toast.success(`Loan ${res.loanNo} sanctioned`);
       if (pendingDocumentFile) {
@@ -1192,6 +1206,18 @@ export default function LoanSanctionPage() {
                         value={fmt(schedule.reduce((s, e) => s + Number(e.EMIAmount), 0))}
                         accent
                       />
+                      {viewingLoan?.PaymentMode && (
+                        <InfoCard
+                          label="Disbursed Via"
+                          value={
+                            viewingLoan.PaymentMode === "Cheque" || viewingLoan.PaymentMode === "Post-Dated Cheque"
+                              ? `${viewingLoan.PaymentMode} #${viewingLoan.ChequeNo || "—"}${viewingLoan.ChequeDate ? ` (${fmtDate(viewingLoan.ChequeDate)})` : ""}`
+                              : ["Cash"].includes(viewingLoan.PaymentMode)
+                                ? viewingLoan.PaymentMode
+                                : `${viewingLoan.PaymentMode} (Ref: ${viewingLoan.DigitalRefNumber || "—"})`
+                          }
+                        />
+                      )}
                     </div>
 
                     {/* Repayment Status — live financial state of the loan.
@@ -1590,6 +1616,65 @@ export default function LoanSanctionPage() {
                       </div>
                     )}
                     <div className="grid grid-cols-2 gap-5">
+                      <div className="space-y-2">
+                        <label className={labelCls}>Payment Mode</label>
+                        <select
+                          className={inputCls}
+                          value={form.paymentMode}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            set("paymentMode", v);
+                            if (v !== "Cheque" && v !== "Post-Dated Cheque") {
+                              set("chequeNo", "");
+                              set("chequeDate", "");
+                            }
+                            if (["Cash", "Cheque", "Post-Dated Cheque"].includes(v)) {
+                              set("digitalRefNumber", "");
+                            }
+                          }}
+                        >
+                          {["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "RTGS", "IMPS", "UPI", "Card"].map((m) => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      {(form.paymentMode === "Cheque" || form.paymentMode === "Post-Dated Cheque") && (
+                        <>
+                          <div className="space-y-2">
+                            <label className={labelCls}>Cheque Number</label>
+                            <input
+                              className={inputCls}
+                              placeholder="Cheque No"
+                              value={form.chequeNo}
+                              onChange={(e) => set("chequeNo", e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className={labelCls}>Cheque Date</label>
+                            <input
+                              type="date"
+                              className={inputCls}
+                              value={form.chequeDate}
+                              onChange={(e) => set("chequeDate", e.target.value)}
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {!["Cash", "Cheque", "Post-Dated Cheque"].includes(form.paymentMode) && (
+                        <div className="space-y-2">
+                          <label className={labelCls}>Reference Number</label>
+                          <input
+                            className={inputCls}
+                            placeholder="UTR / Ref No"
+                            value={form.digitalRefNumber}
+                            onChange={(e) => set("digitalRefNumber", e.target.value)}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-5 mt-5">
                       <div className="space-y-2">
                         <label className={labelCls}>Purpose</label>
                         <input

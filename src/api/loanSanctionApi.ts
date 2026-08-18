@@ -34,6 +34,13 @@ export interface LoanSanction {
   LenderLHeadId?: number | null;
   BorrowerLHeadId?: number | null;
   Remarks?: string | null;
+  PaymentMode?: string | null;
+  ChequeLotId?: number | null;
+  ChequeLotNumber?: string | null;
+  ChequeNo?: string | null;
+  ChequeDate?: string | null;
+  IsPostDated?: boolean;
+  DigitalRefNumber?: string | null;
   CreatedBy?: string | null;
   CreatedAt?: string | null;
   TotalEMIs?: number;
@@ -86,6 +93,13 @@ export interface LoanSanctionPayload {
   dueDate?: string | null;
   purpose?: string | null;
   remarks?: string | null;
+  paymentMode?: string | null;
+  chequeLotId?: number | string | null;
+  chequeLotNumber?: string | null;
+  chequeNo?: string | null;
+  chequeDate?: string | null;
+  isPostDated?: boolean;
+  digitalRefNumber?: string | null;
 }
 
 export interface LoanEMI {
