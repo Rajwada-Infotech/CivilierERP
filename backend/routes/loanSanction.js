@@ -1226,15 +1226,13 @@ async function postBankLoanRepayment(pool, { loan, paymentId, paymentRef, paymen
 //         paymentDate, notes? }
 // Exactly one of emiIds / lumpSumAmount is expected.
 //
-// Payoff validator (as specified): once the running total actually paid
-// toward principal+interest (across every LoanPayment row for this loan,
-// including this one) reaches or exceeds the full schedule total, the loan
-// is marked Closed regardless of which individual installments that total
-// lines up against — a 4-month, interest-bearing loan can be paid off in
-// month 1 with one lump sum. Any amount paid beyond what was actually owed
-// is credited to the LENDER's own ledger (the receiver of the payment) as
-// an on-account credit, adjustable later via the On A/C Adjustment page —
-// it is never silently dropped.
+// Payoff validator: once the running total actually paid toward
+// principal+interest reaches or exceeds the full schedule total AND every
+// EMI row is marked paid, willClose becomes true. But this does NOT
+// automatically close the loan (see CLOSURE FIX below) — it only signals
+// readyToClose in the response so the UI can prompt the user to formally
+// close via POST /:id/close. Any amount paid beyond what was owed is
+// credited to the LENDER's own ledger as an on-account credit.
 // Late fee is tracked separately and does NOT count toward the payoff
 // total — it's an additional charge, not principal/interest.
 router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, res) => {
@@ -1399,7 +1397,7 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
         .input("RefType", sql.NVarChar(30), "LoanPayment")
         .input("RefDocNo", sql.NVarChar(100), paymentRef)
         .input("RefId", sql.Int, paymentId)
-        .input("Notes", sql.NVarChar(500), `${paymentType} payment ${paymentRef} for ${loan.LoanNo}${willClose ? " (loan closed)" : ""}`)
+        .input("Notes", sql.NVarChar(500), `${paymentType} payment ${paymentRef} for ${loan.LoanNo}`)
         .input("CreatedBy", sql.NVarChar(150), actor).query(`
           INSERT INTO dbo.OnAccountLedger
             (PartyId, PartyType, TxnDate, TxnType, Amount, RefType, RefDocNo, RefId, Notes, CreatedBy)
@@ -1435,15 +1433,13 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
         `);
     }
 
-    if (willClose) {
-      await new sql.Request(tx)
-        .input("LoanId", sql.Int, loanId)
-        .input("PaymentId", sql.Int, paymentId).query(`
-          UPDATE dbo.LoanSanction
-          SET Status = 'Closed', ClosedAt = SYSDATETIME(), ClosurePaymentId = @PaymentId, UpdatedAt = SYSDATETIME()
-          WHERE LoanId = @LoanId
-        `);
-    }
+    // CLOSURE FIX: Do NOT auto-close the loan here. Closing a loan is a
+    // deliberate managerial action — it means the lender is satisfied the
+    // debt is settled, NOC has been issued, and the account is formally
+    // reconciled. That confirmation must come from a human, not from the
+    // payment system reaching a number. willClose is kept as a HINT only
+    // so the response can tell the UI "all EMIs are paid — prompt the user
+    // to formally close". The actual close happens via POST /:id/close.
 
     await tx.commit();
     await Promise.all([
@@ -1524,16 +1520,85 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
       paymentId,
       paymentRef,
       totalAmount,
-      loanClosed: willClose,
+      // loanClosed is always false now — closure requires an explicit POST
+      // /:id/close call. readyToClose = true is the signal to the UI to
+      // show the "Close Loan" button, not to close silently.
+      loanClosed: false,
+      readyToClose: willClose,
       excessCredited: excess,
-      // null when GL posted cleanly; non-null string when the repayment was
-      // recorded but GL couldn't post (missing bank A/C tag) — the frontend
-      // should show this as a warning toast so the user knows to fix it.
       glPostingWarning,
     });
   } catch (err) {
     await tx.rollback().catch(() => {});
     res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── POST /:id/close — EXPLICIT loan closure ──────────────────────────────
+// The only correct way to mark a loan as Closed. Requires:
+//   1. All EMIs must be IsPaid = 1
+//   2. The total paid via LoanPayment must equal or exceed the schedule total
+// Sets Status = 'Closed', ClosedAt, ClosurePaymentId (last payment).
+// This is a deliberate human action — it is NOT triggered automatically
+// when the last payment is recorded (see CLOSURE FIX comment in POST /:id/pay).
+router.post("/:id/close", requirePageRight("loan-sanction", "edit"), async (req, res) => {
+  const loanId = parseInt(req.params.id, 10);
+  const actor = req.user?.email || req.user?.name || "system";
+  if (!Number.isFinite(loanId)) return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const pool = getPool();
+
+    const loanRes = await pool.request().input("LoanId", sql.Int, loanId)
+      .query("SELECT LoanId, LoanNo, Status FROM dbo.LoanSanction WHERE LoanId = @LoanId");
+    const loan = loanRes.recordset[0];
+    if (!loan) return res.status(404).json({ error: "Loan not found" });
+    if (loan.Status === "Closed") return res.status(409).json({ error: "Loan is already closed." });
+
+    // Verify all EMIs are paid
+    const unpaidRes = await pool.request().input("LoanId", sql.Int, loanId)
+      .query("SELECT COUNT(*) AS cnt FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId AND IsPaid = 0");
+    if (unpaidRes.recordset[0].cnt > 0) {
+      return res.status(409).json({
+        error: `Cannot close loan — ${unpaidRes.recordset[0].cnt} installment(s) are still unpaid. Complete all repayments first.`,
+      });
+    }
+
+    // Verify total paid >= total scheduled
+    const totalsRes = await pool.request().input("LoanId", sql.Int, loanId).query(`
+      SELECT
+        ISNULL((SELECT SUM(PrincipalInterestAmount) FROM dbo.LoanPayment WHERE LoanId = @LoanId), 0) AS totalPaid,
+        ISNULL((SELECT SUM(EMIAmount) FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId), 0) AS totalSchedule
+    `);
+    const { totalPaid, totalSchedule } = totalsRes.recordset[0];
+    if (Number(totalPaid) < Number(totalSchedule) - 0.01) {
+      return res.status(409).json({
+        error: `Cannot close loan — total paid (₹${Number(totalPaid).toFixed(2)}) is less than total scheduled (₹${Number(totalSchedule).toFixed(2)}). Record the remaining payment first.`,
+      });
+    }
+
+    // Find the last payment ID for ClosurePaymentId reference
+    const lastPayRes = await pool.request().input("LoanId", sql.Int, loanId)
+      .query("SELECT TOP 1 PaymentId FROM dbo.LoanPayment WHERE LoanId = @LoanId ORDER BY PaymentId DESC");
+    const closurePaymentId = lastPayRes.recordset[0]?.PaymentId ?? null;
+
+    await pool.request()
+      .input("LoanId", sql.Int, loanId)
+      .input("PaymentId", sql.Int, closurePaymentId)
+      .input("Actor", sql.NVarChar(150), actor).query(`
+        UPDATE dbo.LoanSanction
+        SET Status = 'Closed',
+            ClosedAt = SYSDATETIME(),
+            ClosurePaymentId = @PaymentId,
+            UpdatedBy = @Actor,
+            UpdatedAt = SYSDATETIME()
+        WHERE LoanId = @LoanId
+      `);
+
+    await bumpCacheVersion("loan-sanction");
+    res.json({ success: true, message: `Loan ${loan.LoanNo} has been closed.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

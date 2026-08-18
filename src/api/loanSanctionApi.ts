@@ -168,7 +168,12 @@ export interface PayLoanResponse {
   paymentId: number;
   paymentRef: string;
   totalAmount: number;
-  loanClosed: boolean;
+  /** Always false now — loan closure requires an explicit closeLoan() call.
+   *  Use readyToClose to know when to show the "Close Loan" prompt. */
+  loanClosed: false;
+  /** True when all EMIs are paid and total paid ≥ scheduled total.
+   *  The UI should show the "Close Loan" button when this is true. */
+  readyToClose: boolean;
   excessCredited: number;
   /** Non-null when the repayment was recorded but GL posting was skipped
    *  (e.g. no Lender/Borrower Bank A/C tagged on the loan). Frontend should
@@ -256,6 +261,13 @@ export const payLoan = (loanId: number, payload: PayLoanPayload) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   }).then((r) => handle<PayLoanResponse>(r));
+
+/** Explicitly close a loan that has been fully repaid.
+ *  The backend validates that all EMIs are paid and total paid ≥ scheduled.
+ *  This is intentionally a separate step from recording the last payment. */
+export const closeLoan = (loanId: number) =>
+  fetchWithAuth(`${BASE}/${loanId}/close`, { method: "POST" })
+    .then((r) => handle<{ success: boolean; message: string }>(r));
 
 export const uploadLoanNoc = (loanId: number, file: File) => {
   const formData = new FormData();
