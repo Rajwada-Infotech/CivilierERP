@@ -35,7 +35,7 @@ const SaLeadActivities: React.FC = () => {
     Summary: "",
     NextFollowupDate: "",
   });
-  const { data: activities = [], isLoading, error, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-lead-activities"], queryFn: fetchActivities, staleTime: 30_000 });
+  const { data: activities = [], isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-lead-activities"], queryFn: fetchActivities, staleTime: 30_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-options"], queryFn: fetchLeads, staleTime: 60_000 });
 
   const filtered = useMemo(() => {

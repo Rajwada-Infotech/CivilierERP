@@ -72,7 +72,7 @@ const SaSiteVisits: React.FC = () => {
   const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"list" | "upcoming">("upcoming");
-  const { data: visits, isLoading, error, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-site-visits"], queryFn: fetchVisits, staleTime: 30_000 });
+  const { data: visits, isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-site-visits"], queryFn: fetchVisits, staleTime: 30_000 });
 
   const mappedData: RecordWithId[] = useMemo(() => {
     if (!Array.isArray(visits)) return [];

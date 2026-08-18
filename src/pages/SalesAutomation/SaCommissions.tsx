@@ -55,7 +55,7 @@ const SaCommissions: React.FC = () => {
     CpRate: "",
     Notes: "",
   });
-  const { data: commissions = [], isLoading, error, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-commissions"], queryFn: fetchCommissions, staleTime: 30_000 });
+  const { data: commissions = [], isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-commissions"], queryFn: fetchCommissions, staleTime: 30_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-options"], queryFn: fetchLeads, staleTime: 60_000 });
   const { data: users = [] } = useQuery({ queryKey: ["sa-users-options"], queryFn: fetchUsers, staleTime: 60_000 });
   const { data: partners = [] } = useQuery({ queryKey: ["sa-channel-partners"], queryFn: fetchPartners, staleTime: 60_000 });

@@ -376,7 +376,7 @@ const CrmAgreementPapers: React.FC = () => {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
-  const { data: documents = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+  const { data: documents = [], isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: ["crm-agreement-papers", status, documentType],
     queryFn: () => fetchAllDocuments(status, documentType),
     staleTime: 30_000,
