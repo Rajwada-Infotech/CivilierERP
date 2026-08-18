@@ -219,7 +219,7 @@ const SaLeadManagement: React.FC = () => {
       setTransferLoading(false);
     }
   };
-  const { data: leads, isLoading, error } = useQuery({ queryKey: ["sa-leads"], queryFn: fetchLeads, staleTime: 30_000 });
+  const { data: leads, isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-leads"], queryFn: fetchLeads, staleTime: 30_000 });
 
   const { data: auditLog = [] } = useQuery({
     queryKey: ["sa-lead-audit", auditLeadId],
@@ -414,7 +414,7 @@ const SaLeadManagement: React.FC = () => {
               { key: "list",     icon: LayoutList, label: "List" },
               { key: "pipeline", icon: Kanban,     label: "Pipeline" },
               { key: "tracking", icon: GitMerge,   label: "Tracking" },
-              { key: "audit",    icon: label: "Audit" },
+              { key: "audit",    icon: Clock,     label: "Audit" },
             ] as const).map(({ key, icon: Icon, label }) => (
               <button
                 key={key}

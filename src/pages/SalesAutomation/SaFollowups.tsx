@@ -57,7 +57,7 @@ const SaFollowups: React.FC = () => {
   const [visitForm, setVisitForm] = useState({ ...EMPTY_VISIT_FORM });
   const [schedulingVisit, setSchedulingVisit] = useState(false);
 
-  const { data: pending = [], isLoading: loadingPending } = useQuery({
+  const { data: pending = [], isLoading: loadingPending, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: ["sa-pending-followups"], queryFn: fetchPendingFollowups, staleTime: 30_000,
   });
   const { data: untouched = [] } = useQuery({
