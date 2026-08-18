@@ -2,6 +2,7 @@ import React from "react";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import {
   Warehouse,
@@ -438,6 +439,7 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
 
 // ─── Main Stock Page ──────────────────────────────────────────────────────────
 export default function Stock() {
+  const rights = usePageRights("stock-ledger");
   const [selectedCompany, setSelectedCompany] = useState<number | null>(null);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
   const [selectedGodownId, setSelectedGodownId] = useState<number | null>(null);

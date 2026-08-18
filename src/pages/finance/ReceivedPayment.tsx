@@ -339,6 +339,7 @@ export default function ReceivedPaymentPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [summary, setSummary] = useState({ totalAmount: 0, approvedCount: 0, draftCount: 0, pendingCount: 0, rejectedCount: 0 });
   const [apiLoading, setApiLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -500,6 +501,7 @@ export default function ReceivedPaymentPage() {
       setTotalPages(res.totalPages);
       setTotalCount(res.total);
       setCurrentPage(page);
+      if (res.summary) setSummary(res.summary);
       setPayments(
         res.data.map((r) => ({
           id: String(r.RPPaymentID),
@@ -734,9 +736,9 @@ export default function ReceivedPaymentPage() {
     );
   });
 
-  const totalReceived = payments.reduce((s, p) => s + p.amount, 0);
-  const approved = payments.filter((p) => p.status === "Approved").length;
-  const submitted = payments.filter((p) => p.status === "Pending").length;
+  const totalReceived = summary.totalAmount;
+  const approved = summary.approvedCount;
+  const submitted = summary.pendingCount;
 
 
   const stats = [

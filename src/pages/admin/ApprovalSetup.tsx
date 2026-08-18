@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getUsers, type User } from "@/api/userApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { PageKey } from "@/contexts/AuthContext";
 import {
@@ -1109,6 +1110,7 @@ function ModuleGroupSelector({
 export default function ApprovalSetup() {
   const qc = useQueryClient();
   const { canDoAction } = useAuth() as any;
+  const rights = usePageRights("approval-setup");
 
   const [mode, setMode] = useState<"list" | "new" | "edit">("list");
   const [editing, setEditing] = useState<ApprovalWorkflow | null>(null);

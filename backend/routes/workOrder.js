@@ -242,11 +242,14 @@ router.get(
       const page = Math.max(parseInt(req.query.page) || 1, 1);
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
       const offset = (page - 1) * limit;
+      const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+      if (!companyId) return res.status(400).json({ error: "companyId is required." });
 
       const result = await pool
         .request()
         .input("offset", sql.Int, offset)
-        .input("limit", sql.Int, limit).query(`
+        .input("limit", sql.Int, limit)
+        .input("companyId", sql.Int, companyId).query(`
         SELECT h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt,
           ec.name AS CompanyName, h.CompanyId,
@@ -267,6 +270,7 @@ router.get(
         LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
         LEFT JOIN dbo.TypeOfDoc         td  ON td.TypeOfDocId = h.DocTypeId
         LEFT JOIN dbo.BOQ               b   ON b.BoqID = h.BoqID
+        WHERE h.CompanyId = @companyId
         GROUP BY h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt, h.CompanyId, h.ProjectId,
           h.ContractorId, h.SupplierId, h.Remarks, h.TermsAndConditions,

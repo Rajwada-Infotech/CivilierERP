@@ -3,6 +3,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -31,6 +33,7 @@ async function fetchRules(): Promise<any[]> {
 }
 
 const SaLeadDistribution: React.FC = () => {
+  usePageRights("sa-lead-distribution");
   const { canDoAction } = useAuth();
   const canAutoDistribute = canDoAction("sa-lead-distribution", "edit");
   const queryClient = useQueryClient();
@@ -184,6 +187,7 @@ const SaLeadDistribution: React.FC = () => {
 
   return (
     <SalesAutoShell title="Lead Distribution" subtitle="Allocate leads to team leaders (L1) and sales persons (L2)">
+      <Breadcrumbs items={["Sales Automation", "Lead Distribution"]} />
       <div className="space-y-6">
 
         {/* Tabs */}

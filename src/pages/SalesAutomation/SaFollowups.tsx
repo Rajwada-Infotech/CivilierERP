@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Phone, MapPin, Clock, AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -49,6 +51,7 @@ const EMPTY_LOG_FORM = { ActivityType: "Call", Outcome: "", Summary: "", NextFol
 const EMPTY_VISIT_FORM = { ProjectName: "", PreferredDate: "", PreferredTime: "", CustomerNotes: "" };
 
 const SaFollowups: React.FC = () => {
+  usePageRights("sa-followups");
   const qc = useQueryClient();
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null);
   const [logForm, setLogForm] = useState({ ...EMPTY_LOG_FORM });
@@ -167,6 +170,7 @@ const SaFollowups: React.FC = () => {
   return (
     <SalesAutoShell title="Follow-Up" subtitle="Leads due for their next touch — reminders, interest, and the next step onward to a site visit"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
+      <Breadcrumbs items={["Sales Automation", "Follow-Ups"]} />
       <div className="flex gap-4 h-[calc(100vh-200px)]">
         <div className="w-80 shrink-0 flex flex-col gap-2">
           <div className="text-xs text-muted-foreground px-1">{queue.length} lead(s) need attention</div>

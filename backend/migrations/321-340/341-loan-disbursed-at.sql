@@ -1,4 +1,4 @@
-﻿-- Migration 341: Loan perspective tracking -- DisbursedAt timestamp.
+-- Migration 341: Loan perspective tracking -- DisbursedAt timestamp.
 --
 -- Previously, LoanSanction.Status jumped directly from 'Sanctioned' to
 -- 'Closed' with no explicit record of when funds actually moved. For
@@ -22,7 +22,7 @@ GO
 -- earliest timestamp as the disbursement date so the field isn't blank on live data.
 UPDATE ls
 SET DisbursedAt = (
-  SELECT MIN(gle.PostedAt)
+  SELECT MIN(gle.CreatedAt)
   FROM dbo.GeneralLedgerEntry gle
   WHERE gle.SourceType = 'LoanPosting'
     AND gle.SourceId = ls.LoanId

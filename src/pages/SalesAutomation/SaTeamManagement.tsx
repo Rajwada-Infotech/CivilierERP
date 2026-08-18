@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { UserPlus, UserMinus, ArrowRightLeft, TrendingUp, TrendingDown, Users, ChevronDown, ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -33,6 +35,7 @@ const roleBadge = (role: string) => {
 };
 
 const SaTeamManagement: React.FC = () => {
+  usePageRights("sa-teams");
   const { canDoAction } = useAuth();
   const canManageTeam = canDoAction("sa-teams", "create");
   const qc = useQueryClient();
@@ -141,6 +144,7 @@ const SaTeamManagement: React.FC = () => {
   return (
     <SalesAutoShell title="Sales Team Management" subtitle="Manage team leads and their salespersons — add, remove, transfer, promote or demote"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
+      <Breadcrumbs items={["Sales Automation", "Team Management"]} />
       <div className="space-y-6">
 
         {/* Teams */}

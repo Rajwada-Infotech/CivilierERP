@@ -177,7 +177,7 @@ export default function BalanceEnquiry() {
 
   const passbookQuery = useQuery({
     queryKey: ["balance-enquiry-passbook", bankId, fromDate, toDate],
-    queryFn: () => getPassbook(bankId as number, { from: fromDate || undefined, to: toDate || undefined, limit: 500 }),
+    queryFn: () => getPassbook(bankId as number, { from: fromDate || undefined, to: toDate || undefined, limit: 2000 }),
     enabled: !!bankId,
   });
 
@@ -414,6 +414,12 @@ export default function BalanceEnquiry() {
               ) : transactions.length === 0 ? (
                 <div className="text-center py-14 text-sm text-muted-foreground">No transactions in this range.</div>
               ) : (
+                <>
+                {transactions.length >= 2000 && (
+                  <div className="px-5 py-2 text-xs text-amber-700 dark:text-amber-400 bg-amber-500/10 border-b border-amber-500/20">
+                    Showing first 2,000 transactions — apply a date filter to narrow results.
+                  </div>
+                )}
                 <div className="divide-y divide-border/50 max-h-[560px] overflow-y-auto">
                   {transactions.map((t) => {
                     const meta = sourceMeta(t.SourceType);
@@ -449,6 +455,7 @@ export default function BalanceEnquiry() {
                     );
                   })}
                 </div>
+                </>
               )}
             </div>
           </>

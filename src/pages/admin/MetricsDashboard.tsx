@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,6 +67,7 @@ const chartConfig = {
 } as const;
 
 const MetricsDashboard = () => {
+  const rights = usePageRights("admin-dashboard");
   const [baseURL, setBaseURL] = useState(
     API_BASE_URL.replace(/\/api$/, "") || "http://localhost:5000",
   );

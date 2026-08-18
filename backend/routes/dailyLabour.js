@@ -51,22 +51,25 @@ const JOINS = `
   LEFT JOIN dbo.RoomMaster rm ON rm.Id = dl.RoomId
 `;
 
-// ─── GET / — optionally filtered by allocationId / date range ────────────────
+// ─── GET / — optionally filtered by allocationId / projectId / date range ─────
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
     const allocationId = req.query.allocationId ? parseInt(req.query.allocationId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const from = req.query.from || null;
     const to = req.query.to || null;
 
     const result = await pool.request()
       .input("allocationId", sql.Int, allocationId)
+      .input("projectId", sql.Int, projectId)
       .input("from", sql.Date, from)
       .input("to", sql.Date, to)
       .query(`
         SELECT ${SELECT_COLUMNS}
         ${JOINS}
         WHERE (@allocationId IS NULL OR dl.AllocationId = @allocationId)
+          AND (@projectId IS NULL OR ca.ProjectId = @projectId)
           AND (@from IS NULL OR dl.EntryDate >= @from)
           AND (@to IS NULL OR dl.EntryDate <= @to)
         ORDER BY dl.EntryDate DESC

@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -441,6 +442,7 @@ const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
 
 // ─── Dashboard component ──────────────────────────────────────────────────────
 export default function EngineeringDashboard() {
+  const rights = usePageRights("engineering-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
   const isDark = theme !== "light";

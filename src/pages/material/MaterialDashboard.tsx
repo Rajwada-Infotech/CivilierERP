@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -741,6 +742,7 @@ type ModalKey =
   | null;
 
 export default function MaterialDashboard() {
+  const rights = usePageRights("material-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
   const isDark = theme !== "light";

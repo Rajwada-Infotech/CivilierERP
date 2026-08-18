@@ -2128,6 +2128,7 @@ export default function BOQ() {
   const PAGE_LIMIT = 10;
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("All");
+  const [filterCompanyId, setFilterCompanyId] = useState<number | null>(null);
   const searchRef = useRef<ReturnType<typeof setTimeout>>();
 
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -2149,11 +2150,12 @@ export default function BOQ() {
     isLoading: loading,
     refetch: loadList,
   } = useQuery({
-    queryKey: ["boqs", page, search, filterStatus],
+    queryKey: ["boqs", page, search, filterStatus, filterCompanyId],
     queryFn: () => {
       const params = new URLSearchParams({
         page: String(page),
         limit: String(PAGE_LIMIT),
+        companyId: String(filterCompanyId),
         ...(search ? { search } : {}),
         ...(filterStatus && filterStatus !== "All"
           ? { status: filterStatus }
@@ -2161,6 +2163,8 @@ export default function BOQ() {
       });
       return apiFetch(`/boq?${params}`);
     },
+    enabled: !!filterCompanyId,
+    staleTime: 30_000,
   });
 
   const rows: BoqRecord[] = listData?.data ?? [];
@@ -2674,6 +2678,24 @@ export default function BOQ() {
                   className="pl-9 h-9"
                 />
               </div>
+              <Select
+                value={filterCompanyId ? String(filterCompanyId) : ""}
+                onValueChange={(v) => {
+                  setFilterCompanyId(v ? Number(v) : null);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="h-9 w-48 text-xs">
+                  <SelectValue placeholder="Select company…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {companies.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)} className="text-xs">
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <div className="flex gap-2 flex-wrap">
                 {statuses.map((s) => (
                   <Button
@@ -2693,7 +2715,11 @@ export default function BOQ() {
             </CardHeader>
 
             <CardContent className="p-0">
-              {loading ? (
+              {!filterCompanyId ? (
+                <div className="flex items-center justify-center p-12 text-muted-foreground text-sm gap-2">
+                  Select a company above to view BOQs.
+                </div>
+              ) : loading ? (
                 <div className="flex items-center justify-center p-12 text-muted-foreground text-sm gap-2">
                   <RefreshCw size={15} className="animate-spin" /> Loading BOQs…
                 </div>

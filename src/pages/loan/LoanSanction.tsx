@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
@@ -120,6 +121,13 @@ const EMPTY_FORM = {
   dueDate: "",
   purpose: "",
   remarks: "",
+  paymentMode: "Cash" as string,
+  chequeLotId: "",
+  chequeLotNumber: "",
+  chequeNo: "",
+  chequeDate: "",
+  isPostDated: false,
+  digitalRefNumber: "",
 };
 
 const fmt = (n: number | null | undefined) =>
@@ -175,6 +183,7 @@ const LOAN_TYPE_COLORS: Record<LoanType, string> = {
 
 export default function LoanSanctionPage() {
   const qc = useQueryClient();
+  usePageRights("loan-sanction");
   const [showForm, setShowForm] = useState(false);
   const [viewingLoan, setViewingLoan] = useState<LoanSanction | null>(null);
   const [tab, setTab] = useState<"overview" | "exposure" | "schedule" | "chain" | "posting">("overview");
@@ -224,24 +233,31 @@ export default function LoanSanctionPage() {
   // Explicit loan closure — separate deliberate step from payment recording
   const [closingLoan, setClosingLoan] = useState(false);
 
+  const [listCompanyId, setListCompanyId] = useState<number | null>(null);
+
   const { data: loans = [], isLoading } = useQuery({
-    queryKey: ["loan-sanctions"],
-    queryFn: getLoanSanctions,
+    queryKey: ["loan-sanctions", listCompanyId],
+    queryFn: () => getLoanSanctions(listCompanyId!),
+    enabled: !!listCompanyId,
+    staleTime: 30_000,
   });
 
   const { data: companies = [] } = useQuery({
     queryKey: ["company-options-loan"],
     queryFn: getCompanyOptions,
+    staleTime: 5 * 60_000,
   });
 
   const { data: customers = [] } = useQuery({
     queryKey: ["customer-options-loan"],
     queryFn: getCustomerOptions,
+    staleTime: 5 * 60_000,
   });
 
   const { data: banks = [] } = useQuery({
     queryKey: ["bank-options-loan"],
     queryFn: getBankOptions,
+    staleTime: 5 * 60_000,
   });
 
   // Full bank records (with each bank's own company tag) — used to scope
@@ -250,6 +266,7 @@ export default function LoanSanctionPage() {
   const { data: bankRecords = [] } = useQuery({
     queryKey: ["bank-records-loan"],
     queryFn: getBanks,
+    staleTime: 5 * 60_000,
   });
   const banksForCompany = (companyLabel: string) =>
     bankRecords.filter(
@@ -260,18 +277,21 @@ export default function LoanSanctionPage() {
     queryKey: ["loan-schedule", viewingLoan?.LoanId],
     queryFn: () => getLoanSchedule(viewingLoan!.LoanId),
     enabled: !!viewingLoan,
+    staleTime: 30_000,
   });
 
   const { data: payments = [] } = useQuery({
     queryKey: ["loan-payments", viewingLoan?.LoanId],
     queryFn: () => getLoanPayments(viewingLoan!.LoanId),
     enabled: !!viewingLoan,
+    staleTime: 30_000,
   });
 
   const { data: loanDocuments = [] } = useQuery({
     queryKey: ["loan-documents", viewingLoan?.LoanId],
     queryFn: () => getLoanDocuments(viewingLoan!.LoanId),
     enabled: !!viewingLoan,
+    staleTime: 30_000,
   });
 
   // Exposure tab — live lookup of what's already lent/owed by whichever
@@ -507,6 +527,13 @@ export default function LoanSanctionPage() {
         dueDate: isInterCompanyType && !form.hasInterest ? form.dueDate || null : null,
         purpose: form.purpose || null,
         remarks: form.remarks || null,
+        paymentMode: form.paymentMode || null,
+        chequeLotId: form.chequeLotId || null,
+        chequeLotNumber: form.chequeLotNumber || null,
+        chequeNo: form.chequeNo || null,
+        chequeDate: form.chequeDate || null,
+        isPostDated: form.isPostDated,
+        digitalRefNumber: form.digitalRefNumber || null,
       });
       toast.success(`Loan ${res.loanNo} sanctioned`);
       if (pendingDocumentFile) {
@@ -778,13 +805,29 @@ export default function LoanSanctionPage() {
     >
       <Breadcrumbs items={[{ label: "Loan", path: "/loan" }, { label: "Loan Sanction" }]} />
 
+      {!showForm && (
+        <div className="flex items-center gap-3 mb-3">
+          <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Company</label>
+          <select
+            className="h-9 rounded-md border border-border bg-background px-3 text-sm"
+            value={listCompanyId ?? ""}
+            onChange={(e) => setListCompanyId(e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">Select company…</option>
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>{c.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {!showForm ? (
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <DataTable
             columns={columns}
             data={loans}
             loading={isLoading}
-            emptyMessage="No loans sanctioned yet. Click 'New Loan' to get started."
+            emptyMessage={listCompanyId ? "No loans sanctioned yet. Click 'New Loan' to get started." : "Select a company to view loans."}
           />
         </div>
       ) : (
@@ -1192,6 +1235,18 @@ export default function LoanSanctionPage() {
                         value={fmt(schedule.reduce((s, e) => s + Number(e.EMIAmount), 0))}
                         accent
                       />
+                      {viewingLoan?.PaymentMode && (
+                        <InfoCard
+                          label="Disbursed Via"
+                          value={
+                            viewingLoan.PaymentMode === "Cheque" || viewingLoan.PaymentMode === "Post-Dated Cheque"
+                              ? `${viewingLoan.PaymentMode} #${viewingLoan.ChequeNo || "—"}${viewingLoan.ChequeDate ? ` (${fmtDate(viewingLoan.ChequeDate)})` : ""}`
+                              : ["Cash"].includes(viewingLoan.PaymentMode)
+                                ? viewingLoan.PaymentMode
+                                : `${viewingLoan.PaymentMode} (Ref: ${viewingLoan.DigitalRefNumber || "—"})`
+                          }
+                        />
+                      )}
                     </div>
 
                     {/* Repayment Status — live financial state of the loan.
@@ -1590,6 +1645,65 @@ export default function LoanSanctionPage() {
                       </div>
                     )}
                     <div className="grid grid-cols-2 gap-5">
+                      <div className="space-y-2">
+                        <label className={labelCls}>Payment Mode</label>
+                        <select
+                          className={inputCls}
+                          value={form.paymentMode}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            set("paymentMode", v);
+                            if (v !== "Cheque" && v !== "Post-Dated Cheque") {
+                              set("chequeNo", "");
+                              set("chequeDate", "");
+                            }
+                            if (["Cash", "Cheque", "Post-Dated Cheque"].includes(v)) {
+                              set("digitalRefNumber", "");
+                            }
+                          }}
+                        >
+                          {["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "RTGS", "IMPS", "UPI", "Card"].map((m) => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      {(form.paymentMode === "Cheque" || form.paymentMode === "Post-Dated Cheque") && (
+                        <>
+                          <div className="space-y-2">
+                            <label className={labelCls}>Cheque Number</label>
+                            <input
+                              className={inputCls}
+                              placeholder="Cheque No"
+                              value={form.chequeNo}
+                              onChange={(e) => set("chequeNo", e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className={labelCls}>Cheque Date</label>
+                            <input
+                              type="date"
+                              className={inputCls}
+                              value={form.chequeDate}
+                              onChange={(e) => set("chequeDate", e.target.value)}
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {!["Cash", "Cheque", "Post-Dated Cheque"].includes(form.paymentMode) && (
+                        <div className="space-y-2">
+                          <label className={labelCls}>Reference Number</label>
+                          <input
+                            className={inputCls}
+                            placeholder="UTR / Ref No"
+                            value={form.digitalRefNumber}
+                            onChange={(e) => set("digitalRefNumber", e.target.value)}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-5 mt-5">
                       <div className="space-y-2">
                         <label className={labelCls}>Purpose</label>
                         <input

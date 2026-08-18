@@ -38,6 +38,9 @@ router.get("/", async (req, res) => {
     const companyId = req.query.companyId
       ? parseInt(req.query.companyId, 10)
       : null;
+    const enterpriseId = req.query.enterpriseId
+      ? parseInt(req.query.enterpriseId, 10)
+      : null;
     const projectId = req.query.projectId
       ? parseInt(req.query.projectId, 10)
       : null;
@@ -89,6 +92,7 @@ router.get("/", async (req, res) => {
       .input("from", sql.Date, from)
       .input("to", sql.Date, to)
       .input("companyId", sql.Int, companyId)
+      .input("enterpriseId", sql.Int, enterpriseId)
       .input("projectId", sql.Int, projectId)
       .input("costCenterId", sql.Int, costCenterId).query(`
         SELECT
@@ -104,6 +108,7 @@ router.get("/", async (req, res) => {
               AND gle.IsReversed = 0
               AND gle.VoucherDate < @from
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+              AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
               AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
           ), 0)
@@ -118,6 +123,7 @@ router.get("/", async (req, res) => {
               AND gle.IsReversed = 0
               AND gle.VoucherDate < @from
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+              AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
               AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
           ), 0)
@@ -141,6 +147,7 @@ router.get("/", async (req, res) => {
               AND gle.IsReversed = 0
               AND gle.VoucherDate BETWEEN @from AND @to
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+              AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
               AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
           ), 0) AS txn_debit,
@@ -152,6 +159,7 @@ router.get("/", async (req, res) => {
               AND gle.IsReversed = 0
               AND gle.VoucherDate BETWEEN @from AND @to
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+              AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
               AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
           ), 0) AS txn_credit
@@ -344,6 +352,9 @@ router.get("/:lheadId/transactions", async (req, res) => {
     const companyId = req.query.companyId
       ? parseInt(req.query.companyId, 10)
       : null;
+    const enterpriseId = req.query.enterpriseId
+      ? parseInt(req.query.enterpriseId, 10)
+      : null;
     const projectId = req.query.projectId
       ? parseInt(req.query.projectId, 10)
       : null;
@@ -367,6 +378,7 @@ router.get("/:lheadId/transactions", async (req, res) => {
       .input("from", sql.Date, from)
       .input("to", sql.Date, to)
       .input("companyId", sql.Int, companyId)
+      .input("enterpriseId", sql.Int, enterpriseId)
       .input("projectId", sql.Int, projectId)
       .input("costCenterId", sql.Int, costCenterId).query(`
         SELECT
@@ -461,6 +473,7 @@ router.get("/:lheadId/transactions", async (req, res) => {
           AND gle.IsReversed = 0
           AND gle.VoucherDate >= @from AND gle.VoucherDate <= @to
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+          AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
           AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
         ORDER BY gle.VoucherDate DESC, gle.EntryId DESC
@@ -685,6 +698,9 @@ router.get("/cost-centre/:costCenterId/transactions", async (req, res) => {
     const companyId = req.query.companyId
       ? parseInt(req.query.companyId, 10)
       : null;
+    const enterpriseId = req.query.enterpriseId
+      ? parseInt(req.query.enterpriseId, 10)
+      : null;
     const projectId = req.query.projectId
       ? parseInt(req.query.projectId, 10)
       : null;
@@ -705,6 +721,7 @@ router.get("/cost-centre/:costCenterId/transactions", async (req, res) => {
       .input("from", sql.Date, from)
       .input("to", sql.Date, to)
       .input("companyId", sql.Int, companyId)
+      .input("enterpriseId", sql.Int, enterpriseId)
       .input("projectId", sql.Int, projectId).query(`
         SELECT
           gle.EntryId,
@@ -750,6 +767,7 @@ router.get("/cost-centre/:costCenterId/transactions", async (req, res) => {
           AND gle.IsReversed = 0
           AND gle.VoucherDate >= @from AND gle.VoucherDate <= @to
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+          AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
         ORDER BY gle.VoucherDate DESC, gle.EntryId DESC
       `);

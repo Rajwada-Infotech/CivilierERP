@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { MapPin, Phone } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -52,6 +54,7 @@ const EMPTY_VISIT_FORM = {
 };
 
 const SaInquiryDashboard: React.FC = () => {
+  usePageRights("sa-inquiry");
   const queryClient = useQueryClient();
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
@@ -153,6 +156,7 @@ const SaInquiryDashboard: React.FC = () => {
   return (
     <SalesAutoShell title="Inquiry Dashboard" subtitle="Review and manage all incoming lead inquiries"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
+      <Breadcrumbs items={["Sales Automation", "Inquiry Dashboard"]} />
       <div className="flex gap-4 h-[calc(100vh-200px)]">
 
         {/* Lead list panel */}
