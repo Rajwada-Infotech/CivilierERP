@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { RefreshButton } from "@/components/ui/RefreshButton";
@@ -53,7 +53,7 @@ async function fetchPartners(): Promise<any[]> {
 const SaChannelPartners: React.FC = () => {
   const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
-  const { data = [], isLoading, error } = useQuery({ queryKey: ["sa-channel-partners"], queryFn: fetchPartners, staleTime: 30_000 });
+  const { data = [], isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-channel-partners"], queryFn: fetchPartners, staleTime: 30_000 });
 
   const mappedData: RecordWithId[] = React.useMemo(() => data.map((p) => ({
     _id: String(p.Id),

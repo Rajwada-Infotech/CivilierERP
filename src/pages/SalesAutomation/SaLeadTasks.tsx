@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { RefreshButton } from "@/components/ui/RefreshButton";
@@ -33,7 +33,7 @@ const SaLeadTasks: React.FC = () => {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [form, setForm] = useState({ LeadId: "", Title: "", Description: "", AssignedTo: "", DueDate: "", Priority: "Normal" });
-  const { data: tasks = [], isLoading, error } = useQuery({ queryKey: ["sa-lead-tasks"], queryFn: fetchTasks, staleTime: 30_000 });
+  const { data: tasks = [], isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-lead-tasks"], queryFn: fetchTasks, staleTime: 30_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-options"], queryFn: fetchLeads, staleTime: 60_000 });
   const { data: users = [] } = useQuery({ queryKey: ["sa-users-options"], queryFn: fetchUsers, staleTime: 60_000 });
 
