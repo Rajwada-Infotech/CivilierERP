@@ -461,7 +461,7 @@ export default function LoanSanctionPage() {
         qc.invalidateQueries({ queryKey: ["loan-schedule", viewingLoan.LoanId] }),
         qc.invalidateQueries({ queryKey: ["loan-payments", viewingLoan.LoanId] }),
       ]);
-      const fresh = await getLoanSanctions();
+      const fresh = await getLoanSanctions(listCompanyId!);
       const updated = fresh.find((l) => l.LoanId === viewingLoan.LoanId);
       if (updated) setViewingLoan(updated);
     } catch (e: any) {
@@ -486,7 +486,7 @@ export default function LoanSanctionPage() {
       const result = await closeLoan(viewingLoan.LoanId);
       toast.success(result.message || `Loan ${viewingLoan.LoanNo} has been closed.`);
       await qc.invalidateQueries({ queryKey: ["loan-sanctions"] });
-      const fresh = await getLoanSanctions();
+      const fresh = await getLoanSanctions(listCompanyId!);
       const updated = fresh.find((l) => l.LoanId === viewingLoan.LoanId);
       if (updated) setViewingLoan(updated);
     } catch (e: any) {
@@ -560,7 +560,7 @@ export default function LoanSanctionPage() {
       await uploadLoanNoc(viewingLoan.LoanId, file);
       toast.success("NOC uploaded — available in Records module");
       await qc.invalidateQueries({ queryKey: ["loan-sanctions"] });
-      const fresh = await getLoanSanctions();
+      const fresh = await getLoanSanctions(listCompanyId!);
       const updated = fresh.find((l) => l.LoanId === viewingLoan.LoanId);
       if (updated) setViewingLoan(updated);
     } catch (e: any) {
