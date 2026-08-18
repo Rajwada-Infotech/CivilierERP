@@ -209,8 +209,10 @@ async function handle<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export const getLoanSanctions = (companyId: number) =>
-  fetchWithAuth(`${BASE}?companyId=${companyId}`).then((r) => handle<LoanSanction[]>(r));
+// Pass a companyId to scope the list to loans where that company is the
+// lender or borrower; omit it (or pass null) for the "All companies" view.
+export const getLoanSanctions = (companyId?: number | null) =>
+  fetchWithAuth(companyId ? `${BASE}?companyId=${companyId}` : BASE).then((r) => handle<LoanSanction[]>(r));
 
 export const getLoanSanction = (id: number) =>
   fetchWithAuth(`${BASE}/${id}`).then((r) => handle<LoanSanction>(r));
