@@ -204,18 +204,18 @@ router.get("/customer-options", requirePageRight("loan-sanction", "view"), async
 router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
   try {
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    if (!companyId) return res.status(400).json({ error: "companyId is required" });
 
     const pool = getPool();
     const nocSearch = typeof req.query.noc === "string" && req.query.noc.trim() ? req.query.noc.trim() : null;
     const request = pool.request();
-    request.input("CompanyId", sql.Int, companyId);
+    if (companyId) request.input("CompanyId", sql.Int, companyId);
     if (nocSearch) request.input("NocSearch", sql.NVarChar(255), `%${nocSearch}%`);
     // A loan touches a company if it is the lender OR the borrower.
     // Bank Loan: LenderCompanyId is NULL (lender is a bank), so only BorrowerCompanyId matches.
     // Customer Loan: BorrowerCompanyId is NULL (borrower is a customer), so only LenderCompanyId matches.
     // Inter-Company: both may match; UNION across both sides ensures the row appears once.
-    const companyFilter = "(ls.LenderCompanyId = @CompanyId OR ls.BorrowerCompanyId = @CompanyId)";
+    // No companyId at all → the "All companies" view: every loan, unfiltered.
+    const companyFilter = companyId ? "(ls.LenderCompanyId = @CompanyId OR ls.BorrowerCompanyId = @CompanyId)" : "1=1";
     const result = await request.query(`
       SELECT
         ls.LoanId, ls.LoanNo, ls.LoanType, ls.LoanDocNo,
