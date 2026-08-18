@@ -117,7 +117,7 @@ const CrmLegalMilestones: React.FC = () => {
   const [bookingId, setBookingId] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const { data: trackers = [], isLoading, isError, error } = useQuery({ queryKey: ["crm-legal-milestones"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: trackers = [], isLoading, isError, error, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-legal-milestones"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
 
   const selected = (trackers as any[]).find((t: any) => t.Id === selectedId);

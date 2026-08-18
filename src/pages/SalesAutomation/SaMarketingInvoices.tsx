@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -105,7 +105,7 @@ const SaMarketingInvoices: React.FC = () => {
       setApprovalLoading(false);
     }
   };
-  const { data: invoices, isLoading, error } = useQuery({ queryKey: ["sa-marketing-invoices"], queryFn: fetchInvoices, staleTime: 30_000 });
+  const { data: invoices, isLoading, error, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-marketing-invoices"], queryFn: fetchInvoices, staleTime: 30_000 });
 
   const mappedData: RecordWithId[] = useMemo(() => {
     if (!Array.isArray(invoices)) return [];
