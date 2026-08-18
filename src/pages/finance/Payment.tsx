@@ -2014,14 +2014,15 @@ const Payment: React.FC = () => {
               lateFee: loanLateFee || undefined,
               notes: loanPaymentNotes || `Paid via Payment — ${form.paymentName}`,
             });
+            // loanClosed is always false now — closure is a deliberate step
+            // from Loan Sanction. readyToClose tells us all EMIs are now paid
+            // so we can guide the user to close it from the Loan Sanction page.
             toast.success(
-              res.loanClosed
-                ? `Loan ${selectedLoanEmi.LoanNo} fully repaid and closed. Ref: ${res.paymentRef}`
+              res.readyToClose
+                ? `All installments settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef} — go to Loan Sanction to formally close it.`
                 : `Loan payment settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef}`,
+              { duration: res.readyToClose ? 8000 : 4000 },
             );
-            // BUG 7 FIX: surface the GL skip warning if the loan is missing a
-            // bank A/C tag so the user knows to fix it (repayment is recorded
-            // but GL was not updated).
             if (res.glPostingWarning) {
               toast.warning(`⚠️ GL posting skipped: ${res.glPostingWarning}`, { duration: 8000 });
             }

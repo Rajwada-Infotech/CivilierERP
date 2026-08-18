@@ -59,6 +59,7 @@ import {
   uploadLoanNoc,
   getLoanDocuments,
   uploadLoanDocument,
+  closeLoan,
   type LoanSanction,
   type LoanType,
   type InterestCalcType,
@@ -219,6 +220,9 @@ export default function LoanSanctionPage() {
   const [pendingDocumentFile, setPendingDocumentFile] = useState<File | null>(null);
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const documentInputRef = useRef<HTMLInputElement>(null);
+
+  // Explicit loan closure — separate deliberate step from payment recording
+  const [closingLoan, setClosingLoan] = useState(false);
 
   const { data: loans = [], isLoading } = useQuery({
     queryKey: ["loan-sanctions"],
@@ -451,6 +455,25 @@ export default function LoanSanctionPage() {
     setShowForm(false);
     setViewingLoan(null);
     setEditingDetails(false);
+  };
+
+  // Explicit loan closure — called only when the user deliberately clicks
+  // "Close Loan". Backend validates all EMIs are paid and total paid >= schedule.
+  const handleCloseLoan = async () => {
+    if (!viewingLoan) return;
+    setClosingLoan(true);
+    try {
+      const result = await closeLoan(viewingLoan.LoanId);
+      toast.success(result.message || `Loan ${viewingLoan.LoanNo} has been closed.`);
+      await qc.invalidateQueries({ queryKey: ["loan-sanctions"] });
+      const fresh = await getLoanSanctions();
+      const updated = fresh.find((l) => l.LoanId === viewingLoan.LoanId);
+      if (updated) setViewingLoan(updated);
+    } catch (e: any) {
+      toast.error(friendlyErrorMessage(e, "Could not close loan"));
+    } finally {
+      setClosingLoan(false);
+    }
   };
 
   const handleSave = async () => {
@@ -707,12 +730,14 @@ export default function LoanSanctionPage() {
 
   const totalEmis = schedule.length;
   const paidEmis = schedule.filter((e) => e.IsPaid).length;
-  // BUG 8 FIX: paidAmount derived from actual LoanPayment transactions
-  // (PrincipalInterestAmount), not from summing IsPaid EMI rows. These can
-  // diverge when a lump-sum payment covers an amount slightly different from
-  // the scheduled EMI sum (rounding, early payoff excess, partial payments).
+  // BUG 8 FIX: paidAmount from actual LoanPayment records (authoritative) when
+  // they exist. Falls back to summing IsPaid EMI rows for loans whose repayments
+  // pre-date the LoanPayment table — those old rows won't appear in payments[]
+  // at all, so we must use the EMI schedule to avoid wrongly showing ₹0 paid.
   const totalScheduledAmount = schedule.reduce((s, e) => s + Number(e.EMIAmount), 0);
-  const paidAmount = payments.reduce((s, p) => s + Number(p.PrincipalInterestAmount), 0);
+  const paidAmount = payments.length > 0
+    ? payments.reduce((s, p) => s + Number(p.PrincipalInterestAmount), 0)
+    : schedule.filter((e) => e.IsPaid).reduce((s, e) => s + Number(e.EMIAmount), 0);
   const outstandingAmount = Math.max(0, Math.round((totalScheduledAmount - paidAmount) * 100) / 100);
   const nextDue = schedule.find((e) => !e.IsPaid) ?? null;
 
@@ -1168,6 +1193,100 @@ export default function LoanSanctionPage() {
                         accent
                       />
                     </div>
+
+                    {/* Repayment Status — live financial state of the loan.
+                        Shows how much has been paid, what's outstanding, and
+                        the EMI progress at a glance without switching tabs. */}
+                    {schedule.length > 0 && (
+                      <>
+                        <SectionLabel icon={Receipt} label="Repayment Status" />
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          <InfoCard
+                            label="Amount Paid"
+                            value={fmt(paidAmount)}
+                            accent={paidAmount > 0}
+                          />
+                          <InfoCard
+                            label="Outstanding"
+                            value={fmt(outstandingAmount)}
+                            accent={outstandingAmount > 0}
+                          />
+                          <InfoCard
+                            label="EMIs Paid"
+                            value={totalEmis ? `${paidEmis} / ${totalEmis}` : "—"}
+                          />
+                          <InfoCard
+                            label="Next Due"
+                            value={
+                              viewingLoan?.Status === "Closed"
+                                ? "Loan Closed ✓"
+                                : nextDue
+                                  ? `${fmt(nextDue.EMIAmount)} on ${fmtDate(nextDue.DueDate)}`
+                                  : totalEmis > 0
+                                    ? "All paid"
+                                    : "—"
+                            }
+                          />
+                        </div>
+                        {/* Amount progress bar */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>Repayment progress</span>
+                            <span>
+                              {totalScheduledAmount > 0
+                                ? `${Math.min(100, Math.round((paidAmount / totalScheduledAmount) * 100))}%`
+                                : "—"}
+                            </span>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-emerald-500 to-green-400 rounded-full transition-all duration-500"
+                              style={{
+                                width: `${totalScheduledAmount > 0
+                                  ? Math.min(100, (paidAmount / totalScheduledAmount) * 100)
+                                  : 0}%`,
+                              }}
+                            />
+                          </div>
+                          {nextDue && viewingLoan?.Status !== "Closed" && (
+                            <p className={`text-[11px] flex items-center gap-1 ${
+                              new Date(nextDue.DueDate) < new Date(new Date().toDateString())
+                                ? "text-red-600 dark:text-red-400"
+                                : "text-amber-600 dark:text-amber-400"
+                            }`}>
+                              <AlertCircle size={11} />
+                              {new Date(nextDue.DueDate) < new Date(new Date().toDateString())
+                                ? `Next EMI overdue — ${fmt(nextDue.EMIAmount)} was due ${fmtDate(nextDue.DueDate)}`
+                                : `Next EMI: ${fmt(nextDue.EMIAmount)} due ${fmtDate(nextDue.DueDate)}`}
+                            </p>
+                          )}
+                        </div>
+                        {/* Close Loan CTA — shown only when all EMIs are paid
+                            and loan is still Sanctioned (not yet formally closed).
+                            The backend double-checks this before closing. */}
+                        {viewingLoan?.Status !== "Closed" && paidEmis === totalEmis && totalEmis > 0 && outstandingAmount <= 0 && (
+                          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] p-4 flex items-center justify-between gap-4">
+                            <div className="space-y-0.5">
+                              <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                                All installments paid — ready to close
+                              </p>
+                              <p className="text-[11px] text-muted-foreground">
+                                Formally closing the loan updates its status, records the closure date,
+                                and enables NOC upload. This step requires your confirmation.
+                              </p>
+                            </div>
+                            <button
+                              onClick={handleCloseLoan}
+                              disabled={closingLoan}
+                              className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 transition-colors"
+                            >
+                              <CheckCircle2 size={14} />
+                              {closingLoan ? "Closing…" : "Close Loan"}
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
 
                     {/* Documents — the agreement/sanction letter attached against Loan Doc No. */}
                     <SectionLabel icon={FileText} label="Documents" />
@@ -1751,7 +1870,7 @@ export default function LoanSanctionPage() {
                             ? ` · ${instrLabel}`
                             : "";
                         const docNoPart = p.PaymentDocNo ? ` · Finance ref: ${p.PaymentDocNo}` : "";
-                        return `${fmt(p.TotalAmount)}${p.LateFee > 0 ? ` (incl. ${fmt(p.LateFee)} late fee)` : ""} · Paid ${fmtDate(p.PaymentDate)}${instrPart}${docNoPart}${p.CreatedBy ? ` by ${p.CreatedBy}` : ""}${p.ExcessCredited > 0 ? ` · ${fmt(p.ExcessCredited)} excess credited to lender's on-account` : ""}${p.ClosedLoan ? " · Loan closed" : ""}`;
+                        return `${fmt(p.TotalAmount)}${p.LateFee > 0 ? ` (incl. ${fmt(p.LateFee)} late fee)` : ""} · Paid ${fmtDate(p.PaymentDate)}${instrPart}${docNoPart}${p.CreatedBy ? ` by ${p.CreatedBy}` : ""}${p.ExcessCredited > 0 ? ` · ${fmt(p.ExcessCredited)} excess credited to lender's on-account` : ""}${p.ClosedLoan && viewingLoan.Status !== "Closed" ? " · All installments settled" : ""}`;
                       })()}
                       done
                       isLast={i === arr.length - 1 && viewingLoan.Status === "Closed"}
@@ -1768,7 +1887,7 @@ export default function LoanSanctionPage() {
                     <ChainNode
                       icon={<Receipt size={13} className="text-amber-500" />}
                       title={`${paidEmis} installment${paidEmis === 1 ? "" : "s"} marked paid`}
-                      subtitle={`No dbo.LoanPayment record on file for ${paidEmis === 1 ? "it" : "them"} — likely set before this loan's repayments moved to Finance → Payment.${schedule.find((e) => e.IsPaid)?.PaidDate ? ` Earliest: ${fmtDate(schedule.find((e) => e.IsPaid)!.PaidDate!)}.` : ""}`}
+                      subtitle={`Payment details not on record for ${paidEmis === 1 ? "this installment" : "these installments"} — recorded before the repayment system was updated.${schedule.find((e) => e.IsPaid)?.PaidDate ? ` Earliest paid: ${fmtDate(schedule.find((e) => e.IsPaid)!.PaidDate!)}.` : ""}`}
                       done
                       isLast={viewingLoan.Status !== "Closed"}
                     />
@@ -1798,6 +1917,29 @@ export default function LoanSanctionPage() {
                     />
                   )}
                 </div>
+
+                {/* Close Loan CTA in Repayment History tab — same logic as in
+                    Overview: show only when all EMIs paid and loan still open */}
+                {viewingLoan.Status !== "Closed" && paidEmis === totalEmis && totalEmis > 0 && outstandingAmount <= 0 && (
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] p-4 flex items-center justify-between gap-4">
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                        All installments paid — ready to close
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Click to formally close this loan, record the closure date, and unlock NOC upload.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleCloseLoan}
+                      disabled={closingLoan}
+                      className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 transition-colors"
+                    >
+                      <CheckCircle2 size={14} />
+                      {closingLoan ? "Closing…" : "Close Loan"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1989,8 +2131,8 @@ export default function LoanSanctionPage() {
           </DialogHeader>
           <p className="text-sm text-muted-foreground pt-1">
             This will permanently delete <strong>{deleteTarget?.LoanNo}</strong> ({fmt(deleteTarget?.Amount)}).
-            This cannot be undone. If any EMI has already been paid, deletion will be blocked —
-            reverse those payments first.
+            This cannot be undone. Deletion is blocked if any EMI has been marked paid or any
+            repayment transaction exists — reverse those payments first.
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <button
