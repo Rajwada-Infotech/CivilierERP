@@ -43,7 +43,9 @@ import {
   Save,
   X as XIcon,
   Search,
+  Filter,
 } from "lucide-react";
+import { useTheme } from "@/contexts/ThemeContext";
 import { MoneyRecive } from "iconsax-react";
 import { getCompanyOptions, getBanks, type CompanyOption, type BankRecord } from "@/api/bankMasterApi";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
@@ -185,6 +187,8 @@ const LOAN_TYPE_COLORS: Record<LoanType, string> = {
 export default function LoanSanctionPage() {
   const qc = useQueryClient();
   usePageRights("loan-sanction");
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   const [showForm, setShowForm] = useState(false);
   const [viewingLoan, setViewingLoan] = useState<LoanSanction | null>(null);
   const [tab, setTab] = useState<"overview" | "exposure" | "schedule" | "chain" | "posting">("overview");
@@ -680,7 +684,7 @@ export default function LoanSanctionPage() {
             }`}
           >
             <span className={`w-1.5 h-1.5 rounded-full inline-block ${closed ? "bg-border" : "bg-emerald-500"}`} />
-            {row.original.Status}
+            {closed ? "Sanctioned" : row.original.Status}
           </span>
         );
       },
@@ -757,6 +761,11 @@ export default function LoanSanctionPage() {
   const estimatedTotalRepayable = estimatedEmi * (Number(form.tenureMonths) || 1);
   const estimatedTotalInterest = Math.max(0, estimatedTotalRepayable - (Number(form.amount) || 0));
 
+  const chequeByPaymentId = new Map(
+    payments
+      .filter((p: any) => p.ChequeNo)
+      .map((p: any) => [p.PaymentId, { chequeNo: p.ChequeNo, chequeDate: p.ChequeDate }]),
+  );
   const totalEmis = schedule.length;
   const paidEmis = schedule.filter((e) => e.IsPaid).length;
   // BUG 8 FIX: paidAmount from actual LoanPayment records (authoritative) when
@@ -808,9 +817,51 @@ export default function LoanSanctionPage() {
       <Breadcrumbs items={[{ label: "Loan", path: "/loan" }, { label: "Loan Sanction" }]} />
 
       {!showForm && (
-        <div className="flex items-center gap-3 mb-3">
-          <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Company</label>
-          <CompanyFilterCombo companies={companies} value={listCompanyId} onChange={setListCompanyId} />
+        <div
+          className="rounded-xl px-4 py-3 mb-4 flex flex-wrap items-center gap-x-5 gap-y-3"
+          style={{
+            background: isDark ? "rgba(15,17,26,0.4)" : "rgba(248,250,252,0.72)",
+            border: isDark ? "1px solid rgba(34,197,94,0.14)" : "1px solid rgba(34,197,94,0.14)",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <div
+              className="flex items-center justify-center w-6 h-6 rounded-md shrink-0"
+              style={{ background: "rgba(34,197,94,0.15)" }}
+            >
+              <Filter size={12} style={{ color: ACCENT }} />
+            </div>
+            <span className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+              Filter loans
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Building2 size={13} className="text-muted-foreground shrink-0" />
+            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Company</span>
+            <CompanyFilterCombo companies={companies} value={listCompanyId} onChange={setListCompanyId} />
+          </div>
+
+          {listCompanyId != null && (
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+              {companies.find((c) => c.id === listCompanyId)?.label ?? "1 company"}
+              <button
+                type="button"
+                onClick={() => setListCompanyId(null)}
+                className="text-emerald-600/60 dark:text-emerald-400/60 hover:text-destructive transition-colors"
+              >
+                <XIcon size={9} />
+              </button>
+            </span>
+          )}
+
+          <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+            <span className="font-heading font-semibold text-foreground tabular-nums">{loans.length}</span>
+            <span>{loans.length === 1 ? "loan" : "loans"}</span>
+          </div>
         </div>
       )}
 
@@ -873,7 +924,7 @@ export default function LoanSanctionPage() {
                 )}
                 {viewingLoan && viewingLoan.Status === "Closed" && (
                   <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 size={10} /> Closed
+                    <CheckCircle2 size={10} /> Sanctioned
                   </span>
                 )}
                 {viewingLoan && viewingLoan.Status !== "Closed" && nextDue && (
@@ -1267,7 +1318,7 @@ export default function LoanSanctionPage() {
                             label="Next Due"
                             value={
                               viewingLoan?.Status === "Closed"
-                                ? "Loan Closed ✓"
+                                ? "Loan Sanctioned ✓"
                                 : nextDue
                                   ? `${fmt(nextDue.EMIAmount)} on ${fmtDate(nextDue.DueDate)}`
                                   : totalEmis > 0
@@ -1812,19 +1863,20 @@ export default function LoanSanctionPage() {
                         <th className="text-right px-3 py-2.5">Principal</th>
                         <th className="text-right px-3 py-2.5">Interest</th>
                         <th className="text-right px-3 py-2.5">EMI Amount</th>
+                        <th className="text-left px-3 py-2.5">Cheque No.</th>
                         <th className="text-center px-3 py-2.5">Paid</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                       {scheduleLoading ? (
                         <tr>
-                          <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground text-xs">
+                          <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground text-xs">
                             Loading…
                           </td>
                         </tr>
                       ) : schedule.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground text-xs">
+                          <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground text-xs">
                             No EMI installments for this loan.
                           </td>
                         </tr>
@@ -1860,6 +1912,9 @@ export default function LoanSanctionPage() {
                                 {fmt(emi.InterestComponent)}
                               </td>
                               <td className="px-3 py-2.5 text-right font-mono font-medium">{fmt(emi.EMIAmount)}</td>
+                              <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">
+                                {chequeByPaymentId.get(emi.PaymentId)?.chequeNo ?? "—"}
+                              </td>
                               <td className="px-3 py-2.5 text-center">
                                 {emi.IsPaid ? (
                                   <CheckCircle2 size={15} className="text-emerald-500 inline-block" />

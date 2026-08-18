@@ -1008,9 +1008,14 @@ const Payment: React.FC = () => {
   const [loanLumpSumAmount, setLoanLumpSumAmount] = useState("");
   const [loanLateFee, setLoanLateFee] = useState("");
   const [loanPaymentNotes, setLoanPaymentNotes] = useState("");
+  // Loan EMIs are only "payable" from the company that's actually the
+  // lender or borrower on that loan — same company the rest of this form
+  // is being booked under (form.company), not the FilterBar's list filter.
+  const loanEmiCompanyId = companyOptions.find((c) => c.label === form.company)?.id;
   const { data: loanEmiOptions = [], isLoading: loanEmisLoading } = useQuery<PayableEmi[]>({
-    queryKey: ["payment-loan-emis"],
-    queryFn: getPayableEmis,
+    queryKey: ["payment-loan-emis", loanEmiCompanyId],
+    queryFn: () => getPayableEmis(loanEmiCompanyId!),
+    enabled: !!loanEmiCompanyId,
     staleTime: 60_000,
   });
   // Every other pending EMI on the same loan — lets the modal offer "pay
@@ -2358,6 +2363,7 @@ const Payment: React.FC = () => {
                           onContractClear={clearContractLink}
                           loanEmis={loanEmiOptions}
                           loanEmisLoading={loanEmisLoading}
+                          loanEmisNoCompany={!loanEmiCompanyId}
                           selectedLoanEmi={selectedLoanEmi}
                           onLoanEmiSelect={handleLoanEmiSelect}
                           onLoanEmiClear={clearLoanEmiLink}

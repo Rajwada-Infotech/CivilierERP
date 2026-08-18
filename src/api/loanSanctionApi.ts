@@ -265,8 +265,11 @@ export const updateLoanSanction = (id: number, payload: LoanEditPayload) =>
     body: JSON.stringify(payload),
   }).then((r) => handle(r));
 
-export const getPayableEmis = () =>
-  fetchWithAuth(`${BASE}/emi-payable`).then((r) => handle<PayableEmi[]>(r));
+// Scoped to the company the payment is being made from — a loan's EMI is
+// only "payable" from the company that is its lender or borrower, same
+// scoping the backend enforces (400s without a companyId).
+export const getPayableEmis = (companyId: number) =>
+  fetchWithAuth(`${BASE}/emi-payable?companyId=${companyId}`).then((r) => handle<PayableEmi[]>(r));
 
 export const getLoanPayments = (loanId: number) =>
   fetchWithAuth(`${BASE}/${loanId}/payments`).then((r) => handle<LoanPayment[]>(r));
