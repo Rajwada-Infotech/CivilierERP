@@ -48,13 +48,18 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
     const offset = (page - 1) * limit;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const statusFilter = req.query.status || null;
     const pool = getPool();
 
-    // All new schema columns always present (migration 107+)
-    const result = await pool
-      .request()
+    const req2 = pool.request()
       .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limit).query(`
+      .input("limit", sql.Int, limit)
+      .input("companyId", sql.Int, companyId)
+      .input("status", sql.NVarChar(20), statusFilter);
+
+    // All new schema columns always present (migration 107+)
+    const result = await req2.query(`
         SELECT
           RPPaymentID, RPCompanyName, RPReceivedFrom, RPProjectName,
           RPDocDate, RPMode, RPAmount, RPBankName, RPTransactionID, RPCheckNumber,
@@ -67,6 +72,8 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
           SourceSaleInvoiceId, SourceSaleInvoiceDocNo,
           COUNT(*) OVER() AS _total
         FROM dbo.ReceivedPayment
+        WHERE (@companyId IS NULL OR RPCompanyId = @companyId)
+          AND (@status IS NULL OR RPStatus = @status)
         ORDER BY RPCreatedAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -327,7 +334,7 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
         @RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPMode,
         @RPAmount, @RPBankName, @RPTransactionID, @RPCheckNumber, @RPRemarks,
         @RPIsEmi, @RPEmiTotal, @RPEmiMonths, @RPEmiStartDate, @RPEmiSchedule, @RPEmiPaying,
-        'Pending', @RPCreatedBy, GETDATE() ${extraVals}
+        'Draft', @RPCreatedBy, GETDATE() ${extraVals}
       )
     `);
 

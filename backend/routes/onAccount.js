@@ -730,7 +730,7 @@ router.get("/report", requireAnyPageRight(["on-account-report", "reports"], "vie
       FETCH NEXT ${parseInt(pageSize)} ROWS ONLY
     `);
 
-    const countRes = await pool.request().query(`SELECT COUNT(*) AS total FROM dbo.OnAccountLedger oa ${where}`);
+    const countRes = await countRequest.query(`SELECT COUNT(*) AS total FROM dbo.OnAccountLedger oa ${where}`);
 
     res.json({ data: data.recordset, total: countRes.recordset[0].total, page: parseInt(page), pageSize: parseInt(pageSize) });
   } catch (err) {

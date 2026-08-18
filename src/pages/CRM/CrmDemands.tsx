@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -265,10 +267,11 @@ const CrmDemands: React.FC = () => {
   // poking at pagePermissions' internal shape myself.
   const canEdit = canDoAction("crm-payments", "edit");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-demands", search],
     queryFn: () => fetchDemands(search),
     placeholderData: (prev) => prev,
+    staleTime: 30_000,
   });
 
   const rows = data?.demands ?? [];
@@ -333,7 +336,7 @@ const CrmDemands: React.FC = () => {
       setRaiseNotes("");
       qc.invalidateQueries({ queryKey: ["crm-demands"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setRaising(false);
     }
@@ -350,7 +353,7 @@ const CrmDemands: React.FC = () => {
       setUndoRow(null);
       qc.invalidateQueries({ queryKey: ["crm-demands"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setUndoing(false);
     }
@@ -370,9 +373,10 @@ const CrmDemands: React.FC = () => {
   const activeGroups = tabbed[activeTab].groups;
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Payment Demands"
       subtitle="Raise and track formal payment demands across all bookings"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
     >
       {/* Summary strip — always computed from the FULL result set (view=all,
           search only), so these numbers never collapse to 0 just because a
@@ -552,7 +556,7 @@ const CrmDemands: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

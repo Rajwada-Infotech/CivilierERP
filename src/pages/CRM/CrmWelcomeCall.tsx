@@ -288,7 +288,7 @@ const ChecklistItemRow: React.FC<{
       toast.success(`Saved — ${item.Label}`);
       onChanged();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -310,7 +310,7 @@ const ChecklistItemRow: React.FC<{
       setShowRecheckBox(false);
       onChanged();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setFlagging(false);
     }
@@ -324,7 +324,7 @@ const ChecklistItemRow: React.FC<{
       toast.success("Recheck resolved — please re-verify and tick the item");
       onChanged();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -443,7 +443,7 @@ const InlineVerify: React.FC<{
       if (!res.ok) throw new Error(data.error || "Save failed");
       onChanged();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -462,7 +462,7 @@ const InlineVerify: React.FC<{
       toast.success("Remarks saved");
       onChanged();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -485,7 +485,7 @@ const InlineVerify: React.FC<{
       setOpen(false);
       onChanged();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setFlagging(false);
     }
@@ -499,7 +499,7 @@ const InlineVerify: React.FC<{
       toast.success("Recheck resolved — please re-verify and tick the item");
       onChanged();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -598,7 +598,7 @@ function useVerificationChecklist(bookingId: number) {
       toast.success("Welcome call verification submitted and locked");
       refetch();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSubmitting(false);
     }
@@ -613,7 +613,7 @@ function useVerificationChecklist(bookingId: number) {
       toast.success("Checklist reopened for edits");
       refetch();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setReopening(false);
     }
@@ -856,7 +856,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       setBankLocked(true);
       refetchChecklist();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setBankSaving(false);
     }
@@ -953,7 +953,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       setDocType(""); setDocUrl("");
       refetchDocs();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -975,7 +975,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       setDocType("");
       refetchDocs();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -988,7 +988,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       if (!res.ok) throw new Error((await res.json()).error);
       refetchDocs();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -1001,7 +1001,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       });
       refetchDocs();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -1018,7 +1018,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       setAddingCo(false);
       refetchCo();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -1027,7 +1027,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       await fetchWithAuth(`${CO_API}/${id}`, { method: "DELETE" });
       refetchCo();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -1839,7 +1839,7 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
       onSaved();
       onClose();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -1854,7 +1854,7 @@ const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => 
       onSaved();
       onClose();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setDeleting(false);
     }

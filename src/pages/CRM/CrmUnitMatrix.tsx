@@ -6,7 +6,7 @@ import { Grid3x3, Layers, Clock, User, FileText, Building2, IndianRupee, Calenda
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FollowupShell } from "@/components/followup/FollowupShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import {
   Select,
   SelectContent,
@@ -469,7 +469,7 @@ export function UnitMatrixPage() {
           { label: "Unit Matrix", path: "/crm/unit-matrix" },
         ]}
       />
-      <FollowupShell
+      <CrmShell
         title="Unit Matrix"
         icon={Grid3x3}
         action={
@@ -617,7 +617,7 @@ export function UnitMatrixPage() {
             )}
           </>
         )}
-      </FollowupShell>
+      </CrmShell>
 
       {holdTarget && <PlaceHoldDialog unit={holdTarget} projectId={projectId} onClose={() => setHoldTarget(null)} />}
       {infoTarget && <TileInfoDialog unit={infoTarget} onClose={() => setInfoTarget(null)} />}

@@ -1,7 +1,9 @@
 import React, { useState, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import {
   getList,
   addRecord,
@@ -89,7 +91,7 @@ const CrmBrokerMaster: React.FC = () => {
   // (no editingId yet) opens unlocked since there's nothing to protect.
   const [locked, setLocked] = useState(false);
 
-  const { data: rawData, isLoading, isError } = useQuery({
+  const { data: rawData, isLoading, dataUpdatedAt, isFetching, refetch, isError } = useQuery({
     queryKey: ["account-head", BROKER_TYPE],
     queryFn: () => getList(BROKER_TYPE),
     staleTime: 5 * 60 * 1000,
@@ -149,17 +151,17 @@ const CrmBrokerMaster: React.FC = () => {
       if (data?.LHeadId) setEditingId(data.LHeadId);
       else resetForm();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(translateError(e.message)),
   });
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: number; data: BrokerForm }) => updateRecord(id, buildPayload(data), BROKER_TYPE),
     onSuccess: () => { toast.success("Broker updated"); invalidate(); resetForm(); },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(translateError(e.message)),
   });
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteRecord(id),
     onSuccess: () => { toast.success("Broker deleted"); invalidate(); setDeleteConfirm(null); },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(translateError(e.message)),
   });
 
   const saving = createMut.isPending || updateMut.isPending;
@@ -179,7 +181,7 @@ const CrmBrokerMaster: React.FC = () => {
       if (certInputRef.current) certInputRef.current.value = "";
       invalidate();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setUploadingCert(false);
     }
@@ -258,7 +260,8 @@ const CrmBrokerMaster: React.FC = () => {
   const inputCls = `w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
   return (
-    <SalesAutoShell title="Broker Master" subtitle="Manage broker ledger accounts — same account-head pattern as Contractors">
+    <CrmShell title="Broker Master" subtitle="Manage broker ledger accounts — same account-head pattern as Contractors"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       {(rights.canCreate || rights.canEdit) && (
         <div className="rounded-xl border border-border overflow-hidden">
           <div className="flex items-center justify-between gap-3 px-5 py-4 bg-muted/20 border-b border-border">
@@ -465,7 +468,7 @@ const CrmBrokerMaster: React.FC = () => {
           </div>
         </div>
       )}
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

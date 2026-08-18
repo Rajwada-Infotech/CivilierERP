@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -460,7 +461,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       setBankVerifiedByName(currentUser?.name || null);
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setBankSaving(false);
     }
@@ -483,7 +484,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       toast.success("Amendment approved and applied");
       invalidateCharges();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setReviewingAmendmentId(null);
     }
@@ -501,7 +502,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           toast.success("Amendment rejected");
           invalidateCharges();
         } catch (e: any) {
-          toast.error(e.message);
+          toast.error(translateError(e.message));
         } finally {
           setReviewingAmendmentId(null);
         }
@@ -531,7 +532,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       setParkingReason("");
       invalidateCharges();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setChargesSaving(false);
     }
@@ -564,7 +565,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           if (!res.ok) throw new Error(resData.error);
           toast.success(resData.pending ? "Amendment queued — needs sign-off before the slot is released" : "Parking allotment released");
           invalidateCharges();
-        } catch (e: any) { toast.error(e.message); }
+        } catch (e: any) { toast.error(translateError(e.message)); }
       },
     });
   };
@@ -593,7 +594,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       setExtraReason("");
       invalidateCharges();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setChargesSaving(false);
     }
@@ -622,7 +623,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           if (!res.ok) throw new Error(resData.error);
           toast.success("Charge removed");
           invalidateCharges();
-        } catch (e: any) { toast.error(e.message); }
+        } catch (e: any) { toast.error(translateError(e.message)); }
       })();
       return;
     }
@@ -637,7 +638,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           if (!res.ok) throw new Error(resData.error);
           toast.success(resData.pending ? "Amendment request submitted — pending approval" : "Charge removed");
           invalidateCharges();
-        } catch (e: any) { toast.error(e.message); }
+        } catch (e: any) { toast.error(translateError(e.message)); }
       },
     });
   };
@@ -708,7 +709,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       qc.invalidateQueries({ queryKey: ["crm-milestones", String(bookingId)] });
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setPlanSaving(false);
     }
@@ -793,7 +794,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
       qc.invalidateQueries({ queryKey: ["approval-inbox"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setStageActioning(null);
     }
@@ -820,7 +821,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
       qc.invalidateQueries({ queryKey: ["approval-inbox"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setStageActioning(null);
     }
@@ -842,7 +843,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       if (action === "flag") { setChecklistFlaggingKey(null); setChecklistFlagRemark(""); }
       await refetchChecklist();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setChecklistBusyKey(null);
     }
@@ -866,7 +867,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setBookingRequesting(false);
     }
@@ -904,7 +905,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", bookingId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setPaySaving(false);
     }
@@ -921,7 +922,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       toast.success("File(s) uploaded");
       qc.invalidateQueries({ queryKey: ["crm-booking-attachments", bookingId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setUploading(false);
     }
@@ -934,7 +935,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       toast.success("Attachment removed");
       qc.invalidateQueries({ queryKey: ["crm-booking-attachments", bookingId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -995,7 +996,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       setInvoiceDialog(false);
       qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }

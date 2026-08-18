@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { XCircle, CheckCircle2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -57,7 +58,7 @@ const CrmCancellations: React.FC = () => {
   const [refundConfirmOpen, setRefundConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const { data: cancellations = [], isLoading } = useQuery({ queryKey: ["crm-cancellations"], queryFn: fetchCancellations, staleTime: 30_000 });
+  const { data: cancellations = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-cancellations"], queryFn: fetchCancellations, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: refundProjectBanks = [] } = useQuery({
     queryKey: ["crm-cancellation-project-banks", refundDialog?.ProjectId],
@@ -197,10 +198,13 @@ const CrmCancellations: React.FC = () => {
       title="CRM — Cancellations & Refunds"
       subtitle="Booking cancellation requests with auto-calculated refund"
       action={
-        <button onClick={() => setDialogOpen(true)}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => setDialogOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <XCircle size={14} /> Request Cancellation
         </button>
+        </div>
       }
     >
       <DataTable

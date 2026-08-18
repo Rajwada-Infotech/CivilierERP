@@ -1,6 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -180,10 +182,10 @@ const CrmBooking: React.FC = () => {
   const [viewingBookingId, setViewingBookingId] = useState<number | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
 
-  const { data: bookings = [], isLoading } = useQuery({
+  const { data: bookings = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-bookings", appFilter],
     queryFn: () => fetchBookings(appFilter || undefined),
-    staleTime: 60_000,
+    staleTime: 30_000,
   });
 
   // Deep-link support: /crm/bookings?applicationId=X (from "View Booking"
@@ -402,7 +404,7 @@ const CrmBooking: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
       qc.invalidateQueries({ queryKey: ["crm-apps"] }); // the Application just became Converted — the New Booking dropdown's app list must reflect that immediately, not after the 5-minute staleTime
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -430,7 +432,7 @@ const CrmBooking: React.FC = () => {
       setUnitChangeNewId(""); setUnitChangeReason("");
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setUnitChangeSaving(false);
     }
@@ -631,12 +633,15 @@ const CrmBooking: React.FC = () => {
       title="CRM — Applications and Bookings"
       subtitle="Applications become pending bookings, then move through review, Marketing Head approval, and Director approval"
       action={
-        canEdit ? (
-          <button onClick={() => { setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); setDialogOpen(true); }}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
-            <Plus size={14} /> New Booking
-          </button>
-        ) : undefined
+        <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          {canEdit && (
+            <button onClick={() => { setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); setDialogOpen(true); }}
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+              <Plus size={14} /> New Booking
+            </button>
+          )}
+        </div>
       }
     >
       {/* Search + status filter + table live in one continuous glass card,

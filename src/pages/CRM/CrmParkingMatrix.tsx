@@ -6,7 +6,7 @@ import { Car, Clock, User, FileText, IndianRupee, CalendarClock, CheckCircle2 } 
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FollowupShell } from "@/components/followup/FollowupShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import {
   Select,
   SelectContent,
@@ -538,7 +538,7 @@ export function ParkingMatrixPage() {
           { label: "Parking Matrix", path: "/crm/parking-matrix" },
         ]}
       />
-      <FollowupShell
+      <CrmShell
         title="Parking Matrix"
         icon={Car}
         action={
@@ -646,7 +646,7 @@ export function ParkingMatrixPage() {
             )}
           </>
         )}
-      </FollowupShell>
+      </CrmShell>
 
       {choiceSlot && (
         <ActionChoiceDialog

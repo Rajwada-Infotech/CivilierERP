@@ -1,13 +1,14 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
 import { useSearchParams } from "react-router-dom";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Plus, Phone, Mail, MessageSquare, MapPin, FileText, X, Search,
   Trash2, Cog, MessageCircle, ArrowDownLeft, ArrowUpRight,
-  Clock, History, Building2, User, Target, IndianRupee, UserCheck, CalendarClock,
+  Clock, Building2, User, Target, IndianRupee, UserCheck, CalendarClock,
   Send, Pencil, Lock,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -203,7 +204,7 @@ function EditLogDialog({
       onSaved();
       onClose();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -218,7 +219,7 @@ function EditLogDialog({
       onSaved();
       onClose();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setDeleting(false);
     }
@@ -319,7 +320,7 @@ function EditLogDialog({
           <div className="space-y-4">
             <div className="rounded-xl border border-border p-3.5">
               <h3 className="text-xs font-semibold flex items-center gap-1.5 text-muted-foreground mb-2">
-                <History size={13} /> Interaction Timeline {customerHistory.length > 0 && `(${customerHistory.length} other${customerHistory.length === 1 ? "" : "s"})`}
+                <Clock size={13} /> Interaction Timeline {customerHistory.length > 0 && `(${customerHistory.length} other${customerHistory.length === 1 ? "" : "s"})`}
               </h3>
               <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                 <div className="flex items-start gap-2 text-xs bg-amber-500/5 border border-amber-500/20 rounded-lg p-2">
@@ -561,7 +562,7 @@ const CrmCommunication: React.FC = () => {
       await qc.invalidateQueries({ queryKey: ["crm-communication"] });
       if (newKey) setActiveKey(newKey);
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -589,7 +590,7 @@ const CrmCommunication: React.FC = () => {
       setComposer((c) => ({ ...c, Text: "" }));
       qc.invalidateQueries({ queryKey: ["crm-communication"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSending(false);
     }

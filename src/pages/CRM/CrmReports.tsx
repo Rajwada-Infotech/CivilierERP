@@ -7,15 +7,15 @@ import { Calendar, Download, ChevronDown, ChevronRight } from "lucide-react";
 const API = "/api/crm/reports";
 
 // ---------- helpers ----------
-const fmt = (n: any) => (n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—");
-const dt = (v: any) => (v ? String(v).slice(0, 10) : "—");
+const fmt = (n: any) => (n != null ? `?${Number(n).toLocaleString("en-IN")}` : "�");
+const dt = (v: any) => (v ? String(v).slice(0, 10) : "�");
 
 const MONEY_KEYS = /amount|balance|value|due|paid|fee|duty|brokerage|refund|deduction/i;
 const DATE_KEYS  = /date|deadline/i;
 const PCT_KEYS   = /percent|complete/i;
 
 function fmtCell(key: string, val: any): string {
-  if (val == null || val === "") return "—";
+  if (val == null || val === "") return "�";
   if (MONEY_KEYS.test(key)) return fmt(val);
   if (PCT_KEYS.test(key)) return `${val}%`;
   if (DATE_KEYS.test(key)) return dt(val);
@@ -59,7 +59,7 @@ type Category  = { label: string; emoji: string; reports: ReportDef[] };
 const CATEGORIES: Category[] = [
   {
     label: "Operations",
-    emoji: "📋",
+    emoji: "??",
     reports: [
       { id: "booking-register",     label: "Booking Register",       desc: "All active bookings with customer, unit, and booking value.", dateable: true },
       { id: "application-funnel",   label: "Application Funnel",     desc: "Lead-to-booking conversion count by application status.", dateable: true },
@@ -71,18 +71,18 @@ const CATEGORIES: Category[] = [
   },
   {
     label: "Financial",
-    emoji: "💰",
+    emoji: "??",
     reports: [
       { id: "payment-collection",   label: "Payment Collection",     desc: "Milestone-wise due, paid, and balance per active booking.", dateable: true },
-      { id: "aging-analysis",       label: "Aging Analysis",         desc: "Overdue payments bucketed by 0–30, 31–60, 61–90, 90+ days." },
-      { id: "receipt-register",     label: "Receipt Register",       desc: "All money received — receipt number, mode, and transaction ref.", dateable: true },
+      { id: "aging-analysis",       label: "Aging Analysis",         desc: "Overdue payments bucketed by 0�30, 31�60, 61�90, 90+ days." },
+      { id: "receipt-register",     label: "Receipt Register",       desc: "All money received � receipt number, mode, and transaction ref.", dateable: true },
       { id: "overdue-payments",     label: "Overdue Payments",       desc: "Pending milestones past their due date on active bookings." },
       { id: "brokerage-report",     label: "Brokerage",              desc: "Broker-wise computed vs paid brokerage with balance.", dateable: true },
     ],
   },
   {
     label: "Legal & Closure",
-    emoji: "📄",
+    emoji: "??",
     reports: [
       { id: "sales-deed-report",        label: "Sales Deed",           desc: "Registration status, stamp duty, and approval states per deed." },
       { id: "noc-report",               label: "NOC",                  desc: "Bank and society NOC requests with loan amount and status.", dateable: true },
@@ -92,17 +92,17 @@ const CATEGORIES: Category[] = [
   },
   {
     label: "Inventory & Handover",
-    emoji: "🏠",
+    emoji: "??",
     reports: [
       { id: "inventory-status",     label: "Inventory Status",       desc: "Unit availability matrix: total, booked, and available per project." },
       { id: "parking-report",       label: "Parking Allotment",      desc: "Parking slot allotments with payment status." },
-      { id: "handover-report",      label: "Handover",               desc: "Key handover progress — scheduled, actual, and clearance flags." },
+      { id: "handover-report",      label: "Handover",               desc: "Key handover progress � scheduled, actual, and clearance flags." },
       { id: "construction-updates", label: "Construction Updates",   desc: "Project stage and completion percentage log.", dateable: true },
     ],
   },
   {
     label: "Customer & After-Sales",
-    emoji: "👥",
+    emoji: "??",
     reports: [
       { id: "customer-report",      label: "Customer Master",        desc: "All customers with contact info and total bookings.", dateable: true },
       { id: "cancellation-report",  label: "Cancellations",         desc: "Cancellation requests with deduction, refund, and status.", dateable: true },
@@ -177,13 +177,13 @@ const CrmReports: React.FC = () => {
 
   const dateChip =
     fromDate || toDate
-      ? `${fromDate || "start"} → ${toDate || "today"}`
+      ? `${fromDate || "start"} ? ${toDate || "today"}`
       : null;
 
   return (
     <CrmShell title="CRM Reports" subtitle="Analytics and exports for all CRM modules">
       <div className="flex gap-5 min-h-[600px]">
-        {/* ── sidebar nav ── */}
+        {/* -- sidebar nav -- */}
         <aside className="w-52 shrink-0 space-y-1">
           {CATEGORIES.map((cat) => (
             <div key={cat.label}>
@@ -215,7 +215,7 @@ const CrmReports: React.FC = () => {
           ))}
         </aside>
 
-        {/* ── report panel ── */}
+        {/* -- report panel -- */}
         <div className="flex-1 min-w-0 flex flex-col gap-4">
           {/* header row */}
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -236,7 +236,7 @@ const CrmReports: React.FC = () => {
                     className="bg-transparent outline-none text-xs w-28"
                     title="From date"
                   />
-                  <span className="text-muted-foreground text-xs">–</span>
+                  <span className="text-muted-foreground text-xs">�</span>
                   <input
                     type="date"
                     value={toDate}
@@ -250,7 +250,7 @@ const CrmReports: React.FC = () => {
                       className="text-muted-foreground hover:text-foreground text-xs ml-1"
                       title="Clear dates"
                     >
-                      ✕
+                      ?
                     </button>
                   )}
                 </div>
@@ -281,17 +281,17 @@ const CrmReports: React.FC = () => {
             {/* record count bar */}
             <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
               <span className="text-xs text-muted-foreground">
-                {isLoading ? "Loading…" : `${data.length} record${data.length !== 1 ? "s" : ""}`}
+                {isLoading ? "Loading�" : `${data.length} record${data.length !== 1 ? "s" : ""}`}
               </span>
             </div>
 
             {isLoading ? (
               <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground p-8">
-                Loading {active.label}…
+                Loading {active.label}�
               </div>
             ) : data.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-sm text-muted-foreground p-8 gap-2">
-                <span className="text-2xl">📭</span>
+                <span className="text-2xl">??</span>
                 <span>No records found{dateChip ? " for the selected date range" : ""}.</span>
                 {dateChip && (
                   <button

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Car, CheckCircle2, Lock, ExternalLink, Pencil, X, ChevronDown, ChevronRight } from "lucide-react";
 
@@ -128,7 +129,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
       if (!res.ok) throw new Error(data.error || "Failed to save parking template");
       toast.success(`Template saved — ${data.total} slot(s)`);
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSavingTemplateBlockId(null);
     }
@@ -155,7 +156,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setGenerating(false);
     }
@@ -189,7 +190,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -227,7 +228,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSavingSlotId(null);
     }

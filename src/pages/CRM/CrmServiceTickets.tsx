@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, Star, UserCheck } from "lucide-react";
 import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -67,7 +68,7 @@ const CrmServiceTickets: React.FC = () => {
   const [reopenTicketId, setReopenTicketId] = useState<number | null>(null);
   const [reopenReason, setReopenReason]   = useState("");
 
-  const { data: tickets = [], isLoading } = useQuery({ queryKey: ["crm-service-tickets"], queryFn: fetchTickets, staleTime: 30_000 });
+  const { data: tickets = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-service-tickets"], queryFn: fetchTickets, staleTime: 30_000 });
   const { data: bookings = [] }           = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: users = [] }             = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
 
@@ -95,7 +96,7 @@ const CrmServiceTickets: React.FC = () => {
       setForm({ ...EMPTY_FORM });
       qc.invalidateQueries({ queryKey: ["crm-service-tickets"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -291,14 +292,17 @@ const CrmServiceTickets: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Service Tickets"
       subtitle="After-sales warranty, complaints & service requests"
       action={
-        <button onClick={() => setDialogOpen(true)}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => setDialogOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> Raise Ticket
         </button>
+        </div>
       }
     >
       <div className="flex gap-3 flex-wrap">
@@ -431,7 +435,7 @@ const CrmServiceTickets: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

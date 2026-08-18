@@ -2,6 +2,8 @@ import React, { useState, useMemo, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -173,7 +175,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
       onSaved();
       onClose();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -323,7 +325,7 @@ const CrmCustomers: React.FC = () => {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
 
-  const { data: customers = [], isLoading } = useQuery({
+  const { data: customers = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-customers", search],
     queryFn: () => fetchCustomers(search),
     staleTime: 30_000,
@@ -426,7 +428,7 @@ const CrmCustomers: React.FC = () => {
       setForm({ ...EMPTY_FORM });
       qc.invalidateQueries({ queryKey: ["crm-customers"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -503,6 +505,7 @@ const CrmCustomers: React.FC = () => {
       subtitle="The master identity record every Application is built on — name, KYC, address, co-applicant"
       action={
         <div className="flex items-center gap-2">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           <button onClick={() => navigate("/masters/customers")}
             title="Every CRM customer auto-creates/syncs a matching ledger head here for Finance/GL"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">

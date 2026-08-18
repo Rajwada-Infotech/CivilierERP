@@ -390,7 +390,7 @@ router.get("/:lheadId/transactions", async (req, res) => {
 
           -- ReceivedPayment
           rp.RPPaymentID  AS RPID,
-          rp.DocNo        AS RPDocNo,
+          rp.RPDocNo      AS RPDocNo,
           rp.RPMode       AS RPMode,
 
           -- ExpenseBooking (direct EB entry, e.g. GRN-linked)

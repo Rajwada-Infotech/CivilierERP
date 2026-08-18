@@ -111,7 +111,7 @@ const CrmRegistry: React.FC = () => {
         body: JSON.stringify({ CompletedDate: completedDate }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Registry completed — RegistrationNo can now be recorded on the Sales Deed");
+      toast.success("Registry completed � RegistrationNo can now be recorded on the Sales Deed");
       setCompleteId(null);
       qc.invalidateQueries({ queryKey: ["crm-registry"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
@@ -128,18 +128,18 @@ const CrmRegistry: React.FC = () => {
       cell: (i) => (
         <div>
           <div className="font-medium">{i.row.original.ApplicantName}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} � {i.row.original.UnitNo}</div>
         </div>
       ) },
-    { accessorKey: "DeedNo", header: "Deed", size: 100, cell: (i) => <span className="text-xs">{i.getValue() as string || "—"}</span> },
+    { accessorKey: "DeedNo", header: "Deed", size: 100, cell: (i) => <span className="text-xs">{i.getValue() as string || "�"}</span> },
     { accessorKey: "ScheduledDate", header: "Scheduled", size: 100,
-      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.ScheduledDate ? String(i.row.original.ScheduledDate).slice(0, 10) : "—"}</span> },
+      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.ScheduledDate ? String(i.row.original.ScheduledDate).slice(0, 10) : "�"}</span> },
     { accessorKey: "Status", header: "Status", size: 100,
       cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
     { id: "actions", header: "Actions", size: 180, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
-        if (r.Status === "Completed") return <span className="text-xs text-muted-foreground">—</span>;
+        if (r.Status === "Completed") return <span className="text-xs text-muted-foreground">�</span>;
         return (
           <div className="flex items-center gap-2">
             {r.Status === "Pending" && (
@@ -159,15 +159,15 @@ const CrmRegistry: React.FC = () => {
 
   return (
     <CrmShell
-      title="CRM — Registry"
-      subtitle="Deed registration at the Sub-Registrar Office — gated on Query Payment being confirmed"
+      title="CRM � Registry"
+      subtitle="Deed registration at the Sub-Registrar Office � gated on Query Payment being confirmed"
       action={
         <div className="flex items-center gap-3">
           {dataUpdatedAt > 0 && (
             <button onClick={() => refetch()} disabled={isFetching}
               className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
               <RotateCcw size={12} className={isFetching ? "animate-spin" : ""} />
-              {isFetching ? "Refreshing…" : "Refresh"}
+              {isFetching ? "Refreshing�" : "Refresh"}
             </button>
           )}
           <button onClick={() => setDialogOpen(true)}
@@ -194,7 +194,7 @@ const CrmRegistry: React.FC = () => {
               className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
               <option value="">Select booking</option>
               {startableBookings.map((b: any) => (
-                <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
+                <option key={b.Id} value={String(b.Id)}>{b.BookingNo} � {b.ApplicantName}</option>
               ))}
             </select>
             <p className="text-[11px] text-muted-foreground mt-1">Requires Query Payment to be Confirmed for this booking first.</p>

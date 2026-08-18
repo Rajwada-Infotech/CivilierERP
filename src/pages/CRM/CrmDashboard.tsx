@@ -21,14 +21,14 @@ import {
 
 const API = "/api/crm/dashboard";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers ------------------------------------------------------------------
 const fmtINR = (n: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
 
 const fmtCr = (n: number) => {
-  if (n >= 1_00_00_000) return `₹${(n / 1_00_00_000).toFixed(2)} Cr`;
-  if (n >= 1_00_000)    return `₹${(n / 1_00_000).toFixed(1)} L`;
-  if (n >= 1_000)       return `₹${(n / 1_000).toFixed(0)}K`;
+  if (n >= 1_00_00_000) return `?${(n / 1_00_00_000).toFixed(2)} Cr`;
+  if (n >= 1_00_000)    return `?${(n / 1_00_000).toFixed(1)} L`;
+  if (n >= 1_000)       return `?${(n / 1_000).toFixed(0)}K`;
   return fmtINR(n);
 };
 
@@ -52,7 +52,7 @@ const STATUS_PIE_COLORS: Record<string, string> = {
   Open:        "#f97316",
 };
 
-// ─── Old-style StatCard ───────────────────────────────────────────────────────
+// --- Old-style StatCard -------------------------------------------------------
 const StatCard: React.FC<{
   icon: React.ElementType;
   label: string;
@@ -76,7 +76,7 @@ const StatCard: React.FC<{
   );
 };
 
-// ─── Horizontal bar row ───────────────────────────────────────────────────────
+// --- Horizontal bar row -------------------------------------------------------
 const HBar: React.FC<{ label: string; value: number; total: number; color?: string }> = ({
   label, value, total, color = "bg-primary",
 }) => (
@@ -91,7 +91,7 @@ const HBar: React.FC<{ label: string; value: number; total: number; color?: stri
   </div>
 );
 
-// ─── Alert Card ───────────────────────────────────────────────────────────────
+// --- Alert Card ---------------------------------------------------------------
 interface AlertCardProps {
   count: number;
   label: string;
@@ -171,7 +171,7 @@ const AlertCard: React.FC<AlertCardProps> = ({ count, label, sublabel, icon: Ico
   );
 };
 
-// ─── This Week Strip ──────────────────────────────────────────────────────────
+// --- This Week Strip ----------------------------------------------------------
 const ThisWeekStrip: React.FC<{ data: any[] }> = ({ data }) => {
   const navigate = useNavigate();
   if (!data?.length) return null;
@@ -216,7 +216,7 @@ const ThisWeekStrip: React.FC<{ data: any[] }> = ({ data }) => {
                   <IndianRupee size={9} /> {day.MilestonesDue}
                 </button>
               )}
-              {!hasEvents && <div className="text-[10px] text-muted-foreground/40 pt-1">—</div>}
+              {!hasEvents && <div className="text-[10px] text-muted-foreground/40 pt-1">�</div>}
             </div>
           </div>
         );
@@ -225,7 +225,7 @@ const ThisWeekStrip: React.FC<{ data: any[] }> = ({ data }) => {
   );
 };
 
-// ─── Collection Per Project bar ───────────────────────────────────────────────
+// --- Collection Per Project bar -----------------------------------------------
 const CollectionBar: React.FC<{ row: any }> = ({ row }) => {
   const p = pct(row.TotalPaid, row.TotalDue);
   const color = p >= 80 ? "#22c55e" : p >= 50 ? "#f59e0b" : "#ef4444";
@@ -248,7 +248,7 @@ const CollectionBar: React.FC<{ row: any }> = ({ row }) => {
   );
 };
 
-// ─── Pie chart tooltip ────────────────────────────────────────────────────────
+// --- Pie chart tooltip --------------------------------------------------------
 const PieTooltip: React.FC<any> = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
   return (
@@ -259,7 +259,7 @@ const PieTooltip: React.FC<any> = ({ active, payload }) => {
   );
 };
 
-// ─── Skeleton ─────────────────────────────────────────────────────────────────
+// --- Skeleton -----------------------------------------------------------------
 const AlertSkeleton = () => (
   <div className="rounded-xl border border-border/40 p-3 flex items-center gap-3">
     <Skeleton className="w-9 h-9 rounded-lg" />
@@ -280,7 +280,7 @@ const StatSkeleton = () => (
   </div>
 );
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// --- Main Component -----------------------------------------------------------
 const CrmDashboard: React.FC = () => {
   const { theme } = useTheme();
   const isDark = theme !== "light";
@@ -360,7 +360,7 @@ const CrmDashboard: React.FC = () => {
     { count: alerts.deedsAwaitingDirector ?? 0, label: "Deeds Awaiting Director",sublabel:"Pending director approval",               icon: FileText,    severity: (alerts.deedsAwaitingDirector > 0 ? "info"     : "ok") as any, route: "/crm/sales-deed" },
     { count: alerts.nocsNotIssued ?? 0,         label: "NOCs Not Issued",       sublabel: "Approved but not physically issued",      icon: ClipboardList,severity: (alerts.nocsNotIssued        > 0 ? "warning"  : "ok") as any, route: "/crm/noc" },
     { count: alerts.cancellationsPending ?? 0,  label: "Cancellations Pending", sublabel: "Awaiting management approval",            icon: XCircle,     severity: (alerts.cancellationsPending  > 0 ? "warning"  : "ok") as any, route: "/crm/cancellations" },
-    { count: alerts.urgentTickets ?? 0,         label: "Urgent/High Tickets",   sublabel: "After-sales — unresolved high priority",  icon: Wrench,      severity: (alerts.urgentTickets         > 0 ? "critical" : "ok") as any, route: "/crm/service-tickets" },
+    { count: alerts.urgentTickets ?? 0,         label: "Urgent/High Tickets",   sublabel: "After-sales � unresolved high priority",  icon: Wrench,      severity: (alerts.urgentTickets         > 0 ? "critical" : "ok") as any, route: "/crm/service-tickets" },
     { count: alerts.handoversThisWeek ?? 0,     label: "Handovers This Week",   sublabel: "Scheduled in next 7 days",                icon: Key,         severity: "info" as any,                                                   route: "/crm/handover" },
   ];
 
@@ -370,10 +370,10 @@ const CrmDashboard: React.FC = () => {
       <DashboardBackground />
       <CrmShell
         title="CRM Dashboard"
-        subtitle="Pipeline, closures, analytics and after-sales — all in one view"
+        subtitle="Pipeline, closures, analytics and after-sales � all in one view"
         icon={LayoutDashboard}
       >
-        {/* ── Top bar: project selector + refresh ───────────────────────────── */}
+        {/* -- Top bar: project selector + refresh ----------------------------- */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <Building2 size={14} className="text-muted-foreground" />
@@ -405,9 +405,9 @@ const CrmDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* ── SECTION 1: Attention Required ─────────────────────────────────── */}
+        {/* -- SECTION 1: Attention Required ----------------------------------- */}
         <CrmSection title="Attention Required" icon={AlertTriangle} accentColor="#ef4444">
-          <p className="text-xs text-muted-foreground -mt-1 mb-2">Items that need human action today — click any card to go directly to that module</p>
+          <p className="text-xs text-muted-foreground -mt-1 mb-2">Items that need human action today � click any card to go directly to that module</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
             {isLoading
               ? Array.from({ length: 10 }).map((_, i) => <AlertSkeleton key={i} />)
@@ -415,12 +415,12 @@ const CrmDashboard: React.FC = () => {
           </div>
           {!isLoading && alertCards.filter(c => c.severity !== "ok" && c.count > 0).length === 0 && (
             <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400 mt-2 font-medium">
-              <CheckCircle2 size={16} /> All clear — no items need immediate attention
+              <CheckCircle2 size={16} /> All clear � no items need immediate attention
             </div>
           )}
         </CrmSection>
 
-        {/* ── SECTION 2: Pipeline Overview (old StatCard grid) ──────────────── */}
+        {/* -- SECTION 2: Pipeline Overview (old StatCard grid) ---------------- */}
         <CrmSection title="Pipeline Overview" icon={ClipboardList} accentColor="#f59e0b">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Applications */}
@@ -448,7 +448,7 @@ const CrmDashboard: React.FC = () => {
                     ))}
                 {bkgsData.length > 0 && (
                   <div className="text-[11px] text-muted-foreground mt-2 border-t border-border pt-2 font-medium">
-                    Total: {bkgsTotal} · {fmtCr(bkgsData.reduce((s: number, b: any) => s + (b.TotalValue || 0), 0))} value
+                    Total: {bkgsTotal} � {fmtCr(bkgsData.reduce((s: number, b: any) => s + (b.TotalValue || 0), 0))} value
                   </div>
                 )}
               </StatCard>
@@ -543,7 +543,7 @@ const CrmDashboard: React.FC = () => {
           </div>
         </CrmSection>
 
-        {/* ── SECTION 3: Analytics — Pie Charts ─────────────────────────────── */}
+        {/* -- SECTION 3: Analytics � Pie Charts ------------------------------- */}
         <CrmSection title="Status Distribution" icon={PieIcon} accentColor="#f59e0b">
           <p className="text-xs text-muted-foreground -mt-1 mb-3">Booking and application status breakdown as of now</p>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -611,7 +611,7 @@ const CrmDashboard: React.FC = () => {
           </div>
         </CrmSection>
 
-        {/* ── SECTION 4: Key Numbers ─────────────────────────────────────────── */}
+        {/* -- SECTION 4: Key Numbers ------------------------------------------- */}
         <CrmSection title="Key Numbers" icon={BarChart3} accentColor="#f59e0b">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {isLoading ? Array.from({ length: 4 }).map((_, i) => (
@@ -664,7 +664,7 @@ const CrmDashboard: React.FC = () => {
           </div>
         </CrmSection>
 
-        {/* ── SECTION 5: Monthly Trend — line + histogram ────────────────────── */}
+        {/* -- SECTION 5: Monthly Trend � line + histogram ---------------------- */}
         <CrmSection title="Monthly Trend" icon={TrendingUp} accentColor="#f59e0b">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {/* Line chart: Applications & Bookings */}
@@ -690,7 +690,7 @@ const CrmDashboard: React.FC = () => {
 
             {/* Bar/Histogram: Collections by Month */}
             <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs font-semibold text-muted-foreground mb-3">Collections by Month (₹)</p>
+              <p className="text-xs font-semibold text-muted-foreground mb-3">Collections by Month (?)</p>
               {isLoading ? <Skeleton className="h-[180px] w-full" />
                 : !data?.monthlyTrend?.length
                   ? <div className="h-40 flex items-center justify-center text-xs text-muted-foreground">No data yet</div>
@@ -703,7 +703,7 @@ const CrmDashboard: React.FC = () => {
                           tickFormatter={(v) => v >= 100000 ? `${(v/100000).toFixed(1)}L` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} />
                         <Tooltip formatter={(v: number) => fmtINR(v)}
                           contentStyle={{ background: isDark ? "#1c1408" : "#fff", border: `1px solid ${gridColor}`, borderRadius: 8, fontSize: 11 }} />
-                        <Bar dataKey="Collected" name="Collected (₹)" radius={[4, 4, 0, 0]}>
+                        <Bar dataKey="Collected" name="Collected (?)" radius={[4, 4, 0, 0]}>
                           {(data?.monthlyTrend ?? []).map((_: any, i: number) => (
                             <Cell key={i} fill={PROJECT_COLORS[i % PROJECT_COLORS.length]} />
                           ))}
@@ -715,10 +715,10 @@ const CrmDashboard: React.FC = () => {
           </div>
         </CrmSection>
 
-        {/* ── SECTION 6: Collection by Project ──────────────────────────────── */}
+        {/* -- SECTION 6: Collection by Project -------------------------------- */}
         {(metrics.collectionPerProject?.length ?? 0) > 0 && (
           <CrmSection title="Collection by Project" icon={Building2} accentColor="#f59e0b">
-            <p className="text-xs text-muted-foreground -mt-1 mb-2">Payment collected vs total demand — per project</p>
+            <p className="text-xs text-muted-foreground -mt-1 mb-2">Payment collected vs total demand � per project</p>
             <div className="rounded-xl border border-border bg-card p-4 space-y-4">
               {isLoading
                 ? Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)
@@ -729,9 +729,9 @@ const CrmDashboard: React.FC = () => {
           </CrmSection>
         )}
 
-        {/* ── SECTION 7: This Week's Schedule ───────────────────────────────── */}
+        {/* -- SECTION 7: This Week's Schedule --------------------------------- */}
         <CrmSection title="This Week's Schedule" icon={Calendar} accentColor="#f59e0b">
-          <p className="text-xs text-muted-foreground -mt-1 mb-2">Handovers (green) · Registry appointments (blue) · Payment milestones due (orange)</p>
+          <p className="text-xs text-muted-foreground -mt-1 mb-2">Handovers (green) � Registry appointments (blue) � Payment milestones due (orange)</p>
           {isLoading
             ? <Skeleton className="h-28 w-full rounded-xl" />
             : <ThisWeekStrip data={data?.thisWeek ?? []} />}

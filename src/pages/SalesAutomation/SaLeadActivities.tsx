@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+﻿import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { MessageCircle, Phone, Plus, Search } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -90,7 +91,8 @@ const SaLeadActivities: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell title="Lead Activities" subtitle="Log calls, WhatsApp, meetings and next follow-up dates against leads">
+    <SalesAutoShell title="Lead Activities" subtitle="Log calls, WhatsApp, meetings and next follow-up dates against leads"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       <div className="space-y-5">
         {canDoAction("sa-lead-activities", "create") && (
           <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-6 gap-3 rounded-lg border border-border p-4 bg-background">

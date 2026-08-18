@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Search, IndianRupee, ExternalLink } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -87,7 +87,7 @@ const CrmBrokerPayments: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Broker Payment"
       subtitle="Tracking only — payouts are recorded and approved in Finance, and reflect here automatically"
     >
@@ -134,7 +134,7 @@ const CrmBrokerPayments: React.FC = () => {
           className="rounded-xl border border-border overflow-hidden bg-card"
         />
       )}
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

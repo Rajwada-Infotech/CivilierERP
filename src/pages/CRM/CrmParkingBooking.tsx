@@ -2,7 +2,9 @@ import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -344,7 +346,7 @@ const CrmParkingBooking: React.FC = () => {
   const [releaseConfirmText, setReleaseConfirmText] = useState("");
   const [releaseSaving, setReleaseSaving] = useState(false);
 
-  const { data: allotments = [], isLoading } = useQuery({
+  const { data: allotments = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-parking-all"], queryFn: fetchAllotments, staleTime: 30_000,
   });
   const { data: applications = [] } = useQuery({
@@ -443,7 +445,7 @@ const CrmParkingBooking: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-parking-all"] });
       qc.invalidateQueries({ queryKey: ["parking-matrix-standalone"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -583,7 +585,7 @@ const CrmParkingBooking: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="Parking Allotments"
       subtitle="Standalone parking sales and unit-linked allotments across all bookings"
       action={
@@ -843,7 +845,7 @@ const CrmParkingBooking: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from "react";
+﻿import React, { useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
@@ -104,7 +105,7 @@ const SaMarketingInvoices: React.FC = () => {
       setApprovalLoading(false);
     }
   };
-  const { data: invoices, isLoading, error } = useQuery({ queryKey: ["sa-marketing-invoices"], queryFn: fetchInvoices, staleTime: 2 * 60_000 });
+  const { data: invoices, isLoading, error } = useQuery({ queryKey: ["sa-marketing-invoices"], queryFn: fetchInvoices, staleTime: 30_000 });
 
   const mappedData: RecordWithId[] = useMemo(() => {
     if (!Array.isArray(invoices)) return [];
@@ -171,7 +172,8 @@ const SaMarketingInvoices: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load invoices.</div>;
 
   return (
-    <SalesAutoShell title="Marketing Invoices" subtitle="Track marketing expenses and invoice payments for campaigns and advertisements">
+    <SalesAutoShell title="Marketing Invoices" subtitle="Track marketing expenses and invoice payments for campaigns and advertisements"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       <div className="space-y-8">
         <MasterPage
           title="Invoice"

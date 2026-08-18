@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Plus, AlertTriangle, RotateCcw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useNavigate } from "react-router-dom";
@@ -43,7 +44,7 @@ const CrmPossessionNotice: React.FC = () => {
   const [retractDialog, setRetractDialog] = useState<number | null>(null);
   const [retractReason, setRetractReason] = useState("");
 
-  const { data: notices = [], isLoading } = useQuery({ queryKey: ["crm-possession-notice"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: notices = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-possession-notice"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
 
   const handleCreate = async () => {
@@ -184,10 +185,13 @@ const CrmPossessionNotice: React.FC = () => {
       title="CRM — Possession Notice"
       subtitle="Formal notice issuance to buyers offering possession"
       action={
-        <button onClick={() => setDialogOpen(true)}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => setDialogOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> New Notice
         </button>
+        </div>
       }
     >
       {!isLoading && (notices as any[]).length === 0 ? (

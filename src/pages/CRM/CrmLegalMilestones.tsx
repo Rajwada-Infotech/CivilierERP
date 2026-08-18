@@ -2,7 +2,9 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, CheckCircle2, Circle, ArrowRight, ExternalLink, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -145,7 +147,7 @@ const CrmLegalMilestones: React.FC = () => {
       setBookingId("");
       qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -162,7 +164,7 @@ const CrmLegalMilestones: React.FC = () => {
       if (!res.ok) throw new Error((await res.json()).error);
       qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -170,14 +172,17 @@ const CrmLegalMilestones: React.FC = () => {
   const postStages = selected ? buildPostAgreementStages(selected) : [];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Legal Milestones"
       subtitle="Agreement through registration: the full post-booking legal journey in one place"
       action={
-        <button onClick={() => setNewDialog(true)}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => setNewDialog(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> Start Workflow
         </button>
+        </div>
       }
     >
       <div className="flex gap-4 h-[calc(100vh-220px)]">
@@ -360,7 +365,7 @@ const CrmLegalMilestones: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

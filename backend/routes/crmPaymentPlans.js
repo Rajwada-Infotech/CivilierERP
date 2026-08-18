@@ -112,7 +112,8 @@ async function syncPaymentPlanProjectTag(pool, planId, projectId) {
 router.get("/", requirePageRight("crm-payment-plans", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const where = req.query.isActive != null ? "WHERE p.IsActive = 1" : "";
+    const showAll = req.query.showAll === "true";
+    const where = showAll ? "" : "WHERE p.IsActive = 1";
     const result = await pool.request().query(`${PLAN_SELECT} ${where} ORDER BY p.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (e) {

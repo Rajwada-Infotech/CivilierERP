@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { UserPlus, UserMinus, ArrowRightLeft, TrendingUp, TrendingDown, Users, ChevronDown, ChevronRight } from "lucide-react";
@@ -41,7 +43,7 @@ const SaTeamManagement: React.FC = () => {
   const [selectedTransferLead, setSelectedTransferLead] = useState("");
   const [loading, setLoading] = useState<string | null>(null);
 
-  const { data: teams = [], isLoading } = useQuery({ queryKey: ["sa-teams"], queryFn: fetchTeams, staleTime: 30_000 });
+  const { data: teams = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-teams"], queryFn: fetchTeams, staleTime: 30_000 });
   const { data: allUsers = [] } = useQuery({ queryKey: ["sa-all-users"], queryFn: fetchAllUsers, staleTime: 30_000 });
   const { data: unassigned = [] } = useQuery({ queryKey: ["sa-unassigned"], queryFn: fetchUnassigned, staleTime: 30_000 });
 
@@ -75,7 +77,7 @@ const SaTeamManagement: React.FC = () => {
       setAddMemberDialog(null);
       setSelectedAddUser("");
       await invalidate();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setLoading(null); }
   };
 
@@ -86,7 +88,7 @@ const SaTeamManagement: React.FC = () => {
       if (!r.ok) throw new Error((await r.json()).error || "Failed");
       toast.success(`${memberName} removed from team`);
       await invalidate();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setLoading(null); }
   };
 
@@ -104,7 +106,7 @@ const SaTeamManagement: React.FC = () => {
       setTransferDialog(null);
       setSelectedTransferLead("");
       await invalidate();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setLoading(null); }
   };
 
@@ -117,7 +119,7 @@ const SaTeamManagement: React.FC = () => {
       if (!r.ok) throw new Error(data.error || "Failed");
       toast.success(data.message);
       await invalidate();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setLoading(null); }
   };
 
@@ -130,14 +132,15 @@ const SaTeamManagement: React.FC = () => {
       if (!r.ok) throw new Error(data.error || "Failed");
       toast.success(data.message);
       await invalidate();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setLoading(null); }
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading teams...</div>;
 
   return (
-    <SalesAutoShell title="Sales Team Management" subtitle="Manage team leads and their salespersons — add, remove, transfer, promote or demote">
+    <SalesAutoShell title="Sales Team Management" subtitle="Manage team leads and their salespersons — add, remove, transfer, promote or demote"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       <div className="space-y-6">
 
         {/* Teams */}

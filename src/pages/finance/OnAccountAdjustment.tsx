@@ -9,6 +9,7 @@ import {
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { Button } from "@/components/ui/button";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell, FinanceGlassCard } from "@/components/finance/FinanceShell";
 import { getInvoicesForParty, applyOAAdjustment, type OAAdjustmentMode } from "@/api/onAccountApi";
 import type { OAInvoice } from "@/api/onAccountApi";
@@ -470,6 +471,8 @@ export default function OnAccountAdjustment() {
   const displayParties = selectedPartyId === "all" ? parties : parties.filter((p) => String(p.PartyId) === selectedPartyId);
 
   return (
+    <>
+    <Breadcrumbs items={["Dashboard", "Finance", "On A/C Adjustment"]} />
     <FinanceShell title="On A/C Adjustment" subtitle="Excess payments available for adjustment against future invoices">
       <div className="space-y-6">
 
@@ -804,5 +807,6 @@ export default function OnAccountAdjustment() {
         />
       )}
     </FinanceShell>
+    </>
   );
 }

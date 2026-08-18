@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 
 const API = "/api/crm/pre-possession";
 const BKG_API = "/api/crm/bookings";
@@ -40,7 +41,7 @@ const CrmPrePossession: React.FC = () => {
   const [bookingId, setBookingId] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const { data: checks = [], isLoading } = useQuery({ queryKey: ["crm-pre-possession"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: checks = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-pre-possession"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
 
   const handleCreate = async () => {
@@ -91,10 +92,13 @@ const CrmPrePossession: React.FC = () => {
       title="CRM — Pre-Possession Check"
       subtitle="Dues, documentation, quality, and utility readiness before handover"
       action={
-        <button onClick={() => setDialogOpen(true)}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => setDialogOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> Start Check
         </button>
+        </div>
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

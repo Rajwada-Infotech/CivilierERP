@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -367,7 +368,7 @@ function UserPermissionsTab({ users }: { users: any[] }) {
       setDirty(false);
       qc.invalidateQueries({ queryKey: ["sa-role-master-perms", selectedUser?.id] });
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) => toast.error(translateError(e.message)),
   });
 
   function handleToggle(pageKey: string, action: Action) {

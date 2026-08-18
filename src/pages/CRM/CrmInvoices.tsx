@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { FileText, Download, Search, ExternalLink, Plus, ChevronDown, ChevronRight, Building2, Info, CheckCircle2, Clock, AlertCircle, Ban } from "lucide-react";
@@ -364,7 +366,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
       toast.success(`Invoice ${data.InvoiceNo} generated`);
       onGenerated();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -695,7 +697,7 @@ const CrmInvoices: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { data: rows = [], isLoading } = useQuery({
+  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-invoices", type, search],
     queryFn: () => fetchInvoices(type, search),
     placeholderData: (prev) => prev,
@@ -730,9 +732,10 @@ const CrmInvoices: React.FC = () => {
   }
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Invoices"
       subtitle="Booking-wise invoice history and generation — Milestone (beyond the Booking Amount), Maintenance, Other, and On-Account. The Booking Amount invoice itself is generated from the Booking's own Payment & Invoice tab."
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
     >
       <div className="flex gap-3 flex-wrap items-center">
         <div className="relative flex-1 min-w-48">
@@ -863,7 +866,7 @@ const CrmInvoices: React.FC = () => {
       {genBookingId !== undefined && (
         <GenerateInvoiceDialog initialBookingId={genBookingId} onClose={() => setGenBookingId(undefined)} onGenerated={handleGenerated} />
       )}
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

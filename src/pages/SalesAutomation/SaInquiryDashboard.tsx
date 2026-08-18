@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { MapPin, Phone } from "lucide-react";
@@ -68,7 +69,7 @@ const SaInquiryDashboard: React.FC = () => {
     staleTime: 5 * 60_000,
   });
 
-  const { data: leads = [], isLoading } = useQuery({ queryKey: ["sa-leads"], queryFn: fetchLeads, staleTime: 60_000 });
+  const { data: leads = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-leads"], queryFn: fetchLeads, staleTime: 30_000 });
   const { data: detail, isLoading: loadingDetail } = useQuery({
     queryKey: ["sa-inquiry-detail", selectedLeadId],
     queryFn: () => fetchLeadDetail(selectedLeadId!),
@@ -150,7 +151,8 @@ const SaInquiryDashboard: React.FC = () => {
   const alreadyScheduled = selectedLead?.Status === "VisitScheduled" || selectedLead?.Status === "Visited";
 
   return (
-    <SalesAutoShell title="Inquiry Dashboard" subtitle="Review and manage all incoming lead inquiries">
+    <SalesAutoShell title="Inquiry Dashboard" subtitle="Review and manage all incoming lead inquiries"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       <div className="flex gap-4 h-[calc(100vh-200px)]">
 
         {/* Lead list panel */}

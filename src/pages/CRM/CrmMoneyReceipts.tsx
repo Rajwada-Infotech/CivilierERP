@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { FileText, Download, CheckCircle2, Clock, AlertTriangle, Search, RotateCcw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -108,9 +110,10 @@ const CrmMoneyReceipts: React.FC = () => {
   const [previewReceipt, setPreviewReceipt] = useState<ReceiptRow | null>(null);
   const qc = useQueryClient();
 
-  const { data: rows = [], isLoading } = useQuery({
+  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-money-receipts", bookingIdParam],
     queryFn: () => fetchReceipts(bookingIdParam),
+    staleTime: 30_000,
   });
 
   const filtered = useMemo(() => {
@@ -181,9 +184,10 @@ const CrmMoneyReceipts: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Money Receipts"
       subtitle="Created once Data Review is complete and the Booking has been submitted for approval — one receipt per Booking Amount"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
     >
       <div className="flex gap-3 flex-wrap items-center">
         <div className="relative flex-1 min-w-48">
@@ -204,7 +208,7 @@ const CrmMoneyReceipts: React.FC = () => {
       />
 
       {previewReceipt && <ReceiptPdfDialog receipt={previewReceipt} onClose={() => setPreviewReceipt(null)} />}
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

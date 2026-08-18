@@ -42,8 +42,8 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // The real-world sequence is two distinct steps, not one long form: staff
-// first send the customer the amount + paperwork, then — once the customer
-// has actually paid the government — come back and confirm it. Presenting
+// first send the customer the amount + paperwork, then � once the customer
+// has actually paid the government � come back and confirm it. Presenting
 // both as one scrollable stack made it easy to miss which step you were on;
 // a tab strip + Next/Previous keeps each step a focused card.
 const STEPS = [
@@ -84,11 +84,11 @@ interface StagedFile {
   name: string;
   size: number;
   type: string;
-  base64: string;   // raw base64 payload (no "data:...;base64," prefix) — what actually gets sent to and stored on the server
-  dataUri: string;  // full data URI — used only for the local <img> preview
+  base64: string;   // raw base64 payload (no "data:...;base64," prefix) � what actually gets sent to and stored on the server
+  dataUri: string;  // full data URI � used only for the local <img> preview
 }
 
-// Files are read as base64 up front — this doubles as both the live preview
+// Files are read as base64 up front � this doubles as both the live preview
 // (an <img src="data:..."> needs no server round-trip) and the exact
 // payload the server stores: it decodes this same base64 back into bytes
 // for the existing VARBINARY(MAX) column, so what you see staged here is
@@ -107,7 +107,7 @@ function fileToStaged(file: File): Promise<StagedFile> {
 }
 
 // Base64 inflates payload ~33%, and the whole request shares one 10mb JSON
-// body cap on the server across every staged file plus JSON structure — so
+// body cap on the server across every staged file plus JSON structure � so
 // this needs real headroom, not just "under 10mb" per file. Kept in sync
 // with the server-side cap in crmQueryPayment.js.
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
@@ -141,7 +141,7 @@ const CrmQueryPayment: React.FC = () => {
   const [step, setStep] = useState(1);
   const [confirmAmount, setConfirmAmount] = useState("");
   const [confirmRemarks, setConfirmRemarks] = useState("");
-  // Staged, not-yet-sent files for the "Send Info & Paperwork" step — a file
+  // Staged, not-yet-sent files for the "Send Info & Paperwork" step � a file
   // picker used to fire the actual send-to-customer the instant a file was
   // chosen, with no review and no way back. Now selecting files only stages
   // them here; nothing goes to the customer until the explicit "Send to
@@ -165,7 +165,7 @@ const CrmQueryPayment: React.FC = () => {
   const trackedBookingIds = new Set((rows as any[]).map((r: any) => r.BookingId));
   const startableBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
 
-  // Land on whichever step matches where this tracker actually is — Pending
+  // Land on whichever step matches where this tracker actually is � Pending
   // starts at Send Paperwork, InfoSent jumps straight to Confirm Payment
   // (paperwork's already out). Only runs once per opened tracker so staff
   // can still freely move between tabs afterward.
@@ -224,7 +224,7 @@ const CrmQueryPayment: React.FC = () => {
     }
     const combined = pendingInfoFiles.reduce((sum, f) => sum + f.size, 0) + arr.reduce((sum, f) => sum + f.size, 0);
     if (combined > MAX_COMBINED_BYTES) {
-      toast.error(`Total attached files can't exceed ${(MAX_COMBINED_BYTES / 1024 / 1024).toFixed(0)}MB — send these in a separate batch`);
+      toast.error(`Total attached files can't exceed ${(MAX_COMBINED_BYTES / 1024 / 1024).toFixed(0)}MB � send these in a separate batch`);
       if (infoInputRef.current) infoInputRef.current.value = "";
       return;
     }
@@ -257,9 +257,9 @@ const CrmQueryPayment: React.FC = () => {
     }
   };
 
-  // The actual send — only reachable after staff has reviewed the staged
+  // The actual send � only reachable after staff has reviewed the staged
   // files and explicitly confirmed via the AlertDialog gate below. Files
-  // travel as base64 JSON, not multipart — the server decodes the same
+  // travel as base64 JSON, not multipart � the server decodes the same
   // base64 back into bytes for storage, so this is the exact payload that
   // ends up in the DB.
   const handleSendInfo = async () => {
@@ -303,7 +303,7 @@ const CrmQueryPayment: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success("Confirmed — customer has paid the government");
+      toast.success("Confirmed � customer has paid the government");
       setConfirmAmount("");
       setConfirmRemarks("");
       setProofFile(null);
@@ -325,10 +325,10 @@ const CrmQueryPayment: React.FC = () => {
       cell: (i) => (
         <div>
           <div className="font-medium">{i.row.original.ApplicantName}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} � {i.row.original.UnitNo}</div>
         </div>
       ) },
-    { accessorKey: "DeedNo", header: "Deed", size: 100, cell: (i) => <span className="text-xs">{i.getValue() as string || "—"}</span> },
+    { accessorKey: "DeedNo", header: "Deed", size: 100, cell: (i) => <span className="text-xs">{i.getValue() as string || "�"}</span> },
     { id: "amount", header: "Required Amount", size: 130,
       cell: (i) => <span className="text-xs font-mono">{formatINR(i.row.original.RequiredAmount)}</span> },
     { accessorKey: "Status", header: "Status", size: 110,
@@ -344,7 +344,7 @@ const CrmQueryPayment: React.FC = () => {
 
   return (
     <CrmShell
-      title="CRM — Query Payment"
+      title="CRM � Query Payment"
       subtitle="Stamp duty & registration fee paid by the customer directly to the government"
       action={
         <div className="flex items-center gap-3">
@@ -352,7 +352,7 @@ const CrmQueryPayment: React.FC = () => {
             <button onClick={() => refetchList()} disabled={listFetching}
               className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
               <RotateCcw size={12} className={listFetching ? "animate-spin" : ""} />
-              {listFetching ? "Refreshing…" : "Refresh"}
+              {listFetching ? "Refreshing�" : "Refresh"}
             </button>
           )}
           <button onClick={() => setDialogOpen(true)}
@@ -380,7 +380,7 @@ const CrmQueryPayment: React.FC = () => {
               className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
               <option value="">Select booking</option>
               {startableBookings.map((b: any) => (
-                <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
+                <option key={b.Id} value={String(b.Id)}>{b.BookingNo} � {b.ApplicantName}</option>
               ))}
             </select>
             <p className="text-[11px] text-muted-foreground mt-1">Requires a Sales Deed to already exist for this booking.</p>
@@ -395,7 +395,7 @@ const CrmQueryPayment: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Detail dialog — a two-step card wizard (Send Paperwork -> Confirm
+      {/* Detail dialog � a two-step card wizard (Send Paperwork -> Confirm
           Payment) instead of one long scrolling form, matching how staff
           actually work this tracker one step at a time. */}
       <Dialog open={!!selectedId} onOpenChange={(o) => !o && setSelectedId(null)}>
@@ -420,7 +420,7 @@ const CrmQueryPayment: React.FC = () => {
               <div className="px-6 pt-3">
                 <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
                   <p className="text-sm font-semibold text-foreground">{detail.ApplicantName}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{detail.BookingNo} · {detail.UnitNo} · Deed {detail.DeedNo || "—"}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{detail.BookingNo} � {detail.UnitNo} � Deed {detail.DeedNo || "�"}</p>
                   <p className="text-xs mt-1.5">
                     Stamp Duty {formatINR(detail.StampDuty)} + Registration Fee {formatINR(detail.RegistrationFee)}
                     {" "}= <span className="font-semibold font-mono">{formatINR(detail.RequiredAmount)}</span> required
@@ -441,7 +441,7 @@ const CrmQueryPayment: React.FC = () => {
                       <div className="font-medium">Government payment confirmed</div>
                       <div className="text-xs text-emerald-700/80 mt-0.5">
                         {detail.ConfirmedAt ? String(detail.ConfirmedAt).slice(0, 10) : ""}
-                        {detail.ConfirmedAmount ? ` · ${formatINR(detail.ConfirmedAmount)}` : ""}
+                        {detail.ConfirmedAmount ? ` � ${formatINR(detail.ConfirmedAmount)}` : ""}
                       </div>
                     </div>
                   </div>
@@ -508,7 +508,7 @@ const CrmQueryPayment: React.FC = () => {
                         )}
                         {detail.Status === "InfoSent" && (
                           <div className="flex items-center gap-1.5 text-xs text-blue-700">
-                            <CheckCircle2 size={12} /> Sent — waiting on the customer to pay the government.
+                            <CheckCircle2 size={12} /> Sent � waiting on the customer to pay the government.
                           </div>
                         )}
                       </div>
@@ -585,7 +585,7 @@ const CrmQueryPayment: React.FC = () => {
 
       {/* The real gate: sending is a customer-facing, semi-irreversible
           action (it flips Status to InfoSent and notifies the customer),
-          so it needs an explicit confirmation step — not a bare file picker
+          so it needs an explicit confirmation step � not a bare file picker
           that fires the instant something is chosen. */}
       <AlertDialog open={confirmSendOpen} onOpenChange={(o) => !sendingInfo && setConfirmSendOpen(o)}>
         <AlertDialogContent>
@@ -628,7 +628,7 @@ function AttachmentList({ attachments }: { attachments: any[] }) {
         <li key={a.AttachmentId} className="flex items-center gap-2 text-xs">
           <Paperclip size={11} className="text-muted-foreground shrink-0" />
           <a href={`${API}/attachment/${a.AttachmentId}`} target="_blank" rel="noreferrer" className="text-primary hover:underline truncate">{a.FileName}</a>
-          <span className="text-muted-foreground shrink-0">· {a.DocType}</span>
+          <span className="text-muted-foreground shrink-0">� {a.DocType}</span>
         </li>
       ))}
     </ul>

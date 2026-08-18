@@ -6,6 +6,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { promptNextStep } from "@/lib/workflowNav";
 import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Plus, Key, AlertTriangle, CheckCircle2, User } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
@@ -84,8 +85,8 @@ const CrmHandover: React.FC = () => {
     CustomerAcknowledged: false,
   });
 
-  const { data: handovers = [], isLoading } = useQuery({
-    queryKey: ["crm-handovers"], queryFn: fetchHandovers, staleTime: 60_000,
+  const { data: handovers = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-handovers"], queryFn: fetchHandovers, staleTime: 30_000,
   });
   const { data: detail } = useQuery({
     queryKey: ["crm-handover-detail", selectedId],
@@ -254,10 +255,13 @@ const CrmHandover: React.FC = () => {
       title="CRM — Possession & Handover"
       subtitle="Snag inspection and key handover workflow"
       action={
-        <button onClick={() => setNewDialog(true)}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => setNewDialog(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Key size={14} /> Schedule Handover
         </button>
+        </div>
       }
     >
       <div className="flex gap-4 h-[calc(100vh-220px)]">

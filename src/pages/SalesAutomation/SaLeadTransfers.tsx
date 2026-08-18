@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, ArrowRightLeft } from "lucide-react";
@@ -39,7 +41,7 @@ const SaLeadTransfers: React.FC = () => {
   const [adminNotes, setAdminNotes] = useState("");
   const [acting, setActing] = useState(false);
 
-  const { data: requests = [], isLoading } = useQuery({ queryKey: ["sa-lead-transfers"], queryFn: fetchRequests, staleTime: 30_000 });
+  const { data: requests = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-lead-transfers"], queryFn: fetchRequests, staleTime: 30_000 });
 
   const filtered = (requests as any[]).filter((r: any) => filterStatus === "All" || r.Status === filterStatus);
 
@@ -84,7 +86,7 @@ const SaLeadTransfers: React.FC = () => {
       const items = await fetchItems(resolvedId);
       setLoadedItems((prev) => ({ ...prev, [resolvedId]: items }));
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setActing(false);
     }
@@ -124,7 +126,8 @@ const SaLeadTransfers: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell title="Lead Transfer Requests" subtitle="Review and approve lead transfer requests from team leads">
+    <SalesAutoShell title="Lead Transfer Requests" subtitle="Review and approve lead transfer requests from team leads"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>

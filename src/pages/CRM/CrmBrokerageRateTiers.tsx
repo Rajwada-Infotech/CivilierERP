@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, Pencil, Percent, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,7 +33,7 @@ const CrmBrokerageRateTiers: React.FC = () => {
   const [locked, setLocked] = useState(false);
   const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
-  const { data: tiers = [], isLoading } = useQuery({ queryKey: ["crm-brokerage-rate-tiers-master"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: tiers = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-brokerage-rate-tiers-master"], queryFn: fetchAll, staleTime: 30_000 });
 
   const resetForm = () => {
     setEditingId(null);
@@ -72,7 +74,7 @@ const CrmBrokerageRateTiers: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-brokerage-rate-tiers-master"] });
       qc.invalidateQueries({ queryKey: ["crm-brokerage-rate-tiers"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -89,7 +91,7 @@ const CrmBrokerageRateTiers: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-brokerage-rate-tiers-master"] });
       qc.invalidateQueries({ queryKey: ["crm-brokerage-rate-tiers"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setDeletingId(null);
     }
@@ -119,14 +121,17 @@ const CrmBrokerageRateTiers: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Brokerage Rate Tiers"
       subtitle="Default commission % by deal value — only applies when Application/Booking staff don't type an explicit override"
       action={
-        <button onClick={() => { resetForm(); setDialogOpen(true); }}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => { resetForm(); setDialogOpen(true); }}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> New Tier
         </button>
+        </div>
       }
     >
       <DataTable
@@ -202,7 +207,7 @@ const CrmBrokerageRateTiers: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

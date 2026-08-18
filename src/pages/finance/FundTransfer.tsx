@@ -39,7 +39,7 @@ import {
 } from "@/api/fundTransferApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
-import { fetchChequeLots, fetchChequeNumbers, deductChequeFromLot } from "@/pages/finance/payment/api";
+import { fetchChequeLots, fetchChequeNumbers } from "@/pages/finance/payment/api";
 import type { ChequeLot } from "@/pages/finance/payment/types";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -466,18 +466,14 @@ export default function FundTransfer() {
     setChequeNo("");
   };
 
-  const handleChequeSelect = async (num: string) => {
+  const handleChequeSelect = (num: string) => {
     setChequeNo(num);
     if (!num || !chequeLotId) return;
     setValidatingCheque(true);
-    try {
-      await deductChequeFromLot(chequeLotId, num);
-    } catch (err: any) {
-      toast.error(err.message);
-      setChequeNo("");
-    } finally {
-      setValidatingCheque(false);
-    }
+    // Cheque leaf is deducted by the server on form submit, not on selection.
+    // Calling deductChequeFromLot here would permanently mark the leaf as used
+    // even if the user cancels or changes payment mode.
+    setValidatingCheque(false);
   };
 
   const load = async () => {

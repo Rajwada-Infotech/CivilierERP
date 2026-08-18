@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
@@ -9,7 +10,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
-  Mail, MapPin, IndianRupee, Users2, Briefcase, History, X, PlayCircle, Ban, Lock, Wallet,
+  Mail, MapPin, IndianRupee, Users2, Briefcase, X, PlayCircle, Ban, Lock, Wallet,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -798,7 +799,7 @@ const CrmApplication: React.FC = () => {
       setMaxStepReached(resumeStep);
       setDialogOpen(true);
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setLoadingApplication(false);
     }
@@ -888,7 +889,7 @@ const CrmApplication: React.FC = () => {
         body: JSON.stringify({ CurrentStep: 2 }),
       }).catch(() => {});
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -922,7 +923,7 @@ const CrmApplication: React.FC = () => {
       await saveBankDetailsRef.current?.();
       advanceStep(5);
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -995,7 +996,7 @@ const CrmApplication: React.FC = () => {
         toast.success("Application submitted");
       }
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -1038,7 +1039,7 @@ const CrmApplication: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["parking-matrix"] });
       if (viewingAppId === cancelledId) qc.invalidateQueries({ queryKey: ["crm-app-detail", cancelledId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setCancelling(false);
     }
@@ -1068,7 +1069,7 @@ const CrmApplication: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-apps"] });
       navigate(`/crm/bookings?applicationId=${a.Id}`);
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setCreatingBookingId(null);
     }
@@ -2294,7 +2295,7 @@ const CrmApplication: React.FC = () => {
 
                 {(viewingAppDetail.statusLog || []).length > 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><History size={14} className="text-primary" /> Status History</h3>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Clock size={14} className="text-primary" /> Status History</h3>
                     <div className="space-y-1.5">
                       {viewingAppDetail.statusLog.map((s: any) => (
                         <div key={s.Id} className="flex items-center justify-between text-xs">
@@ -2508,7 +2509,7 @@ const BankDetailsStep: React.FC<{
       if (!res.ok) throw new Error((await res.json()).error || "Save failed");
       if (!silent) toast.success("Bank/KYC details saved");
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
       throw e;
     } finally {
       setBankSaving(false);
@@ -2683,7 +2684,7 @@ const ParkingSelectionStep: React.FC<{
       setSelectedType(""); setSelectedSlotId("");
       refetchAll();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setAdding(false);
     }
@@ -2700,7 +2701,7 @@ const ParkingSelectionStep: React.FC<{
       if (!res.ok) throw new Error((await res.json()).error);
       refetchAll();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -2882,7 +2883,7 @@ const ExtraWorkSelectionStep: React.FC<{
       setDescription(""); setAmount("");
       refetch();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setAdding(false);
     }
@@ -2894,7 +2895,7 @@ const ExtraWorkSelectionStep: React.FC<{
       if (!res.ok) throw new Error((await res.json()).error);
       refetch();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -3056,7 +3057,7 @@ const CoApplicantStep: React.FC<{
       cancelEdit();
       refetch();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -3068,7 +3069,7 @@ const CoApplicantStep: React.FC<{
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Delete failed");
       refetch();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -3321,7 +3322,7 @@ const AttachmentsStep: React.FC<{
       setDocType("");
       refetchDocs();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -3334,7 +3335,7 @@ const AttachmentsStep: React.FC<{
       if (!res.ok) throw new Error((await res.json()).error);
       refetchDocs();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 

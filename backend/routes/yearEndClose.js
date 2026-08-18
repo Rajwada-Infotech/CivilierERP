@@ -252,29 +252,39 @@ router.post("/carry-forward", adminOnly, async (req, res) => {
 
     const voucherNo = `YEC-FY${fy.FName}-${companyId}`;
     
-    if (Math.abs(netProfit) >= 0.01) {
-      const legs = [];
-      if (netProfit > 0) {
-        legs.push({ lHeadId: incSumHeadId, debit: netProfit, credit: 0, narration: `Year End Closing — transfer P&L surplus to Retained Earnings` });
-        legs.push({ lHeadId: reHeadId, debit: 0, credit: netProfit, narration: `Year End Closing — Net Profit FY ${fy.FName}` });
-      } else {
-        const loss = Math.abs(netProfit);
-        legs.push({ lHeadId: reHeadId, debit: loss, credit: 0, narration: `Year End Closing — Net Loss FY ${fy.FName}` });
-        legs.push({ lHeadId: incSumHeadId, debit: 0, credit: loss, narration: `Year End Closing — transfer P&L deficit to Retained Earnings` });
-      }
+    // Lock the FY first so no new postings can come in during the carry-forward.
+    // If postVoucher fails we unlock it so the operation can be safely retried.
+    await pool.request().input("fyId", sql.Int, financialYearId)
+      .query(`UPDATE dbo.FinYear SET FisLocked = 1 WHERE FId = @fyId`);
 
-      await postVoucher(pool, {
-        voucherNo,
-        voucherDate: fy.FEndDate,
-        legs,
-        sourceType: "YearEndClose",
-        sourceId: fy.FId,
-        companyId,
-        createdBy: req.user?.email || req.user?.userId?.toString() || "system",
-      });
+    try {
+      if (Math.abs(netProfit) >= 0.01) {
+        const legs = [];
+        if (netProfit > 0) {
+          legs.push({ lHeadId: incSumHeadId, debit: netProfit, credit: 0, narration: `Year End Closing — transfer P&L surplus to Retained Earnings` });
+          legs.push({ lHeadId: reHeadId, debit: 0, credit: netProfit, narration: `Year End Closing — Net Profit FY ${fy.FName}` });
+        } else {
+          const loss = Math.abs(netProfit);
+          legs.push({ lHeadId: reHeadId, debit: loss, credit: 0, narration: `Year End Closing — Net Loss FY ${fy.FName}` });
+          legs.push({ lHeadId: incSumHeadId, debit: 0, credit: loss, narration: `Year End Closing — transfer P&L deficit to Retained Earnings` });
+        }
+
+        await postVoucher(pool, {
+          voucherNo,
+          voucherDate: fy.FEndDate,
+          legs,
+          sourceType: "YearEndClose",
+          sourceId: fy.FId,
+          companyId,
+          createdBy: req.user?.email || req.user?.userId?.toString() || "system",
+        });
+      }
+    } catch (postErr) {
+      // Unlock the FY so the operation can be retried after diagnosing the failure
+      await pool.request().input("fyId", sql.Int, financialYearId)
+        .query(`UPDATE dbo.FinYear SET FisLocked = 0 WHERE FId = @fyId`);
+      throw postErr;
     }
-    
-    await pool.request().input("fyId", sql.Int, financialYearId).query(`UPDATE dbo.FinYear SET FisLocked = 1 WHERE FId = @fyId`);
 
     res.json({ success: true, netProfit, voucherNo, locked: true });
   } catch (err) {

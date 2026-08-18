@@ -1,9 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, History, FolderClock, Download } from "lucide-react";
+import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, FolderClock, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -225,7 +227,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
       toast.success("File uploaded");
       onReviewed();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setAttaching(false);
     }
@@ -259,7 +261,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
       toast.success(`Marked ${status}`);
       onReviewed();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -282,7 +284,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
           </button>
           <button onClick={() => setTab("history")}
             className={`text-xs font-medium px-3 py-1.5 border-b-2 -mb-px flex items-center gap-1 ${tab === "history" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-            <History size={12} /> History
+            <Clock size={12} /> History
           </button>
         </div>
 
@@ -442,7 +444,7 @@ const CrmAgreement: React.FC = () => {
   const [agrTab, setAgrTab] = useState<AgrTab>("Overview");
   useEffect(() => { setAgrTab("Overview"); }, [selectedId]);
 
-  const { data: agreements = [], isLoading } = useQuery({ queryKey: ["crm-agreements"], queryFn: fetchAgreements, staleTime: 60_000 });
+  const { data: agreements = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-agreements"], queryFn: fetchAgreements, staleTime: 30_000 });
   const { data: detail } = useQuery({
     queryKey: ["crm-agreement-detail", selectedId],
     queryFn: () => fetchAgreementDetail(selectedId!),
@@ -518,7 +520,7 @@ const CrmAgreement: React.FC = () => {
       setAgrForm({ ...EMPTY_AGR_FORM, BookingId: bkgFilter });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -542,7 +544,7 @@ const CrmAgreement: React.FC = () => {
       setShowUrlField(false);
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -564,7 +566,7 @@ const CrmAgreement: React.FC = () => {
       setDocRequestForm({ ...EMPTY_DOC_REQUEST_FORM });
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -588,7 +590,7 @@ const CrmAgreement: React.FC = () => {
       setShowUrlField(false);
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setUploadingDocs(false);
       if (docFileInputRef.current) docFileInputRef.current.value = "";
@@ -613,7 +615,7 @@ const CrmAgreement: React.FC = () => {
       toast.success(`Marked ${status}`);
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -635,7 +637,7 @@ const CrmAgreement: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -658,7 +660,7 @@ const CrmAgreement: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -678,7 +680,7 @@ const CrmAgreement: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -699,7 +701,7 @@ const CrmAgreement: React.FC = () => {
         promptNextStep(navigate, "Agreement registered — Sales Deed can now be created.", "/crm/sales-deed", "Go to Sales Deed");
       }
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -714,7 +716,7 @@ const CrmAgreement: React.FC = () => {
       toast.success(deactivate ? "Portal access deactivated" : "Portal access reactivated");
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setTogglingPortal(false);
     }
@@ -754,7 +756,7 @@ const CrmAgreement: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setAssigningLegal(false);
     }
@@ -780,21 +782,24 @@ const CrmAgreement: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-agreement-revisions", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Agreements"
       subtitle="Sale agreements and legal documents"
       action={
-        <button onClick={() => setAgrDialog(true)}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => setAgrDialog(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> New Agreement
         </button>
+        </div>
       }
     >
       <div className="flex gap-4 h-[calc(100vh-220px)]">
@@ -1685,7 +1690,7 @@ const CrmAgreement: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

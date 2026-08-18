@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Search, Phone, FileText, Home, MessageSquare, Wrench, ArrowLeft,
@@ -114,7 +114,7 @@ const CrmCustomer360: React.FC = () => {
   const backToList = () => setSelectedMobile(null);
 
   return (
-    <SalesAutoShell title="CRM — Applicant Ledger" subtitle="Full customer journey and centralized financial ledger — lead to after-sales, in one view">
+    <CrmShell title="CRM — Applicant Ledger" subtitle="Full customer journey and centralized financial ledger — lead to after-sales, in one view">
       {!selectedMobile ? (
         <>
           <div className="flex gap-2 max-w-md">
@@ -420,7 +420,7 @@ const CrmCustomer360: React.FC = () => {
           )}
         </>
       )}
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 
