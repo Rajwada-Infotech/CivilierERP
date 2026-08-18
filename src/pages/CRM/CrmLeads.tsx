@@ -10,11 +10,11 @@ import { useTheme } from "@/contexts/ThemeContext";
 const LEADS_API = "/api/sa/leads";
 const CUSTOMER_API = "/api/crm/customers";
 
-// Converted leads from Sales Automation land here first, as a pool — they
+// Converted leads from Sales Automation land here first, as a pool � they
 // are NOT CrmApplications yet. Converting a lead (SaLead.Status ->
 // 'Converted', see saHandoff.js) never auto-creates one anymore. Staff pick
 // a lead from this pool via "Create Customer" (deep-links into
-// CrmCustomers.tsx's New Customer dialog with ?leadId=X pre-selected) —
+// CrmCustomers.tsx's New Customer dialog with ?leadId=X pre-selected) �
 // that's the real Leads -> Customer step (also the actual "only a converted
 // lead may enter the CRM module" gate, enforced again server-side in
 // crmCustomers.js POST /). An Application only ever gets created afterwards,
@@ -43,7 +43,7 @@ const CrmLeads: React.FC = () => {
   const { data: customers = [] } = useQuery({ queryKey: ["crm-customers-for-leads-pool"], queryFn: fetchCustomers, staleTime: 30_000 });
 
   // A lead is "used" the moment it's linked to a Customer (CrmCustomer.LeadId)
-  // — an Application beyond that is just the next, later step and doesn't
+  // � an Application beyond that is just the next, later step and doesn't
   // change this. Merging in the linked customer here (rather than trusting
   // CrmApplicationId alone) is what keeps this pool in sync with the actual
   // gate now enforced in crmCustomers.js POST /.
@@ -69,21 +69,21 @@ const CrmLeads: React.FC = () => {
       cell: (i) => (
         <div>
           <div className="font-mono text-xs">{i.row.original.LeadUid}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.DateGenerated ? String(i.row.original.DateGenerated).slice(0, 10) : "—"}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.DateGenerated ? String(i.row.original.DateGenerated).slice(0, 10) : "�"}</div>
         </div>
       ) },
     { accessorKey: "CustomerName", header: "Customer", size: 160,
       cell: (i) => (
         <div>
           <div className="font-medium">{i.row.original.CustomerName}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.Mobile}{i.row.original.Email ? ` · ${i.row.original.Email}` : ""}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.Mobile}{i.row.original.Email ? ` � ${i.row.original.Email}` : ""}</div>
         </div>
       ) },
-    { accessorKey: "SourceType", header: "Source", size: 100, cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
+    { accessorKey: "SourceType", header: "Source", size: 100, cell: (i) => <span className="text-xs">{(i.getValue() as string) || "�"}</span> },
     { accessorKey: "PropertyType", header: "Interested In", size: 120,
-      cell: (i) => <span className="text-xs">{[i.row.original.BhkPreference, i.row.original.PropertyType].filter(Boolean).join(" · ") || "—"}</span> },
-    { accessorKey: "PreferredLocation", header: "Preferred Location", size: 130, cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
-    { accessorKey: "SalespersonName", header: "Salesperson", size: 120, cell: (i) => <span className="text-xs text-muted-foreground">{(i.getValue() as string) || "—"}</span> },
+      cell: (i) => <span className="text-xs">{[i.row.original.BhkPreference, i.row.original.PropertyType].filter(Boolean).join(" � ") || "�"}</span> },
+    { accessorKey: "PreferredLocation", header: "Preferred Location", size: 130, cell: (i) => <span className="text-xs">{(i.getValue() as string) || "�"}</span> },
+    { accessorKey: "SalespersonName", header: "Salesperson", size: 120, cell: (i) => <span className="text-xs text-muted-foreground">{(i.getValue() as string) || "�"}</span> },
     { id: "action", header: "", size: 150, enableSorting: false,
       cell: (i) => {
         const l = i.row.original;
@@ -118,7 +118,7 @@ const CrmLeads: React.FC = () => {
 
   return (
     <CrmShell
-      title="CRM — Leads"
+      title="CRM � Leads"
       subtitle="Converted leads from Sales Automation, waiting to be linked to a CRM Customer"
     >
       {/* Toolbar + table live in one continuous card instead of a loose
@@ -145,7 +145,7 @@ const CrmLeads: React.FC = () => {
           </div>
         </div>
 
-        {/* Custom, actionable empty state — DataTable's own emptyMessage is
+        {/* Custom, actionable empty state � DataTable's own emptyMessage is
             plain text only, and "convert one in Sales Automation" used to
             be a dead end with no way to actually get there. */}
         {!isLoading && filtered.length === 0 ? (

@@ -2,9 +2,10 @@ import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
+import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, CalendarClock, CheckCircle2 } from "lucide-react";
+import { Plus, CalendarClock, CheckCircle2, RotateCcw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -40,7 +41,7 @@ const CrmRegistry: React.FC = () => {
   const [completeId, setCompleteId] = useState<number | null>(null);
   const [completedDate, setCompletedDate] = useState(() => new Date().toISOString().slice(0, 10));
 
-  const { data: rows = [], isLoading } = useQuery({ queryKey: ["crm-registry"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-registry"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
 
   const trackedBookingIds = new Set((rows as any[]).map((r: any) => r.BookingId));
@@ -72,8 +73,10 @@ const CrmRegistry: React.FC = () => {
       setDialogOpen(false);
       setBookingId("");
       qc.invalidateQueries({ queryKey: ["crm-registry"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -92,8 +95,10 @@ const CrmRegistry: React.FC = () => {
       setScheduleId(null);
       setScheduledDate("");
       qc.invalidateQueries({ queryKey: ["crm-registry"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -106,11 +111,13 @@ const CrmRegistry: React.FC = () => {
         body: JSON.stringify({ CompletedDate: completedDate }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Registry completed — RegistrationNo can now be recorded on the Sales Deed");
+      toast.success("Registry completed � RegistrationNo can now be recorded on the Sales Deed");
       setCompleteId(null);
       qc.invalidateQueries({ queryKey: ["crm-registry"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -121,18 +128,18 @@ const CrmRegistry: React.FC = () => {
       cell: (i) => (
         <div>
           <div className="font-medium">{i.row.original.ApplicantName}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} � {i.row.original.UnitNo}</div>
         </div>
       ) },
-    { accessorKey: "DeedNo", header: "Deed", size: 100, cell: (i) => <span className="text-xs">{i.getValue() as string || "—"}</span> },
+    { accessorKey: "DeedNo", header: "Deed", size: 100, cell: (i) => <span className="text-xs">{i.getValue() as string || "�"}</span> },
     { accessorKey: "ScheduledDate", header: "Scheduled", size: 100,
-      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.ScheduledDate ? String(i.row.original.ScheduledDate).slice(0, 10) : "—"}</span> },
+      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.ScheduledDate ? String(i.row.original.ScheduledDate).slice(0, 10) : "�"}</span> },
     { accessorKey: "Status", header: "Status", size: 100,
       cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
     { id: "actions", header: "Actions", size: 180, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
-        if (r.Status === "Completed") return <span className="text-xs text-muted-foreground">—</span>;
+        if (r.Status === "Completed") return <span className="text-xs text-muted-foreground">�</span>;
         return (
           <div className="flex items-center gap-2">
             {r.Status === "Pending" && (
@@ -140,23 +147,34 @@ const CrmRegistry: React.FC = () => {
                 <CalendarClock size={11} /> Schedule
               </button>
             )}
-            <button onClick={() => setCompleteId(r.Id)} className="flex items-center gap-1 text-xs text-green-700 hover:underline">
-              <CheckCircle2 size={11} /> Mark Completed
-            </button>
+            {r.Status === "Scheduled" && (
+              <button onClick={() => setCompleteId(r.Id)} className="flex items-center gap-1 text-xs text-green-700 hover:underline">
+                <CheckCircle2 size={11} /> Mark Completed
+              </button>
+            )}
           </div>
         );
       } },
   ];
 
   return (
-    <SalesAutoShell
-      title="CRM — Registry"
-      subtitle="Deed registration at the Sub-Registrar Office — gated on Query Payment being confirmed"
+    <CrmShell
+      title="CRM � Registry"
+      subtitle="Deed registration at the Sub-Registrar Office � gated on Query Payment being confirmed"
       action={
-        <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-          <Plus size={14} /> Start Registry
-        </button>
+        <div className="flex items-center gap-3">
+          {dataUpdatedAt > 0 && (
+            <button onClick={() => refetch()} disabled={isFetching}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
+              <RotateCcw size={12} className={isFetching ? "animate-spin" : ""} />
+              {isFetching ? "Refreshing�" : "Refresh"}
+            </button>
+          )}
+          <button onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            <Plus size={14} /> Start Registry
+          </button>
+        </div>
       }
     >
       <DataTable
@@ -176,7 +194,7 @@ const CrmRegistry: React.FC = () => {
               className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
               <option value="">Select booking</option>
               {startableBookings.map((b: any) => (
-                <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
+                <option key={b.Id} value={String(b.Id)}>{b.BookingNo} � {b.ApplicantName}</option>
               ))}
             </select>
             <p className="text-[11px] text-muted-foreground mt-1">Requires Query Payment to be Confirmed for this booking first.</p>
@@ -220,7 +238,7 @@ const CrmRegistry: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

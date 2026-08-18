@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from "react";
+﻿import React, { useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
@@ -71,7 +72,7 @@ const SaSiteVisits: React.FC = () => {
   const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"list" | "upcoming">("upcoming");
-  const { data: visits, isLoading, error } = useQuery({ queryKey: ["sa-site-visits"], queryFn: fetchVisits, staleTime: 2 * 60_000 });
+  const { data: visits, isLoading, error } = useQuery({ queryKey: ["sa-site-visits"], queryFn: fetchVisits, staleTime: 30_000 });
 
   const mappedData: RecordWithId[] = useMemo(() => {
     if (!Array.isArray(visits)) return [];
@@ -143,7 +144,8 @@ const SaSiteVisits: React.FC = () => {
   });
 
   return (
-    <SalesAutoShell title="Site Visitation" subtitle="Schedule and track customer site visits for interested leads">
+    <SalesAutoShell title="Site Visitation" subtitle="Schedule and track customer site visits for interested leads"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">

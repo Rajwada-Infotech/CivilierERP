@@ -347,6 +347,11 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
       if (!registry.recordset.length || registry.recordset[0].Status !== "Completed") {
         return res.status(400).json({ error: "Registration number can't be recorded until Registry is marked Completed (Query Payment must be Confirmed first)" });
       }
+      const dirCheck = await pool.request().input("id", sql.Int, id)
+        .query("SELECT DirectorApprovalStatus FROM dbo.CrmSalesDeed WHERE Id = @id");
+      if (dirCheck.recordset[0]?.DirectorApprovalStatus !== "Approved") {
+        return res.status(400).json({ error: "Director must approve the sales deed before the registration number can be recorded" });
+      }
     }
 
     const newStatus = deriveDeedStatus({

@@ -1,9 +1,11 @@
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus } from "lucide-react";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { Plus, AlertTriangle, RotateCcw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
@@ -20,7 +22,9 @@ const statusColor: Record<string, string> = {
   Disputed: "text-red-600 bg-red-50 border-red-200",
 };
 
-const EMPTY_FORM = { BookingId: "", OfferedDate: "", ResponseDeadline: "", DeliveryMode: "Email" };
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const deadlineISO = () => { const d = new Date(); d.setDate(d.getDate() + 15); return d.toISOString().slice(0, 10); };
+const EMPTY_FORM = { BookingId: "", OfferedDate: todayISO(), ResponseDeadline: deadlineISO(), DeliveryMode: "Email" };
 
 async function fetchAll(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
@@ -35,8 +39,12 @@ const CrmPossessionNotice: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
+  const [disputeDialog, setDisputeDialog] = useState<number | null>(null);
+  const [disputeReason, setDisputeReason] = useState("");
+  const [retractDialog, setRetractDialog] = useState<number | null>(null);
+  const [retractReason, setRetractReason] = useState("");
 
-  const { data: notices = [], isLoading } = useQuery({ queryKey: ["crm-possession-notice"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: notices = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-possession-notice"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
 
   const handleCreate = async () => {
@@ -54,8 +62,10 @@ const CrmPossessionNotice: React.FC = () => {
       setDialogOpen(false);
       setForm({ ...EMPTY_FORM });
       qc.invalidateQueries({ queryKey: ["crm-possession-notice"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -68,8 +78,9 @@ const CrmPossessionNotice: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
       toast.success("Notice marked Sent");
       qc.invalidateQueries({ queryKey: ["crm-possession-notice"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -81,26 +92,48 @@ const CrmPossessionNotice: React.FC = () => {
       toast.success("Notice marked Acknowledged");
       promptNextStep(navigate, "Possession notice acknowledged — handover can now be scheduled.", "/crm/handover", "Go to Handover");
       qc.invalidateQueries({ queryKey: ["crm-possession-notice"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
-  const handleMarkDisputed = async (id: number) => {
-    const reason = window.prompt("Reason for dispute:");
-    if (!reason) return;
+  const handleMarkDisputed = async () => {
+    if (!disputeDialog || !disputeReason.trim()) { toast.error("Dispute reason is required"); return; }
     try {
-      const res = await fetchWithAuth(`${API}/${id}/mark-disputed`, {
+      const res = await fetchWithAuth(`${API}/${disputeDialog}/mark-disputed`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ DisputeReason: reason }),
+        body: JSON.stringify({ DisputeReason: disputeReason.trim() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success("Notice marked Disputed");
+      setDisputeDialog(null);
+      setDisputeReason("");
       qc.invalidateQueries({ queryKey: ["crm-possession-notice"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
+    }
+  };
+
+  const handleRetractDispute = async () => {
+    if (!retractDialog || !retractReason.trim()) { toast.error("Retract reason is required"); return; }
+    try {
+      const res = await fetchWithAuth(`${API}/${retractDialog}/retract-dispute`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ RetractReason: retractReason.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Dispute retracted — notice returned to Draft. You can now re-send it.");
+      setRetractDialog(null);
+      setRetractReason("");
+      qc.invalidateQueries({ queryKey: ["crm-possession-notice"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
     }
   };
 
@@ -122,19 +155,25 @@ const CrmPossessionNotice: React.FC = () => {
       cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
     { accessorKey: "Status", header: "Status", size: 100,
       cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
-    { id: "actions", header: "Actions", size: 160, enableSorting: false,
+    { id: "actions", header: "Actions", size: 200, enableSorting: false,
       cell: (i) => {
         const n = i.row.original;
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {n.Status === "Draft" && (
               <button onClick={() => handleMarkSent(n.Id)} className="text-xs text-primary hover:underline">Mark Sent</button>
             )}
             {n.Status === "Sent" && (
               <>
                 <button onClick={() => handleMarkAcknowledged(n.Id)} className="text-xs text-primary hover:underline">Acknowledge</button>
-                <button onClick={() => handleMarkDisputed(n.Id)} className="text-xs text-red-600 hover:underline">Dispute</button>
+                <button onClick={() => { setDisputeDialog(n.Id); setDisputeReason(""); }} className="text-xs text-red-600 hover:underline">Dispute</button>
               </>
+            )}
+            {n.Status === "Disputed" && (
+              <button onClick={() => { setRetractDialog(n.Id); setRetractReason(""); }}
+                className="flex items-center gap-1 text-xs text-amber-700 hover:underline">
+                <RotateCcw size={11} /> Retract Dispute
+              </button>
             )}
           </div>
         );
@@ -142,23 +181,90 @@ const CrmPossessionNotice: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Possession Notice"
       subtitle="Formal notice issuance to buyers offering possession"
       action={
-        <button onClick={() => setDialogOpen(true)}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => setDialogOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> New Notice
         </button>
+        </div>
       }
     >
-      <DataTable
-        data={notices as any[]}
-        columns={noticeColumns}
-        loading={isLoading}
-        emptyMessage="No possession notices"
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
+      {!isLoading && (notices as any[]).length === 0 ? (
+        <div className="p-6 rounded-xl border border-dashed border-border bg-muted/20 space-y-2 text-center">
+          <div className="text-2xl">📋</div>
+          <p className="text-sm font-medium text-foreground">No possession notices yet</p>
+          <p className="text-xs text-muted-foreground leading-relaxed max-w-sm mx-auto">
+            A possession notice is issued once pre-possession inspection is cleared and the unit is ready to hand over.
+          </p>
+          <button onClick={() => setDialogOpen(true)} className="mt-1 text-xs text-primary hover:underline font-medium">
+            Issue First Notice →
+          </button>
+        </div>
+      ) : (
+        <DataTable
+          data={notices as any[]}
+          columns={noticeColumns}
+          loading={isLoading}
+          emptyMessage="No possession notices"
+          className="rounded-xl border border-border overflow-hidden bg-card"
+        />
+      )}
+
+      {/* Dispute reason dialog */}
+      <Dialog open={!!disputeDialog} onOpenChange={(o) => { if (!o) { setDisputeDialog(null); setDisputeReason(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <AlertTriangle size={16} className="text-red-500" /> Mark Notice Disputed
+            </DialogTitle>
+          </DialogHeader>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Dispute Reason *</label>
+            <textarea value={disputeReason} onChange={(e) => setDisputeReason(e.target.value)}
+              rows={3} placeholder="Describe the customer's objection or dispute..."
+              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <button onClick={() => { setDisputeDialog(null); setDisputeReason(""); }}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleMarkDisputed} disabled={!disputeReason.trim()}
+              className="px-4 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">
+              Mark Disputed
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Retract dispute dialog — Disputed → Draft */}
+      <Dialog open={!!retractDialog} onOpenChange={(o) => { if (!o) { setRetractDialog(null); setRetractReason(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <RotateCcw size={16} className="text-amber-600" /> Retract Dispute
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">This returns the notice to Draft so it can be revised and re-sent. Describe how the dispute was resolved.</p>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Resolution / Retract Reason *</label>
+            <textarea value={retractReason} onChange={(e) => setRetractReason(e.target.value)}
+              rows={3} placeholder="How was the customer's dispute resolved?"
+              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <button onClick={() => { setRetractDialog(null); setRetractReason(""); }}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleRetractDispute} disabled={!retractReason.trim()}
+              className="px-4 py-1.5 text-sm bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-40">
+              Retract &amp; Return to Draft
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="max-w-md">
@@ -203,7 +309,7 @@ const CrmPossessionNotice: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

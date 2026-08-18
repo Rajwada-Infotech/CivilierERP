@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Building2, Layers, Ruler, Car, CheckCircle2, Lock, ExternalLink, Pencil, X, ChevronDown, ChevronRight } from "lucide-react";
 import CrmProjectAutoSetupParking from "./CrmProjectAutoSetupParking";
@@ -305,7 +306,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSavingBlocks(false);
     }
@@ -334,7 +335,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSavingFloors(false);
     }
@@ -352,7 +353,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -373,7 +374,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setEditingBlockId(null);
     }
@@ -393,7 +394,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -407,7 +408,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -446,7 +447,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -493,7 +494,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSavingUnitId(null);
     }
@@ -523,7 +524,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       if (!res.ok) throw new Error(data.error || "Failed to save template");
       toast.success(`Template saved — ${data.total} units/floor`);
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSavingTemplateBlockId(null);
     }
@@ -539,7 +540,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setApplyingTemplateBlockId(null);
     }
@@ -563,14 +564,14 @@ const CrmProjectAutoSetup: React.FC = () => {
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setGenerating(false);
     }
   };
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Auto Project Setup"
       subtitle="Pick a Project, then generate its Blocks, Floors, and Units in one guided flow instead of one-row-at-a-time forms"
     >
@@ -1288,7 +1289,7 @@ const CrmProjectAutoSetup: React.FC = () => {
         </>
         )}
       </div>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

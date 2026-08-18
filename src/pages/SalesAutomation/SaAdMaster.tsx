@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import {
   MasterPage,
@@ -165,7 +166,7 @@ const CreativesDialog: React.FC<{ adId: string; adName: string; onClose: () => v
       toast.success("Creative(s) uploaded");
       qc.invalidateQueries({ queryKey: ["sa-ad-creatives", adId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setUploading(false);
     }
@@ -178,7 +179,7 @@ const CreativesDialog: React.FC<{ adId: string; adName: string; onClose: () => v
       toast.success("Creative removed");
       qc.invalidateQueries({ queryKey: ["sa-ad-creatives", adId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 

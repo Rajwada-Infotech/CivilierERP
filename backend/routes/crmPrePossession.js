@@ -75,6 +75,30 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
     const pool = getPool();
     const b = req.body;
     const id = parseInt(req.params.id);
+
+    // If DuesClearedCheck is being set to true, validate that no outstanding
+    // payment demands exist for this booking. Checking here (not at creation)
+    // because the pre-possession record is created once and then updated as
+    // checks are completed — the toggle must be validated at the moment it's set.
+    if (b.DuesClearedCheck === true || b.DuesClearedCheck === 1) {
+      const ppRow = await pool.request().input("id", sql.Int, id)
+        .query("SELECT BookingId FROM dbo.CrmPrePossession WHERE Id = @id");
+      if (ppRow.recordset.length) {
+        const bookingId = ppRow.recordset[0].BookingId;
+        const demands = await pool.request().input("bid", sql.Int, bookingId)
+          .query(`
+            SELECT COUNT(*) AS OutstandingCount
+            FROM dbo.CrmPaymentDemand
+            WHERE BookingId = @bid AND Status NOT IN ('Paid', 'Waived', 'Cancelled')
+          `);
+        if (demands.recordset[0].OutstandingCount > 0) {
+          return res.status(400).json({
+            error: `Cannot mark dues cleared — ${demands.recordset[0].OutstandingCount} outstanding payment demand(s) exist for this booking. Ensure all demands are paid or waived first.`,
+          });
+        }
+      }
+    }
+
     const result = await pool.request()
       .input("id",   sql.Int, id)
       .input("dues", sql.Bit, b.DuesClearedCheck ? 1 : (b.DuesClearedCheck === false ? 0 : null))
@@ -82,7 +106,6 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
       .input("qc",   sql.Bit, b.QualityInspectionCheck ? 1 : (b.QualityInspectionCheck === false ? 0 : null))
       .input("util", sql.Bit, b.UtilityReadinessCheck ? 1 : (b.UtilityReadinessCheck === false ? 0 : null))
       .input("icd",  sql.Date, b.InspectionCompletedDate || null)
-      .input("st",   sql.NVarChar(30), b.Status || null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub",   sql.Int, actorId(req))
       .query(`
@@ -92,10 +115,10 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
           QualityInspectionCheck = ISNULL(@qc, QualityInspectionCheck),
           UtilityReadinessCheck = ISNULL(@util, UtilityReadinessCheck),
           InspectionCompletedDate = ISNULL(@icd, InspectionCompletedDate),
-          Status = ISNULL(@st, CASE
+          Status = CASE
             WHEN ISNULL(@dues, DuesClearedCheck) = 1 AND ISNULL(@doc, DocumentationCheck) = 1
              AND ISNULL(@qc, QualityInspectionCheck) = 1 AND ISNULL(@util, UtilityReadinessCheck) = 1
-            THEN 'Ready' ELSE Status END),
+            THEN 'Ready' ELSE Status END,
           Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         OUTPUT INSERTED.Status
         WHERE Id = @id

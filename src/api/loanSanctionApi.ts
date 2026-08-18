@@ -138,6 +138,18 @@ export interface LoanPayment {
   CreatedBy?: string | null;
   CreatedAt: string;
   EmisCovered: number;
+  // The real dbo.NewPayment record this settlement was made through (see
+  // migration 340) — null for older rows recorded before this link existed.
+  NewPaymentId?: number | null;
+  PaymentMode?: string | null;
+  ChequeNo?: string | null;
+  ChequeDate?: string | null;
+  BankName?: string | null;
+  NeftNumber?: string | null;
+  UpiTransactionId?: string | null;
+  RtgsReference?: string | null;
+  ImpsReference?: string | null;
+  PaymentDocNo?: string | null;
 }
 
 export interface PayLoanPayload {
@@ -146,6 +158,10 @@ export interface PayLoanPayload {
   lateFee?: number | string;
   paymentDate: string;
   notes?: string;
+  // The dbo.NewPayment row Payment.tsx just created for this settlement —
+  // links the loan's own payment record back to the one that actually
+  // carries mode/cheque/bank details (see migration 340).
+  newPaymentId?: number;
 }
 
 export interface PayLoanResponse {

@@ -153,6 +153,7 @@ export default function BalanceEnquiry() {
   const { data: banks = [], isLoading: loadingBanks } = useQuery({
     queryKey: ["balance-enquiry-banks", selectedCompanyName],
     queryFn: () => getEnquiryBanks(selectedCompanyName || undefined),
+    staleTime: 5 * 60 * 1000,
   });
 
   // Auto-select the first bank whenever the filtered list changes and
@@ -417,8 +418,8 @@ export default function BalanceEnquiry() {
                   {transactions.map((t) => {
                     const meta = sourceMeta(t.SourceType);
                     const Icon = meta.icon;
-                    const isCredit = Number(t.DebitAmount) > 0; // Dr = money in for a bank (asset)
-                    const amount = isCredit ? Number(t.DebitAmount) : Number(t.CreditAmount);
+                    const isDebit = Number(t.DebitAmount) > 0; // Dr = money in for a bank (asset)
+                    const amount = isDebit ? Number(t.DebitAmount) : Number(t.CreditAmount);
                     const ref = docRefFor(t);
                     return (
                       <div key={t.EntryId} className="flex items-center gap-2.5 sm:gap-3 px-4 sm:px-5 py-3 hover:bg-muted/20 transition-colors">
@@ -437,8 +438,8 @@ export default function BalanceEnquiry() {
                           </p>
                         </div>
                         <div className="text-right shrink-0">
-                          <p className={`text-sm font-bold font-heading tabular-nums ${isCredit ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                            {isCredit ? "+" : "−"}{formatINR(amount)}
+                          <p className={`text-sm font-bold font-heading tabular-nums ${isDebit ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                            {isDebit ? "+" : "−"}{formatINR(amount)}
                           </p>
                           <p className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">
                             Bal {formatINR(t.RunningBalance)}

@@ -38,11 +38,9 @@ const ROLE_ALIASES = {
   "branch admin": "branch_manager",
   branch_manager: "branch_manager",
 
-  // finance
-  "finance manager": "finance_manager",
-  finance: "finance_manager",
-  finance_manager: "finance_manager",
-  accountant: "finance_manager",
+  // finance (general "finance" keyword → accounts_head, same bucket)
+  finance: "accounts_head",
+  finance_manager: "accounts_head",
 
   // material / store
   "store manager": "store_manager",

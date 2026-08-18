@@ -272,8 +272,8 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     // Same deal-value base the auto-engine uses (maybeAutoCreateBrokerage in
     // crmWorkflowGuards.js) — unit price + parking + extras, GST excluded.
     const bk = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
-      .query("SELECT TotalValue, ParkingTotal, ExtraChargesTotal FROM dbo.CrmBooking WHERE Id = @bid");
-    const dealValue = Number(bk.recordset[0]?.TotalValue || 0) + Number(bk.recordset[0]?.ParkingTotal || 0) + Number(bk.recordset[0]?.ExtraChargesTotal || 0);
+      .query("SELECT TotalValue, ParkingTotal FROM dbo.CrmBooking WHERE Id = @bid");
+    const dealValue = Number(bk.recordset[0]?.TotalValue || 0) + Number(bk.recordset[0]?.ParkingTotal || 0);
     const computedAmount = rateType === "Percentage" ? Math.round(dealValue * rateValue) / 100 : rateValue;
 
     const result = await pool.request()
@@ -312,7 +312,7 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
     const b = req.body;
     const cur = await pool.request().input("id", sql.Int, id).query(`
       SELECT br.Status, br.RateType, br.RateValue,
-             b.TotalValue, b.ParkingTotal, b.ExtraChargesTotal
+             b.TotalValue, b.ParkingTotal
       FROM dbo.CrmBrokerageMaster br
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
       WHERE br.Id = @id
@@ -339,7 +339,7 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
     // (see buildBrokerageTranches), so that branch always fell through to
     // TotalValue alone — silently under-basing a customized amount on any
     // booking with parking or extra charges.
-    const baseAmount = Number(row.TotalValue || 0) + Number(row.ParkingTotal || 0) + Number(row.ExtraChargesTotal || 0);
+    const baseAmount = Number(row.TotalValue || 0) + Number(row.ParkingTotal || 0);
     const computedAmount = b.ComputedAmount != null && b.ComputedAmount !== ""
       ? Math.round(Number(b.ComputedAmount) * 100) / 100
       : computeBrokerageAmount(rateType, rateValue, baseAmount);

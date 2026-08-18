@@ -28,11 +28,10 @@ async function ensureCapitalStructure(pool, entityType) {
 
   async function createGroup(name, code, parentId) {
     const res = await pool.request()
-      .input("name", sql.NVarChar(255), name)
-      .input("parentId", sql.Int, parentId)
+      .input("code", sql.NVarChar(50), code)
       .query(`
         SELECT AGId FROM dbo.AccountGroup 
-        WHERE Name = @name AND ParentGroupId = @parentId
+        WHERE Code = @code
       `);
     
     if (res.recordset.length > 0) {
@@ -44,9 +43,9 @@ async function ensureCapitalStructure(pool, entityType) {
       .input("code", sql.NVarChar(50), code)
       .input("parentId", sql.Int, parentId)
       .query(`
-        INSERT INTO dbo.AccountGroup (Name, Code, ParentGroupId, Status, CreatedAt)
+        INSERT INTO dbo.AccountGroup (Name, Code, ParentGroupId, Status, CreatedBy, CreatedAt)
         OUTPUT inserted.AGId
-        VALUES (@name, @code, @parentId, 1, GETDATE())
+        VALUES (@name, @code, @parentId, 1, 1, GETDATE())
       `);
     
     groupsCreated.push(name);
@@ -70,9 +69,9 @@ async function ensureCapitalStructure(pool, entityType) {
       .input("name", sql.NVarChar(255), name)
       .input("groupId", sql.Int, groupId)
       .query(`
-        INSERT INTO dbo.AccountHeadMaster (LHeadName, LHeadType, LBelongsTo, LHeadStatus)
+        INSERT INTO dbo.AccountHeadMaster (LHeadName, LHeadType, LBelongsTo, LHeadStatus, LHeadAddress, LHeadContactPerson, LHeadPhone, LHeadEmail, CreatedBy, CreatedAt)
         OUTPUT inserted.LHeadId
-        VALUES (@name, 'GL', @groupId, 1)
+        VALUES (@name, 'GL', @groupId, 1, '', '', NULL, NULL, 1, GETDATE())
       `);
     
     headsCreated.push(name);

@@ -178,7 +178,7 @@ router.put("/:id/mark-in-progress", requirePageRight("crm-service-tickets", "edi
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
-    if (cur.recordset[0].Status !== "Assigned") {
+    if (!["Assigned", "Reopened"].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot mark-in-progress from status '${cur.recordset[0].Status}'` });
     }
     if (!cur.recordset[0].AssignedTo) {
@@ -208,7 +208,7 @@ router.put("/:id/resolve", requirePageRight("crm-service-tickets", "edit"), asyn
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
-    if (!["Assigned", "InProgress"].includes(cur.recordset[0].Status)) {
+    if (!["Assigned", "InProgress", "Reopened"].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot resolve from status '${cur.recordset[0].Status}'` });
     }
 

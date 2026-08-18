@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { FileText, Download, CheckCircle2, Clock, AlertTriangle, Search, ExternalLink } from "lucide-react";
+import { FileText, Download, CheckCircle2, Clock, AlertTriangle, Search, RotateCcw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -91,11 +94,6 @@ function ReceiptPdfDialog({ receipt, onClose }: { receipt: ReceiptRow; onClose: 
         <div className="text-xs text-muted-foreground pt-1">
           {receipt.BookingNo} · {fmtMoney(receipt.Amount)} · <StatusPill status={receipt.Status} />
         </div>
-        {receipt.Status === "Pending" && (
-          <p className="text-[11px] text-muted-foreground">
-            Approve or bounce this from Finance's Received Payment queue — this receipt mirrors that payment's own status, it has no separate approval.
-          </p>
-        )}
         {receipt.Status === "Bounced" && receipt.BouncedReason && (
           <p className="text-[11px] text-red-600 dark:text-red-400">Bounce reason: {receipt.BouncedReason}</p>
         )}
@@ -110,10 +108,12 @@ const CrmMoneyReceipts: React.FC = () => {
 
   const [search, setSearch] = useState("");
   const [previewReceipt, setPreviewReceipt] = useState<ReceiptRow | null>(null);
+  const qc = useQueryClient();
 
-  const { data: rows = [], isLoading } = useQuery({
+  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-money-receipts", bookingIdParam],
     queryFn: () => fetchReceipts(bookingIdParam),
+    staleTime: 30_000,
   });
 
   const filtered = useMemo(() => {
@@ -122,6 +122,24 @@ const CrmMoneyReceipts: React.FC = () => {
     return rows.filter((r) =>
       r.ReceiptNo.toLowerCase().includes(q) || r.BookingNo.toLowerCase().includes(q) || r.ApplicantName?.toLowerCase().includes(q));
   }, [rows, search]);
+
+  async function handleResubmit(row: ReceiptRow) {
+    try {
+      const res = await fetchWithAuth(`${API}/${row.Id}/resubmit`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Resubmit failed" }));
+        toast.error(err.error || "Resubmit failed");
+        return;
+      }
+      toast.success(`${row.ReceiptNo} resubmitted for approval`);
+      qc.invalidateQueries({ queryKey: ["crm-money-receipts"] });
+    } catch {
+      toast.error("Network error — could not resubmit receipt");
+    }
+  }
 
   const columns: ColumnDef<ReceiptRow, unknown>[] = [
     { accessorKey: "ReceiptNo", header: "Receipt No.", size: 130,
@@ -154,11 +172,11 @@ const CrmMoneyReceipts: React.FC = () => {
               className="flex items-center gap-1 px-2 py-1 text-xs border border-border rounded-md hover:bg-muted">
               <FileText className="w-3 h-3" /> PDF
             </button>
-            {row.Status === "Pending" && (
-              <a href="/received-payments"
-                className="flex items-center gap-1 px-2 py-1 text-xs border border-border rounded-md hover:bg-muted">
-                <ExternalLink className="w-3 h-3" /> Approve/Bounce
-              </a>
+            {row.Status === "Bounced" && !row.ReceivedPaymentId && (
+              <button onClick={() => handleResubmit(row)}
+                className="flex items-center gap-1 px-2 py-1 text-xs border border-amber-300 text-amber-700 rounded-md hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950/30">
+                <RotateCcw className="w-3 h-3" /> Resubmit
+              </button>
             )}
           </div>
         );
@@ -166,13 +184,11 @@ const CrmMoneyReceipts: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Money Receipts"
-      subtitle="Auto-generated the moment a Booking Amount payment is submitted for approval — one receipt per real payment, no separate entry"
+      subtitle="Created once Data Review is complete and the Booking has been submitted for approval — one receipt per Booking Amount"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
     >
-      <p className="text-xs text-muted-foreground -mt-2">
-        A Money Receipt has no approval of its own — approve or bounce it from Finance's Received Payment queue, the same action that approves the payment it documents.
-      </p>
       <div className="flex gap-3 flex-wrap items-center">
         <div className="relative flex-1 min-w-48">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -187,12 +203,12 @@ const CrmMoneyReceipts: React.FC = () => {
         columns={columns}
         searchable={false}
         loading={isLoading}
-        emptyMessage="No money receipts yet — one is generated automatically the first time a Booking Amount payment is submitted for approval on a Booking."
+        emptyMessage="No money receipts yet — one becomes available once a Booking's Data Review checklist is complete and it's been submitted for approval."
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
 
       {previewReceipt && <ReceiptPdfDialog receipt={previewReceipt} onClose={() => setPreviewReceipt(null)} />}
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

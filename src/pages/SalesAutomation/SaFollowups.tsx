@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Phone, MapPin, Clock, AlertTriangle } from "lucide-react";
@@ -111,7 +113,7 @@ const SaFollowups: React.FC = () => {
       setLogForm({ ...EMPTY_LOG_FORM });
       invalidateAll();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -129,7 +131,7 @@ const SaFollowups: React.FC = () => {
       toast.success(`Marked as ${classification}`);
       invalidateAll();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -156,14 +158,15 @@ const SaFollowups: React.FC = () => {
       invalidateAll();
       setSelectedLeadId(null);
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSchedulingVisit(false);
     }
   };
 
   return (
-    <SalesAutoShell title="Follow-Up" subtitle="Leads due for their next touch — reminders, interest, and the next step onward to a site visit">
+    <SalesAutoShell title="Follow-Up" subtitle="Leads due for their next touch — reminders, interest, and the next step onward to a site visit"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       <div className="flex gap-4 h-[calc(100vh-200px)]">
         <div className="w-80 shrink-0 flex flex-col gap-2">
           <div className="text-xs text-muted-foreground px-1">{queue.length} lead(s) need attention</div>

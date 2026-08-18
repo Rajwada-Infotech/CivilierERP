@@ -2,6 +2,8 @@ import React, { useState, useMemo, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -144,6 +146,21 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
   const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
   const handleSave = async () => {
+    if (form.Mobile?.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
+      toast.error("Mobile must be exactly 10 digits"); return;
+    }
+    if (form.PanNo?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
+      toast.error("PAN must be in format ABCDE1234F"); return;
+    }
+    if (form.AadhaarNo?.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
+      toast.error("Aadhaar must be exactly 12 digits"); return;
+    }
+    if (form.Email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.Email.trim())) {
+      toast.error("Please enter a valid email address"); return;
+    }
+    if (form.PermanentPincode?.trim() && !/^\d{6}$/.test(form.PermanentPincode.trim())) {
+      toast.error("Pincode must be exactly 6 digits"); return;
+    }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${customer.Id}`, {
@@ -158,7 +175,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
       onSaved();
       onClose();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -308,7 +325,7 @@ const CrmCustomers: React.FC = () => {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
 
-  const { data: customers = [], isLoading } = useQuery({
+  const { data: customers = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-customers", search],
     queryFn: () => fetchCustomers(search),
     staleTime: 30_000,
@@ -379,6 +396,24 @@ const CrmCustomers: React.FC = () => {
       toast.error("Customer Name, Mobile, PAN and Permanent Address are required");
       return;
     }
+    if (!/^\d{10}$/.test(form.Mobile.trim())) {
+      toast.error("Mobile must be exactly 10 digits"); return;
+    }
+    if (form.AltMobile.trim() && !/^\d{10}$/.test(form.AltMobile.trim())) {
+      toast.error("Alternate mobile must be exactly 10 digits"); return;
+    }
+    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
+      toast.error("PAN must be in format ABCDE1234F"); return;
+    }
+    if (form.AadhaarNo.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
+      toast.error("Aadhaar must be exactly 12 digits"); return;
+    }
+    if (form.Email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.Email.trim())) {
+      toast.error("Please enter a valid email address"); return;
+    }
+    if (form.PermanentPincode.trim() && !/^\d{6}$/.test(form.PermanentPincode.trim())) {
+      toast.error("Pincode must be exactly 6 digits"); return;
+    }
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -393,7 +428,7 @@ const CrmCustomers: React.FC = () => {
       setForm({ ...EMPTY_FORM });
       qc.invalidateQueries({ queryKey: ["crm-customers"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -470,6 +505,7 @@ const CrmCustomers: React.FC = () => {
       subtitle="The master identity record every Application is built on — name, KYC, address, co-applicant"
       action={
         <div className="flex items-center gap-2">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           <button onClick={() => navigate("/masters/customers")}
             title="Every CRM customer auto-creates/syncs a matching ledger head here for Finance/GL"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">

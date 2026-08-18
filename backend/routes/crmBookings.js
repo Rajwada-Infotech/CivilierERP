@@ -12,6 +12,7 @@ const { guardAndConvertHold } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
 const { generateInvoicePdf, getInvoicePdfBuffer } = require("../services/invoicePdf");
+const { normalizeRole } = require("../middleware/role");
 const { recalculateBookingGst } = require("../services/crmGst");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
@@ -62,8 +63,6 @@ const BOOKING_SELECT = `
     b.PaymentMode, b.AssignedTo, b.Status, b.Notes, b.IsActive,
     b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
     b.UnitParkingGstRate, b.UnitGstAmount, b.ParkingGstAmount, b.UnitParkingGstAmount, b.ExtraWorkGstAmount, b.TotalGstAmount,
-    b.UnitReviewConfirmed, b.UnitReviewConfirmedBy, b.UnitReviewConfirmedAt,
-    b.PlanReviewConfirmed, b.PlanReviewConfirmedBy, b.PlanReviewConfirmedAt,
     b.ReadyForApprovalAt, b.WorkflowStage, b.StageRemarks, b.RejectedFromStage,
     b.RejectedBy, b.RejectedAt, b.MarketingHeadApprovedAt, b.MarketingHeadApprovedBy,
     b.DirectorApprovedAt, b.DirectorApprovedBy, b.ConfirmedAt, b.ConfirmedBy,
@@ -94,7 +93,11 @@ const BOOKING_SELECT = `
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.Occupation, ''))), '') IS NOT NULL
     ) THEN 1 ELSE 0 END AS BIT) AS BankDetailsComplete,
     ag.Id AS AgreementId, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus,
-    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.Status = 'Pending') AS PendingMilestoneCount
+    ag.AgreementDate, ag.DateApprovalStatus, ag.Status AS AgreementStatus,
+    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.Status = 'Pending') AS PendingMilestoneCount,
+    (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalCleared,
+    (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS ApprovedOnAccount,
+    (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmMoneyReceipt WHERE BookingId = b.Id AND Status IN ('Pending','Approved')) AS MRReceivedTotal
   FROM dbo.CrmBooking b
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
@@ -226,9 +229,20 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const actor = actorId(req);
 
     const old = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, AssignedTo, AreaSqFt, PaymentPlanId, CompanyId, ProjectId, UnitId, TotalValue, BookingAmount FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Status, WorkflowStage, ReadyForApprovalAt, AssignedTo, AreaSqFt, PaymentPlanId, CompanyId, ProjectId, UnitId, TotalValue, BookingAmount FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
     if (!old.recordset.length) return res.status(404).json({ error: "Booking not found" });
     const oldRow = old.recordset[0];
+
+    // Block financial field edits once the booking has entered the approval pipeline.
+    // The approver must see exactly the figures they approved — silent mid-approval changes
+    // would mean the approval is for different numbers than what was submitted.
+    const APPROVAL_STAGES = ["MarketingHeadApproval", "DirectorApproval", "Confirmed"];
+    const inApproval = APPROVAL_STAGES.includes(oldRow.WorkflowStage) || oldRow.ReadyForApprovalAt != null;
+    const financialFields = ["RatePerSqFt", "TotalValue", "BookingAmount", "PaymentPlanId"];
+    if (inApproval && financialFields.some(f => b[f] !== undefined)) {
+      return res.status(400).json({ error: `Financial fields (rate, value, booking amount, payment plan) cannot be changed once the booking is in ${oldRow.WorkflowStage || "the approval pipeline"}. Reject it back to Review first.` });
+    }
+
     const existingArea = oldRow.AreaSqFt;
 
     const total = b.TotalValue != null ? parseFloat(b.TotalValue)
@@ -984,7 +998,7 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       `);
       const oaRow = oa.recordset[0];
       if (!oaRow) return res.status(404).json({ error: "On-account payment not found on this booking" });
-      const already = await pool.request().input("oid", sql.Int, onAccountPaymentId).query("SELECT Id FROM dbo.CrmInvoice WHERE OnAccountPaymentId = @oid");
+      const already = await pool.request().input("oid", sql.Int, onAccountPaymentId).query("SELECT Id FROM dbo.CrmInvoice WHERE OnAccountPaymentId = @oid AND Status <> 'Void'");
       if (already.recordset.length) return res.status(400).json({ error: `On-account payment "${oaRow.ReceiptNo}" already has an invoice` });
       amount = Number(oaRow.Amount);
       invoiceDate = oaRow.ReceivedDate;
@@ -1004,7 +1018,7 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       if (mRow.DemandStatus === "Pending") {
         return res.status(400).json({ error: `A demand must be raised for "${mRow.MilestoneName}" (from the Demands page) before its invoice can be generated` });
       }
-      const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid");
+      const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid AND Status <> 'Void'");
       if (already.recordset.length) return res.status(400).json({ error: `"${mRow.MilestoneName}" already has an invoice` });
       amount = Number(mRow.AmountPaid);
       invoiceDate = mRow.PaidDate;
@@ -1035,7 +1049,7 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
         .input("mo", sql.Int, periodMonth)
         .query(`
           SELECT TOP 1 Id, InvoiceNo FROM dbo.CrmInvoice
-          WHERE BookingId = @bid AND InvoiceType = @type
+          WHERE BookingId = @bid AND InvoiceType = @type AND Status <> 'Void'
             AND YEAR(InvoiceDate) = @yr AND MONTH(InvoiceDate) = @mo
         `);
       if (dup.recordset.length) {
@@ -1140,6 +1154,56 @@ router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "vie
   }
 });
 
+// Invoices are otherwise write-once (no UPDATE/DELETE route exists) — Void
+// is the one, audited correction path: it never deletes the row (InvoiceNo
+// stays on record for audit trail, matching this app's no-hard-delete
+// convention elsewhere in CRM), but it does free the invoice's MilestoneId /
+// OnAccountPaymentId / BillingPeriod slot (migration 325's re-scoped unique
+// indexes + the Status <> 'Void' guards above) so a corrected invoice can be
+// generated in its place. Gated tighter than plain "crm-bookings edit" —
+// same approver set as Money Receipt approval (crmMoneyReceiptWorkflow.js's
+// APPROVER_ROLES) since this is a financial-document correction, not routine
+// booking editing.
+const INVOICE_VOID_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
+router.put("/:id/invoices/:invoiceId/void", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  try {
+    if (!INVOICE_VOID_ROLES.includes(normalizeRole(req.user?.role))) {
+      return res.status(403).json({ error: "Only Finance / Accounts Head can void an invoice" });
+    }
+    const pool = getPool();
+    const bookingId = parseInt(req.params.id);
+    const invoiceId = parseInt(req.params.invoiceId);
+    const reason = String(req.body?.reason || req.body?.Reason || "").trim();
+    if (!reason) return res.status(400).json({ error: "A reason is required to void an invoice" });
+
+    const cur = await pool.request().input("iid", sql.Int, invoiceId).input("bid", sql.Int, bookingId).query(`
+      SELECT Id, InvoiceNo, Status FROM dbo.CrmInvoice WHERE Id = @iid AND BookingId = @bid
+    `);
+    const row = cur.recordset[0];
+    if (!row) return res.status(404).json({ error: "Invoice not found" });
+    if (row.Status === "Void") return res.status(400).json({ error: `"${row.InvoiceNo}" is already void` });
+
+    await pool.request()
+      .input("iid", sql.Int, invoiceId)
+      .input("by", sql.Int, actorId(req))
+      .input("reason", sql.NVarChar(500), reason)
+      .query(`
+        UPDATE dbo.CrmInvoice SET
+          Status = 'Void', VoidedBy = @by, VoidedAt = SYSDATETIME(), VoidReason = @reason
+        WHERE Id = @iid
+      `);
+    await logCrmAudit(pool, "CrmInvoice", invoiceId, actorId(req), [
+      { field: "Status", oldVal: row.Status, newVal: "Void" },
+      { field: "VoidReason", oldVal: null, newVal: reason },
+    ]);
+
+    res.json({ success: true, InvoiceNo: row.InvoiceNo });
+  } catch (e) {
+    console.error("[crm-bookings] PUT /:id/invoices/:invoiceId/void error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /:id/resync-schedule — retroactive fix for bookings whose payment
 // schedule was generated before Milestone #1 tracked the booking's real
 // BookingAmount (it used to be sized off the payment plan's own fixed %,
@@ -1240,7 +1304,7 @@ router.post("/:id/attachments", requirePageRight("crm-bookings", "edit"), upload
     if (!files.length) return res.status(400).json({ error: "No files uploaded" });
 
     const statusCheck = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
-    if (statusCheck.recordset[0]?.Status === "Approved") return res.status(400).json({ error: "This Booking is Approved — attachments can no longer be added." });
+    if (["Cancelled","Rejected"].includes(statusCheck.recordset[0]?.Status)) return res.status(400).json({ error: "Attachments cannot be added to a cancelled or rejected booking." });
 
     const inserted = [];
     for (const file of files) {
@@ -1292,7 +1356,7 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
     const bookingId = parseInt(req.params.id);
     const attId = parseInt(req.params.attId);
     const statusCheck = await pool.request().input("id", sql.Int, bookingId).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
-    if (statusCheck.recordset[0]?.Status === "Approved") return res.status(400).json({ error: "This Booking is Approved — attachments can no longer be removed." });
+    if (["Cancelled","Rejected"].includes(statusCheck.recordset[0]?.Status)) return res.status(400).json({ error: "Attachments cannot be removed from a cancelled or rejected booking." });
 
     const result = await pool.request().input("id", sql.Int, attId).input("bid", sql.Int, bookingId)
       .query("SELECT Id FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
@@ -1301,6 +1365,344 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-bookings] DELETE /:id/attachments/:attId error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/portal-status — staff-facing: shows whether the customer portal
+// account has been provisioned for this booking's customer. Includes masked
+// mobile (initial password hint) so support staff can help a customer who
+// forgot their first-login credential. Only meaningful once the booking is
+// Confirmed, but readable at any stage.
+router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+
+    // Query 1: booking + customer — always safe (no portal table join)
+    const bkgResult = await pool.request().input("bid", sql.Int, id).query(`
+      SELECT
+        b.Status        AS BookingStatus,
+        b.WorkflowStage,
+        b.ConfirmedAt,
+        b.ApplicationId,
+        a.CustomerId,
+        c.CustomerName,
+        c.Email         AS CustomerEmail,
+        c.Mobile        AS CustomerMobile
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
+      WHERE b.Id = @bid AND b.IsActive = 1
+    `);
+    if (!bkgResult.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    const bkgRow = bkgResult.recordset[0];
+
+    // Query 2: portal user lookup — may fail if migration 254 not yet applied;
+    // degrade gracefully so the frontend still gets the booking stage.
+    let portalRow = null;
+    try {
+      // Try CustomerId-keyed lookup (post-migration-254 schema)
+      let pResult = null;
+      if (bkgRow.CustomerId) {
+        pResult = await pool.request().input("cid", sql.Int, bkgRow.CustomerId).query(`
+          SELECT Id, Email, IsActive, MustChangePassword, CreatedAt
+          FROM dbo.CrmCustomerPortalUser
+          WHERE CustomerId = @cid
+        `);
+      }
+      // Fall back to ApplicationId-keyed lookup (pre-migration-254 rows)
+      if ((!pResult || !pResult.recordset.length) && bkgRow.ApplicationId) {
+        pResult = await pool.request().input("aid", sql.Int, bkgRow.ApplicationId).query(`
+          SELECT Id, Email, IsActive, MustChangePassword, CreatedAt
+          FROM dbo.CrmCustomerPortalUser
+          WHERE ApplicationId = @aid
+        `);
+      }
+      if (pResult && pResult.recordset.length) portalRow = pResult.recordset[0];
+    } catch (pe) {
+      // Column missing (migration not run) or other transient issue — log and continue
+      console.warn("[crm-bookings] portal user lookup failed (non-fatal):", pe.message);
+    }
+
+    const mob = bkgRow.CustomerMobile;
+    res.json({
+      hasPortal: !!portalRow,
+      portalUserId: portalRow ? portalRow.Id : null,
+      email: portalRow ? portalRow.Email : (bkgRow.CustomerEmail || null),
+      maskedMobile: mob || null,
+      isActive: portalRow ? !!portalRow.IsActive : false,
+      mustChangePassword: portalRow ? !!portalRow.MustChangePassword : false,
+      portalCreatedAt: portalRow ? portalRow.CreatedAt : null,
+      customerName: bkgRow.CustomerName || null,
+      bookingStatus: bkgRow.BookingStatus,
+      workflowStage: bkgRow.WorkflowStage,
+      confirmedAt: bkgRow.ConfirmedAt || null,
+    });
+  } catch (e) {
+    console.error("[crm-bookings] GET /:id/portal-status error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/provision-portal — idempotent recovery route. The portal is
+// normally auto-provisioned at booking confirmation, but if that failed
+// (e.g. customer had no email on file at that moment and it was added later),
+// staff can trigger it here without re-running the full approval flow.
+router.post("/:id/provision-portal", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const bkg = await pool.request().input("bid", sql.Int, id)
+      .query("SELECT ApplicationId, WorkflowStage FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
+    if (!bkg.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    const { ApplicationId, WorkflowStage } = bkg.recordset[0];
+    if (WorkflowStage !== "Confirmed") {
+      return res.status(400).json({ error: "Portal can only be provisioned once the booking is fully confirmed" });
+    }
+    const { ensurePortalUser } = require("../services/crmPortalProvision");
+    const result = await ensurePortalUser(pool, ApplicationId);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    console.error("[crm-bookings] POST /:id/provision-portal error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Helper shared by deactivate + reactivate below
+async function setBookingPortalActive(pool, bookingId, isActive) {
+  // Look up portal user via booking → application → customer (CustomerId-keyed first, then ApplicationId fallback)
+  const bkg = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT b.ApplicationId, a.CustomerId FROM dbo.CrmBooking b
+    JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+    WHERE b.Id = @bid AND b.IsActive = 1
+  `);
+  if (!bkg.recordset.length) return { error: "Booking not found", status: 404 };
+  const { ApplicationId, CustomerId } = bkg.recordset[0];
+
+  let portalUserId = null;
+  if (CustomerId) {
+    try {
+      const r = await pool.request().input("cid", sql.Int, CustomerId)
+        .query("SELECT Id FROM dbo.CrmCustomerPortalUser WHERE CustomerId = @cid");
+      if (r.recordset.length) portalUserId = r.recordset[0].Id;
+    } catch (_) {}
+  }
+  if (!portalUserId && ApplicationId) {
+    try {
+      const r = await pool.request().input("aid", sql.Int, ApplicationId)
+        .query("SELECT Id FROM dbo.CrmCustomerPortalUser WHERE ApplicationId = @aid");
+      if (r.recordset.length) portalUserId = r.recordset[0].Id;
+    } catch (_) {}
+  }
+  if (!portalUserId) return { error: "No portal account exists for this customer yet", status: 404 };
+  await pool.request().input("id", sql.Int, portalUserId).input("act", sql.Bit, isActive ? 1 : 0)
+    .query("UPDATE dbo.CrmCustomerPortalUser SET IsActive = @act WHERE Id = @id");
+  return { ok: true };
+}
+
+router.put("/:id/portal/deactivate", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const result = await setBookingPortalActive(getPool(), id, false);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-bookings] portal deactivate error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put("/:id/portal/reactivate", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const result = await setBookingPortalActive(getPool(), id, true);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-bookings] portal reactivate error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/lifecycle — structured step-by-step lifecycle state for one booking.
+// Powers the BookingLifecycleBar component in CrmBookingDetail.
+router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: "Invalid booking id" });
+  try {
+    const pool = getPool();
+
+    const [bkRes, wcRes, agRes, lmRes, sdRes, qpRes, regRes, nocRes, ppRes, pnRes, hoRes] = await Promise.all([
+      // booking itself
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT Id, BookingNo, Status, BookingDate, ApplicationId FROM dbo.CrmBooking WHERE Id = @id"),
+      // welcome call — any 'Welcomed' outcome
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 CallDate, Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = @id AND Outcome = 'Welcomed' ORDER BY CallDate DESC"),
+      // agreement
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, AgreementDate, CreatedAt FROM dbo.CrmAgreement WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // legal milestones
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, CurrentStep, OverallStatus, CreatedAt FROM dbo.CrmLegalMilestone WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // sales deed
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, CustomerApprovalStatus, DirectorApprovalStatus, RegistrationNo, CreatedAt FROM dbo.CrmSalesDeed WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // query payment
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, CreatedAt FROM dbo.CrmQueryPayment WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // registry
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, AppointmentDate, CreatedAt FROM dbo.CrmRegistry WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // NOC
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, NocType, CreatedAt FROM dbo.CrmNoc WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // pre-possession
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, CreatedAt FROM dbo.CrmPrePossession WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // possession notice
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, OfferedDate, CreatedAt FROM dbo.CrmPossessionNotice WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // handover
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, ActualHandoverDate, CreatedAt FROM dbo.CrmHandover WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+    ]);
+
+    if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
+
+    const bk  = bkRes.recordset[0];
+    const wc  = wcRes.recordset[0];
+    const ag  = agRes.recordset[0];
+    const lm  = lmRes.recordset[0];
+    const sd  = sdRes.recordset[0];
+    const qp  = qpRes.recordset[0];
+    const reg = regRes.recordset[0];
+    const noc = nocRes.recordset[0];
+    const pp  = ppRes.recordset[0];
+    const pn  = pnRes.recordset[0];
+    const ho  = hoRes.recordset[0];
+
+    const agDone  = ag  && ["Executed","Registered"].includes(ag.Status);
+    const sdDone  = sd  && sd.CustomerApprovalStatus === "Approved";
+    const qpDone  = qp  && qp.Status === "Confirmed";
+    const ppDone  = pp  && pp.Status === "Ready";
+    const pnDone  = pn  && pn.Status === "Acknowledged";
+    const hoDone  = ho  && ho.Status === "Completed";
+
+    const d = (v) => v ? String(v).slice(0, 10) : null;
+
+    const steps = [
+      {
+        key: "application",
+        label: "Application",
+        status: "done",
+        date: d(bk.BookingDate),
+        link: bk.ApplicationId ? `/crm/applications` : null,
+        blockedBy: null,
+      },
+      {
+        key: "booking",
+        label: "Booking",
+        status: "done",
+        date: d(bk.BookingDate),
+        link: "/crm/booking",
+        blockedBy: null,
+      },
+      {
+        key: "welcome_call",
+        label: "Welcome Call",
+        status: wc ? "done" : "active",
+        date: wc ? d(wc.CallDate) : null,
+        link: "/crm/welcome-call",
+        blockedBy: null,
+      },
+      {
+        key: "agreement",
+        label: "Agreement",
+        status: agDone ? "done" : ag ? "active" : "active",
+        date: agDone ? d(ag.AgreementDate || ag.CreatedAt) : ag ? d(ag.CreatedAt) : null,
+        link: "/crm/agreements",
+        blockedBy: null,
+      },
+      {
+        key: "legal_milestones",
+        label: "Legal Milestones",
+        status: lm && lm.OverallStatus === "Cleared" ? "done"
+               : lm ? "active"
+               : agDone ? "active"
+               : "locked",
+        date: lm ? d(lm.CreatedAt) : null,
+        link: "/crm/legal-milestones",
+        blockedBy: agDone ? null : "Agreement must be Executed first",
+      },
+      {
+        key: "sales_deed",
+        label: "Sales Deed",
+        status: sdDone ? "done" : sd ? "active" : agDone ? "active" : "locked",
+        date: sd ? d(sd.CreatedAt) : null,
+        link: "/crm/sales-deed",
+        blockedBy: agDone ? null : "Agreement must be Executed first",
+      },
+      {
+        key: "noc",
+        label: "NOC",
+        status: noc && noc.Status === "Issued" ? "done"
+               : noc ? "active"
+               : agDone ? "active"
+               : "locked",
+        date: noc ? d(noc.CreatedAt) : null,
+        link: "/crm/noc",
+        blockedBy: agDone ? null : "Agreement must be Executed first",
+      },
+      {
+        key: "query_payment",
+        label: "Query Payment",
+        status: qpDone ? "done" : qp ? "active" : sd ? "active" : "locked",
+        date: qp ? d(qp.CreatedAt) : null,
+        link: "/crm/query-payment",
+        blockedBy: sd ? null : "Sales Deed must be created first",
+      },
+      {
+        key: "registry",
+        label: "Registry",
+        status: reg && reg.Status === "Completed" ? "done"
+               : reg ? "active"
+               : qpDone ? "active"
+               : "locked",
+        date: reg ? d(reg.AppointmentDate || reg.CreatedAt) : null,
+        link: "/crm/registry",
+        blockedBy: qpDone ? null : "Query Payment must be Confirmed first",
+      },
+      {
+        key: "pre_possession",
+        label: "Pre-Possession",
+        status: ppDone ? "done" : pp ? "active" : sdDone ? "active" : "locked",
+        date: pp ? d(pp.CreatedAt) : null,
+        link: "/crm/pre-possession",
+        blockedBy: sdDone ? null : "Customer must approve the Sales Deed first",
+      },
+      {
+        key: "possession_notice",
+        label: "Possession Notice",
+        status: pnDone ? "done" : pn ? "active" : ppDone ? "active" : "locked",
+        date: pn ? d(pn.OfferedDate || pn.CreatedAt) : null,
+        link: "/crm/possession-notice",
+        blockedBy: ppDone ? null : "Pre-Possession inspection must be Ready first",
+      },
+      {
+        key: "handover",
+        label: "Handover",
+        status: hoDone ? "done" : ho ? "active" : pnDone ? "active" : "locked",
+        date: ho ? d(ho.ActualHandoverDate || ho.CreatedAt) : null,
+        link: "/crm/handover",
+        blockedBy: pnDone ? null : "Possession Notice must be Acknowledged first",
+      },
+    ];
+
+    res.json({ BookingId: id, BookingNo: bk.BookingNo, steps });
+  } catch (e) {
+    console.error("[crm-bookings] lifecycle error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

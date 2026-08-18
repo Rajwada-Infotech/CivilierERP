@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, ChevronDown, ChevronRight, Play, ToggleLeft, ToggleRight } from "lucide-react";
@@ -57,7 +59,7 @@ const SaDistributionRules: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [runningLevel, setRunningLevel] = useState<number | null>(null);
 
-  const { data: rules = [], isLoading } = useQuery({ queryKey: ["sa-distribution-rules"], queryFn: fetchRules, staleTime: 30_000 });
+  const { data: rules = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-distribution-rules"], queryFn: fetchRules, staleTime: 30_000 });
   const { data: userOptions = [] } = useQuery({ queryKey: ["sa-user-options"], queryFn: fetchUserOptions, staleTime: 5 * 60_000 });
   const { data: campaignOptions = [] } = useQuery({ queryKey: ["sa-campaign-options"], queryFn: fetchCampaignOptions, staleTime: 5 * 60_000 });
 
@@ -75,7 +77,7 @@ const SaDistributionRules: React.FC = () => {
       if (!r.ok) throw new Error((await r.json()).error);
       toast.success(rule.IsActive ? "Rule deactivated" : "Rule activated");
       await invalidate();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: any) { toast.error(translateError(e.message)); }
   };
 
   const handleDelete = async (id: number) => {
@@ -85,7 +87,7 @@ const SaDistributionRules: React.FC = () => {
       if (!r.ok) throw new Error((await r.json()).error);
       toast.success("Rule deactivated");
       await invalidate();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: any) { toast.error(translateError(e.message)); }
   };
 
   const handleRunNow = async (level: number) => {
@@ -96,7 +98,7 @@ const SaDistributionRules: React.FC = () => {
       if (!r.ok) throw new Error(data.error);
       toast.success(data.message);
       await qc.invalidateQueries({ queryKey: ["sa-leads"] });
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setRunningLevel(null); }
   };
 
@@ -129,7 +131,7 @@ const SaDistributionRules: React.FC = () => {
       setForm({ ...EMPTY_FORM });
       setMembers([{ UserId: "", Weight: "1" }]);
       await invalidate();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setSaving(false); }
   };
 
@@ -216,7 +218,8 @@ const SaDistributionRules: React.FC = () => {
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading distribution rules...</div>;
 
   return (
-    <SalesAutoShell title="Distribution Rules" subtitle="Configure how leads are automatically assigned to team leads and salespersons">
+    <SalesAutoShell title="Distribution Rules" subtitle="Configure how leads are automatically assigned to team leads and salespersons"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4">
           {canManage && (

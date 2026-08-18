@@ -1,12 +1,14 @@
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, CheckSquare, Square } from "lucide-react";
+import { Plus, CheckSquare, Square, ClipboardCheck, ArrowRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 
 const API = "/api/crm/pre-possession";
 const BKG_API = "/api/crm/bookings";
@@ -39,7 +41,7 @@ const CrmPrePossession: React.FC = () => {
   const [bookingId, setBookingId] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const { data: checks = [], isLoading } = useQuery({ queryKey: ["crm-pre-possession"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: checks = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-pre-possession"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
 
   const handleCreate = async () => {
@@ -57,8 +59,10 @@ const CrmPrePossession: React.FC = () => {
       setDialogOpen(false);
       setBookingId("");
       qc.invalidateQueries({ queryKey: ["crm-pre-possession"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -76,27 +80,47 @@ const CrmPrePossession: React.FC = () => {
         promptNextStep(navigate, "Pre-possession check is Ready — the Possession Notice can now be sent.", "/crm/possession-notice", "Go to Possession Notice");
       }
       qc.invalidateQueries({ queryKey: ["crm-pre-possession"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Pre-Possession Check"
       subtitle="Dues, documentation, quality, and utility readiness before handover"
       action={
-        <button onClick={() => setDialogOpen(true)}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => setDialogOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> Start Check
         </button>
+        </div>
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {isLoading ? (
           <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
         ) : checks.length === 0 ? (
-          <div className="p-4 text-center text-muted-foreground text-sm">No pre-possession checks</div>
+          <div className="col-span-2 flex flex-col items-center gap-3 py-12 text-center">
+            <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center">
+              <ClipboardCheck size={22} className="text-muted-foreground" />
+            </div>
+            <div>
+              <p className="font-medium text-foreground">No pre-possession checks yet</p>
+              <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+                Start a check once the Sales Deed has been approved by the customer.
+                Four items must all be ticked before a Possession Notice can be sent.
+              </p>
+            </div>
+            <button onClick={() => navigate("/crm/sales-deed")}
+              className="flex items-center gap-1.5 text-sm text-primary hover:underline">
+              Go to Sales Deed <ArrowRight size={14} />
+            </button>
+          </div>
         ) : (checks as any[]).map((c: any) => (
           <div key={c.Id} className="rounded-xl border border-border p-4 space-y-2">
             <div className="flex items-center justify-between">
@@ -141,7 +165,7 @@ const CrmPrePossession: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 
