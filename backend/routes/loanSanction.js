@@ -462,8 +462,23 @@ router.get("/:id/payments", requirePageRight("loan-sanction", "view"), async (re
         p.PaymentId, p.LoanId, p.PaymentRef, p.PaymentDate, p.PaymentType,
         p.PrincipalInterestAmount, p.LateFee, p.TotalAmount, p.ExcessCredited,
         p.ClosedLoan, p.Notes, p.CreatedBy, p.CreatedAt,
-        (SELECT COUNT(*) FROM dbo.LoanEMISchedule e WHERE e.PaymentId = p.PaymentId) AS EmisCovered
+        (SELECT COUNT(*) FROM dbo.LoanEMISchedule e WHERE e.PaymentId = p.PaymentId) AS EmisCovered,
+        -- The actual payment instrument used (see migration 340) — settling
+        -- a Loan EMI always goes through Finance > Payment first, which is
+        -- where mode/cheque/bank/reference are genuinely captured; this
+        -- table itself never stored them until the NewPaymentId link.
+        np.PPaymentID AS NewPaymentId,
+        np.PMode AS PaymentMode,
+        np.PChequeNo AS ChequeNo,
+        np.PChequeDate AS ChequeDate,
+        np.PBankName AS BankName,
+        np.PNeftNumber AS NeftNumber,
+        np.PUpiTransactionId AS UpiTransactionId,
+        np.PRtgsReference AS RtgsReference,
+        np.PImpsReference AS ImpsReference,
+        np.DocNo AS PaymentDocNo
       FROM dbo.LoanPayment p
+      LEFT JOIN dbo.NewPayment np ON np.PPaymentID = p.NewPaymentId
       WHERE p.LoanId = @id
       ORDER BY p.PaymentDate ASC, p.PaymentId ASC
     `);
@@ -1113,92 +1128,18 @@ router.post("/:id/post-to-gl", requirePageRight("loan-sanction", "edit"), async 
   }
 });
 
-// ── PUT /:id/emi/:emiId/pay — check/uncheck an EMI as paid ────────────────
-// Checking it DEBITs the borrower's Loan ledger balance (repayment reduces
-// what's still outstanding/adjustable); unchecking reverses that DEBIT.
-// When every installment is paid, the loan itself flips to 'Closed'.
-router.put("/:id/emi/:emiId/pay", requirePageRight("loan-sanction", "edit"), async (req, res) => {
-  const loanId = parseInt(req.params.id, 10);
-  const emiId = parseInt(req.params.emiId, 10);
-  const paid = !!req.body.paid;
-  const actor = req.user?.email || req.user?.name || "system";
-  if (!Number.isFinite(loanId) || !Number.isFinite(emiId)) {
-    return res.status(400).json({ error: "Invalid id" });
-  }
-
-  const pool = getPool();
-  const tx = new sql.Transaction(pool);
-  try {
-    await tx.begin();
-
-    const emiRes = await new sql.Request(tx)
-      .input("EMIId", sql.Int, emiId)
-      .input("LoanId", sql.Int, loanId)
-      .query("SELECT * FROM dbo.LoanEMISchedule WHERE EMIId = @EMIId AND LoanId = @LoanId");
-    const emi = emiRes.recordset[0];
-    if (!emi) throw Object.assign(new Error("EMI installment not found"), { status: 404 });
-    if (!!emi.IsPaid === paid) {
-      await tx.commit();
-      return res.json({ success: true, unchanged: true });
-    }
-
-    const loanRes = await new sql.Request(tx)
-      .input("LoanId", sql.Int, loanId)
-      .query("SELECT BorrowerLHeadId, LoanNo FROM dbo.LoanSanction WHERE LoanId = @LoanId");
-    const loan = loanRes.recordset[0];
-    if (!loan) throw Object.assign(new Error("Loan not found"), { status: 404 });
-
-    await new sql.Request(tx)
-      .input("EMIId", sql.Int, emiId)
-      .input("IsPaid", sql.Bit, paid ? 1 : 0)
-      .input("PaidDate", sql.Date, paid ? new Date() : null)
-      .input("PaidBy", sql.NVarChar(150), paid ? actor : null).query(`
-        UPDATE dbo.LoanEMISchedule
-        SET IsPaid = @IsPaid, PaidDate = @PaidDate, PaidBy = @PaidBy
-        WHERE EMIId = @EMIId
-      `);
-
-    if (loan.BorrowerLHeadId) {
-      await new sql.Request(tx)
-        .input("PartyId", sql.Int, loan.BorrowerLHeadId)
-        .input("PartyType", sql.NVarChar(20), "Loan")
-        .input("TxnDate", sql.Date, new Date())
-        .input("TxnType", sql.NVarChar(10), paid ? "DEBIT" : "CREDIT")
-        .input("Amount", sql.Decimal(18, 2), emi.EMIAmount)
-        .input("RefType", sql.NVarChar(30), "LoanEMI")
-        .input("RefDocNo", sql.NVarChar(100), loan.LoanNo)
-        .input("RefId", sql.Int, emiId)
-        .input("Notes", sql.NVarChar(500), `EMI #${emi.InstallmentNo} ${paid ? "paid" : "un-marked"} for ${loan.LoanNo}`)
-        .input("CreatedBy", sql.NVarChar(150), actor).query(`
-          INSERT INTO dbo.OnAccountLedger
-            (PartyId, PartyType, TxnDate, TxnType, Amount, RefType, RefDocNo, RefId, Notes, CreatedBy)
-          VALUES
-            (@PartyId, @PartyType, @TxnDate, @TxnType, @Amount, @RefType, @RefDocNo, @RefId, @Notes, @CreatedBy);
-          UPDATE dbo.AccountHeadMaster
-            SET OnAccountBalance = ISNULL(OnAccountBalance, 0) + (CASE WHEN @TxnType = 'CREDIT' THEN @Amount ELSE -@Amount END)
-            WHERE LHeadId = @PartyId;
-        `);
-    }
-
-    const remaining = await new sql.Request(tx)
-      .input("LoanId", sql.Int, loanId)
-      .query("SELECT COUNT(*) AS cnt FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId AND IsPaid = 0");
-    await new sql.Request(tx)
-      .input("LoanId", sql.Int, loanId)
-      .input("Status", sql.NVarChar(20), remaining.recordset[0].cnt === 0 ? "Closed" : "Sanctioned")
-      .query("UPDATE dbo.LoanSanction SET Status = @Status, UpdatedBy = NULL, UpdatedAt = SYSDATETIME() WHERE LoanId = @LoanId");
-
-    await tx.commit();
-    await Promise.all([
-      bumpCacheVersion("loan-sanction"),
-      bumpCacheVersion("on-account"),
-    ]);
-    res.json({ success: true });
-  } catch (err) {
-    await tx.rollback().catch(() => {});
-    res.status(err.status || 500).json({ error: err.message });
-  }
-});
+// PUT /:id/emi/:emiId/pay — REMOVED. This let a single EMI (and, once it
+// was the last one, the whole loan) be marked paid/Closed with no
+// dbo.LoanPayment row and no payment mode/cheque/bank captured at all —
+// exactly the "closed with no payment details" failure mode this file's own
+// header comment says can't happen ("repaid... driven exclusively from the
+// Payment page's Loan EMIs tab — the Loan Sanction page itself is
+// read-only"). Confirmed unreachable from the UI (the EMI Schedule tab's
+// paid/unpaid marker is a static icon, no click handler — see
+// LoanSanction.tsx) and the only caller, loanSanctionApi.ts's
+// toggleEmiPaid(), had zero call sites anywhere in src/. Removed rather
+// than fixed in place: POST /:id/pay already is the one correct way to
+// settle an EMI, and having a second path invites this bug to come back.
 
 // Posts a Customer Loan repayment to GL — the single-sided counterpart to
 // the Inter-Company two-sided posting below. A customer isn't one of our
@@ -1245,9 +1186,17 @@ async function postCustomerLoanRepayment(pool, { loan, paymentId, paymentRef, pa
 // total — it's an additional charge, not principal/interest.
 router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, res) => {
   const loanId = parseInt(req.params.id, 10);
-  const { emiIds, lumpSumAmount, lateFee, paymentDate, notes } = req.body;
+  const { emiIds, lumpSumAmount, lateFee, paymentDate, notes, newPaymentId } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
   if (!Number.isFinite(loanId)) return res.status(400).json({ error: "Invalid id" });
+
+  // The dbo.NewPayment row Payment.tsx just created for this settlement
+  // (see migration 340) — links this LoanPayment back to the record that
+  // actually carries payment mode/cheque no./bank/reference, so the loan's
+  // own Repayment History isn't blind to how it was paid. Optional: some
+  // callers (e.g. a future manual settle-from-Loan-Sanction path) may not
+  // have one yet.
+  const resolvedNewPaymentId = Number.isFinite(parseInt(newPaymentId, 10)) ? parseInt(newPaymentId, 10) : null;
 
   const fee = lateFee != null && lateFee !== "" ? parseFloat(lateFee) : 0;
   const isLumpSum = lumpSumAmount != null && lumpSumAmount !== "";
@@ -1340,12 +1289,13 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
       .input("ExcessCredited", sql.Decimal(18, 2), excess)
       .input("ClosedLoan", sql.Bit, willClose ? 1 : 0)
       .input("Notes", sql.NVarChar(500), notes || null)
+      .input("NewPaymentId", sql.Int, resolvedNewPaymentId)
       .input("CreatedBy", sql.NVarChar(150), actor).query(`
         INSERT INTO dbo.LoanPayment
-          (LoanId, PaymentRef, PaymentDate, PaymentType, PrincipalInterestAmount, LateFee, TotalAmount, ExcessCredited, ClosedLoan, Notes, CreatedBy)
+          (LoanId, PaymentRef, PaymentDate, PaymentType, PrincipalInterestAmount, LateFee, TotalAmount, ExcessCredited, ClosedLoan, Notes, NewPaymentId, CreatedBy)
         OUTPUT INSERTED.PaymentId
         VALUES
-          (@LoanId, @PaymentRef, @PaymentDate, @PaymentType, @PrincipalInterestAmount, @LateFee, @TotalAmount, @ExcessCredited, @ClosedLoan, @Notes, @CreatedBy)
+          (@LoanId, @PaymentRef, @PaymentDate, @PaymentType, @PrincipalInterestAmount, @LateFee, @TotalAmount, @ExcessCredited, @ClosedLoan, @Notes, @NewPaymentId, @CreatedBy)
       `);
     const paymentId = paymentInsert.recordset[0].PaymentId;
 

@@ -1995,15 +1995,19 @@ const Payment: React.FC = () => {
         await updatePayment(editingId, payload);
         toast.success("Payment updated.");
       } else {
-        await addPayment(payload);
+        const newPaymentRes = await addPayment(payload);
         // A Loan EMI payment isn't just a NewPayment record — it also has to
         // actually settle the EMI on the loan itself (mark it paid, run the
         // payoff/early-closure check, generate the payment ref). That's what
         // the loan-sanction backend's own /pay endpoint does; this triggers
-        // it right after the payment record is created.
+        // it right after the payment record is created. Passing this
+        // payment's own id through (see migration 340) is what lets the
+        // loan's Repayment History later show the real cheque/mode/bank it
+        // was actually paid with, instead of nothing.
         if (selectedLoanEmi) {
           try {
             const res = await payLoan(selectedLoanEmi.LoanId, {
+              newPaymentId: newPaymentRes?.PPaymentID,
               emiIds: loanPayMode === "emis" ? selectedLoanEmiIds : undefined,
               lumpSumAmount: loanPayMode === "lumpsum" ? loanLumpSumAmount : undefined,
               paymentDate: form.date,

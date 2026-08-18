@@ -65,6 +65,7 @@ import {
   type CustomerOption,
   type BankOption,
   type CompanyExposure,
+  type LoanPayment,
 } from "@/api/loanSanctionApi";
 
 const ACCENT = "#22c55e";
@@ -129,6 +130,21 @@ const fmtDate = (d?: string | null) =>
   d
     ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
     : "—";
+
+// What a repayment was actually paid WITH — a Loan EMI is always settled
+// through Finance > Payment first (see migration 340's NewPaymentId link),
+// which is where mode/cheque/bank/reference are genuinely captured. Falls
+// back to null (rendered as nothing) for older rows recorded before that
+// link existed, rather than claiming a mode that isn't on file.
+function paymentInstrumentLabel(p: LoanPayment): string | null {
+  if (!p.PaymentMode) return null;
+  if (p.PaymentMode === "Cheque" || p.PaymentMode === "Post-Dated Cheque") {
+    return p.ChequeNo ? `Cheque #${p.ChequeNo}${p.BankName ? ` (${p.BankName})` : ""}` : p.PaymentMode;
+  }
+  const ref = p.NeftNumber || p.UpiTransactionId || p.RtgsReference || p.ImpsReference;
+  if (ref) return `${p.PaymentMode} (Ref: ${ref})${p.BankName ? ` — ${p.BankName}` : ""}`;
+  return p.BankName ? `${p.PaymentMode} — ${p.BankName}` : p.PaymentMode;
+}
 
 const LOAN_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Loan No", accessor: "LoanNo" },
@@ -1701,7 +1717,7 @@ export default function LoanSanctionPage() {
                       key={p.PaymentId}
                       icon={<Receipt size={13} className="text-emerald-500" />}
                       title={`${p.PaymentType === "LumpSum" ? "Lump Sum Payment" : `${p.EmisCovered} EMI${p.EmisCovered === 1 ? "" : "s"} Paid`} — ${p.PaymentRef}`}
-                      subtitle={`${fmt(p.TotalAmount)}${p.LateFee > 0 ? ` (incl. ${fmt(p.LateFee)} late fee)` : ""} · Paid ${fmtDate(p.PaymentDate)}${p.CreatedBy ? ` by ${p.CreatedBy}` : ""}${p.ExcessCredited > 0 ? ` · ${fmt(p.ExcessCredited)} excess credited to lender's on-account` : ""}${p.ClosedLoan ? " · Loan closed" : ""}`}
+                      subtitle={`${fmt(p.TotalAmount)}${p.LateFee > 0 ? ` (incl. ${fmt(p.LateFee)} late fee)` : ""} · Paid ${fmtDate(p.PaymentDate)}${paymentInstrumentLabel(p) ? ` · ${paymentInstrumentLabel(p)}` : ""}${p.CreatedBy ? ` by ${p.CreatedBy}` : ""}${p.ExcessCredited > 0 ? ` · ${fmt(p.ExcessCredited)} excess credited to lender's on-account` : ""}${p.ClosedLoan ? " · Loan closed" : ""}`}
                       done
                       isLast={i === arr.length - 1 && viewingLoan.Status === "Closed"}
                     />
