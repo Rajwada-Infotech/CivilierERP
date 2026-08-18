@@ -1009,9 +1009,14 @@ const Payment: React.FC = () => {
   const [loanLateFee, setLoanLateFee] = useState("");
   const [loanPaymentNotes, setLoanPaymentNotes] = useState("");
   // Loan EMIs are only "payable" from the company that's actually the
-  // lender or borrower on that loan — same company the rest of this form
-  // is being booked under (form.company), not the FilterBar's list filter.
-  const loanEmiCompanyId = companyOptions.find((c) => c.label === form.company)?.id;
+  // lender or borrower on that loan. At the point the user is browsing the
+  // Loan EMIs tab, form.company is still empty — the whole point of picking
+  // an EMI here is to auto-fill it — so the only company context that
+  // actually exists yet is the FilterBar's own Company filter above the
+  // picker. Once a booking has been linked (form.company set), prefer that.
+  const loanEmiCompanyId =
+    companyOptions.find((c) => c.label === form.company)?.id ??
+    companyOptions.find((c) => c.label === bookingFilters.company)?.id;
   const { data: loanEmiOptions = [], isLoading: loanEmisLoading } = useQuery<PayableEmi[]>({
     queryKey: ["payment-loan-emis", loanEmiCompanyId],
     queryFn: () => getPayableEmis(loanEmiCompanyId!),
