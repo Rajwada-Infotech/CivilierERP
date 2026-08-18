@@ -1008,9 +1008,11 @@ const Payment: React.FC = () => {
   const [loanLumpSumAmount, setLoanLumpSumAmount] = useState("");
   const [loanLateFee, setLoanLateFee] = useState("");
   const [loanPaymentNotes, setLoanPaymentNotes] = useState("");
+  const selectedCompanyIdNum = companyOptions.find((c) => c.label === form.company)?.id;
   const { data: loanEmiOptions = [], isLoading: loanEmisLoading } = useQuery<PayableEmi[]>({
-    queryKey: ["payment-loan-emis"],
-    queryFn: getPayableEmis,
+    queryKey: ["payment-loan-emis", selectedCompanyIdNum],
+    queryFn: () => selectedCompanyIdNum ? getPayableEmis(selectedCompanyIdNum) : Promise.resolve([]),
+    enabled: !!selectedCompanyIdNum,
     staleTime: 60_000,
   });
   // Every other pending EMI on the same loan — lets the modal offer "pay

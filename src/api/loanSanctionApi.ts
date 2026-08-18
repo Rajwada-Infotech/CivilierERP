@@ -263,8 +263,8 @@ export const updateLoanSanction = (id: number, payload: LoanEditPayload) =>
     body: JSON.stringify(payload),
   }).then((r) => handle(r));
 
-export const getPayableEmis = () =>
-  fetchWithAuth(`${BASE}/emi-payable`).then((r) => handle<PayableEmi[]>(r));
+export const getPayableEmis = (companyId: number) =>
+  fetchWithAuth(`${BASE}/emi-payable?companyId=${companyId}`).then((r) => handle<PayableEmi[]>(r));
 
 export const getLoanPayments = (loanId: number) =>
   fetchWithAuth(`${BASE}/${loanId}/payments`).then((r) => handle<LoanPayment[]>(r));
