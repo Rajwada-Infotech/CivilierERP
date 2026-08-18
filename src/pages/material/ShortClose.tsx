@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -143,6 +144,8 @@ export default function ShortClose() {
   const allSelected = candidates.length > 0 && selectedIds.size === candidates.length;
 
   return (
+    <>
+    <Breadcrumbs items={["Dashboard", "Material", "Short Close"]} />
     <MaterialShell
       title="Short Close"
       subtitle="Year-end housekeeping — retire partially-fulfilled POs and MRs"
@@ -422,5 +425,6 @@ export default function ShortClose() {
         </div>
       )}
     </MaterialShell>
+    </>
   );
 }

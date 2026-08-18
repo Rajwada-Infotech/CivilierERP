@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, ChevronDown, ChevronRight, Play, ToggleLeft, ToggleRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -49,6 +51,7 @@ const methodBadge = (m: string) => {
 const EMPTY_FORM = { Level: 1, ScopeType: "Global", ScopeId: "", Method: "RoundRobin" };
 
 const SaDistributionRules: React.FC = () => {
+  usePageRights("sa-distribution-rules");
   const { canDoAction } = useAuth();
   const canManage = canDoAction("sa-distribution-rules", "create");
   const qc = useQueryClient();
@@ -220,6 +223,7 @@ const SaDistributionRules: React.FC = () => {
   return (
     <SalesAutoShell title="Distribution Rules" subtitle="Configure how leads are automatically assigned to team leads and salespersons"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
+      <Breadcrumbs items={["Sales Automation", "Distribution Rules"]} />
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4">
           {canManage && (

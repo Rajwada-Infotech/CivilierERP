@@ -89,6 +89,7 @@ router.get("/balance-sheet", async (req, res) => {
         SELECT
           ahm.LHeadId AS id,
           ahm.LHeadName AS name,
+          ahm.LHeadCode AS code,
           ahm.LHeadType AS [type],
           ahm.LBelongsTo AS groupId,
           ISNULL((
@@ -202,9 +203,9 @@ router.get("/balance-sheet", async (req, res) => {
       let groupName = grp ? grp.name : `Group-${gid}`;
       let root = rootOf(groupMap, gid);
 
-      // If it's the Income Summary system head used for Year-End Close, capture 
+      // If it's the Income Summary system head used for Year-End Close, capture
       // its balance to offset the synthetic P&L prior years calculation, and skip rendering.
-      if (h.name === "Income Summary") {
+      if (h.code === "INCOME-SUMMARY") {
         // As a liability head, a debit balance (net > 0) means it was debited 
         // to transfer profit TO Retained Earnings. So its true liability balance is -net.
         incomeSummaryBalance = -net;

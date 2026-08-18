@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +36,7 @@ interface SignatureItem {
 
 export default function Signature() {
   const qc = useQueryClient();
+  const rights = usePageRights("admin-signatures");
   const [formData, setFormData] = useState({
     name: "",
     owner: "",
@@ -52,6 +54,7 @@ export default function Signature() {
       if (!res.ok) throw new Error("Failed to load");
       return res.json().catch(() => ({}));
     },
+    staleTime: 5 * 60_000,
   });
 
   const saveMutation = useMutation({

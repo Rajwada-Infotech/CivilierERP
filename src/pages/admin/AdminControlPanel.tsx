@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getUsers, addUser, updateUser, deleteUser } from "@/api/userApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,7 @@ import { toast } from "sonner";
 
 export default function AdminControlPanel() {
   const qc = useQueryClient();
+  const rights = usePageRights("users");
   const [activeTab, setActiveTab] = useState<"users" | "database" | "activity">(
     "users",
   );

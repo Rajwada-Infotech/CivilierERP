@@ -228,24 +228,25 @@ router.get(
       const page = Math.max(parseInt(req.query.page) || 1, 1);
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
       const search = req.query.search ? String(req.query.search).trim() : "";
+      const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
       const offset = (page - 1) * limit;
 
-      let whereClause = "";
+      const conditions = [];
       const searchParam = search ? `%${search}%` : null;
 
       if (search) {
-        whereClause = `
-        WHERE mi.DocNo   LIKE @search
-           OR mi.IssueNo LIKE @search
-           OR c.name     LIKE @search
-           OR p.name     LIKE @search
-      `;
+        conditions.push("(mi.DocNo LIKE @search OR mi.IssueNo LIKE @search OR c.name LIKE @search OR p.name LIKE @search)");
       }
+      if (companyId) {
+        conditions.push("mi.CompanyId = @companyId");
+      }
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
       // Use a single request with COUNT(*) OVER() to avoid executing the same
       // Request object twice (mssql Request instances are single-use).
       const dataReq = pool.request();
       if (searchParam) dataReq.input("search", sql.NVarChar(200), searchParam);
+      if (companyId) dataReq.input("companyId", sql.Int, companyId);
       dataReq.input("offset", sql.Int, offset);
       dataReq.input("limit", sql.Int, limit);
 

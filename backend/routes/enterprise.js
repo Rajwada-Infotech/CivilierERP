@@ -1,4 +1,5 @@
 const allowRoles = require("../middleware/role");
+const authMiddleware = require("../middleware/auth");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -371,7 +372,7 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
 });
 
 // GET /by-id/:id — fetch a single enterprise/company record by ID (any business_type)
-router.get("/by-id/:id", async (req, res) => {
+router.get("/by-id/:id", authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -394,7 +395,7 @@ router.get("/by-id/:id", async (req, res) => {
 // GET options for FK dropdowns
 // Supports: ?type=<entity_type>  (legacy)
 //           ?business_type=C     (filter companies by business_type column)
-router.get("/options", async (req, res) => {
+router.get("/options", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();

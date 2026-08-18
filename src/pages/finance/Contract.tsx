@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
 import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import {
@@ -121,6 +122,7 @@ function AttachmentRow({ att, onRemove, readOnly }: { att: Attachment; onRemove:
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function Contract() {
+  const rights = usePageRights("finance-contracts");
   const qc = useQueryClient();
   // FinYearContext exposes the full list, not a single "current" value —
   // derive it the same way the rest of Finance does: the one row flagged

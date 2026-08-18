@@ -3,6 +3,8 @@ import Webcam from "react-webcam";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { TicketShell } from "@/components/ticket/TicketShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { escapeHtml } from "@/utils/escapeHtml";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { unwrapTicketList } from "@/lib/ticketListResponse";
@@ -1481,6 +1483,7 @@ const MyTickets: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
   const queryClient = useQueryClient();
+  const rights = usePageRights("tickets");
   const ADMIN_ROLES = ["super_admin", "admin", "dba"];
   const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
   const canSeeAllTickets = isAdmin || currentUser?.role === "engineer";
@@ -1571,6 +1574,8 @@ const MyTickets: React.FC = () => {
   }
 
   return (
+    <>
+    <Breadcrumbs items={["Tickets", "My Tickets"]} />
     <TicketShell
       title="My Tickets"
       subtitle={`${openTickets.length} open · ${allTickets.length} total${urgentCount > 0 ? ` · ${urgentCount} urgent` : ""}`}
@@ -1735,6 +1740,7 @@ const MyTickets: React.FC = () => {
           </p>
         )}
     </TicketShell>
+    </>
   );
 };
 

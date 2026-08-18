@@ -15,6 +15,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { toast } from "sonner";
 import {
@@ -164,6 +165,7 @@ const ROLE_PRESETS: Record<
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 export default function MenuRights() {
+  const rights = usePageRights("menu-rights");
   // ── Page definitions — now fetched from DB ──────────────────────────────────
   const [pageDefs, setPageDefs] = useState<PageDef[]>([]);
   const [loadingDefs, setLoadingDefs] = useState(true);

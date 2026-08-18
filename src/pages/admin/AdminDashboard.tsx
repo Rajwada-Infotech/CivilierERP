@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import {
   ShieldCheck,
@@ -166,6 +167,7 @@ const getPageName = (resource?: string): string => {
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
+  const rights = usePageRights("admin-dashboard");
   const [justClicked, setJustClicked] = React.useState(false);
   const {
     data: dashData,

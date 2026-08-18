@@ -242,11 +242,11 @@ router.post("/carry-forward", adminOnly, async (req, res) => {
       reHeadId = insHead.recordset[0].LHeadId;
     }
     
-    const isRes = await pool.request().input("groupId", sql.Int, rsGroupId).query(`SELECT LHeadId FROM dbo.AccountHeadMaster WHERE LHeadName = 'Income Summary' AND LBelongsTo = @groupId`);
+    const isRes = await pool.request().query(`SELECT LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = 'INCOME-SUMMARY'`);
     if (isRes.recordset.length > 0) {
       incSumHeadId = isRes.recordset[0].LHeadId;
     } else {
-      const insHead = await pool.request().input("groupId", sql.Int, rsGroupId).query(`INSERT INTO dbo.AccountHeadMaster (LHeadName, LHeadType, LBelongsTo, LHeadStatus) OUTPUT inserted.LHeadId VALUES ('Income Summary', 'GL', @groupId, 1)`);
+      const insHead = await pool.request().input("groupId", sql.Int, rsGroupId).query(`INSERT INTO dbo.AccountHeadMaster (LHeadName, LHeadCode, LHeadType, LBelongsTo, LHeadStatus) OUTPUT inserted.LHeadId VALUES ('Income Summary', 'INCOME-SUMMARY', 'GL', @groupId, 1)`);
       incSumHeadId = insHead.recordset[0].LHeadId;
     }
 

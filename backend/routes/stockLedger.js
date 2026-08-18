@@ -6,6 +6,9 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
+
+router.use(checkPermissionForMethod("Material", "StockLedger"));
 
 async function hasColumn(pool, tableName, columnName) {
   const result = await pool

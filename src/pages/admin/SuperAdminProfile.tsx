@@ -1,6 +1,7 @@
 import React from "react";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getUserProfile,
@@ -121,6 +122,7 @@ export default function SuperAdminProfile() {
     updateCurrentUserAvatar,
     updateCurrentUserShowLoginReminders,
   } = useAuth();
+  const rights = usePageRights("admin-profile");
   const userId = currentUser?.id ? parseInt(currentUser.id) : 0;
   const queryClient = useQueryClient();
 
@@ -139,6 +141,7 @@ export default function SuperAdminProfile() {
     queryKey: ["user-profile", userId],
     queryFn: () => getUserProfile(userId),
     enabled: !!userId,
+    staleTime: 5 * 60_000,
   });
 
   useEffect(() => {
@@ -149,6 +152,7 @@ export default function SuperAdminProfile() {
     queryKey: ["user-activity", userId],
     queryFn: () => getUserActivity(userId, 30),
     enabled: activeTab === "activity" && !!userId,
+    staleTime: 30_000,
   });
 
   const updateMutation = useMutation({

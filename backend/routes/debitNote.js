@@ -27,7 +27,9 @@ function toDecimal(val) {
 router.get("/", requirePageRight("debit-note", "view"), cache("debit-note", 120), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    if (!companyId) return res.status(400).json({ error: "companyId is required." });
+    const result = await pool.request().input("companyId", sql.Int, companyId).query(`
       SELECT
         dn.id, dn.DocNo, dn.DebitDate, dn.company_id, dn.project_id,
         dn.supplier_id, dn.bill_id, dn.is_active, dn.created_by,
@@ -42,6 +44,7 @@ router.get("/", requirePageRight("debit-note", "view"), cache("debit-note", 120)
       LEFT JOIN dbo.enterprise co ON co.id = dn.company_id
       LEFT JOIN dbo.enterprise pr ON pr.id = dn.project_id
       LEFT JOIN dbo.AccountHeadMaster sup ON sup.LHeadId = dn.supplier_id
+      WHERE dn.company_id = @companyId
       ORDER BY dn.id DESC
     `);
     res.json(result.recordset);

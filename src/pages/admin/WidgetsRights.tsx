@@ -16,6 +16,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { getWidgetCatalog, type WidgetCatalogItem } from "@/api/widgetsApi";
 import { getRolesList } from "@/api/roleApi";
@@ -93,6 +94,7 @@ async function saveRoleWidgets(roleId: number, allowedWidgets: string[]): Promis
 
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function WidgetsRights() {
+  const rights = usePageRights("widgets-rights");
   // ── Subject mode: edit a Role's baseline, or a specific user's overrides ────
   type Subject = "user" | "role";
   const [subject, setSubject] = useState<Subject>("user");

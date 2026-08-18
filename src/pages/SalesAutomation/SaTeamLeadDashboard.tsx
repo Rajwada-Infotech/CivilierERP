@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Users, GitBranch, Clock } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
@@ -25,6 +27,7 @@ const StatCard: React.FC<{ icon: React.ElementType; label: string; value: string
 );
 
 const SaTeamLeadDashboard: React.FC = () => {
+  usePageRights("sa-lead-distribution");
   const { data, isLoading, error } = useQuery({ queryKey: ["sa-dashboard-team-lead"], queryFn: fetchTeamLeadDashboard, staleTime: 60_000 });
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading dashboard...</div>;
@@ -47,6 +50,7 @@ const SaTeamLeadDashboard: React.FC = () => {
 
   return (
     <SalesAutoShell title="Team Leader Dashboard" subtitle="Lead distribution and salesperson performance overview" icon={GitBranch}>
+      <Breadcrumbs items={["Sales Automation", "Team Leader Dashboard"]} />
       <div className="space-y-6">
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">

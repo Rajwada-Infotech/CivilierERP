@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -869,6 +870,7 @@ const InboxRow: React.FC<{
 
 const ApprovalInbox: React.FC = () => {
   const queryClient = useQueryClient();
+  const rights = usePageRights("approval-inbox");
   const [activeModule, setActiveModule] = useState<string | null>(null);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 

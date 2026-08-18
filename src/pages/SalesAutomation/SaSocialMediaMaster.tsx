@@ -3,6 +3,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -72,6 +74,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const SaSocialMediaMaster: React.FC = () => {
+  usePageRights("sa-social-media");
   const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
 
@@ -185,6 +188,7 @@ const SaSocialMediaMaster: React.FC = () => {
 
   return (
     <SalesAutoShell title="Social Media Master" subtitle="Manage social media platforms and their campaign connections">
+      <Breadcrumbs items={["Sales Automation", "Social Media"]} />
       <div className="space-y-8">
         <MasterPage
           title="Social Media Platform"
