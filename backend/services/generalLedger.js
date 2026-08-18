@@ -21,6 +21,10 @@ const GL_ACCOUNTS = {
   // AccountGroup wiring in 230) — was seeded but never actually posted to
   // until postOnAccountAdjustment/postPaymentApproval below.
   ON_ACCOUNT: "Company On Account A/c",
+  // Singleton counter-account for Cash-mode Direct Payments (migration 339)
+  // — Cash payments never carry a PBankID (Payment.tsx disables the Bank
+  // field for Cash), so this stands in for the bank leg on the credit side.
+  CASH_IN_HAND: "Cash-in-Hand A/c",
 };
 
 /** Same "advance / on account" Payment Reason match used by newPayment.js's
@@ -526,7 +530,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     .request()
     .input("PPaymentID", sql.Int, paymentId)
     .query(`
-      SELECT PPaymentID, PAmount, PDate, PBankID, PExpenseRef, DocNo,
+      SELECT PPaymentID, PAmount, PDate, PBankID, PMode, PExpenseRef, DocNo,
              PCompany, PProject, ContractId, PPartyId, PPaymentName,
              ISNULL(TDSAmount, 0) AS TDSAmount
       FROM dbo.NewPayment
@@ -534,7 +538,15 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     `);
   const payment = result.recordset[0];
   if (!payment) return { posted: false, reason: `Payment ${paymentId} not found` };
-  if (!payment.PBankID)
+
+  // Cash-mode payments never carry a PBankID (Payment.tsx disables the Bank
+  // field for Cash) — Cash-in-Hand (migration 339) stands in for the bank
+  // leg instead of hard-failing for lack of one.
+  let bankId = payment.PBankID;
+  if (!bankId && payment.PMode === "Cash") {
+    bankId = await getGLHeadId(pool, GL_ACCOUNTS.CASH_IN_HAND).catch(() => null);
+  }
+  if (!bankId)
     return { posted: false, reason: `Payment ${paymentId} has no PBankID (bank account)` };
 
   const amount = Number(payment.PAmount) || 0;
@@ -606,7 +618,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
           debit: a.amount,
           narration: `${docNo} — ${a.lHeadName} (direct expense payment)`,
         })),
-        ...bankAndTdsLegs(payment.PBankID, `${docNo} — direct expense payment`, `${docNo} — TDS Payable`),
+        ...bankAndTdsLegs(bankId, `${docNo} — direct expense payment`, `${docNo} — TDS Payable`),
       ],
     });
     return { posted: true };
@@ -650,7 +662,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
           ? `${docNo} — advance / on account payment`
           : `${docNo} — payment made`,
       },
-      ...bankAndTdsLegs(payment.PBankID, `${docNo} — payment made`, `${docNo} — TDS Payable`),
+      ...bankAndTdsLegs(bankId, `${docNo} — payment made`, `${docNo} — TDS Payable`),
     ],
   });
   return { posted: true };

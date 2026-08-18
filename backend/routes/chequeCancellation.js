@@ -40,16 +40,78 @@ const PAYMENT_SEARCH_SELECT = `
     np.PChequeNo, np.PChequeLotId, np.PChequeLotNumber, np.PChequeDate,
     np.PChequeAccountNumber, np.PChequeIfsc, np.PIsPostDated, np.PBankID,
     np.PIsChequeCancelled,
-    ISNULL(bm.BName, np.PBankName)  AS BankName,
-    bm.BBranch                      AS BankBranch,
-    cm.ChequeLotNumber              AS LotNumber,
-    cc.CCId                         AS CancelledCheckId
+    ISNULL(bm.LHeadName, np.PBankName)  AS BankName,
+    bm.LBranchName                      AS BankBranch,
+    cm.ChequeLotNumber                  AS LotNumber,
+    cc.CCId                             AS CancelledCheckId
   FROM dbo.NewPayment np
-  LEFT JOIN dbo.BankMaster bm ON bm.BId = np.PBankID
+  LEFT JOIN dbo.AccountHeadMaster bm ON bm.LHeadId = np.PBankID
   LEFT JOIN dbo.ChequeMaster cm ON cm.CId = np.PChequeLotId
   LEFT JOIN dbo.CancelledCheque cc ON cc.PaymentId = np.PPaymentID
   WHERE np.PChequeNo = @ChequeNo AND np.Status NOT IN ('Rejected', 'Deleted')
 `;
+
+// A cheque number with no dbo.NewPayment row at all (never actually issued
+// against a payment) still belongs to a cheque lot/range and should still be
+// cancellable — e.g. a leaf torn out, spoiled, or lost before use. This finds
+// the active lot whose number range contains it and shapes the result like a
+// ChequeSearchResult (PPaymentID: null marks it as payment-less) so the
+// frontend can render/cancel it through the same code path as a real
+// payment match.
+async function findLotFallback(pool, chequeNo) {
+  const num = parseInt(chequeNo, 10);
+  if (!Number.isFinite(num)) return null;
+
+  const lotRes = await pool
+    .request()
+    .input("Num", sql.Int, num)
+    .query(`
+      SELECT TOP 1
+        cm.CId, cm.ChequeLotNumber, cm.ChequeStartNumber, cm.ChequeEndNumber,
+        cm.BankId, cm.AccountNumber, cm.IFSCCode,
+        bm.LHeadName AS BankName, bm.LBranchName AS BankBranch
+      FROM dbo.ChequeMaster cm
+      LEFT JOIN dbo.AccountHeadMaster bm ON bm.LHeadId = cm.BankId
+      WHERE cm.Status = 1 AND cm.ChequeStartNumber <= @Num AND cm.ChequeEndNumber >= @Num
+      ORDER BY cm.CId
+    `);
+  const lot = lotRes.recordset[0];
+  if (!lot) return null;
+
+  const cancelledRes = await pool
+    .request()
+    .input("ChequeLotId", sql.Int, lot.CId)
+    .input("ChequeNo", sql.NVarChar(50), chequeNo)
+    .query(`SELECT CCId FROM dbo.CancelledCheque WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo`);
+  const alreadyCancelled = cancelledRes.recordset.length > 0;
+
+  return {
+    PPaymentID: null,
+    DocNo: null,
+    PPaymentName: null,
+    PRemarks: null,
+    PAmount: null,
+    PDate: null,
+    PMode: null,
+    PProject: null,
+    PCompany: null,
+    PExpenseRef: null,
+    Status: null,
+    PChequeNo: chequeNo,
+    PChequeLotId: lot.CId,
+    PChequeLotNumber: lot.ChequeLotNumber,
+    PChequeDate: null,
+    PChequeAccountNumber: lot.AccountNumber,
+    PChequeIfsc: lot.IFSCCode,
+    PIsPostDated: 0,
+    PBankID: lot.BankId,
+    PIsChequeCancelled: alreadyCancelled ? 1 : 0,
+    BankName: lot.BankName,
+    BankBranch: lot.BankBranch,
+    LotNumber: lot.ChequeLotNumber,
+    CancelledCheckId: null,
+  };
+}
 
 // ── GET /search?chequeNo=XXXX — find payment entries by cheque number ──────────
 router.get("/search", requirePageRight("cheque-cancellation", "view"), async (req, res) => {
@@ -62,7 +124,12 @@ router.get("/search", requirePageRight("cheque-cancellation", "view"), async (re
       .request()
       .input("ChequeNo", sql.NVarChar(50), chequeNo)
       .query(`${PAYMENT_SEARCH_SELECT} ORDER BY np.PPaymentID DESC`);
-    res.json(result.recordset);
+    if (result.recordset.length) return res.json(result.recordset);
+
+    // No payment ever used this number — fall back to a payment-less lot
+    // match so it can still be cancelled.
+    const lotMatch = await findLotFallback(pool, chequeNo);
+    res.json(lotMatch ? [lotMatch] : []);
   } catch (err) {
     console.error("CHEQUE CANCELLATION SEARCH ERROR:", err.message);
     res.status(500).json({ error: err.message });
@@ -70,9 +137,10 @@ router.get("/search", requirePageRight("cheque-cancellation", "view"), async (re
 });
 
 // ── POST /bulk-search — same lookup for a batch of cheque numbers ──────────────
-// Returns one entry per requested number: the matched payment (if any) plus
-// whether it's already cancelled, or found:false when nothing matches — the
-// frontend renders that as "no corresponding payment entry".
+// Returns one entry per requested number: the matched payment (or payment-less
+// lot match) if any, plus whether it's already cancelled, or found:false when
+// nothing matches at all (not a real payment AND not within any active lot's
+// range) — the frontend renders that as "no matching payment".
 router.post("/bulk-search", requirePageRight("cheque-cancellation", "view"), async (req, res) => {
   const numbers = Array.isArray(req.body.chequeNumbers)
     ? [...new Set(req.body.chequeNumbers.map((n) => String(n).trim()).filter(Boolean))]
@@ -87,7 +155,7 @@ router.post("/bulk-search", requirePageRight("cheque-cancellation", "view"), asy
         .request()
         .input("ChequeNo", sql.NVarChar(50), chequeNo)
         .query(`${PAYMENT_SEARCH_SELECT} ORDER BY np.PPaymentID DESC`);
-      const payment = r.recordset[0] || null;
+      const payment = r.recordset[0] || (await findLotFallback(pool, chequeNo));
       results.push({
         chequeNo,
         found: !!payment,
@@ -104,17 +172,25 @@ router.post("/bulk-search", requirePageRight("cheque-cancellation", "view"), asy
 
 // Cancels one payment's cheque within an existing SQL transaction/request pool —
 // shared by the single-cancel and bulk-cancel endpoints.
-async function cancelOne(pool, { paymentId, chequeNo, reason, userEmail }) {
+async function cancelOne(pool, { paymentId, chequeLotId, chequeNo, reason, userEmail }) {
+  if (paymentId) {
+    return cancelPaymentCheque(pool, { paymentId, chequeNo, reason, userEmail });
+  }
+  return cancelLotCheque(pool, { chequeLotId, chequeNo, reason, userEmail });
+}
+
+// The original path — a cheque that was actually issued against a payment.
+async function cancelPaymentCheque(pool, { paymentId, chequeNo, reason, userEmail }) {
   const payRes = await pool
     .request()
     .input("PPaymentID", sql.Int, paymentId)
     .query(`
       SELECT np.PPaymentID, np.PChequeNo, np.PChequeLotId, np.PChequeLotNumber,
              np.PIsChequeCancelled, np.PBankID,
-             ISNULL(bm.BName, np.PBankName) AS BankName,
+             ISNULL(bm.LHeadName, np.PBankName) AS BankName,
              np.PChequeAccountNumber
       FROM dbo.NewPayment np
-      LEFT JOIN dbo.BankMaster bm ON bm.BId = np.PBankID
+      LEFT JOIN dbo.AccountHeadMaster bm ON bm.LHeadId = np.PBankID
       WHERE np.PPaymentID = @PPaymentID
     `);
   const payment = payRes.recordset[0];
@@ -158,17 +234,98 @@ async function cancelOne(pool, { paymentId, chequeNo, reason, userEmail }) {
   return { ok: true };
 }
 
+// The new path — a cheque number that was never issued against any payment.
+// Validated straight against its lot (must exist, be active, and have the
+// number within its range) rather than against dbo.NewPayment. PaymentId is
+// stored NULL on the CancelledCheque row (the column is nullable precisely
+// for this case).
+async function cancelLotCheque(pool, { chequeLotId, chequeNo, reason, userEmail }) {
+  if (!chequeLotId || !chequeNo) {
+    return { ok: false, error: "Cheque number not found." };
+  }
+
+  const lotRes = await pool
+    .request()
+    .input("CId", sql.Int, chequeLotId)
+    .query(`
+      SELECT cm.CId, cm.ChequeLotNumber, cm.ChequeStartNumber, cm.ChequeEndNumber,
+             cm.BankId, cm.AccountNumber, bm.LHeadName AS BankName
+      FROM dbo.ChequeMaster cm
+      LEFT JOIN dbo.AccountHeadMaster bm ON bm.LHeadId = cm.BankId
+      WHERE cm.CId = @CId AND cm.Status = 1
+    `);
+  const lot = lotRes.recordset[0];
+  if (!lot) return { ok: false, error: "Cheque lot not found or inactive." };
+
+  const num = parseInt(chequeNo, 10);
+  const start = Number(lot.ChequeStartNumber);
+  const end = Number(lot.ChequeEndNumber);
+  if (!Number.isFinite(num) || num < start || num > end) {
+    return { ok: false, error: "Cheque number is out of this lot's range." };
+  }
+
+  // Guards against a race where the cheque got issued against a payment
+  // between search and cancel — that case belongs to cancelPaymentCheque.
+  const usedRes = await pool
+    .request()
+    .input("PChequeLotId", sql.Int, chequeLotId)
+    .input("PChequeNo", sql.NVarChar(50), String(chequeNo))
+    .query(`
+      SELECT TOP 1 PPaymentID FROM dbo.NewPayment
+      WHERE PChequeLotId = @PChequeLotId AND PChequeNo = @PChequeNo AND Status NOT IN ('Rejected', 'Deleted')
+    `);
+  if (usedRes.recordset.length) {
+    return { ok: false, error: "This cheque number is now linked to a payment — search again to cancel it." };
+  }
+
+  const dupRes = await pool
+    .request()
+    .input("ChequeLotId", sql.Int, chequeLotId)
+    .input("ChequeNo", sql.NVarChar(50), String(chequeNo))
+    .query(`SELECT CCId FROM dbo.CancelledCheque WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo`);
+  if (dupRes.recordset.length) {
+    return { ok: false, error: "This cheque has already been cancelled." };
+  }
+
+  await pool
+    .request()
+    .input("ChequeLotId", sql.Int, lot.CId)
+    .input("ChequeLotNumber", sql.NVarChar(100), lot.ChequeLotNumber || null)
+    .input("ChequeNo", sql.NVarChar(50), String(chequeNo))
+    .input("PaymentId", sql.Int, null)
+    .input("BankId", sql.Int, lot.BankId || null)
+    .input("BankName", sql.NVarChar(200), lot.BankName || null)
+    .input("AccountNumber", sql.NVarChar(50), lot.AccountNumber || null)
+    .input("Reason", sql.NVarChar(500), reason || null)
+    .input("CancelledBy", sql.NVarChar(150), userEmail).query(`
+      INSERT INTO dbo.CancelledCheque
+        (ChequeLotId, ChequeLotNumber, ChequeNo, PaymentId, BankId, BankName, AccountNumber, Reason, CancelledBy, CancelledAt)
+      VALUES
+        (@ChequeLotId, @ChequeLotNumber, @ChequeNo, @PaymentId, @BankId, @BankName, @AccountNumber, @Reason, @CancelledBy, SYSUTCDATETIME())
+    `);
+
+  return { ok: true };
+}
+
 // ── POST / — cancel a single cheque ─────────────────────────────────────────────
 router.post("/", requirePageRight("cheque-cancellation", "create"), async (req, res) => {
   const userEmail = requireUserEmail(req, res);
   if (!userEmail) return;
 
-  const { paymentId, chequeNo, reason } = req.body;
-  if (!paymentId) return res.status(400).json({ error: "paymentId is required" });
+  const { paymentId, chequeLotId, chequeNo, reason } = req.body;
+  if (!paymentId && !(chequeLotId && chequeNo)) {
+    return res.status(400).json({ error: "paymentId, or chequeLotId and chequeNo, is required" });
+  }
 
   try {
     const pool = getPool();
-    const result = await cancelOne(pool, { paymentId: parseInt(paymentId, 10), chequeNo, reason, userEmail });
+    const result = await cancelOne(pool, {
+      paymentId: paymentId ? parseInt(paymentId, 10) : null,
+      chequeLotId: chequeLotId ? parseInt(chequeLotId, 10) : null,
+      chequeNo,
+      reason,
+      userEmail,
+    });
     if (!result.ok) return res.status(400).json({ error: result.error });
 
     await bumpCacheVersion("new-payment");
@@ -194,13 +351,15 @@ router.post("/bulk", requirePageRight("cheque-cancellation", "create"), async (r
     const cancelled = [];
     const skipped = [];
     for (const item of items) {
-      const paymentId = parseInt(item.paymentId, 10);
-      if (!paymentId) {
-        skipped.push({ chequeNo: item.chequeNo, error: "No matching payment." });
+      const paymentId = item.paymentId ? parseInt(item.paymentId, 10) : null;
+      const chequeLotId = item.chequeLotId ? parseInt(item.chequeLotId, 10) : null;
+      if (!paymentId && !chequeLotId) {
+        skipped.push({ chequeNo: item.chequeNo, error: "No matching payment or cheque lot." });
         continue;
       }
       const result = await cancelOne(pool, {
         paymentId,
+        chequeLotId,
         chequeNo: item.chequeNo,
         reason,
         userEmail,

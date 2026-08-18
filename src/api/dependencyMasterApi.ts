@@ -33,6 +33,12 @@ export interface DependencyScope {
 }
 
 export interface LadderActivity {
+  /** dbo.DependencyMasterActivity's own row id — only present once a chain
+   * has been saved and re-fetched (GET /:id); a chain still being edited in
+   * the form builder has no rung id yet. Needed to hang anything else off a
+   * specific rung, e.g. Work Reporting's per-rung engineer/material
+   * assignment. */
+  rungId?: number;
   activityId: number;
   activityName: string; // denormalized for display
   sequenceNo: number; // 1-indexed, drives ladder order

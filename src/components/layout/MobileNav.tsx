@@ -172,6 +172,14 @@ const MODULE_META: Record<
     label: "Engineering",
     route: MODULE_DASHBOARD_ROUTES.engineering,
   },
+  civilworkdpr: {
+    h: 192,
+    s: 91,
+    l: 36,
+    icon: Chart21,
+    label: "Civil Work DPR",
+    route: MODULE_DASHBOARD_ROUTES.civilworkdpr,
+  },
   ticket: {
     h: 330,
     s: 80,
@@ -187,14 +195,6 @@ const MODULE_META: Record<
     icon: Archive,
     label: "Records",
     route: MODULE_DASHBOARD_ROUTES.records,
-  },
-  civilworkdpr: {
-    h: 192,
-    s: 91,
-    l: 36,
-    icon: Chart21,
-    label: "Civil Work DPR",
-    route: MODULE_DASHBOARD_ROUTES.civilworkdpr,
   },
   "sales-automation": {
     h: 330,
@@ -396,6 +396,13 @@ const followupSetupItems: SetupItem[] = [
     path: "/followup/setup/department-master",
     color: "text-cyan-500",
     pageKey: "followup-department-master",
+  },
+  {
+    icon: Tag,
+    label: "Tag Master",
+    path: "/followup/setup/tag-master",
+    color: "text-pink-500",
+    pageKey: "followup-tag-master",
   },
 ];
 

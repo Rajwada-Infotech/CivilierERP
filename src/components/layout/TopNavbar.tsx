@@ -47,6 +47,7 @@ import {
   Wand2,
   Percent,
   GitBranch,
+  ClipboardCheck,
 } from "lucide-react";
 import {
   Crown,
@@ -344,6 +345,13 @@ const followupSetupItems = [
     color: "text-cyan-500",
     pageKey: "followup-department-master",
   },
+  {
+    icon: Tag,
+    label: "Tag Master",
+    path: "/followup/setup/tag-master",
+    color: "text-pink-500",
+    pageKey: "followup-tag-master",
+  },
 ];
 
 const engineeringSetupItems = [
@@ -372,6 +380,27 @@ const civilWorkDprSetupItems = [
     path: "/masters/activity",
     color: "text-cyan-500",
     pageKey: "activity-master",
+  },
+  {
+    icon: LayoutGrid,
+    label: "Room Composition",
+    path: "/civilworkdpr/room-composition",
+    color: "text-cyan-500",
+    pageKey: "room-composition-builder",
+  },
+  {
+    icon: Tag,
+    label: "Room Categories",
+    path: "/civilworkdpr/room-category-master",
+    color: "text-cyan-500",
+    pageKey: "room-category-master",
+  },
+  {
+    icon: ClipboardCheck,
+    label: "Work Checkpoints",
+    path: "/civilworkdpr/work-checkpoint-master",
+    color: "text-cyan-500",
+    pageKey: "work-checkpoint-master",
   },
 ];
 

@@ -1,7 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Paperclip, Send, FileText, CalendarClock, Pause, Play, CheckCircle2, Trash2, Check } from "lucide-react";
+import { Paperclip, Send, FileText, CalendarClock, Pause, Play, CheckCircle2, Trash2, Check, Tag as TagIcon, X, Plus } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ProgressBar } from "@/components/followup/ProgressBar";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getSocket } from "@/lib/socket";
 import { useAuth } from "@/contexts/AuthContext";
@@ -37,6 +38,9 @@ interface TaskDetail {
   CaseProjectName: string | null;
   AssigneeName: string | null;
   CreatedByName: string | null;
+  Progress: number;
+  EffectiveProgress: number;
+  HasChildren: boolean;
 }
 
 interface FollowUp {
@@ -59,6 +63,11 @@ interface Attachment {
   UploadedBy: number | null;
   UploadedByName: string | null;
   UploadedAt: string;
+}
+
+interface TaskTag {
+  Id: number;
+  Name: string;
 }
 
 interface ChatMessage {
@@ -130,6 +139,173 @@ const Avatar: React.FC<{ name: string | null; url?: string | null; size?: number
       style={{ width: px, height: px, fontSize: size * 0.36, background: "rgba(13,148,136,0.16)", color: TEAL }}
     >
       {initials(name)}
+    </div>
+  );
+};
+
+// ── Tag picker: chip row of assigned tags + a combobox that lets the user
+// pick an existing active tag or type a brand-new one. The task drawer
+// always sends the full desired tag-name list to PUT /:id/tags, which
+// syncs it server-side (auto-creating any name that doesn't exist yet) —
+// so add/remove here is just "recompute the list, resubmit".
+const TagPicker: React.FC<{ taskId: string }> = ({ taskId }) => {
+  const queryClient = useQueryClient();
+  const [input, setInput] = React.useState("");
+  const [open, setOpen] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const blurTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { data: assigned = [] } = useQuery<TaskTag[]>({
+    queryKey: ["task-tags", taskId],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`${API}/${taskId}/tags`);
+      if (!res.ok) throw new Error("Failed to load tags");
+      return res.json().catch(() => []);
+    },
+    enabled: !!taskId,
+  });
+
+  const { data: activeTags = [] } = useQuery<TaskTag[]>({
+    queryKey: ["tag-master-active"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/tag-master/active");
+      if (!res.ok) throw new Error("Failed to load tags");
+      return res.json().catch(() => []);
+    },
+    staleTime: 60_000,
+  });
+
+  const sync = async (names: string[]) => {
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${taskId}/tags`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ TagNames: names }),
+      });
+      const data = await res.json().catch(() => []);
+      if (!res.ok) throw new Error((data as any)?.error || "Failed to update tags");
+      queryClient.setQueryData(["task-tags", taskId], data);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["tag-master-active"] }),
+        // So the tag chips on the Follow-Up / Close Task board cards update
+        // immediately, not just inside this drawer.
+        queryClient.invalidateQueries({ queryKey: ["followup-board"] }),
+        queryClient.invalidateQueries({ queryKey: ["closed-board"] }),
+      ]);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update tags");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addTag = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (assigned.some((t) => t.Name.toLowerCase() === trimmed.toLowerCase())) {
+      setInput("");
+      return;
+    }
+    setInput("");
+    setOpen(false);
+    sync([...assigned.map((t) => t.Name), trimmed]);
+  };
+
+  const removeTag = (name: string) => {
+    sync(assigned.filter((t) => t.Name.toLowerCase() !== name.toLowerCase()).map((t) => t.Name));
+  };
+
+  const query = input.trim().toLowerCase();
+  const suggestions = activeTags.filter(
+    (t) => !assigned.some((a) => a.Id === t.Id) && (!query || t.Name.toLowerCase().includes(query)),
+  );
+  const exactMatch = query && activeTags.some((t) => t.Name.toLowerCase() === query);
+
+  return (
+    <div>
+      <p className="text-[9px] font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 flex items-center gap-1">
+        <TagIcon size={10} /> Tags
+      </p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {assigned.map((t) => (
+          <span
+            key={t.Id}
+            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full text-[11px] font-medium"
+            style={{ background: "rgba(13,148,136,0.12)", border: "1px solid rgba(13,148,136,0.3)", color: TEAL }}
+          >
+            {t.Name}
+            <button
+              type="button"
+              onClick={() => removeTag(t.Name)}
+              disabled={saving}
+              className="rounded-full p-0.5 hover:bg-black/10 transition-colors disabled:opacity-40"
+              title={`Remove ${t.Name}`}
+            >
+              <X size={10} />
+            </button>
+          </span>
+        ))}
+
+        <div className="relative">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => {
+              setInput(e.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => {
+              blurTimer.current = setTimeout(() => setOpen(false), 150);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addTag(input);
+              }
+            }}
+            placeholder="Add tag…"
+            disabled={saving}
+            className="w-28 px-2 py-1 rounded-full text-[11px] bg-muted border border-border focus:outline-none focus:ring-1 disabled:opacity-50"
+            style={{ ["--tw-ring-color" as any]: TEAL }}
+          />
+          {open && (input.trim() || suggestions.length > 0) && (
+            <div
+              className="absolute z-20 top-full left-0 mt-1 w-48 max-h-48 overflow-y-auto rounded-lg border border-border bg-card shadow-lg py-1"
+              onMouseDown={(e) => {
+                // Keep the input's blur from closing the list before the click registers.
+                if (blurTimer.current) clearTimeout(blurTimer.current);
+                e.preventDefault();
+              }}
+            >
+              {suggestions.map((t) => (
+                <button
+                  key={t.Id}
+                  type="button"
+                  onClick={() => addTag(t.Name)}
+                  className="w-full text-left px-3 py-1.5 text-xs text-foreground hover:bg-muted transition-colors"
+                >
+                  {t.Name}
+                </button>
+              ))}
+              {input.trim() && !exactMatch && (
+                <button
+                  type="button"
+                  onClick={() => addTag(input)}
+                  className="w-full text-left px-3 py-1.5 text-xs font-medium flex items-center gap-1.5 hover:bg-muted transition-colors"
+                  style={{ color: TEAL }}
+                >
+                  <Plus size={11} /> Create "{input.trim()}"
+                </button>
+              )}
+              {!input.trim() && suggestions.length === 0 && (
+                <p className="px-3 py-1.5 text-xs text-muted-foreground">No tags yet — type to create one.</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -245,6 +421,27 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
   // rows server-side — bump it too so the board reflects the new/removed
   // reminder without waiting for its own staleTime to lapse.
   const invalidateBoard = () => queryClient.invalidateQueries({ queryKey: ["followup-board"] });
+  const invalidateClosedBoard = () => queryClient.invalidateQueries({ queryKey: ["closed-board"] });
+
+  const handleProgressChange = async (progress: number) => {
+    const res = await fetchWithAuth(`${API}/${taskId}/progress`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ Progress: progress }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(data.error || "Failed to update progress");
+      await queryClient.invalidateQueries({ queryKey: ["followup-task", taskId] });
+      return;
+    }
+    if (progress === 100) toast.success("Task marked Completed");
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["followup-task", taskId] }),
+      invalidateBoard(),
+      invalidateClosedBoard(),
+    ]);
+  };
 
   const handleSaveFollowUp = async () => {
     if (!note.trim()) return;
@@ -383,6 +580,19 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                 <DetailRow label="Project" value={task?.CaseProjectName} />
                 <DetailRow label="Created By" value={task?.CreatedByName} />
               </div>
+
+              <div>
+                <p className="text-[9px] font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+                  Progress{task?.HasChildren ? " (from sub-tasks)" : ""}
+                </p>
+                <ProgressBar
+                  value={task?.EffectiveProgress ?? task?.Progress ?? 0}
+                  onCommit={handleProgressChange}
+                  disabled={task?.HasChildren}
+                />
+              </div>
+
+              <TagPicker taskId={taskId} />
 
               {canTransition && (
                 <div className="flex flex-wrap gap-2 pt-1">

@@ -370,8 +370,10 @@ export default function BalanceEnquiry() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               {[
                 { label: "Opening Balance", value: formatINR(summaryQuery.data?.windowOpeningBalance ?? 0), icon: Wallet, color: "text-primary", bg: "bg-primary/10", ring: "ring-primary/15", borderL: "border-l-primary" },
-                { label: "Money In", value: formatINR(summaryQuery.data?.periodCredit ?? 0), icon: TrendingUp, color: "text-emerald-500", bg: "bg-emerald-500/10", ring: "ring-emerald-500/15", borderL: "border-l-emerald-500" },
-                { label: "Money Out", value: formatINR(summaryQuery.data?.periodDebit ?? 0), icon: TrendingDown, color: "text-rose-500", bg: "bg-rose-500/10", ring: "ring-rose-500/15", borderL: "border-l-rose-500" },
+                // Bank is an asset account (see backend/routes/balanceEnquiry.js) —
+                // a Debit increases it (money in), a Credit decreases it (money out).
+                { label: "Money In", value: formatINR(summaryQuery.data?.periodDebit ?? 0), icon: TrendingUp, color: "text-emerald-500", bg: "bg-emerald-500/10", ring: "ring-emerald-500/15", borderL: "border-l-emerald-500" },
+                { label: "Money Out", value: formatINR(summaryQuery.data?.periodCredit ?? 0), icon: TrendingDown, color: "text-rose-500", bg: "bg-rose-500/10", ring: "ring-rose-500/15", borderL: "border-l-rose-500" },
                 { label: "Transactions", value: String(summaryQuery.data?.periodTxnCount ?? 0), icon: Receipt, color: "text-amber-500", bg: "bg-amber-500/10", ring: "ring-amber-500/15", borderL: "border-l-amber-500" },
               ].map(({ label, value, icon: Icon, color, bg, ring, borderL }) => (
                 <div key={label} className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}>

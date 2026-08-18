@@ -78,7 +78,13 @@ export default function ChequeCancellation() {
   const [results, setResults] = useState<ChequeSearchResult[]>([]);
   const [searched, setSearched] = useState(false);
   const [reason, setReason] = useState("");
-  const [cancellingId, setCancellingId] = useState<number | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  // A row's PPaymentID is null for a payment-less cheque (never issued
+  // against any payment) — key/match on this instead so both kinds of row
+  // still get a stable, unique identity.
+  const rowKey = (row: ChequeSearchResult) =>
+    row.PPaymentID != null ? `p-${row.PPaymentID}` : `lot-${row.PChequeLotId}-${row.PChequeNo}`;
 
   const runSearch = async () => {
     const trimmed = chequeNo.trim();
@@ -92,7 +98,7 @@ export default function ChequeCancellation() {
       const data = await searchChequeByNumber(trimmed);
       setResults(data);
       setSearched(true);
-      if (!data.length) toast.info("No payment entry found for this cheque number.");
+      if (!data.length) toast.info("This cheque number isn't linked to a payment or any active cheque lot.");
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? "Search failed.");
     } finally {
@@ -102,14 +108,13 @@ export default function ChequeCancellation() {
 
   const handleCancel = async (row: ChequeSearchResult) => {
     if (!window.confirm(`Cancel cheque ${row.PChequeNo}? This cannot be undone.`)) return;
-    setCancellingId(row.PPaymentID);
+    const key = rowKey(row);
+    setCancellingId(key);
     try {
-      await cancelCheque(row.PPaymentID, row.PChequeNo, reason || undefined);
+      await cancelCheque(row.PPaymentID, row.PChequeNo, reason || undefined, row.PChequeLotId);
       toast.success(`Cheque ${row.PChequeNo} cancelled.`);
       setResults((prev) =>
-        prev.map((r) =>
-          r.PPaymentID === row.PPaymentID ? { ...r, PIsChequeCancelled: 1 } : r,
-        ),
+        prev.map((r) => (rowKey(r) === key ? { ...r, PIsChequeCancelled: 1 } : r)),
       );
       loadCancelled();
     } catch (err: any) {
@@ -163,6 +168,7 @@ export default function ChequeCancellation() {
     try {
       const items = validBulkEntries.map((r) => ({
         paymentId: r.payment!.PPaymentID,
+        chequeLotId: r.payment!.PChequeLotId,
         chequeNo: r.chequeNo,
       }));
       const result = await bulkCancelCheques(items, bulkReason || undefined);
@@ -297,12 +303,12 @@ export default function ChequeCancellation() {
 
               {searched && results.length === 0 && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground py-6 justify-center">
-                  <AlertTriangle size={14} /> No payment entry found for this cheque number.
+                  <AlertTriangle size={14} /> This cheque number isn't linked to a payment or any active cheque lot.
                 </div>
               )}
 
               {results.map((row) => (
-                <div key={row.PPaymentID} className="rounded-xl border border-border overflow-hidden">
+                <div key={rowKey(row)} className="rounded-xl border border-border overflow-hidden">
                   {/* Header: cheque + bank/lot chips + status */}
                   <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-muted/20 border-b border-border">
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
@@ -315,35 +321,45 @@ export default function ChequeCancellation() {
                         <Layers size={11} className="text-amber-500" /> Lot {row.LotNumber ?? row.PChequeLotNumber ?? "—"}
                       </span>
                     </div>
-                    {row.PIsChequeCancelled ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[11px] font-semibold shrink-0">
-                        <Ban size={11} /> Cancelled Cheque
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold shrink-0">
-                        <CheckCircle2 size={11} /> Active
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {row.PPaymentID == null && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-muted text-muted-foreground text-[11px] font-semibold">
+                          Not linked to a payment
+                        </span>
+                      )}
+                      {row.PIsChequeCancelled ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[11px] font-semibold">
+                          <Ban size={11} /> Cancelled Cheque
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
+                          <CheckCircle2 size={11} /> Active
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Payment document — compact definition list */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3 px-4 py-3.5 text-xs">
-                    {[
-                      { label: "Doc No", value: row.DocNo },
-                      { label: "Payment Name", value: row.PPaymentName },
-                      { label: "Amount", value: formatINR(row.PAmount) },
-                      { label: "Date", value: fmt(row.PDate) },
-                      { label: "Mode", value: row.PMode },
-                      { label: "Status", value: row.Status },
-                      { label: "Cheque Date", value: fmt(row.PChequeDate) },
-                      { label: "IFSC", value: row.PChequeIfsc },
-                    ].map((f) => (
-                      <div key={f.label} className="min-w-0">
-                        <p className="text-[9px] uppercase tracking-widest text-muted-foreground/80">{f.label}</p>
-                        <p className="font-medium text-foreground truncate">{f.value || "—"}</p>
-                      </div>
-                    ))}
-                  </div>
+                  {/* Payment document — compact definition list (blank for a
+                      payment-less cheque, which has no payment document at all) */}
+                  {row.PPaymentID != null && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3 px-4 py-3.5 text-xs">
+                      {[
+                        { label: "Doc No", value: row.DocNo },
+                        { label: "Payment Name", value: row.PPaymentName },
+                        { label: "Amount", value: formatINR(row.PAmount) },
+                        { label: "Date", value: fmt(row.PDate) },
+                        { label: "Mode", value: row.PMode },
+                        { label: "Status", value: row.Status },
+                        { label: "Cheque Date", value: fmt(row.PChequeDate) },
+                        { label: "IFSC", value: row.PChequeIfsc },
+                      ].map((f) => (
+                        <div key={f.label} className="min-w-0">
+                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground/80">{f.label}</p>
+                          <p className="font-medium text-foreground truncate">{f.value || "—"}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {!row.PIsChequeCancelled && rights.canCreate && (
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 px-4 py-3 border-t border-border bg-muted/10">
@@ -355,10 +371,10 @@ export default function ChequeCancellation() {
                       />
                       <button
                         onClick={() => handleCancel(row)}
-                        disabled={cancellingId === row.PPaymentID}
+                        disabled={cancellingId === rowKey(row)}
                         className="h-8 flex items-center justify-center gap-1.5 px-4 rounded-lg bg-rose-600 text-white text-xs font-medium hover:bg-rose-700 disabled:opacity-50 transition-all whitespace-nowrap"
                       >
-                        {cancellingId === row.PPaymentID ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />}
+                        {cancellingId === rowKey(row) ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />}
                         Cancel Cheque
                       </button>
                     </div>
@@ -433,6 +449,7 @@ export default function ChequeCancellation() {
                   <div className="max-h-64 overflow-y-auto divide-y divide-border/50">
                     {bulkResults.map((r) => {
                       const state = !r.found ? "missing" : r.alreadyCancelled ? "cancelled" : "ready";
+                      const paymentLess = r.payment && r.payment.PPaymentID == null;
                       return (
                         <div
                           key={r.chequeNo}
@@ -440,11 +457,15 @@ export default function ChequeCancellation() {
                         >
                           <span className="font-mono font-semibold text-foreground w-24 shrink-0">{r.chequeNo}</span>
                           <span className="flex-1 min-w-0 truncate text-muted-foreground">
-                            {r.payment ? `${r.payment.DocNo ?? "—"} · ${formatINR(r.payment.PAmount)}` : "—"}
+                            {!r.payment
+                              ? "—"
+                              : paymentLess
+                                ? `Not linked to a payment · Lot ${r.payment.LotNumber ?? r.payment.PChequeLotNumber ?? "—"}`
+                                : `${r.payment.DocNo ?? "—"} · ${formatINR(r.payment.PAmount)}`}
                           </span>
                           {state === "missing" && (
                             <span className="inline-flex items-center gap-1 text-muted-foreground shrink-0">
-                              <XCircle size={11} /> No matching payment
+                              <XCircle size={11} /> No matching payment or cheque
                             </span>
                           )}
                           {state === "cancelled" && (
@@ -540,10 +561,18 @@ export default function ChequeCancellation() {
                           <td className="px-3 py-3 align-middle">{r.ChequeLotNumber ?? "—"}</td>
                           <td className="px-3 py-3 align-middle">{r.BankName ?? "—"}</td>
                           <td className="px-3 py-3 font-mono align-middle">{r.AccountNumber ?? "—"}</td>
-                          <td className="px-3 py-3 align-middle">{r.DocNo ?? "—"}</td>
-                          <td className="px-3 py-3 align-middle">{r.PCompanyName ?? r.PCompany ?? "—"}</td>
-                          <td className="px-3 py-3 align-middle">{r.PProject ?? "—"}</td>
-                          <td className="px-3 py-3 align-middle">{r.PAmount != null ? formatINR(r.PAmount) : "—"}</td>
+                          {r.PaymentId == null ? (
+                            <td className="px-3 py-3 align-middle text-muted-foreground italic" colSpan={4}>
+                              Cancelled directly from cheque book — never issued against a payment
+                            </td>
+                          ) : (
+                            <>
+                              <td className="px-3 py-3 align-middle">{r.DocNo ?? "—"}</td>
+                              <td className="px-3 py-3 align-middle">{r.PCompanyName ?? r.PCompany ?? "—"}</td>
+                              <td className="px-3 py-3 align-middle">{r.PProject ?? "—"}</td>
+                              <td className="px-3 py-3 align-middle">{r.PAmount != null ? formatINR(r.PAmount) : "—"}</td>
+                            </>
+                          )}
                           <td className="px-3 py-3 text-muted-foreground align-middle">{r.Reason ?? "—"}</td>
                           <td className="px-3 py-3 align-middle">{r.CancelledBy ?? "—"}</td>
                           <td className="px-3 py-3 whitespace-nowrap align-middle">{fmt(r.CancelledAt)}</td>

@@ -448,7 +448,7 @@ export default function LoanSanctionPage() {
         loanDocNo: form.loanDocNo || null,
         lenderCompanyId: isBankLoan ? null : form.lenderCompanyId,
         lenderBankId: isBankLoan ? form.lenderBankId : null,
-        lenderBankAccountId: isInterCompanyType ? form.lenderBankAccountId || null : null,
+        lenderBankAccountId: (isInterCompanyType || isCustomerLoan) ? form.lenderBankAccountId || null : null,
         borrowerCompanyId: isCustomerLoan ? null : form.borrowerCompanyId,
         borrowerCustomerId: isCustomerLoan ? form.borrowerCustomerId : null,
         borrowerCustomerSource: isCustomerLoan ? form.borrowerCustomerSource : null,
@@ -648,6 +648,16 @@ export default function LoanSanctionPage() {
   const labelCls = "text-xs font-semibold uppercase tracking-widest text-muted-foreground";
   const readOnly = !!viewingLoan;
   const isInterCompanyType = (viewingLoan?.LoanType ?? form.loanType) === "Inter-Company";
+  // Combined create+edit flag, same shape as isInterCompanyType — a
+  // Customer Loan's lender bank account matters too (it's who actually
+  // receives the repayment), just never the borrower's, since the borrower
+  // is external and has no bank account of ours to tag.
+  const isCustomerLoanType = (viewingLoan?.LoanType ?? form.loanType) === "Customer Loan";
+  // Same view-aware pattern for Bank Loan — read-only display (the Parties
+  // labels, GL posting help text) must reflect the loan actually being
+  // VIEWED, not whatever form.loanType happens to still hold from the last
+  // time the create form was open (it doesn't reset when opening a view).
+  const isBankLoanType = (viewingLoan?.LoanType ?? form.loanType) === "Bank Loan";
   const isCustomerLoan = form.loanType === "Customer Loan";
   const isBankLoan = form.loanType === "Bank Loan";
 
@@ -999,7 +1009,7 @@ export default function LoanSanctionPage() {
                               />
                             </div>
                           )}
-                          {isInterCompanyType && (
+                          {(isInterCompanyType || isCustomerLoanType) && (
                             <>
                               <div className="space-y-1.5">
                                 <label className={labelCls}>Lender Bank A/C</label>
@@ -1014,19 +1024,25 @@ export default function LoanSanctionPage() {
                                   ))}
                                 </select>
                               </div>
-                              <div className="space-y-1.5">
-                                <label className={labelCls}>Borrower Bank A/C</label>
-                                <select
-                                  className={inputCls}
-                                  value={editForm.borrowerBankAccountId}
-                                  onChange={(e) => setEditForm((f) => ({ ...f, borrowerBankAccountId: e.target.value }))}
-                                >
-                                  <option value="">— No bank A/C tag —</option>
-                                  {banksForCompany(viewingLoan?.BorrowerCompanyName || "").map((b: BankRecord) => (
-                                    <option key={b.BId} value={b.BId}>{b.BName}</option>
-                                  ))}
-                                </select>
-                              </div>
+                              {/* Borrower Bank A/C only applies to
+                                  Inter-Company — a Customer Loan's borrower
+                                  is external, with no bank account of ours
+                                  to tag. */}
+                              {isInterCompanyType && (
+                                <div className="space-y-1.5">
+                                  <label className={labelCls}>Borrower Bank A/C</label>
+                                  <select
+                                    className={inputCls}
+                                    value={editForm.borrowerBankAccountId}
+                                    onChange={(e) => setEditForm((f) => ({ ...f, borrowerBankAccountId: e.target.value }))}
+                                  >
+                                    <option value="">— No bank A/C tag —</option>
+                                    {banksForCompany(viewingLoan?.BorrowerCompanyName || "").map((b: BankRecord) => (
+                                      <option key={b.BId} value={b.BId}>{b.BName}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
                             </>
                           )}
                           <div className="space-y-1.5 col-span-2">
@@ -1069,9 +1085,9 @@ export default function LoanSanctionPage() {
                     {/* Parties */}
                     <SectionLabel icon={Building2} label="Parties" />
                     <div className="grid grid-cols-2 gap-3">
-                      <InfoCard label={isBankLoan ? "Lender (Bank)" : "Lender"} value={displayLender || "—"} />
+                      <InfoCard label={isBankLoanType ? "Lender (Bank)" : "Lender"} value={displayLender || "—"} />
                       <InfoCard
-                        label={isCustomerLoan ? "Borrower (Customer)" : "Borrower (Company)"}
+                        label={isCustomerLoanType ? "Borrower (Customer)" : "Borrower (Company)"}
                         value={displayBorrower || "—"}
                       />
                       {isInterCompanyType && (
@@ -1235,7 +1251,7 @@ export default function LoanSanctionPage() {
                       </div>
                     </div>
 
-                    {isInterCompanyType && (
+                    {(isInterCompanyType || isCustomerLoan) && (
                       <div className="grid grid-cols-2 gap-5">
                         <div className="space-y-2">
                           <label className={labelCls}>Lender Bank A/C</label>
@@ -1255,34 +1271,41 @@ export default function LoanSanctionPage() {
                             ))}
                           </select>
                           <p className="text-[11px] text-muted-foreground">
-                            Which of the lender's bank accounts the funds actually left from.
+                            {isCustomerLoan
+                              ? "Which of the lender's bank accounts repayments actually land in."
+                              : "Which of the lender's bank accounts the funds actually left from."}
                             {form.lenderCompanyId && banksForCompany(companyName(form.lenderCompanyId)).length === 0 &&
                               " No banks tagged to this company in Bank Master."}
                           </p>
                         </div>
-                        <div className="space-y-2">
-                          <label className={labelCls}>Borrower Bank A/C</label>
-                          <select
-                            className={inputCls}
-                            value={form.borrowerBankAccountId}
-                            onChange={(e) => set("borrowerBankAccountId", e.target.value)}
-                            disabled={!form.borrowerCompanyId}
-                          >
-                            <option value="">
-                              {form.borrowerCompanyId ? "— No bank A/C tag —" : "— Select borrower company first —"}
-                            </option>
-                            {banksForCompany(companyName(form.borrowerCompanyId)).map((b: BankRecord) => (
-                              <option key={b.BId} value={b.BId}>
-                                {b.BName}
+                        {/* Borrower Bank A/C only applies to Inter-Company —
+                            a Customer Loan's borrower is external and has no
+                            bank account of ours to tag. */}
+                        {isInterCompanyType && (
+                          <div className="space-y-2">
+                            <label className={labelCls}>Borrower Bank A/C</label>
+                            <select
+                              className={inputCls}
+                              value={form.borrowerBankAccountId}
+                              onChange={(e) => set("borrowerBankAccountId", e.target.value)}
+                              disabled={!form.borrowerCompanyId}
+                            >
+                              <option value="">
+                                {form.borrowerCompanyId ? "— No bank A/C tag —" : "— Select borrower company first —"}
                               </option>
-                            ))}
-                          </select>
-                          <p className="text-[11px] text-muted-foreground">
-                            Which of the borrower's bank accounts the funds landed in.
-                            {form.borrowerCompanyId && banksForCompany(companyName(form.borrowerCompanyId)).length === 0 &&
-                              " No banks tagged to this company in Bank Master."}
-                          </p>
-                        </div>
+                              {banksForCompany(companyName(form.borrowerCompanyId)).map((b: BankRecord) => (
+                                <option key={b.BId} value={b.BId}>
+                                  {b.BName}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="text-[11px] text-muted-foreground">
+                              Which of the borrower's bank accounts the funds landed in.
+                              {form.borrowerCompanyId && banksForCompany(companyName(form.borrowerCompanyId)).length === 0 &&
+                                " No banks tagged to this company in Bank Master."}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -1842,7 +1865,7 @@ export default function LoanSanctionPage() {
                 )}
                 <p className="text-xs text-muted-foreground">
                   All postings use system-generated GL accounts, auto-created per counterparty on
-                  first use{isBankLoan ? " — for a Bank Loan, the lender's own existing GL account (and its real account group) is reused directly, not a shadow account" : ""}.
+                  first use{isBankLoanType ? " — for a Bank Loan, the lender's own existing GL account (and its real account group) is reused directly, not a shadow account" : ""}.
                   {readOnly
                     ? " This entry is posted to the General Ledger automatically and appears in Trial Balance."
                     : " Save the loan to generate this posting."}
