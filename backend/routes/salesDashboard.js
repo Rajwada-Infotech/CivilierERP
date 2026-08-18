@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
-const { getPool } = require("../db");
+const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 // No extra permission gate here — /api routes are already protected
 // by authMiddleware at the server level. Any authenticated user who
@@ -18,6 +18,8 @@ const { cache } = require("../middleware/cache");
  *   - Recent sale invoices         : last 8 rows
  */
 router.get("/", cache("sales-dashboard", 60), async (req, res) => {
+  const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+  if (!companyId) return res.status(400).json({ error: "companyId is required" });
   try {
     const pool = getPool();
 
@@ -28,7 +30,7 @@ router.get("/", cache("sales-dashboard", 60), async (req, res) => {
       recentSaleInvoices,
     ] = await Promise.all([
       // ── Sale Orders ──────────────────────────────────────────────────────────
-      pool.request().query(`
+      pool.request().input("CompanyId", sql.Int, companyId).query(`
         SELECT
           COUNT(*)                                                              AS TotalCount,
           COUNT(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END)
@@ -39,10 +41,11 @@ router.get("/", cache("sales-dashboard", 60), async (req, res) => {
           COUNT(CASE WHEN Status = 'Approved' THEN 1 END)                      AS ApprovedCount,
           COUNT(CASE WHEN Status = 'Rejected' THEN 1 END)                      AS RejectedCount
         FROM dbo.SaleOrders
+        WHERE CompanyId = @CompanyId
       `),
 
       // ── Sale Invoices ────────────────────────────────────────────────────────
-      pool.request().query(`
+      pool.request().input("CompanyId", sql.Int, companyId).query(`
         SELECT
           COUNT(*)                                                              AS TotalCount,
           COUNT(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END)
@@ -53,11 +56,11 @@ router.get("/", cache("sales-dashboard", 60), async (req, res) => {
           COUNT(CASE WHEN ISNULL(PaymentStatus, 'Pending Payment') <> 'Paid' THEN 1 END)
                                                                                 AS PendingCount
         FROM dbo.SaleInvoices
-        WHERE ISNULL(IsDeleted, 0) = 0
+        WHERE ISNULL(IsDeleted, 0) = 0 AND CompanyId = @CompanyId
       `),
 
       // ── Recent Sale Orders (last 8) ──────────────────────────────────────────
-      pool.request().query(`
+      pool.request().input("CompanyId", sql.Int, companyId).query(`
         SELECT TOP 8
           so.SaleOrderID,
           so.DocNo,
@@ -68,11 +71,12 @@ router.get("/", cache("sales-dashboard", 60), async (req, res) => {
           so.CreatedAt
         FROM dbo.SaleOrders so
         LEFT JOIN dbo.enterprise tc ON tc.id = so.ToCompanyID
+        WHERE so.CompanyId = @CompanyId
         ORDER BY so.CreatedAt DESC
       `),
 
       // ── Recent Sale Invoices (last 8) ───────────────────────────────────────
-      pool.request().query(`
+      pool.request().input("CompanyId", sql.Int, companyId).query(`
         SELECT TOP 8
           si.SaleInvoiceID,
           si.SaleInvoiceNo,
@@ -84,7 +88,7 @@ router.get("/", cache("sales-dashboard", 60), async (req, res) => {
           si.CreatedAt
         FROM dbo.SaleInvoices si
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = si.CustomerID
-        WHERE ISNULL(si.IsDeleted, 0) = 0
+        WHERE ISNULL(si.IsDeleted, 0) = 0 AND si.CompanyId = @CompanyId
         ORDER BY si.CreatedAt DESC
       `),
     ]);

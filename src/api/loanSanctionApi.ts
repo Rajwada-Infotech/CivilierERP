@@ -209,8 +209,8 @@ async function handle<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export const getLoanSanctions = () =>
-  fetchWithAuth(BASE).then((r) => handle<LoanSanction[]>(r));
+export const getLoanSanctions = (companyId: number) =>
+  fetchWithAuth(`${BASE}?companyId=${companyId}`).then((r) => handle<LoanSanction[]>(r));
 
 export const getLoanSanction = (id: number) =>
   fetchWithAuth(`${BASE}/${id}`).then((r) => handle<LoanSanction>(r));

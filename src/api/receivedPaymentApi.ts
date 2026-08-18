@@ -62,11 +62,20 @@ export type ReceivedPaymentPayload = Omit<
   | "RPRejectedAt"
 >;
 
+export interface ReceivedPaymentSummary {
+  totalAmount: number;
+  approvedCount: number;
+  draftCount: number;
+  pendingCount: number;
+  rejectedCount: number;
+}
+
 export interface PaginatedReceivedPayments {
   data: ReceivedPaymentRecord[];
   page: number;
   totalPages: number;
   total: number;
+  summary: ReceivedPaymentSummary;
 }
 
 export async function getReceivedPayments(

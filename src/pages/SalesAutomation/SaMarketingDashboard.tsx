@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Megaphone, TrendingUp, IndianRupee, Target, Award } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
 
 async function fetchMarketingDashboard(): Promise<any> {
@@ -25,6 +27,7 @@ const StatCard: React.FC<{ icon: React.ElementType; label: string; value: string
 );
 
 const SaMarketingDashboard: React.FC = () => {
+  usePageRights("sa-campaigns");
   const { data, isLoading, error } = useQuery({ queryKey: ["sa-dashboard-marketing"], queryFn: fetchMarketingDashboard, staleTime: 60_000 });
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading dashboard...</div>;
@@ -32,6 +35,7 @@ const SaMarketingDashboard: React.FC = () => {
 
   return (
     <SalesAutoShell title="Marketing Dashboard" subtitle="Campaign performance, spend, and lead generation overview" icon={Megaphone}>
+      <Breadcrumbs items={["Sales Automation", "Marketing Dashboard"]} />
       <div className="space-y-6">
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

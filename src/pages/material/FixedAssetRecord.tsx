@@ -9,6 +9,7 @@ import {
   Boxes, Wallet, PackageCheck, Circle, CheckCircle2, PlayCircle,
 } from "lucide-react";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
@@ -989,6 +990,8 @@ export default function FixedAssetRecord() {
   // LIST VIEW
   // ═══════════════════════════════════════════════════════════════════════════
   return (
+    <>
+    <Breadcrumbs items={["Dashboard", "Material", "Fixed Asset Record"]} />
     <MaterialShell
       title="Fixed Asset Record"
       subtitle="Track and manage all fixed assets with depreciation"
@@ -1270,5 +1273,6 @@ export default function FixedAssetRecord() {
         document.body
       )}
     </MaterialShell>
+    </>
   );
 }

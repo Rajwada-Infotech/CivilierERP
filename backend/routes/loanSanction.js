@@ -203,10 +203,19 @@ router.get("/customer-options", requirePageRight("loan-sanction", "view"), async
 // ── GET / — list ──────────────────────────────────────────────────────────
 router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
   try {
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    if (!companyId) return res.status(400).json({ error: "companyId is required" });
+
     const pool = getPool();
     const nocSearch = typeof req.query.noc === "string" && req.query.noc.trim() ? req.query.noc.trim() : null;
     const request = pool.request();
+    request.input("CompanyId", sql.Int, companyId);
     if (nocSearch) request.input("NocSearch", sql.NVarChar(255), `%${nocSearch}%`);
+    // A loan touches a company if it is the lender OR the borrower.
+    // Bank Loan: LenderCompanyId is NULL (lender is a bank), so only BorrowerCompanyId matches.
+    // Customer Loan: BorrowerCompanyId is NULL (borrower is a customer), so only LenderCompanyId matches.
+    // Inter-Company: both may match; UNION across both sides ensures the row appears once.
+    const companyFilter = "(ls.LenderCompanyId = @CompanyId OR ls.BorrowerCompanyId = @CompanyId)";
     const result = await request.query(`
       SELECT
         ls.LoanId, ls.LoanNo, ls.LoanType, ls.LoanDocNo,
@@ -234,7 +243,8 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
       LEFT JOIN dbo.AccountHeadMaster bba ON bba.LHeadId = ls.BorrowerBankAccountId
       LEFT JOIN dbo.LoanNOCAttachments noc ON noc.AttachmentId = ls.NOCAttachmentId
-      ${nocSearch ? "WHERE noc.FileName LIKE @NocSearch" : ""}
+      WHERE ${companyFilter}
+        ${nocSearch ? "AND noc.FileName LIKE @NocSearch" : ""}
       ORDER BY ls.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -245,10 +255,12 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
 
 // ── GET /emi-reminders — unpaid EMIs due within 7 days (or overdue) ───────
 // Registered before "/:id" so it isn't swallowed by the param route.
-router.get("/emi-reminders", async (req, res) => {
+router.get("/emi-reminders", requirePageRight("loan-sanction", "view"), async (req, res) => {
+  const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+  if (!companyId) return res.status(400).json({ error: "companyId is required" });
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const result = await pool.request().input("CompanyId", sql.Int, companyId).query(`
       SELECT
         e.EMIId, e.LoanId, e.InstallmentNo, e.DueDate, e.EMIAmount,
         ls.LoanNo,
@@ -259,6 +271,7 @@ router.get("/emi-reminders", async (req, res) => {
       LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
       WHERE e.IsPaid = 0 AND e.DueDate <= DATEADD(day, 7, CAST(GETDATE() AS DATE))
+        AND (ls.LenderCompanyId = @CompanyId OR ls.BorrowerCompanyId = @CompanyId)
       ORDER BY e.DueDate ASC
     `);
     res.json(result.recordset);
@@ -271,9 +284,11 @@ router.get("/emi-reminders", async (req, res) => {
 // Feeds the Payment page's "Loan EMIs" picker (multi-select or lump sum).
 // Registered before "/:id" so it isn't swallowed by the param route.
 router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req, res) => {
+  const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+  if (!companyId) return res.status(400).json({ error: "companyId is required" });
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const result = await pool.request().input("CompanyId", sql.Int, companyId).query(`
       SELECT
         e.EMIId, e.LoanId, e.InstallmentNo, e.DueDate, e.EMIAmount,
         e.PrincipalComponent, e.InterestComponent,
@@ -301,6 +316,7 @@ router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
       LEFT JOIN dbo.enterprise lc ON lc.id = ls.LenderCompanyId AND lc.business_type = 'C'
       WHERE e.IsPaid = 0 AND ls.Status <> 'Closed'
+        AND (ls.LenderCompanyId = @CompanyId OR ls.BorrowerCompanyId = @CompanyId)
       ORDER BY e.DueDate ASC
     `);
     res.json(result.recordset);

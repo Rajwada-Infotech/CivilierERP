@@ -103,8 +103,12 @@ router.get("/", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const { status, transferType, companyId, dateFrom, dateTo } = req.query;
+    if (!companyId) return res.status(400).json({ error: "companyId is required." });
     const request = pool.request();
     const conditions = [];
+
+    conditions.push("(ft.SourceCompanyId = @companyId OR ft.DestinationCompanyId = @companyId)");
+    request.input("companyId", sql.Int, parseInt(companyId, 10));
 
     if (status) {
       conditions.push("ft.Status = @status");
@@ -113,10 +117,6 @@ router.get("/", authenticateToken, async (req, res) => {
     if (transferType) {
       conditions.push("ft.TransferType = @transferType");
       request.input("transferType", sql.NVarChar(20), transferType);
-    }
-    if (companyId) {
-      conditions.push("(ft.SourceCompanyId = @companyId OR ft.DestinationCompanyId = @companyId)");
-      request.input("companyId", sql.Int, parseInt(companyId, 10));
     }
     if (dateFrom) {
       conditions.push("ft.TransferDate >= @dateFrom");

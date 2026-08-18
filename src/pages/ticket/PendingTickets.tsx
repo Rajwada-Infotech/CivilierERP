@@ -2,6 +2,8 @@ import React, { useMemo, useState, useRef, useEffect } from "react";
 import Webcam from "react-webcam";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { TicketShell } from "@/components/ticket/TicketShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { escapeHtml } from "@/utils/escapeHtml";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { unwrapTicketList } from "@/lib/ticketListResponse";
@@ -840,6 +842,7 @@ const TAB_LABELS: Record<StatusFilter, string> = {
 const PendingTickets: React.FC = () => {
   const { currentUser } = useAuth();
   const queryClient = useQueryClient();
+  const rights = usePageRights("tickets");
   const ADMIN_ROLES = ["super_admin", "admin", "dba"];
   const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
   const currentUserName = currentUser?.name ?? "Me";
@@ -914,6 +917,8 @@ const PendingTickets: React.FC = () => {
   }
 
   return (
+    <>
+    <Breadcrumbs items={["Tickets", "Pending Tickets"]} />
     <TicketShell
       title="Pending Tickets"
       subtitle={`${tabCounts["Pending"]} pending · ${allTickets.length} total${urgentCount > 0 ? ` · ${urgentCount} urgent` : ""}`}
@@ -1019,6 +1024,7 @@ const PendingTickets: React.FC = () => {
           </p>
         )}
     </TicketShell>
+    </>
   );
 };
 

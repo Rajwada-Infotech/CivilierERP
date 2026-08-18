@@ -157,12 +157,16 @@ router.get("/", async (req, res) => {
       ORDER BY h.Id DESC
     `);
 
-    // Fetch activities for each WO (batch query)
+    // Fetch activities for each WO (batch query — parameterized IN list)
     let woActivities = [];
     const woIds = woResult.recordset.map((r) => r.Id);
     if (woIds.length > 0) {
-      const idList = woIds.join(",");
-      const actResult = await pool.request().query(`
+      const actReq = pool.request();
+      const actParams = woIds.map((id, i) => {
+        actReq.input(`wid${i}`, sql.Int, id);
+        return `@wid${i}`;
+      });
+      const actResult = await actReq.query(`
         SELECT
           a.Id,
           a.WorkOrderHeaderId,
@@ -181,7 +185,7 @@ router.get("/", async (req, res) => {
         LEFT JOIN dbo.ActivityMaster ag  ON ag.id  = a.ActivityGroupId
         LEFT JOIN dbo.ActivityMaster act ON act.id = a.ActivityId
         LEFT JOIN dbo.UOMMaster      uom ON uom.Id  = a.UOMId
-        WHERE a.WorkOrderHeaderId IN (${idList})
+        WHERE a.WorkOrderHeaderId IN (${actParams.join(",")})
         ORDER BY a.WorkOrderHeaderId, a.Id
       `);
       woActivities = actResult.recordset;

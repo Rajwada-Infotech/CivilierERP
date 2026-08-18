@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -159,6 +161,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const SaLeadManagement: React.FC = () => {
+  usePageRights("sa-leads");
   const queryClient = useQueryClient();
   const [handoffLoading, setHandoffLoading] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"list" | "pipeline" | "tracking" | "audit">("list");
@@ -395,6 +398,7 @@ const SaLeadManagement: React.FC = () => {
   return (
     <SalesAutoShell title="Lead Management" subtitle="Track, assign and manage the complete lead lifecycle"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
+      <Breadcrumbs items={["Sales Automation", "Lead Management"]} />
       <style>{`@media print { nav, header, aside, .print\\:hidden { display: none !important; } }`}</style>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">

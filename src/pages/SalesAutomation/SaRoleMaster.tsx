@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Users, Check, X, Save, RotateCcw, Download, Upload, FileDown,
@@ -582,6 +584,7 @@ function UserPermissionsTab({ users }: { users: any[] }) {
 // Main Page
 // ════════════════════════════════════════════════════════════════════════════
 const SaRoleMaster: React.FC = () => {
+  usePageRights("sa-role-master");
   const [tab, setTab] = useState<"roles" | "users">("roles");
 
   const { data: users = [], isLoading: loadingUsers } = useQuery({
@@ -604,6 +607,7 @@ const SaRoleMaster: React.FC = () => {
         </span>
       }
     >
+      <Breadcrumbs items={["Sales Automation", "Role Master"]} />
       <div className="flex flex-col gap-6">
 
       {/* Tabs */}

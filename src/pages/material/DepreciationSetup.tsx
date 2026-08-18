@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   getDepreciationSetups, createDepreciationSetup, updateDepreciationSetup, deleteDepreciationSetup,
   type DepreciationSetup, type DepreciationPayload,
@@ -154,6 +155,8 @@ export default function DepreciationSetupPage() {
   const selectedCategoryIcon = CATEGORY_ICONS[form.assetCategory] || Percent;
 
   return (
+    <>
+    <Breadcrumbs items={["Dashboard", "Material", "Depreciation Setup"]} />
     <MaterialShell
       title="Depreciation Setup"
       subtitle="Define annual depreciation rates for fixed asset categories"
@@ -399,5 +402,6 @@ export default function DepreciationSetupPage() {
         document.body
       )}
     </MaterialShell>
+    </>
   );
 }

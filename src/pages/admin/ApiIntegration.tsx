@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import {
   getCommunicatorConfig,
@@ -52,6 +53,7 @@ const maskApiKey = (apiKey: string) => {
 };
 
 export default function ApiIntegration() {
+  const rights = usePageRights("api-integration");
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const {
@@ -87,6 +89,7 @@ export default function ApiIntegration() {
         await getCommunicatorConfig<IntegrationConfigPayload>("integrations");
       return Array.isArray(config.apis) ? config.apis : [];
     },
+    staleTime: 5 * 60_000,
   });
 
   const persistApis = useMutation({

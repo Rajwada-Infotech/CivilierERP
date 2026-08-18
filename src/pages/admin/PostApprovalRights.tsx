@@ -9,6 +9,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { toast } from "sonner";
 import {
@@ -46,6 +47,7 @@ const POST_APPROVAL_ACTION: PageAction = "post-approval";
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 export default function PostApprovalRights() {
+  const rights = usePageRights("post-approval-rights");
   const [pageDefs, setPageDefs] = useState<PageDef[]>([]);
   const [loadingDefs, setLoadingDefs] = useState(true);
 

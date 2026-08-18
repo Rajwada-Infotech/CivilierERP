@@ -76,11 +76,18 @@ const JOINS = `
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT ${SELECT_COLUMNS}
-      ${JOINS}
-      ORDER BY ca.CreatedAt DESC
-    `);
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const contractorId = req.query.contractorId ? parseInt(req.query.contractorId, 10) : null;
+    const result = await pool.request()
+      .input("projectId", sql.Int, projectId)
+      .input("contractorId", sql.Int, contractorId)
+      .query(`
+        SELECT ${SELECT_COLUMNS}
+        ${JOINS}
+        WHERE (@projectId IS NULL OR ca.ProjectId = @projectId)
+          AND (@contractorId IS NULL OR ca.ContractorLHeadId = @contractorId)
+        ORDER BY ca.CreatedAt DESC
+      `);
     res.json(result.recordset);
   } catch (err) {
     console.error("ContractorAllocation / error:", err);

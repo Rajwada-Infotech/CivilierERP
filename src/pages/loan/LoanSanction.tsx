@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
@@ -182,6 +183,7 @@ const LOAN_TYPE_COLORS: Record<LoanType, string> = {
 
 export default function LoanSanctionPage() {
   const qc = useQueryClient();
+  usePageRights("loan-sanction");
   const [showForm, setShowForm] = useState(false);
   const [viewingLoan, setViewingLoan] = useState<LoanSanction | null>(null);
   const [tab, setTab] = useState<"overview" | "exposure" | "schedule" | "chain" | "posting">("overview");
@@ -231,24 +233,31 @@ export default function LoanSanctionPage() {
   // Explicit loan closure — separate deliberate step from payment recording
   const [closingLoan, setClosingLoan] = useState(false);
 
+  const [listCompanyId, setListCompanyId] = useState<number | null>(null);
+
   const { data: loans = [], isLoading } = useQuery({
-    queryKey: ["loan-sanctions"],
-    queryFn: getLoanSanctions,
+    queryKey: ["loan-sanctions", listCompanyId],
+    queryFn: () => getLoanSanctions(listCompanyId!),
+    enabled: !!listCompanyId,
+    staleTime: 30_000,
   });
 
   const { data: companies = [] } = useQuery({
     queryKey: ["company-options-loan"],
     queryFn: getCompanyOptions,
+    staleTime: 5 * 60_000,
   });
 
   const { data: customers = [] } = useQuery({
     queryKey: ["customer-options-loan"],
     queryFn: getCustomerOptions,
+    staleTime: 5 * 60_000,
   });
 
   const { data: banks = [] } = useQuery({
     queryKey: ["bank-options-loan"],
     queryFn: getBankOptions,
+    staleTime: 5 * 60_000,
   });
 
   // Full bank records (with each bank's own company tag) — used to scope
@@ -257,6 +266,7 @@ export default function LoanSanctionPage() {
   const { data: bankRecords = [] } = useQuery({
     queryKey: ["bank-records-loan"],
     queryFn: getBanks,
+    staleTime: 5 * 60_000,
   });
   const banksForCompany = (companyLabel: string) =>
     bankRecords.filter(
@@ -267,18 +277,21 @@ export default function LoanSanctionPage() {
     queryKey: ["loan-schedule", viewingLoan?.LoanId],
     queryFn: () => getLoanSchedule(viewingLoan!.LoanId),
     enabled: !!viewingLoan,
+    staleTime: 30_000,
   });
 
   const { data: payments = [] } = useQuery({
     queryKey: ["loan-payments", viewingLoan?.LoanId],
     queryFn: () => getLoanPayments(viewingLoan!.LoanId),
     enabled: !!viewingLoan,
+    staleTime: 30_000,
   });
 
   const { data: loanDocuments = [] } = useQuery({
     queryKey: ["loan-documents", viewingLoan?.LoanId],
     queryFn: () => getLoanDocuments(viewingLoan!.LoanId),
     enabled: !!viewingLoan,
+    staleTime: 30_000,
   });
 
   // Exposure tab — live lookup of what's already lent/owed by whichever
@@ -792,13 +805,29 @@ export default function LoanSanctionPage() {
     >
       <Breadcrumbs items={[{ label: "Loan", path: "/loan" }, { label: "Loan Sanction" }]} />
 
+      {!showForm && (
+        <div className="flex items-center gap-3 mb-3">
+          <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Company</label>
+          <select
+            className="h-9 rounded-md border border-border bg-background px-3 text-sm"
+            value={listCompanyId ?? ""}
+            onChange={(e) => setListCompanyId(e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">Select company…</option>
+            {companies.map((c) => (
+              <option key={c.id} value={c.id}>{c.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {!showForm ? (
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <DataTable
             columns={columns}
             data={loans}
             loading={isLoading}
-            emptyMessage="No loans sanctioned yet. Click 'New Loan' to get started."
+            emptyMessage={listCompanyId ? "No loans sanctioned yet. Click 'New Loan' to get started." : "Select a company to view loans."}
           />
         </div>
       ) : (

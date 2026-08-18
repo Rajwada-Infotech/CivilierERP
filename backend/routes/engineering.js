@@ -314,6 +314,11 @@ router.get("/dashboard", async (req, res) => {
 
 router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
   try {
+    const companyId = parseInt(req.query.companyId, 10) || null;
+    if (!companyId) {
+      return res.status(400).json({ error: "companyId is required" });
+    }
+
     const pool = getPool();
     if (!(await ensureWorkDoneTable(pool, res))) return;
 
@@ -328,21 +333,22 @@ router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
     const statusFilter = req.query.status
       ? String(req.query.status).trim()
       : null;
-    const whereClause = statusFilter
-      ? `WHERE ISNULL(wd.Status, 'Draft') = @statusFilter`
-      : "";
-    const countWhere = statusFilter
-      ? `WHERE ISNULL(Status, 'Draft') = @statusFilter`
-      : "";
+    const whereParts = ["wd.CompanyId = @companyId"];
+    if (statusFilter) whereParts.push("ISNULL(wd.Status, 'Draft') = @statusFilter");
+    const whereClause = `WHERE ${whereParts.join(" AND ")}`;
+    const countWhereParts = ["CompanyId = @companyId"];
+    if (statusFilter) countWhereParts.push("ISNULL(Status, 'Draft') = @statusFilter");
+    const countWhere = `WHERE ${countWhereParts.join(" AND ")}`;
 
     const dataReq = pool
       .request()
+      .input("companyId", sql.Int, companyId)
       .input("limit", sql.Int, limit)
       .input("offset", sql.Int, offset);
     if (statusFilter)
       dataReq.input("statusFilter", sql.NVarChar(50), statusFilter);
 
-    const countReq = pool.request();
+    const countReq = pool.request().input("companyId", sql.Int, companyId);
     if (statusFilter)
       countReq.input("statusFilter", sql.NVarChar(50), statusFilter);
 
@@ -886,7 +892,9 @@ router.get(
   async (req, res) => {
     try {
       const pool = getPool();
-      const result = await pool.request().query(`
+      const companyId = parseInt(req.query.companyId, 10) || null;
+      const woReq = pool.request().input("companyId", sql.Int, companyId);
+      const result = await woReq.query(`
         SELECT
           h.Id,
           COALESCE(h.DocNo, h.DocumentNumber) AS DocNo,
@@ -899,6 +907,7 @@ router.get(
         LEFT JOIN dbo.WorkOrderActivities a ON a.WorkOrderHeaderId = h.Id
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = h.ContractorId
         WHERE ISNULL(h.Status, 'Draft') = 'Approved'
+          AND (@companyId IS NULL OR h.CompanyId = @companyId)
         GROUP BY h.Id, h.DocNo, h.DocumentNumber, ah.LHeadName
         ORDER BY h.Id DESC
       `);
@@ -1039,7 +1048,9 @@ router.get(
   async (req, res) => {
     try {
       const pool = getPool();
-      const result = await pool.request().query(`
+      const companyId = parseInt(req.query.companyId, 10) || null;
+      const boqReq = pool.request().input("companyId", sql.Int, companyId);
+      const result = await boqReq.query(`
         SELECT
           b.BoqID   AS id,
           COALESCE(b.DocNo, b.BoqNo) AS name,
@@ -1052,6 +1063,7 @@ router.get(
         LEFT JOIN dbo.enterprise co ON co.id = b.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
         WHERE b.Status = 'Approved'
+          AND (@companyId IS NULL OR b.CompanyId = @companyId)
         ORDER BY b.BoqID DESC
       `);
       res.json(result.recordset);

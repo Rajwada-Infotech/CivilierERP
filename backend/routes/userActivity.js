@@ -12,6 +12,7 @@ const {
   getDynamicLimit,
 } = require("../redis");
 
+const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const { cache } = require("../middleware/cache");
 
@@ -352,7 +353,7 @@ router.delete(
 );
 
 // POST activity — logs to DB then broadcasts to activity-watchers room via socket.io
-router.post("/", async (req, res) => {
+router.post("/", authMiddleware, async (req, res) => {
   const { userId, userName, userEmail, userRole, event, ...rest } =
     req.body || {};
 

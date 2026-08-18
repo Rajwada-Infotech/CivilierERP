@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
@@ -462,6 +463,7 @@ const PRIORITIES: Priority[] = ["Urgent", "High", "Medium", "Low"];
 
 export default function TicketResolution() {
   const queryClient = useQueryClient();
+  const rights = usePageRights("tickets");
 
   const [search, setSearch] = useState("");
   const [priorityFilter, setPriority] = useState<Priority | "All">("All");

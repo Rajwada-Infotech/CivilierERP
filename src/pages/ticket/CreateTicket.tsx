@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { TicketShell } from "@/components/ticket/TicketShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import { Button } from "@/components/ui/button";
@@ -241,6 +243,7 @@ function Field({
 const CreateTicket = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const rights = usePageRights("tickets");
 
   const [companyId, setCompanyId] = useState<string | undefined>(undefined);
   const [projectId, setProjectId] = useState<string | undefined>(undefined);
@@ -397,6 +400,8 @@ const CreateTicket = () => {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
+    <>
+    <Breadcrumbs items={["Tickets", "Create Ticket"]} />
     <TicketShell
       title="New Support Ticket"
       subtitle="Fill in the details below to raise a ticket"
@@ -734,6 +739,7 @@ const CreateTicket = () => {
         </div>
       )}
     </TicketShell>
+    </>
   );
 };
 

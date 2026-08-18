@@ -518,12 +518,14 @@ router.get("/", cache("grns", 300), async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 500);
     const offset = (page - 1) * limit;
     const finYearFilter = req.query.finYear || null; // e.g. "2025-2026"
+    const companyId = parseInt(req.query.companyId, 10) || null;
 
     const result = await pool
       .request()
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, limit)
-      .input("finYear", sql.NVarChar(20), finYearFilter).query(`
+      .input("finYear", sql.NVarChar(20), finYearFilter)
+      .input("companyId", sql.Int, companyId).query(`
       SELECT
         grn.GRNID,
         grn.GRNNo,
@@ -589,6 +591,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
           END
         ) = @finYear
       ))
+        AND (@companyId IS NULL OR p.CompanyId = @companyId)
       ORDER BY grn.GRNID DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);

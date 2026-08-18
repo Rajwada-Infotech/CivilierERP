@@ -57,16 +57,16 @@ router.get("/", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const { status, companyId, projectId, dateFrom, dateTo } = req.query;
+    if (!companyId) return res.status(400).json({ error: "companyId is required." });
     const request = pool.request();
     const conditions = [];
+
+    conditions.push("jv.CompanyId = @companyId");
+    request.input("companyId", sql.Int, parseInt(companyId, 10));
 
     if (status) {
       conditions.push("jv.Status = @status");
       request.input("status", sql.NVarChar(20), status);
-    }
-    if (companyId) {
-      conditions.push("jv.CompanyId = @companyId");
-      request.input("companyId", sql.Int, parseInt(companyId, 10));
     }
     if (projectId) {
       conditions.push("jv.ProjectId = @projectId");

@@ -70,7 +70,12 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
           RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
           RPCustomerName, RPDepositBankId, RPDepositBankName,
           SourceSaleInvoiceId, SourceSaleInvoiceDocNo,
-          COUNT(*) OVER() AS _total
+          COUNT(*) OVER() AS _total,
+          SUM(RPAmount) OVER() AS _totalAmount,
+          SUM(CASE WHEN RPStatus = 'Approved' THEN 1 ELSE 0 END) OVER() AS _approvedCount,
+          SUM(CASE WHEN RPStatus = 'Draft' THEN 1 ELSE 0 END) OVER() AS _draftCount,
+          SUM(CASE WHEN RPStatus = 'Pending' THEN 1 ELSE 0 END) OVER() AS _pendingCount,
+          SUM(CASE WHEN RPStatus = 'Rejected' THEN 1 ELSE 0 END) OVER() AS _rejectedCount
         FROM dbo.ReceivedPayment
         WHERE (@companyId IS NULL OR RPCompanyId = @companyId)
           AND (@status IS NULL OR RPStatus = @status)
@@ -80,13 +85,21 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
 
     const rows = result.recordset;
     const total = rows.length > 0 ? rows[0]._total : 0;
-    const data = rows.map(({ _total, ...r }) => r);
+    const summary = rows.length > 0 ? {
+      totalAmount: Number(rows[0]._totalAmount || 0),
+      approvedCount: Number(rows[0]._approvedCount || 0),
+      draftCount: Number(rows[0]._draftCount || 0),
+      pendingCount: Number(rows[0]._pendingCount || 0),
+      rejectedCount: Number(rows[0]._rejectedCount || 0),
+    } : { totalAmount: 0, approvedCount: 0, draftCount: 0, pendingCount: 0, rejectedCount: 0 };
+    const data = rows.map(({ _total, _totalAmount, _approvedCount, _draftCount, _pendingCount, _rejectedCount, ...r }) => r);
 
     res.json({
       data,
       page,
       totalPages: Math.ceil(total / limit),
       total,
+      summary,
     });
   } catch (err) {
     console.error("GET /received-payment error:", err);

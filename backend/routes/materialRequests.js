@@ -291,12 +291,14 @@ router.get("/", authenticateToken, async (req, res) => {
     const offset = (page - 1) * limit;
     const search = req.query.search || "";
     const statusFilter = req.query.status || ""; // exact status filter from dashboard
+    const companyId = parseInt(req.query.companyId, 10) || null;
 
     const request = pool.request();
     request.input("offset", sql.Int, offset);
     request.input("limit", sql.Int, limit);
     request.input("search", sql.NVarChar, `%${search}%`);
     request.input("statusFilter", sql.NVarChar, statusFilter);
+    request.input("companyId", sql.Int, companyId);
 
     const result = await request.query(`
       SELECT
@@ -316,6 +318,7 @@ router.get("/", authenticateToken, async (req, res) => {
       LEFT JOIN  dbo.MaterialRequestItems mri WITH (NOLOCK) ON mri.MRId = mr.MRId
       WHERE (@search = '%%' OR mr.DocNo LIKE @search OR ec.name LIKE @search OR mr.Status LIKE @search)
         AND (@statusFilter = '' OR mr.Status = @statusFilter)
+        AND (@companyId IS NULL OR mr.CompanyId = @companyId)
       GROUP BY mr.MRId, mr.DocNo, mr.Status, mr.Priority,
                mr.RequestDate, mr.RequiredByDate,
                mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
