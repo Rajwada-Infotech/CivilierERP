@@ -170,6 +170,10 @@ export interface PayLoanResponse {
   totalAmount: number;
   loanClosed: boolean;
   excessCredited: number;
+  /** Non-null when the repayment was recorded but GL posting was skipped
+   *  (e.g. no Lender/Borrower Bank A/C tagged on the loan). Frontend should
+   *  show this as a warning toast so the user knows GL needs manual attention. */
+  glPostingWarning: string | null;
 }
 
 export interface CustomerOption {
