@@ -1,10 +1,15 @@
 const express = require("express");
 const router = express.Router();
+const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const PHOTO_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"]);
+const PHOTO_PHASES = new Set(["before", "after"]);
 
 const STATUS_VALUES = new Set(["PENDING", "IN_PROGRESS", "HOLD", "CANCELLED", "APPROVED", "REWORK", "COMPLETED"]);
 const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
@@ -514,6 +519,118 @@ router.put("/:rungId/blueprint-annotation", authMiddleware, async (req, res) => 
     res.json({ success: true, version: 1 });
   } catch (err) {
     console.error("[dependency-activity-assignment] PUT /:rungId/blueprint-annotation error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Before/After Photo Capture (Part C) ─────────────────────────────────────
+// Replaces the reporting-context blueprint markup as how a field engineer
+// actually updates a work report — a handful of camera photos per phase,
+// not a drawing. See migration 348.
+
+// GET /:rungId/photos — grouped { before: [...], after: [...] }, metadata
+// only (no FileData — keeps the list light even with several large photos).
+router.get("/:rungId/photos", authMiddleware, async (req, res) => {
+  const rungId = parseInt(req.params.rungId, 10);
+  if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+  try {
+    const pool = await getPool();
+    const result = await pool.request().input("rungId", sql.Int, rungId).query(`
+      SELECT Id AS id, Phase AS phase, FileName AS fileName, MimeType AS mimeType,
+             Note AS note, CapturedBy AS capturedBy, CapturedAt AS capturedAt
+      FROM dbo.ActivityPhoto
+      WHERE DependencyMasterActivityId = @rungId
+      ORDER BY CapturedAt DESC
+    `);
+    const before = result.recordset.filter((p) => p.phase === "before");
+    const after = result.recordset.filter((p) => p.phase === "after");
+    res.json({ before, after });
+  } catch (err) {
+    console.error("[dependency-activity-assignment] GET /:rungId/photos error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /:rungId/photos/:photoId — one photo's base64 data, always reached
+// through fetchWithAuth (never a bare <img src>) for the same auth-token
+// reason documented on room-master's /:id/blueprint endpoint.
+router.get("/:rungId/photos/:photoId", authMiddleware, async (req, res) => {
+  const rungId = parseInt(req.params.rungId, 10);
+  const photoId = parseInt(req.params.photoId, 10);
+  if (!Number.isFinite(rungId) || !Number.isFinite(photoId)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input("rungId", sql.Int, rungId)
+      .input("photoId", sql.Int, photoId).query(`
+        SELECT FileName AS fileName, MimeType AS mimeType, FileData AS dataBase64
+        FROM dbo.ActivityPhoto
+        WHERE DependencyMasterActivityId = @rungId AND Id = @photoId
+      `);
+    const row = result.recordset[0];
+    if (!row) return res.status(404).json({ error: "Photo not found" });
+    res.json(row);
+  } catch (err) {
+    console.error("[dependency-activity-assignment] GET /:rungId/photos/:photoId error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:rungId/photos — upload one photo. multipart body: file, phase
+// ('before'|'after'), note (optional).
+router.post("/:rungId/photos", authMiddleware, upload.single("file"), async (req, res) => {
+  const rungId = parseInt(req.params.rungId, 10);
+  if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  if (!PHOTO_MIME_TYPES.has(req.file.mimetype)) {
+    return res.status(400).json({ error: "Photo must be a JPG, PNG, WEBP, or HEIC image" });
+  }
+  const phase = PHOTO_PHASES.has(req.body.phase) ? req.body.phase : null;
+  if (!phase) return res.status(400).json({ error: "phase must be 'before' or 'after'" });
+
+  const actor = req.user?.email || req.user?.name || "system";
+
+  try {
+    const pool = await getPool();
+    const rungCheck = await pool.request().input("rungId", sql.Int, rungId)
+      .query(`SELECT Id FROM dbo.DependencyMasterActivity WHERE Id = @rungId`);
+    if (!rungCheck.recordset.length) return res.status(404).json({ error: "Activity rung not found" });
+
+    const insertRes = await pool.request()
+      .input("rungId", sql.Int, rungId)
+      .input("Phase", sql.NVarChar(10), phase)
+      .input("FileName", sql.NVarChar(255), req.file.originalname)
+      .input("MimeType", sql.NVarChar(100), req.file.mimetype)
+      .input("FileData", sql.NVarChar(sql.MAX), req.file.buffer.toString("base64"))
+      .input("Note", sql.NVarChar(500), req.body.note ? String(req.body.note).slice(0, 500) : null)
+      .input("CapturedBy", sql.NVarChar(200), actor).query(`
+        INSERT INTO dbo.ActivityPhoto
+          (DependencyMasterActivityId, Phase, FileName, MimeType, FileData, Note, CapturedBy, CapturedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@rungId, @Phase, @FileName, @MimeType, @FileData, @Note, @CapturedBy, SYSDATETIME())
+      `);
+    res.status(201).json({ id: insertRes.recordset[0].Id });
+  } catch (err) {
+    console.error("[dependency-activity-assignment] POST /:rungId/photos error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /:rungId/photos/:photoId
+router.delete("/:rungId/photos/:photoId", authMiddleware, async (req, res) => {
+  const rungId = parseInt(req.params.rungId, 10);
+  const photoId = parseInt(req.params.photoId, 10);
+  if (!Number.isFinite(rungId) || !Number.isFinite(photoId)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input("rungId", sql.Int, rungId)
+      .input("photoId", sql.Int, photoId)
+      .query(`DELETE FROM dbo.ActivityPhoto WHERE DependencyMasterActivityId = @rungId AND Id = @photoId`);
+    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Photo not found" });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[dependency-activity-assignment] DELETE /:rungId/photos/:photoId error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

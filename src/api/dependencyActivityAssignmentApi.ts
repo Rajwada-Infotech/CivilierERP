@@ -249,3 +249,61 @@ export const saveBlueprintAnnotation = async (
   });
   return handleResponse<{ success: boolean; version: number }>(res);
 };
+
+// ── Before/After Photo Capture ──────────────────────────────────────────────
+// Replaces the reporting-context blueprint markup as how a field engineer
+// actually updates a work report — see migration 348.
+export type PhotoPhase = "before" | "after";
+
+export interface ActivityPhotoMeta {
+  id: number;
+  phase: PhotoPhase;
+  fileName: string;
+  mimeType: string;
+  note: string | null;
+  capturedBy: string | null;
+  capturedAt: string;
+}
+
+export interface ActivityPhotos {
+  before: ActivityPhotoMeta[];
+  after: ActivityPhotoMeta[];
+}
+
+export interface ActivityPhotoData {
+  fileName: string;
+  mimeType: string;
+  dataBase64: string;
+}
+
+export const getActivityPhotos = async (rungId: number): Promise<ActivityPhotos> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos`);
+  return handleResponse<ActivityPhotos>(res);
+};
+
+export const getActivityPhoto = async (rungId: number, photoId: number): Promise<ActivityPhotoData> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos/${photoId}`);
+  return handleResponse<ActivityPhotoData>(res);
+};
+
+export const uploadActivityPhoto = async (
+  rungId: number,
+  phase: PhotoPhase,
+  file: File,
+  note?: string,
+): Promise<{ id: number }> => {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("phase", phase);
+  if (note) formData.append("note", note);
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos`, {
+    method: "POST",
+    body: formData,
+  });
+  return handleResponse<{ id: number }>(res);
+};
+
+export const deleteActivityPhoto = async (rungId: number, photoId: number): Promise<{ success: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos/${photoId}`, { method: "DELETE" });
+  return handleResponse<{ success: boolean }>(res);
+};
