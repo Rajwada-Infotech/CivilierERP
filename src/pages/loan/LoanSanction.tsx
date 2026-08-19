@@ -48,6 +48,7 @@ import {
 import { useTheme } from "@/contexts/ThemeContext";
 import { MoneyRecive } from "iconsax-react";
 import { getCompanyOptions, getBanks, type CompanyOption, type BankRecord } from "@/api/bankMasterApi";
+import { CompanyFilterCombo } from "@/components/CompanyFilterCombo";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -151,6 +152,19 @@ const fmtDate = (d?: string | null) =>
 //   null    — PaymentMode is empty even though NewPaymentId is set (not expected)
 //   "NOT_ON_FILE" — NewPaymentId is null: this row pre-dates migration 340;
 //                   the caller should render "Payment mode not on file" in muted style.
+// What the loan's own disbursement was paid WITH (distinct from
+// paymentInstrumentLabel below, which is for a repayment) — LoanSanction
+// carries its own PaymentMode/ChequeNo directly, no NewPayment link needed.
+function sanctionInstrumentLabel(loan: LoanSanction): string | null {
+  if (!loan.PaymentMode) return null;
+  if (loan.PaymentMode === "Cheque" || loan.PaymentMode === "Post-Dated Cheque") {
+    return loan.ChequeNo
+      ? `Cheque #${loan.ChequeNo}${loan.ChequeDate ? ` dated ${new Date(loan.ChequeDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}`
+      : loan.PaymentMode;
+  }
+  return loan.DigitalRefNumber ? `${loan.PaymentMode} (Ref: ${loan.DigitalRefNumber})` : loan.PaymentMode;
+}
+
 function paymentInstrumentLabel(p: LoanPayment): string | null | "NOT_ON_FILE" {
   // BUG 3 FIX: distinguish "no NewPaymentId at all" from "has one but mode blank"
   if (p.NewPaymentId == null) return "NOT_ON_FILE";
@@ -366,7 +380,7 @@ export default function LoanSanctionPage() {
       .then(async (r) => {
         const body = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(body?.error ?? "Posting failed");
-        setLoanPostingData((prev: any) => ({ ...prev, isPosted: true, jvNo: body.jvNo, jvId: body.jvId }));
+        setLoanPostingData((prev: any) => ({ ...prev, isPosted: true, jvNo: body.voucherNo }));
       })
       .catch((err: any) => setLoanPostingError(err.message ?? "Posting failed"))
       .finally(() => setLoanPosting(false));
@@ -790,7 +804,7 @@ export default function LoanSanctionPage() {
   return (
     <GlassShell
       title="Loan Sanction"
-      subtitle="Sanction inter-company, intra-company and customer loans"
+      subtitle="Sanction inter-company, bank and customer loans"
       icon={MoneyRecive as any}
       accentColor={ACCENT}
       action={
@@ -838,11 +852,7 @@ export default function LoanSanctionPage() {
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Building2 size={13} className="text-muted-foreground shrink-0" />
-            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Company</span>
-            <CompanyFilterCombo companies={companies} value={listCompanyId} onChange={setListCompanyId} />
-          </div>
+          <CompanyFilterCombo companies={companies} value={listCompanyId} onChange={setListCompanyId} />
 
           {listCompanyId != null && (
             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
@@ -2015,9 +2025,15 @@ export default function LoanSanctionPage() {
                   <ChainNode
                     icon={<MoneyRecive size={13} className="text-emerald-500" />}
                     title={`Loan Sanctioned — ${viewingLoan.LoanNo}`}
-                    subtitle={`${fmt(viewingLoan.Amount)} disbursed to ${displayBorrower} on ${fmtDate(viewingLoan.LoanDate)}`}
+                    subtitle={`${fmt(viewingLoan.Amount)} disbursed to ${displayBorrower} on ${fmtDate(viewingLoan.LoanDate)}${sanctionInstrumentLabel(viewingLoan) ? ` · ${sanctionInstrumentLabel(viewingLoan)}` : ""}`}
                     done
-                    isLast={payments.length === 0 && paidEmis === 0}
+                    // Something always renders after this node — the payments
+                    // list, the "marked paid" node, the Closed node, or the
+                    // "No payments yet" placeholder — so it's never actually
+                    // last. Forcing isLast here used to drop both the
+                    // connector line AND the bottom padding, collapsing the
+                    // gap to this node's neighbor to zero.
+                    isLast={false}
                   />
                   {payments.map((p, i, arr) => (
                     <ChainNode
@@ -2120,7 +2136,7 @@ export default function LoanSanctionPage() {
                       <span className="text-[10px] text-muted-foreground">Loading…</span>
                     ) : loanPostingData?.isPosted ? (
                       <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                        <CheckCircle2 size={10} /> Posted · {loanPostingData.jvNo || `JV-${loanPostingData.jvId}`}
+                        <CheckCircle2 size={10} /> Posted · {loanPostingData.jvNo || viewingLoan?.LoanNo}
                       </span>
                     ) : loanPosting ? (
                       <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -2148,83 +2164,96 @@ export default function LoanSanctionPage() {
                       <PostingCard key={p.companyId ?? i} p={p} />
                     ))}
                   </div>
-                ) : (
-                  <div className="rounded-xl border border-border overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-muted/30 text-[10px] uppercase tracking-widest text-muted-foreground">
-                          <th className="text-left px-3 py-2">Account</th>
-                          <th className="text-left px-3 py-2">Account Group</th>
-                          <th className="text-right px-3 py-2">Debit</th>
-                          <th className="text-right px-3 py-2">Credit</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        <tr>
-                          <td className="px-3 py-2.5">
+                ) : (() => {
+                  // Same debit/credit grid + colored side-dot styling as
+                  // GRN's Posting tab (GRN.tsx "Journal Entry — GRN
+                  // Posting"), instead of a plain <table> — kept visually
+                  // identical across the app's posting views.
+                  const gridCols = "grid-cols-[minmax(0,2.5fr)_minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1.2fr_1fr_1fr]";
+                  const borrowerGroup = readOnly
+                    ? viewingLoan?.BorrowerGroupName
+                      ? `${viewingLoan.BorrowerParentGroupName ? `${viewingLoan.BorrowerParentGroupName} / ` : ""}${viewingLoan.BorrowerGroupName}`
+                      : "—"
+                    : "Loans and Advances";
+                  const lenderGroup = readOnly
+                    ? viewingLoan?.LenderGroupName
+                      ? `${viewingLoan.LenderParentGroupName ? `${viewingLoan.LenderParentGroupName} / ` : ""}${viewingLoan.LenderGroupName}`
+                      : "—"
+                    : isBankLoan
+                      ? "Bank's own account group"
+                      : "Loans and Advances";
+                  return (
+                    <div className="rounded-xl border border-border overflow-hidden">
+                      <div className={`grid ${gridCols} bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2`}>
+                        <span>Account</span>
+                        <span>Account Group</span>
+                        <span className="text-right">Debit (₹)</span>
+                        <span className="text-right">Credit (₹)</span>
+                      </div>
+                      <div className={`grid ${gridCols} px-2 sm:px-4 py-3 border-b border-border/50 items-center gap-1 sm:gap-2`}>
+                        <div className="flex items-center gap-2 min-w-0 pl-1">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 bg-emerald-500" />
+                          <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0">
                             Loan — {displayBorrower || "Borrower"}
-                            {readOnly && viewingLoan?.BorrowerLHeadCode && (
-                              <span className="block text-[10px] text-muted-foreground font-mono mt-0.5">
-                                {viewingLoan.BorrowerLHeadCode}
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2.5 text-xs text-muted-foreground">
-                            {readOnly ? (
-                              viewingLoan?.BorrowerGroupName ? (
-                                <>
-                                  {viewingLoan.BorrowerParentGroupName && `${viewingLoan.BorrowerParentGroupName} / `}
-                                  {viewingLoan.BorrowerGroupName}
-                                </>
-                              ) : (
-                                "—"
-                              )
-                            ) : (
-                              "Loans and Advances"
-                            )}
-                          </td>
-                          <td className="px-3 py-2.5 text-right font-mono">{fmt(displayAmount)}</td>
-                          <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">—</td>
-                        </tr>
-                        <tr>
-                          <td className="px-3 py-2.5">
+                            {readOnly && viewingLoan?.BorrowerLHeadCode && ` (${viewingLoan.BorrowerLHeadCode})`}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-muted-foreground truncate">{borrowerGroup}</span>
+                        <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">{fmt(displayAmount)}</span>
+                        <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400" />
+                      </div>
+                      <div className={`grid ${gridCols} px-2 sm:px-4 py-3 border-b border-border/50 items-center gap-1 sm:gap-2`}>
+                        <div className="flex items-center gap-2 min-w-0 pl-1">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 bg-rose-500" />
+                          <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0">
                             Loan — {displayLender || "Lender"}
-                            {readOnly && viewingLoan?.LenderLHeadCode && (
-                              <span className="block text-[10px] text-muted-foreground font-mono mt-0.5">
-                                {viewingLoan.LenderLHeadCode}
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2.5 text-xs text-muted-foreground">
-                            {readOnly ? (
-                              viewingLoan?.LenderGroupName ? (
-                                <>
-                                  {viewingLoan.LenderParentGroupName && `${viewingLoan.LenderParentGroupName} / `}
-                                  {viewingLoan.LenderGroupName}
-                                </>
-                              ) : (
-                                "—"
-                              )
-                            ) : isBankLoan ? (
-                              "Bank's own account group"
-                            ) : (
-                              "Loans and Advances"
-                            )}
-                          </td>
-                          <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">—</td>
-                          <td className="px-3 py-2.5 text-right font-mono">{fmt(displayAmount)}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                            {readOnly && viewingLoan?.LenderLHeadCode && ` (${viewingLoan.LenderLHeadCode})`}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-muted-foreground truncate">{lenderGroup}</span>
+                        <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400" />
+                        <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">{fmt(displayAmount)}</span>
+                      </div>
+                      <div className={`grid ${gridCols} px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2`}>
+                        <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                        <span />
+                        <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(displayAmount)}</span>
+                        <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(displayAmount)}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <p className="text-xs text-muted-foreground">
                   All postings use system-generated GL accounts, auto-created per counterparty on
                   first use{isBankLoanType ? " — for a Bank Loan, the lender's own existing GL account (and its real account group) is reused directly, not a shadow account" : ""}.
-                  {readOnly
-                    ? " This entry is posted to the General Ledger automatically and appears in Trial Balance."
-                    : " Save the loan to generate this posting."}
                 </p>
+
+                {/* Posted / posting / error status banner — same layout as
+                    GRN's Posting tab status banner. */}
+                {readOnly && !loanPostingLoading && (
+                  loanPostingData?.isPosted ? (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                      <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
+                      <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                        Posted to General Ledger as <span className="font-semibold">{loanPostingData.jvNo || viewingLoan?.LoanNo}</span>. Entries are visible in the Trial Balance.
+                      </p>
+                    </div>
+                  ) : loanPostingError ? (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3">
+                      <AlertCircle size={13} className="text-destructive flex-shrink-0" />
+                      <p className="text-xs text-destructive">Auto-posting failed: {loanPostingError}</p>
+                    </div>
+                  ) : loanPosting ? (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-4 py-3">
+                      <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                      <p className="text-xs text-muted-foreground">Posting to General Ledger…</p>
+                    </div>
+                  ) : null
+                )}
+                {!readOnly && (
+                  <p className="text-xs text-muted-foreground">Save the loan to generate this posting.</p>
+                )}
 
                 {/* Repayment postings — each repayment (see POST /:id/pay)
                     posts its own reversing two-sided entry; list them below
@@ -2450,154 +2479,6 @@ function PostingCard({ p }: { p: { companyId: number | null; companyName: string
           <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(total)}</span>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ── CompanyFilterCombo ─────────────────────────────────────────────────────
-// The loan list's Company filter. Unlike the old plain <select>, "All
-// companies" is a real, always-visible option (not just placeholder text
-// that blocks the table until something else is picked) and the list is
-// searchable, matching the app's other combo pickers (CustomerComboField
-// below, VendorCombo in the Payment filter bar). Panel is portalled to
-// document.body so overflow:hidden on ancestors never clips it.
-function CompanyFilterCombo({
-  companies,
-  value,
-  onChange,
-}: {
-  companies: CompanyOption[];
-  value: number | null;
-  onChange: (id: number | null) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  const updateRect = useCallback(() => {
-    if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    updateRect();
-    window.addEventListener("scroll", updateRect, true);
-    window.addEventListener("resize", updateRect);
-    return () => {
-      window.removeEventListener("scroll", updateRect, true);
-      window.removeEventListener("resize", updateRect);
-    };
-  }, [open, updateRect]);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (
-        triggerRef.current && !triggerRef.current.contains(e.target as Node) &&
-        panelRef.current && !panelRef.current.contains(e.target as Node)
-      ) { setOpen(false); setQuery(""); }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const selected = value != null ? companies.find((c) => c.id === value) : null;
-  const filtered = query.trim()
-    ? companies.filter((c) => c.label.toLowerCase().includes(query.trim().toLowerCase()))
-    : companies;
-
-  const PANEL_MAX = 260;
-  const GAP = 6;
-  const spaceBelow = rect ? window.innerHeight - rect.bottom - GAP : 0;
-  const spaceAbove = rect ? rect.top - GAP : 0;
-  const openUpward = spaceAbove > spaceBelow && spaceBelow < PANEL_MAX;
-
-  const panel = open && rect && createPortal(
-    <div
-      ref={panelRef}
-      style={{
-        position: "fixed",
-        ...(openUpward
-          ? { bottom: window.innerHeight - rect.top + GAP }
-          : { top: rect.bottom + GAP }),
-        left: rect.left,
-        width: Math.max(rect.width, 220),
-        zIndex: 9999,
-      }}
-      className="rounded-lg border border-border bg-card shadow-2xl overflow-hidden"
-    >
-      <div className="p-1.5 border-b border-border">
-        <div className="relative">
-          <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input
-            autoFocus
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search company…"
-            className="w-full pl-6 pr-2 py-1.5 text-xs bg-muted border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </div>
-      </div>
-      <div className="overflow-y-auto py-1" style={{ maxHeight: (openUpward ? spaceAbove : spaceBelow) - 44 }}>
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => { onChange(null); setOpen(false); setQuery(""); }}
-          className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-muted/60 ${
-            value == null ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-foreground"
-          }`}
-        >
-          All companies
-        </button>
-        {filtered.length === 0 ? (
-          <p className="px-3 py-2 text-xs text-muted-foreground">No companies found</p>
-        ) : (
-          filtered.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { onChange(c.id); setOpen(false); setQuery(""); }}
-              className={`w-full text-left px-3 py-2 text-sm truncate transition-colors hover:bg-muted/60 ${
-                c.id === value ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-foreground"
-              }`}
-            >
-              {c.label}
-            </button>
-          ))
-        )}
-      </div>
-    </div>,
-    document.body,
-  );
-
-  return (
-    <div className="relative">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => { setOpen((o) => !o); updateRect(); }}
-        className="flex items-center gap-2 h-9 min-w-[220px] rounded-lg border border-border bg-background px-3 text-sm hover:border-emerald-500/40 transition-colors"
-      >
-        <Building2 size={13} className="text-muted-foreground shrink-0" />
-        <span className={`flex-1 text-left truncate ${selected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
-          {selected ? selected.label : "All companies"}
-        </span>
-        {selected && (
-          <span
-            role="button"
-            tabIndex={-1}
-            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onChange(null); setQuery(""); }}
-            className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
-          >
-            <XIcon size={12} />
-          </span>
-        )}
-        <ChevronDown size={13} className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {panel}
     </div>
   );
 }
