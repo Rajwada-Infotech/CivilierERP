@@ -32,11 +32,17 @@ const { getPool, sql } = require("../db");
 // NOTE: authMiddleware is intentionally NOT included here — already applied
 // globally via app.use("/api", authMiddleware) in server.js.
 
+// finYearCol: a direct FK column to dbo.FinYear.FId, when the module's own
+// table has one (only Purchase Order does — see purchaseOrders.js's fy_id
+// join). Every other module falls back to a date-range join against
+// dbo.FinYear (dateCol BETWEEN FStartDate AND FEndDate) below — the same
+// "safest/most general" approach grns.js already uses as its own fallback,
+// rather than every module needing its own FinYear FK added.
 const DOC_MODULE_MAP = {
   "Purchase Order": {
     table: "dbo.PurchaseOrders", alias: "t",
     idCol: "PurchaseOrderID", docNoCol: "PurchaseOrderNo", dateCol: "PODate",
-    companyCol: "CompanyId", projectCol: "ProjectId",
+    companyCol: "CompanyId", projectCol: "ProjectId", finYearCol: "fy_id",
     statusCol: "Status", excludeStatuses: ["Rejected", "Deleted"],
   },
   "GRN": {
@@ -97,11 +103,17 @@ router.get("/modules", (req, res) => {
 });
 
 // ── GET /?module=Purchase Order&companyId=&projectId=&search= ────────────────
+// ── GET /?module=Purchase Order&id=123 ────────────────────────────────────────
+// The `id` form is an exact lookup for one already-picked record (e.g. a
+// task's linked doc re-resolving on Edit-open, or re-resolving after a
+// change) — it bypasses status/company/project filtering and `search`
+// entirely, since the caller already knows exactly which record it wants.
 router.get("/", async (req, res) => {
   const moduleLabel = (req.query.module || "").toString();
   const cfg = DOC_MODULE_MAP[moduleLabel];
   if (!cfg) return res.status(400).json({ error: "Unsupported or missing document module" });
 
+  const idParam = req.query.id ? parseInt(req.query.id, 10) : null;
   const search = (req.query.search || "").toString().trim();
   const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
   const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
@@ -111,27 +123,38 @@ router.get("/", async (req, res) => {
     const request = pool.request();
     const conditions = [];
 
-    if (cfg.excludeStatuses?.length) {
-      const names = cfg.excludeStatuses.map((v, i) => {
-        request.input(`ex${i}`, sql.NVarChar(30), v);
-        return `@ex${i}`;
-      });
-      conditions.push(`ISNULL(t.${cfg.statusCol}, '') NOT IN (${names.join(", ")})`);
-    }
-    if (search) {
-      request.input("Search", sql.NVarChar(100), `%${search}%`);
-      conditions.push(`t.${cfg.docNoCol} LIKE @Search`);
+    if (idParam) {
+      request.input("Id", sql.Int, idParam);
+      conditions.push(`t.${cfg.idCol} = @Id`);
+    } else {
+      if (cfg.excludeStatuses?.length) {
+        const names = cfg.excludeStatuses.map((v, i) => {
+          request.input(`ex${i}`, sql.NVarChar(30), v);
+          return `@ex${i}`;
+        });
+        conditions.push(`ISNULL(t.${cfg.statusCol}, '') NOT IN (${names.join(", ")})`);
+      }
+      if (search) {
+        request.input("Search", sql.NVarChar(100), `%${search}%`);
+        conditions.push(`t.${cfg.docNoCol} LIKE @Search`);
+      }
     }
     const companyExpr = cfg.companyExpr || (cfg.companyCol ? `t.${cfg.companyCol}` : null);
     const projectExpr = cfg.projectExpr || (cfg.projectCol ? `t.${cfg.projectCol}` : null);
-    if (companyId && companyExpr) {
-      request.input("CompanyId", sql.Int, companyId);
-      conditions.push(`${companyExpr} = @CompanyId`);
+    if (!idParam) {
+      if (companyId && companyExpr) {
+        request.input("CompanyId", sql.Int, companyId);
+        conditions.push(`${companyExpr} = @CompanyId`);
+      }
+      if (projectId && projectExpr) {
+        request.input("ProjectId", sql.Int, projectId);
+        conditions.push(`${projectExpr} = @ProjectId`);
+      }
     }
-    if (projectId && projectExpr) {
-      request.input("ProjectId", sql.Int, projectId);
-      conditions.push(`${projectExpr} = @ProjectId`);
-    }
+
+    const finYearJoin = cfg.finYearCol
+      ? `LEFT JOIN dbo.FinYear fy ON fy.FId = t.${cfg.finYearCol}`
+      : `LEFT JOIN dbo.FinYear fy ON t.${cfg.dateCol} BETWEEN fy.FStartDate AND fy.FEndDate`;
 
     const query = `
       SELECT TOP ${RESULT_LIMIT}
@@ -141,11 +164,14 @@ router.get("/", async (req, res) => {
         ${companyExpr ?? "NULL"} AS CompanyId,
         ${projectExpr ?? "NULL"} AS ProjectId,
         co.name AS CompanyName,
-        pr.name AS ProjectName
+        pr.name AS ProjectName,
+        fy.FId AS FinYearId,
+        fy.FName AS FinYearName
       FROM ${cfg.table} t
       ${cfg.join || ""}
       LEFT JOIN dbo.enterprise co ON co.id = ${companyExpr ?? "NULL"} AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = ${projectExpr ?? "NULL"} AND pr.business_type = 'P'
+      ${finYearJoin}
       ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
       ORDER BY t.${cfg.dateCol} DESC
     `;
@@ -159,6 +185,8 @@ router.get("/", async (req, res) => {
         projectId: r.ProjectId,
         company: r.CompanyName,
         project: r.ProjectName,
+        finYearId: r.FinYearId,
+        finYearName: r.FinYearName,
       })),
     );
   } catch (err) {
