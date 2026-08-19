@@ -1,11 +1,15 @@
 const allowRoles = require("../middleware/role");
 const express = require("express");
+const multer = require("multer");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg"]);
 
 bumpCacheVersion("room-master").catch(() => {});
 
@@ -25,6 +29,8 @@ router.get("/", cache("room-master", 300), async (req, res) => {
         r.RoomName,
         r.Floor,
         r.IsActive,
+        r.BlueprintFileName,
+        r.BlueprintMimeType,
         r.CreatedAt,
         r.UpdatedAt
       FROM dbo.RoomMaster r
@@ -127,7 +133,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       return res.status(400).json({ error: "Selected unit not found" });
     const BlockId = unitRow.recordset[0].BlockId;
 
-    await pool
+    const insertRes = await pool
       .request()
       .input("ProjectId", sql.Int, parseInt(ProjectId))
       .input("BlockId",   sql.Int, BlockId)
@@ -138,10 +144,11 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
         INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, Floor, IsActive, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
         VALUES (@ProjectId, @BlockId, @UnitId, @RoomName, @Floor, @IsActive, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("room-master");
-    res.json({ message: "Room added successfully" });
+    res.json({ id: insertRes.recordset[0].Id, message: "Room added successfully" });
   } catch (err) {
     console.error("[room-master] POST error:", err.message);
     res.status(500).json({ error: err.message });
@@ -231,6 +238,71 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
     res.json({ message: `Room "${RoomName}" deleted successfully` });
   } catch (err) {
     console.error("[room-master] DELETE error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST — upload (or replace) a room's blueprint. PDF or JPG only.
+router.post("/:id/blueprint", allowRoles("admin", "super_admin", "dba"), upload.single("file"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0)
+    return res.status(400).json({ error: "Invalid id" });
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  if (!BLUEPRINT_MIME_TYPES.has(req.file.mimetype)) {
+    return res.status(400).json({ error: "Blueprint must be a PDF or JPG file" });
+  }
+  try {
+    const pool = getPool();
+    const existing = await pool
+      .request()
+      .input("Id", sql.Int, id)
+      .query("SELECT Id FROM dbo.RoomMaster WHERE Id = @Id");
+    if (!existing.recordset.length)
+      return res.status(404).json({ error: "Room not found" });
+
+    await pool
+      .request()
+      .input("Id", sql.Int, id)
+      .input("FileName", sql.NVarChar(255), req.file.originalname)
+      .input("MimeType", sql.NVarChar(100), req.file.mimetype)
+      .input("FileData", sql.VarBinary(sql.MAX), req.file.buffer)
+      .input("UploadedAt", sql.DateTime2(3), new Date()).query(`
+        UPDATE dbo.RoomMaster SET
+          BlueprintFileName = @FileName,
+          BlueprintMimeType = @MimeType,
+          BlueprintFileData = @FileData,
+          BlueprintUploadedAt = @UploadedAt
+        WHERE Id = @Id
+      `);
+    await bumpCacheVersion("room-master");
+    res.json({ fileName: req.file.originalname });
+  } catch (err) {
+    console.error("[room-master] POST /:id/blueprint error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET — stream a room's blueprint back (inline, so a PDF/JPG opens directly
+// in a new tab rather than downloading).
+router.get("/:id/blueprint", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0)
+    return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("Id", sql.Int, id)
+      .query("SELECT BlueprintFileName, BlueprintMimeType, BlueprintFileData FROM dbo.RoomMaster WHERE Id = @Id");
+    const row = result.recordset[0];
+    if (!row || !row.BlueprintFileData)
+      return res.status(404).json({ error: "No blueprint uploaded for this room" });
+    res.setHeader("Content-Type", row.BlueprintMimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(row.BlueprintFileName)}"`);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(row.BlueprintFileData);
+  } catch (err) {
+    console.error("[room-master] GET /:id/blueprint error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
