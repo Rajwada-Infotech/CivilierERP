@@ -138,9 +138,6 @@ const WorkCheckpointMaster = lazy(
 const DependencyTracker = lazy(
   () => import("./pages/civilworkdpr/DependencyTracker"),
 );
-const ContractorRegister = lazy(
-  () => import("./pages/civilworkdpr/ContractorRegister"),
-);
 const WorkerAttendance = lazy(
   () => import("./pages/civilworkdpr/WorkerAttendance"),
 );
@@ -866,7 +863,7 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/civilworkdpr/work-reporting"
+        path="/civilworkdpr/work-allocation"
         element={
           <ProtectedRoute pageKey="civilworkdpr-work-done">
             <CivilWorkDprWorkDone />
@@ -910,14 +907,6 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-dependency">
             <DependencyTracker />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/civilworkdpr/contractor-register"
-        element={
-          <ProtectedRoute pageKey="civilworkdpr-contractor-register">
-            <ContractorRegister />
           </ProtectedRoute>
         }
       />

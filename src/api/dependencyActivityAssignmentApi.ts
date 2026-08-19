@@ -142,7 +142,7 @@ export const ASSIGNMENT_STATUSES = [
 ] as const;
 export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
 
-// Shared with Work Reporting's inline "saved flow" view, so a status reads
+// Shared with Work Allocation's inline "saved flow" view, so a status reads
 // the same badge color wherever it's shown — purely presentational, no
 // bearing on the order rows can move through.
 export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; className: string }> = {

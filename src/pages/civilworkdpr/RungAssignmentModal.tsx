@@ -108,7 +108,7 @@ function givenByValue(source: SourceType | "", contractorId: number | null): str
   return "";
 }
 
-// Centered modal opened by clicking an activity chip in Work Reporting's
+// Centered modal opened by clicking an activity chip in Work Allocation's
 // linked Dependency chain preview — lets the user assign one or more
 // engineers, a start date + duration (auto-fills the end date), who's
 // supplying labour/material (Developer or a project-allocated contractor),
@@ -258,7 +258,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     onSuccess: () => {
       toast.success("Assignment saved.");
       queryClient.invalidateQueries({ queryKey: ["dependency-activity-assignment", rungId] });
-      // Prefix match — refreshes Work Reporting's "Saved Flow" list for
+      // Prefix match — refreshes Work Allocation's "Saved Flow" list for
       // whichever chain is currently open there, without this modal needing
       // to know that page's exact query key/params.
       queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });

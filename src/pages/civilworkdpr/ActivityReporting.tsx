@@ -71,7 +71,7 @@ export default function ActivityReporting() {
       />
       <CivilWorkDprShell
         title="Reporting"
-        subtitle="Every activity assigned an engineer or material from Work Reporting, tracked through to completion"
+        subtitle="Every activity assigned an engineer or material from Work Allocation, tracked through to completion"
         icon={ClipboardList}
       >
         {!rights.canView ? (
@@ -107,7 +107,7 @@ export default function ActivityReporting() {
             ) : filteredRows.length === 0 ? (
               <div className="p-8 text-center text-sm text-muted-foreground">
                 {rows.length === 0
-                  ? "No activities have been assigned yet — click an activity chip in Work Reporting's Link Dependency chain to assign one."
+                  ? "No activities have been assigned yet — click an activity chip in Work Allocation's Link Dependency chain to assign one."
                   : "No activities match this status."}
               </div>
             ) : (
