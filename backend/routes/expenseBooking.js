@@ -1506,11 +1506,6 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
   const EReminder = null;
   const EWorkDoneRef = null;
 
-  if (!EProjectName) {
-    const err = new Error("EProjectName is required.");
-    err.status = 400;
-    throw err;
-  }
   if (!EDocumentType) {
     const err = new Error("EDocumentType is required.");
     err.status = 400;
@@ -1771,7 +1766,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
     const insertReq = transaction
       .request()
       .input("EName", sql.NVarChar(200), EName || null)
-      .input("EProjectName", sql.NVarChar(150), EProjectName)
+      .input("EProjectName", sql.NVarChar(150), EProjectName || null)
       .input("EDocumentType", sql.NVarChar(50), EDocumentType)
       .input("EDocDate", sql.Date, EDocDate)
       .input(
@@ -1972,15 +1967,14 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     TDSId,
   } = req.body;
 
-  // EProjectName, EDocumentType, EDocDate and ECompanyId are NOT NULL columns
-  // with no fallback default in the INSERT below — omitting any of them used
-  // to reach the database and crash with a raw, unhandled SQL "Cannot insert
+  // EDocumentType, EDocDate and ECompanyId are NOT NULL columns with no
+  // fallback default in the INSERT below — omitting any of them used to
+  // reach the database and crash with a raw, unhandled SQL "Cannot insert
   // the value NULL" 500 (leaking internal table/column names) instead of a
-  // clean validation error. Caught live: creating a booking without
-  // EProjectName 500'd instead of 400'ing.
-  if (!EProjectName) {
-    return res.status(400).json({ error: "EProjectName is required." });
-  }
+  // clean validation error. Caught live: creating a booking without one of
+  // them 500'd instead of 400'ing. EProjectName itself is no longer in
+  // this list — the column was widened to nullable (migration 347) since
+  // a project isn't always known at booking time.
   if (!EDocumentType) {
     return res.status(400).json({ error: "EDocumentType is required." });
   }
@@ -2436,7 +2430,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     const insertReq = transaction
       .request()
       .input("EName", sql.NVarChar(200), EName || null)
-      .input("EProjectName", sql.NVarChar(150), EProjectName)
+      .input("EProjectName", sql.NVarChar(150), EProjectName || null)
       .input("EDocumentType", sql.NVarChar(50), EDocumentType)
       .input("EDocDate", sql.Date, EDocDate)
       .input(
@@ -3180,10 +3174,8 @@ router.put(
     // Same NOT NULL columns as POST / — this UPDATE overwrites them
     // unconditionally (not a COALESCE-style partial update), so omitting any
     // of them here would null out the existing value and crash the same way
-    // the create path did before the fix above.
-    if (!EProjectName) {
-      return res.status(400).json({ error: "EProjectName is required." });
-    }
+    // the create path did before the fix above. EProjectName is exempt —
+    // nullable since migration 347, a project isn't always known/applicable.
     if (!EDocumentType) {
       return res.status(400).json({ error: "EDocumentType is required." });
     }
@@ -3293,7 +3285,7 @@ router.put(
         .request()
         .input("Eid", sql.Int, numericId)
         .input("EName", sql.NVarChar(200), EName || null)
-        .input("EProjectName", sql.NVarChar(150), EProjectName)
+        .input("EProjectName", sql.NVarChar(150), EProjectName || null)
         .input("EDocumentType", sql.NVarChar(50), EDocumentType)
         .input("EDocDate", sql.Date, EDocDate)
         .input(

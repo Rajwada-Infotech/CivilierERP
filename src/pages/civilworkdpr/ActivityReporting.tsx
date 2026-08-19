@@ -7,16 +7,62 @@ import {
   ASSIGNMENT_STATUSES,
   ASSIGNMENT_STATUS_META as STATUS_META,
   getReportedAssignments,
+  getBlueprintAnnotation,
   type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
-import { ClipboardList, UserRound, CalendarDays, Package, Loader2, ChevronDown, ChevronRight, GitBranch } from "lucide-react";
+import { ClipboardList, UserRound, CalendarDays, Package, Loader2, ChevronDown, ChevronRight, GitBranch, PenSquare } from "lucide-react";
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
+import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
 
 const FILTER_OPTIONS: Array<{ value: AssignmentStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "All" },
   ...ASSIGNMENT_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label })),
 ];
+
+// Field engineers mark up the same blueprint Work Allocation used, on a
+// separate "reporting" layer (see migration 346) — the allocation markup
+// shows through underneath, locked, as reference. One button per row opens
+// the shared editor in that mode; the icon fills in once this rung
+// actually has a reporting-layer markup saved.
+function BlueprintMarkupButton({ rungId, roomId, roomLabel }: { rungId: number; roomId: number | null; roomLabel: string }) {
+  const [open, setOpen] = useState(false);
+  const { data: annotation } = useQuery({
+    queryKey: ["blueprint-annotation", rungId, roomId, "reporting"],
+    queryFn: () => getBlueprintAnnotation(rungId, roomId!, "reporting"),
+    enabled: roomId != null,
+  });
+
+  if (roomId == null) return <span className="text-xs text-muted-foreground">—</span>;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title={annotation ? "View/edit reporting markup" : "Mark up blueprint"}
+        className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
+          annotation
+            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+        }`}
+      >
+        <PenSquare size={12} />
+        {annotation ? "Marked" : "Mark up"}
+      </button>
+      {open && (
+        <BlueprintAnnotationEditor
+          rungId={rungId}
+          roomId={roomId}
+          roomLabel={roomLabel}
+          editableContext="reporting"
+          referenceContext="allocation"
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
 
 export default function ActivityReporting() {
   const rights = usePageRights("civilworkdpr-activity-reporting");
@@ -155,6 +201,7 @@ export default function ActivityReporting() {
                               <th className="px-3 py-2">Engineer</th>
                               <th className="px-3 py-2">Start Date</th>
                               <th className="px-3 py-2">Material</th>
+                              <th className="px-3 py-2">Blueprint</th>
                               <th className="px-5 py-2">Status</th>
                             </tr>
                           </thead>
@@ -195,6 +242,9 @@ export default function ActivityReporting() {
                                       ))}
                                     </div>
                                   )}
+                                </td>
+                                <td className="px-3 py-3">
+                                  <BlueprintMarkupButton rungId={row.rungId} roomId={row.roomId} roomLabel={row.scopePath} />
                                 </td>
                                 <td className="px-5 py-3">
                                   <AssignmentStatusSelect rungId={row.rungId} status={row.status} />

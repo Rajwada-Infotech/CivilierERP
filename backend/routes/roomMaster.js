@@ -9,7 +9,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg"]);
+const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg", "image/png"]);
 
 bumpCacheVersion("room-master").catch(() => {});
 
@@ -242,14 +242,14 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
   }
 });
 
-// POST — upload (or replace) a room's blueprint. PDF or JPG only.
+// POST — upload (or replace) a room's blueprint. PDF, JPG, or PNG only.
 router.post("/:id/blueprint", allowRoles("admin", "super_admin", "dba"), upload.single("file"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   if (!BLUEPRINT_MIME_TYPES.has(req.file.mimetype)) {
-    return res.status(400).json({ error: "Blueprint must be a PDF or JPG file" });
+    return res.status(400).json({ error: "Blueprint must be a PDF, JPG, or PNG file" });
   }
   try {
     const pool = getPool();
@@ -265,7 +265,7 @@ router.post("/:id/blueprint", allowRoles("admin", "super_admin", "dba"), upload.
       .input("Id", sql.Int, id)
       .input("FileName", sql.NVarChar(255), req.file.originalname)
       .input("MimeType", sql.NVarChar(100), req.file.mimetype)
-      .input("FileData", sql.VarBinary(sql.MAX), req.file.buffer)
+      .input("FileData", sql.NVarChar(sql.MAX), req.file.buffer.toString("base64"))
       .input("UploadedAt", sql.DateTime2(3), new Date()).query(`
         UPDATE dbo.RoomMaster SET
           BlueprintFileName = @FileName,
@@ -282,8 +282,12 @@ router.post("/:id/blueprint", allowRoles("admin", "super_admin", "dba"), upload.
   }
 });
 
-// GET — stream a room's blueprint back (inline, so a PDF/JPG opens directly
-// in a new tab rather than downloading).
+// GET — a room's blueprint as base64 JSON (not a raw stream). This is
+// always reached through fetchWithAuth on the frontend, never a plain
+// <a href> — the app's auth is a Bearer token attached only by
+// fetchWithAuth's own header, so a bare link/navigation to this endpoint
+// 401s with "No token provided". The frontend decodes the base64 into a
+// Blob and opens/downloads that instead.
 router.get("/:id/blueprint", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
@@ -297,10 +301,11 @@ router.get("/:id/blueprint", async (req, res) => {
     const row = result.recordset[0];
     if (!row || !row.BlueprintFileData)
       return res.status(404).json({ error: "No blueprint uploaded for this room" });
-    res.setHeader("Content-Type", row.BlueprintMimeType || "application/octet-stream");
-    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(row.BlueprintFileName)}"`);
-    res.setHeader("Cache-Control", "private, max-age=3600");
-    res.send(row.BlueprintFileData);
+    res.json({
+      fileName: row.BlueprintFileName,
+      mimeType: row.BlueprintMimeType,
+      dataBase64: row.BlueprintFileData,
+    });
   } catch (err) {
     console.error("[room-master] GET /:id/blueprint error:", err.message);
     res.status(500).json({ error: err.message });

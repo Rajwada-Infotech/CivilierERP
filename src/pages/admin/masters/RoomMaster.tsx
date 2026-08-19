@@ -16,8 +16,33 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/room-master";
 
-const BLUEPRINT_ACCEPT = ".pdf,.jpg,.jpeg,application/pdf,image/jpeg";
-const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg"]);
+const BLUEPRINT_ACCEPT = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
+const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg", "image/png"]);
+
+// GET /:id/blueprint returns base64 JSON rather than a raw file stream —
+// the app's auth is a Bearer token attached only by fetchWithAuth's own
+// header, so a plain <a href> straight to the API 401s with "No token
+// provided". This decodes the base64 into a Blob and opens that instead,
+// going through fetchWithAuth so the request is actually authenticated.
+async function openBlueprint(roomId: string) {
+  try {
+    const res = await fetchWithAuth(`${API}/${roomId}/blueprint`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || "Could not load blueprint");
+    }
+    const { mimeType, dataBase64 } = await res.json();
+    const byteChars = atob(dataBase64);
+    const byteNumbers = new Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+    const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType || "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (err: any) {
+    toast.error(err.message || "Could not open blueprint");
+  }
+}
 
 // The "custom" field's render prop is just a function, not a component, so
 // it can't hold a ref/hook itself — pulled out into its own component so a
@@ -49,16 +74,15 @@ function BlueprintUploadField({
           <span className="text-[10px] text-muted-foreground shrink-0">Will upload on save</span>
         </div>
       ) : existingName ? (
-        <a
-          href={`${API}/${existingId}/blueprint`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40 transition-colors"
+        <button
+          type="button"
+          onClick={() => existingId && openBlueprint(existingId)}
+          className="flex items-center gap-2 w-full rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40 transition-colors text-left"
         >
           <FileText size={13} className="text-muted-foreground shrink-0" />
           <span className="flex-1 truncate font-medium text-foreground">{existingName}</span>
           <span className="text-[10px] text-muted-foreground shrink-0">View current</span>
-        </a>
+        </button>
       ) : (
         <p className="text-xs text-muted-foreground">No blueprint uploaded yet.</p>
       )}
@@ -71,7 +95,7 @@ function BlueprintUploadField({
           const file = e.target.files?.[0];
           if (!file) return;
           if (!BLUEPRINT_MIME_TYPES.has(file.type)) {
-            toast.error("Blueprint must be a PDF or JPG file");
+            toast.error("Blueprint must be a PDF, JPG, or PNG file");
             e.target.value = "";
             return;
           }
@@ -167,7 +191,7 @@ const fields: FieldDef[] = [
   },
   {
     name: "blueprintUpload",
-    label: "Blueprint (PDF or JPG)",
+    label: "Blueprint (PDF, JPG or PNG)",
     type: "custom",
     fullWidth: true,
     render: ({ value, onChange, formData }) => (
@@ -369,15 +393,14 @@ const RoomMaster: React.FC = () => {
               label: "Blueprint",
               render: (val, row) =>
                 val ? (
-                  <a
-                    href={`${API}/${row._id}/blueprint`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
+                    onClick={() => openBlueprint(row._id)}
                     className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
                   >
                     <FileText size={13} className="shrink-0" />
                     <span className="truncate">{String(val)}</span>
-                  </a>
+                  </button>
                 ) : (
                   <p className="text-sm text-muted-foreground">Not uploaded</p>
                 ),
