@@ -14,6 +14,7 @@ import {
   type BlueprintAnnotationContext,
 } from "@/api/dependencyActivityAssignmentApi";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
 
 // ── Shape model ──────────────────────────────────────────────────────────
 // A plain discriminated union serialized straight to JSON — no need for
@@ -104,6 +105,7 @@ export default function BlueprintAnnotationEditor({
   referenceContext?: BlueprintAnnotationContext;
   onClose: () => void;
 }) {
+  useOverlayBackClose(onClose);
   const queryClient = useQueryClient();
   const stageRef = useRef<Konva.Stage>(null);
   const canvasAreaRef = useRef<HTMLDivElement>(null);
