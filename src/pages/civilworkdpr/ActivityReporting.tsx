@@ -7,58 +7,48 @@ import {
   ASSIGNMENT_STATUSES,
   ASSIGNMENT_STATUS_META as STATUS_META,
   getReportedAssignments,
-  getBlueprintAnnotation,
+  getActivityPhotos,
   type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
-import { ClipboardList, UserRound, CalendarDays, Package, Loader2, ChevronDown, ChevronRight, GitBranch, PenSquare } from "lucide-react";
+import { ClipboardList, UserRound, CalendarDays, Package, Loader2, ChevronDown, ChevronRight, GitBranch, Camera } from "lucide-react";
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
-import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
+import ActivityPhotoSection from "./ActivityPhotoSection";
 
 const FILTER_OPTIONS: Array<{ value: AssignmentStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "All" },
   ...ASSIGNMENT_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label })),
 ];
 
-// Field engineers mark up the same blueprint Work Allocation used, on a
-// separate "reporting" layer (see migration 346) — the allocation markup
-// shows through underneath, locked, as reference. One button per row opens
-// the shared editor in that mode; the icon fills in once this rung
-// actually has a reporting-layer markup saved.
-function BlueprintMarkupButton({ rungId, roomId, roomLabel }: { rungId: number; roomId: number | null; roomLabel: string }) {
+// A field engineer updates a work report by uploading before/after site
+// photos, not by drawing on the blueprint — that's Work Allocation's job.
+// One button per row opens the photo section; it fills in once at least
+// one photo has been captured for this rung.
+function ActivityPhotoButton({ rungId, roomLabel }: { rungId: number; roomLabel: string }) {
   const [open, setOpen] = useState(false);
-  const { data: annotation } = useQuery({
-    queryKey: ["blueprint-annotation", rungId, roomId, "reporting"],
-    queryFn: () => getBlueprintAnnotation(rungId, roomId!, "reporting"),
-    enabled: roomId != null,
+  const { data: photos } = useQuery({
+    queryKey: ["activity-photos", rungId],
+    queryFn: () => getActivityPhotos(rungId),
   });
-
-  if (roomId == null) return <span className="text-xs text-muted-foreground">—</span>;
+  const count = (photos?.before.length ?? 0) + (photos?.after.length ?? 0);
 
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        title={annotation ? "View/edit reporting markup" : "Mark up blueprint"}
+        title={count > 0 ? `${count} photo${count === 1 ? "" : "s"}` : "Add before/after photos"}
         className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
-          annotation
+          count > 0
             ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
             : "text-muted-foreground hover:bg-muted hover:text-foreground"
         }`}
       >
-        <PenSquare size={12} />
-        {annotation ? "Marked" : "Mark up"}
+        <Camera size={12} />
+        {count > 0 ? `${count} photo${count === 1 ? "" : "s"}` : "Add photos"}
       </button>
       {open && (
-        <BlueprintAnnotationEditor
-          rungId={rungId}
-          roomId={roomId}
-          roomLabel={roomLabel}
-          editableContext="reporting"
-          referenceContext="allocation"
-          onClose={() => setOpen(false)}
-        />
+        <ActivityPhotoSection rungId={rungId} roomLabel={roomLabel} onClose={() => setOpen(false)} />
       )}
     </>
   );
@@ -201,7 +191,7 @@ export default function ActivityReporting() {
                               <th className="px-3 py-2">Engineer</th>
                               <th className="px-3 py-2">Start Date</th>
                               <th className="px-3 py-2">Material</th>
-                              <th className="px-3 py-2">Blueprint</th>
+                              <th className="px-3 py-2">Photos</th>
                               <th className="px-5 py-2">Status</th>
                             </tr>
                           </thead>
@@ -244,7 +234,7 @@ export default function ActivityReporting() {
                                   )}
                                 </td>
                                 <td className="px-3 py-3">
-                                  <BlueprintMarkupButton rungId={row.rungId} roomId={row.roomId} roomLabel={row.scopePath} />
+                                  <ActivityPhotoButton rungId={row.rungId} roomLabel={row.scopePath} />
                                 </td>
                                 <td className="px-5 py-3">
                                   <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
