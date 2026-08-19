@@ -1,7 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Paperclip, Send, FileText, CalendarClock, Pause, Play, CheckCircle2, Trash2, Check, Tag as TagIcon, X, Plus } from "lucide-react";
+import { Paperclip, Send, FileText, CalendarClock, Pause, Play, CheckCircle2, Trash2, Check, Tag as TagIcon, X, Plus, Download, XCircle } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -11,6 +11,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ProgressBar } from "@/components/followup/ProgressBar";
+import { CancelReasonDialog } from "@/components/followup/CancelReasonDialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getSocket } from "@/lib/socket";
 import { useAuth } from "@/contexts/AuthContext";
@@ -21,7 +22,7 @@ const TEAL = "#0d9488";
 interface TaskDrawerProps {
   taskId: string | null;
   onClose: () => void;
-  onStatusChange: (id: string, status: string) => void;
+  onStatusChange: (id: string, status: string, cancelReasonId?: string) => void;
 }
 
 interface TaskDetail {
@@ -41,6 +42,11 @@ interface TaskDetail {
   Progress: number;
   EffectiveProgress: number;
   HasChildren: boolean;
+  CancelReasonId: number | null;
+  CancelReasonLabel: string | null;
+  CancelledBy: number | null;
+  CancelledByName: string | null;
+  CancelledAt: string | null;
 }
 
 interface FollowUp {
@@ -89,22 +95,41 @@ function formatDateTime(value: string | null): string {
   });
 }
 
+function formatFileSize(bytes: number | null): string {
+  if (bytes == null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const ACCEPTED_FILE_TYPES = ".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.zip";
+const PRIVILEGED_ROLES = new Set(["admin", "super_admin", "dba"]);
+
 // Attachments are behind JWT auth, so a plain <a href> navigation can't carry
 // the Authorization header (that's why it 404s/401s with "No token
-// provided") — fetch it as an authenticated blob and open that instead.
-async function openAttachment(id: number, fileName: string) {
+// provided") — fetch it as an authenticated blob and open/save that instead.
+// `forceDownload` sets a=download so the browser always saves rather than
+// trying to render the blob inline (matters for e.g. zip/docx).
+async function openAttachment(id: number, fileName: string, forceDownload = false) {
   try {
-    const res = await fetchWithAuth(`${API}/attachment/${id}`);
+    const res = await fetchWithAuth(`${API}/attachment/${id}${forceDownload ? "?download=1" : ""}`);
     if (!res.ok) throw new Error("Failed to load attachment");
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-    const win = window.open(url, "_blank");
-    if (!win) {
-      // Popup blocked — fall back to a same-tab download.
+    if (forceDownload) {
       const a = document.createElement("a");
       a.href = url;
       a.download = fileName;
       a.click();
+    } else {
+      const win = window.open(url, "_blank");
+      if (!win) {
+        // Popup blocked — fall back to a same-tab download.
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        a.click();
+      }
     }
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   } catch (err) {
@@ -371,6 +396,21 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
   const [submitting, setSubmitting] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+  // Completion-evidence files, picked before hitting "Done" on the current
+  // follow-up — keyed by follow-up id since only one is ever "current" at a
+  // time, but this avoids cross-talk if that ever changes.
+  const [doneFiles, setDoneFiles] = React.useState<Record<number, File[]>>({});
+  const [markingDoneId, setMarkingDoneId] = React.useState<number | null>(null);
+  const doneFileInputRef = React.useRef<HTMLInputElement>(null);
+  const [doneFileTargetId, setDoneFileTargetId] = React.useState<number | null>(null);
+
+  // Files tab's own direct upload — not tied to any Follow-Up note.
+  const filesTabInputRef = React.useRef<HTMLInputElement>(null);
+  const [uploadingFiles, setUploadingFiles] = React.useState(false);
+
+  const [cancelDialogOpen, setCancelDialogOpen] = React.useState(false);
+  const [cancelling, setCancelling] = React.useState(false);
+
   const [chatText, setChatText] = React.useState("");
   const [sendingChat, setSendingChat] = React.useState(false);
   const chatScrollRef = React.useRef<HTMLDivElement>(null);
@@ -469,13 +509,61 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
   };
 
   const handleMarkFollowUpDone = async (followUpId: number) => {
+    setMarkingDoneId(followUpId);
     try {
-      const res = await fetchWithAuth(`${API}/${taskId}/followups/${followUpId}/done`, { method: "PATCH" });
+      const filesToAttach = doneFiles[followUpId] || [];
+      let body: BodyInit | undefined;
+      if (filesToAttach.length) {
+        const form = new FormData();
+        filesToAttach.forEach((f) => form.append("files", f));
+        body = form;
+      }
+      const res = await fetchWithAuth(`${API}/${taskId}/followups/${followUpId}/done`, { method: "PATCH", body });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to mark follow-up done");
       toast.success("Follow-up marked done");
-      await Promise.all([invalidateFollowUps(), invalidateBoard()]);
+      setDoneFiles((prev) => {
+        const next = { ...prev };
+        delete next[followUpId];
+        return next;
+      });
+      await Promise.all([invalidateFollowUps(), invalidateFiles(), invalidateBoard()]);
     } catch (err: any) {
       toast.error(err.message || "Failed to mark follow-up done");
+    } finally {
+      setMarkingDoneId(null);
+    }
+  };
+
+  const canDeleteAttachment = (uploadedBy: number | null) =>
+    (uploadedBy != null && uploadedBy === currentUserId) || PRIVILEGED_ROLES.has(currentUser?.role || "");
+
+  const handleDeleteAttachment = async (attachmentId: number, fileName: string) => {
+    if (!window.confirm(`Delete "${fileName}"? This can't be undone.`)) return;
+    try {
+      const res = await fetchWithAuth(`${API}/attachment/${attachmentId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to delete attachment");
+      toast.success("Attachment deleted");
+      await Promise.all([invalidateFollowUps(), invalidateFiles()]);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete attachment");
+    }
+  };
+
+  const handleUploadFiles = async (fileList: FileList | null) => {
+    const picked = Array.from(fileList || []);
+    if (!picked.length) return;
+    setUploadingFiles(true);
+    try {
+      const form = new FormData();
+      picked.forEach((f) => form.append("files", f));
+      const res = await fetchWithAuth(`${API}/${taskId}/attachments`, { method: "POST", body: form });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to upload files");
+      toast.success(`${picked.length} file(s) attached`);
+      await invalidateFiles();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to upload files");
+    } finally {
+      setUploadingFiles(false);
     }
   };
 
@@ -520,7 +608,15 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
 
   const canTransition = task?.Status !== "Closed" && task?.Status !== "Cancel";
 
+  const handleConfirmCancel = (reasonId: string) => {
+    setCancelling(true);
+    onStatusChange(taskId, "Cancel", reasonId);
+    setCancelling(false);
+    setCancelDialogOpen(false);
+  };
+
   return (
+    <>
     <Sheet open={!!taskId} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
         side="right"
@@ -620,6 +716,28 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                   >
                     <CheckCircle2 size={12} /> Close Task
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setCancelDialogOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-muted text-muted-foreground border border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive/25 transition-colors"
+                  >
+                    <XCircle size={12} /> Cancel Task
+                  </button>
+                </div>
+              )}
+
+              {task?.Status === "Cancel" && (
+                <div
+                  className="rounded-xl p-3.5 text-sm space-y-1.5"
+                  style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.18)" }}
+                >
+                  <p className="text-[9px] font-heading font-semibold uppercase tracking-wide text-red-500">Cancelled</p>
+                  <p className="text-xs text-foreground">
+                    <span className="text-muted-foreground">Reason:</span> {task.CancelReasonLabel || "—"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    By {task.CancelledByName || "—"} · {task.CancelledAt ? formatDateTime(task.CancelledAt) : "—"}
+                  </p>
                 </div>
               )}
             </div>
@@ -658,14 +776,36 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                       <p className={`text-sm whitespace-pre-wrap flex-1 ${f.IsDone ? "text-muted-foreground" : "text-foreground"}`}>{f.Note}</p>
                       <div className="flex items-center gap-1 shrink-0">
                         {isCurrent && (
-                          <button
-                            type="button"
-                            onClick={() => handleMarkFollowUpDone(f.Id)}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/25 hover:bg-emerald-500/20 transition-colors"
-                            title="Mark this follow-up as done"
-                          >
-                            <Check size={11} /> Done
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDoneFileTargetId(f.Id);
+                                doneFileInputRef.current?.click();
+                              }}
+                              className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors relative"
+                              title="Attach completion files"
+                            >
+                              <Paperclip size={13} />
+                              {(doneFiles[f.Id]?.length ?? 0) > 0 && (
+                                <span
+                                  className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full text-[8px] font-bold text-white flex items-center justify-center"
+                                  style={{ background: TEAL }}
+                                >
+                                  {doneFiles[f.Id]!.length}
+                                </span>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMarkFollowUpDone(f.Id)}
+                              disabled={markingDoneId === f.Id}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/25 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                              title="Mark this follow-up as done"
+                            >
+                              <Check size={11} /> Done
+                            </button>
+                          </>
                         )}
                         <button
                           type="button"
@@ -698,18 +838,40 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                         </span>
                       )}
                     </div>
+                    {isCurrent && (doneFiles[f.Id]?.length ?? 0) > 0 && (
+                      <p className="text-[11px] text-muted-foreground mt-1.5">
+                        {doneFiles[f.Id]!.length} file(s) ready to attach when marked Done
+                      </p>
+                    )}
                     {f.Attachments.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-2">
+                      <div className="flex flex-wrap gap-1.5 mt-2">
                         {f.Attachments.map((a) => (
-                          <button
+                          <span
                             key={a.Id}
-                            type="button"
-                            onClick={() => openAttachment(a.Id, a.FileName)}
-                            className="inline-flex items-center gap-1 text-[11px] font-medium hover:underline"
-                            style={{ color: TEAL }}
+                            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md text-[11px] font-medium"
+                            style={{ background: "rgba(13,148,136,0.10)", border: "1px solid rgba(13,148,136,0.25)" }}
                           >
-                            <Paperclip size={11} /> {a.FileName}
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => openAttachment(a.Id, a.FileName)}
+                              className="inline-flex items-center gap-1 hover:underline"
+                              style={{ color: TEAL }}
+                              title="View"
+                            >
+                              <Paperclip size={11} /> {a.FileName}
+                              {a.FileSize != null && <span className="text-muted-foreground">({formatFileSize(a.FileSize)})</span>}
+                            </button>
+                            {canDeleteAttachment(a.UploadedBy) && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAttachment(a.Id, a.FileName)}
+                                className="p-0.5 rounded-full hover:bg-red-500/15 text-muted-foreground hover:text-red-600 transition-colors"
+                                title="Delete attachment"
+                              >
+                                <X size={10} />
+                              </button>
+                            )}
+                          </span>
                         ))}
                       </div>
                     )}
@@ -718,6 +880,20 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                 );
               })}
             </div>
+            <input
+              ref={doneFileInputRef}
+              type="file"
+              multiple
+              accept={ACCEPTED_FILE_TYPES}
+              className="hidden"
+              onChange={(e) => {
+                const picked = Array.from(e.target.files || []);
+                if (doneFileTargetId != null && picked.length) {
+                  setDoneFiles((prev) => ({ ...prev, [doneFileTargetId]: [...(prev[doneFileTargetId] || []), ...picked] }));
+                }
+                e.target.value = "";
+              }}
+            />
 
             {/* A plain sibling of the scroll area above, not `sticky` inside
                 it — sticky-inside-scroll was overlapping the last entry. */}
@@ -750,6 +926,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                   ref={fileInputRef}
                   type="file"
                   multiple
+                  accept={ACCEPTED_FILE_TYPES}
                   className="hidden"
                   onChange={(e) => setPendingFiles((prev) => [...prev, ...Array.from(e.target.files || [])])}
                 />
@@ -848,30 +1025,81 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
           {/* ── Files ── */}
           <TabsContent value="files" className="flex-1 min-h-0 overflow-y-auto scrollbar-none mt-3" style={{ height: 0 }}>
             <div className="px-5 pb-5">
-              {files.length === 0 && <EmptyState label="No files yet." />}
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+                  {files.length} file{files.length === 1 ? "" : "s"}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => filesTabInputRef.current?.click()}
+                  disabled={uploadingFiles}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50 transition-opacity"
+                  style={{ background: TEAL }}
+                >
+                  <Paperclip size={12} /> {uploadingFiles ? "Uploading…" : "Attach Files"}
+                </button>
+                <input
+                  ref={filesTabInputRef}
+                  type="file"
+                  multiple
+                  accept={ACCEPTED_FILE_TYPES}
+                  className="hidden"
+                  onChange={(e) => {
+                    handleUploadFiles(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+              </div>
+              {files.length === 0 && <EmptyState label="No files yet. Attach one from a Follow-Up, or directly here." />}
               <div className="space-y-2">
                 {[...files]
                   .sort((a, b) => new Date(b.UploadedAt).getTime() - new Date(a.UploadedAt).getTime())
                   .map((f) => (
-                    <button
+                    <div
                       key={f.Id}
-                      type="button"
-                      onClick={() => openAttachment(f.Id, f.FileName)}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border/70 bg-card/50 hover:border-teal-500/40 hover:bg-card transition-colors text-sm text-left"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border/70 bg-card/50 hover:border-teal-500/40 hover:bg-card transition-colors text-sm"
                     >
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                        style={{ background: "rgba(13,148,136,0.12)" }}
+                      <button
+                        type="button"
+                        onClick={() => openAttachment(f.Id, f.FileName)}
+                        className="flex items-center gap-3 min-w-0 flex-1 text-left"
+                        title="View"
                       >
-                        <Paperclip size={14} style={{ color: TEAL }} />
+                        <div
+                          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                          style={{ background: "rgba(13,148,136,0.12)" }}
+                        >
+                          <Paperclip size={14} style={{ color: TEAL }} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium text-foreground">{f.FileName}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {f.UploadedByName || "Unknown"} · {formatDateTime(f.UploadedAt)}
+                            {f.FileSize != null && ` · ${formatFileSize(f.FileSize)}`}
+                          </p>
+                        </div>
+                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => openAttachment(f.Id, f.FileName, true)}
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                          title="Download"
+                        >
+                          <Download size={14} />
+                        </button>
+                        {canDeleteAttachment(f.UploadedBy) && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteAttachment(f.Id, f.FileName)}
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-500/10 transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-medium text-foreground">{f.FileName}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {f.UploadedByName || "Unknown"} · {formatDateTime(f.UploadedAt)}
-                        </p>
-                      </div>
-                    </button>
+                    </div>
                   ))}
               </div>
             </div>
@@ -879,6 +1107,13 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
         </Tabs>
       </SheetContent>
     </Sheet>
+    <CancelReasonDialog
+      open={cancelDialogOpen}
+      onOpenChange={setCancelDialogOpen}
+      onConfirm={handleConfirmCancel}
+      submitting={cancelling}
+    />
+    </>
   );
 };
 

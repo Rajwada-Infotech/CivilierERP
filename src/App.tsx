@@ -181,6 +181,9 @@ const ExtraChargeMaster = lazy(
 const TagMaster = lazy(
   () => import("./pages/admin/masters/TagMaster"),
 );
+const CancelTemplateMaster = lazy(
+  () => import("./pages/admin/masters/CancelTemplateMaster"),
+);
 const DepartmentMaster = lazy(
   () => import("./pages/admin/masters/DepartmentMaster"),
 );
@@ -342,10 +345,12 @@ const ControlPanel = lazy(() => import("./pages/dba/ControlPanel"));
 const AdsManager = lazy(() => import("./pages/dba/AdsManager"));
 const FollowUp = lazy(() => import("./pages/followup/FollowUp"));
 const ClosedTasks = lazy(() => import("./pages/followup/ClosedTasks"));
+const CancelledTasks = lazy(() => import("./pages/followup/CancelledTasks"));
 const TaskTransfer = lazy(() => import("./pages/followup/TaskTransfer"));
 const TaskPerformanceReport = lazy(() => import("./pages/followup/TaskPerformanceReport"));
 const TaskDashboard = lazy(() => import("./pages/followup/TaskDashboard"));
 const TagPerformanceReport = lazy(() => import("./pages/followup/TagPerformanceReport"));
+const EntryTypeDocFollowUpReport = lazy(() => import("./pages/followup/EntryTypeDocFollowUpReport"));
 const FollowupReminders = lazy(
   () => import("./pages/admin/masters/Reminders"),
 );
@@ -941,6 +946,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/followup/cancelled-tasks"
+        element={
+          <ProtectedRoute pageKey="followup-cancelled-tasks">
+            <CancelledTasks />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/followup/task-transfer"
         element={
           <ProtectedRoute pageKey="followup-task-transfer">
@@ -969,6 +982,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="task-performance-report">
             <TagPerformanceReport />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/entry-type-doc-followup-report"
+        element={
+          <ProtectedRoute pageKey="entry-type-doc-followup-report">
+            <EntryTypeDocFollowUpReport />
           </ProtectedRoute>
         }
       />
@@ -2085,6 +2106,7 @@ function AppRoutes() {
       <Route path="/crm/setup/extra-charge-master" element={<ProtectedRoute pageKey="followup-extra-charge-master"><ExtraChargeMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/department-master" element={<ProtectedRoute pageKey="followup-department-master"><DepartmentMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/tag-master" element={<ProtectedRoute pageKey="followup-tag-master"><TagMaster /></ProtectedRoute>} />
+      <Route path="/followup/setup/cancel-template" element={<ProtectedRoute pageKey="followup-cancel-template-master"><CancelTemplateMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/task-master" element={<ProtectedRoute pageKey="task-master"><TaskMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/pending-tasks"       element={<ProtectedRoute pageKey="followup-pending-tasks"><PendingTasksPage /></ProtectedRoute>} />
       <Route path="/crm/setup/reminders"           element={<ProtectedRoute pageKey="followup-reminders"><FollowupReminders /></ProtectedRoute>} />

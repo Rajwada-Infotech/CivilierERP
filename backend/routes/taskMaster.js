@@ -28,11 +28,31 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   fileFilter: (_req, file, cb) => {
-    const allowed = /jpeg|jpg|png|gif|webp|pdf|docx?|xlsx?/i;
+    const allowed = /jpeg|jpg|png|gif|webp|pdf|docx?|xlsx?|zip/i;
     if (allowed.test(path.extname(file.originalname))) cb(null, true);
     else cb(new Error("Unsupported file type"));
   },
 });
+
+// Shared by both attach points (new follow-up note, and marking one done) —
+// same TaskAttachments row shape, same linkage (TaskId + FollowUpId).
+async function saveAttachments(pool, taskId, followUpId, files, uploadedBy) {
+  for (const file of files || []) {
+    await pool
+      .request()
+      .input("TaskId", sql.Int, taskId)
+      .input("FollowUpId", sql.Int, followUpId)
+      .input("FileName", sql.NVarChar(255), file.originalname)
+      .input("MimeType", sql.NVarChar(100), file.mimetype)
+      .input("FileSize", sql.Int, file.size)
+      .input("FileData", sql.VarBinary(sql.MAX), file.buffer)
+      .input("UploadedBy", sql.Int, uploadedBy)
+      .query(`
+        INSERT INTO dbo.TaskAttachments (TaskId, FollowUpId, FileName, MimeType, FileSize, FileData, UploadedBy, UploadedAt)
+        VALUES (@TaskId, @FollowUpId, @FileName, @MimeType, @FileSize, @FileData, @UploadedBy, SYSUTCDATETIME())
+      `);
+  }
+}
 
 // GET /followup-board is cached under its own namespace (separate cache
 // entry/TTL from GET /), so any mutation that could change what the board
@@ -44,6 +64,7 @@ function bumpTaskCaches() {
     bumpCacheVersion("task-master"),
     bumpCacheVersion("task-master-followup-board"),
     bumpCacheVersion("task-master-closed-board"),
+    bumpCacheVersion("task-master-cancelled-board"),
   ]);
 }
 
@@ -256,6 +277,66 @@ router.get("/closed-board", cache("task-master-closed-board", 30), async (req, r
   }
 });
 
+// GET /cancelled-board — the Follow-Up module's "Cancelled Tasks" history
+// list. Same card-friendly shape and self-scoping rule as /closed-board,
+// just Status = 'Cancel' — kept as its own separate feed (not merged into
+// closed-board) so a cancelled task never gets miscounted as completed, and
+// carries its own reason/cancelled-by/cancelled-at fields the Closed list
+// doesn't need.
+router.get("/cancelled-board", cache("task-master-cancelled-board", 30), async (req, res) => {
+  try {
+    const pool = getPool();
+    const scopeToSelf = !FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role);
+    const request = pool.request();
+    if (scopeToSelf) request.input("UserId", sql.Int, req.user?.userId || null);
+    const result = await request.query(`
+      SELECT
+        t.Id, t.TaskNo, t.Subject, t.Details, t.Department, t.DueDate,
+        t.CaseNumber, t.Priority, t.Status,
+        co.name AS CaseCompanyName, pr.name AS CaseProjectName, fy.FName AS CaseFinYearName,
+        t.ParentTaskId, pt.TaskNo AS ParentTaskNo, pt.Subject AS ParentTaskSubject,
+        t.CancelledAt, t.CancelReasonId, cr.Reason AS CancelReasonLabel,
+        t.CancelledBy, cb.name AS CancelledByName,
+        t.Progress
+      FROM dbo.TaskMaster t
+      LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
+      LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
+      LEFT JOIN dbo.FinYear fy ON fy.FId = t.CaseFinYearId
+      LEFT JOIN dbo.TaskMaster pt ON pt.Id = t.ParentTaskId
+      LEFT JOIN dbo.CancelTemplateMaster cr ON cr.Id = t.CancelReasonId
+      LEFT JOIN dbo.users cb ON cb.id = t.CancelledBy
+      WHERE t.IsDeleted = 0 AND t.Status = 'Cancel'
+        ${scopeToSelf ? "AND t.AssignedTo = @UserId" : ""}
+      ORDER BY t.CancelledAt DESC
+    `);
+
+    const tagsByTask = {};
+    if (result.recordset.length) {
+      const tagsReq = pool.request();
+      if (scopeToSelf) tagsReq.input("UserId", sql.Int, req.user?.userId || null);
+      const tagsResult = await tagsReq.query(`
+        SELECT tt.TaskId, tg.Id, tg.Name
+        FROM dbo.TaskTags tt
+        JOIN dbo.TagMaster tg ON tg.Id = tt.TagId
+        WHERE tt.TaskId IN (
+          SELECT t.Id FROM dbo.TaskMaster t
+          WHERE t.IsDeleted = 0 AND t.Status = 'Cancel'
+            ${scopeToSelf ? "AND t.AssignedTo = @UserId" : ""}
+        )
+        ORDER BY tg.Name
+      `);
+      for (const row of tagsResult.recordset) {
+        (tagsByTask[row.TaskId] ||= []).push({ Id: row.Id, Name: row.Name });
+      }
+    }
+
+    res.json(result.recordset.map((r) => ({ ...r, Tags: tagsByTask[r.Id] || [] })));
+  } catch (err) {
+    console.error("[task-master] GET cancelled-board error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /:id — single task, for the Follow-Up drawer to fetch standalone
 // (independent of whatever list/cache the caller came from).
 router.get("/:id", async (req, res) => {
@@ -280,7 +361,9 @@ router.get("/:id", async (req, res) => {
         t.EntryTypeId, et.EntryType AS EntryTypeLabel,
         t.LinkedTypeOfDocId, ltd.Prefix AS LinkedTypeOfDocPrefix, ltd.Description AS LinkedTypeOfDocLabel,
         t.LinkedDocRecordId, t.LinkedDocNo,
-        t.Progress
+        t.Progress,
+        t.CancelReasonId, cr.Reason AS CancelReasonLabel,
+        t.CancelledBy, cb.name AS CancelledByName, t.CancelledAt
       FROM dbo.TaskMaster t
       LEFT JOIN dbo.enterprise co ON co.id = t.CaseCompanyId AND co.business_type = 'C'
       LEFT JOIN dbo.enterprise pr ON pr.id = t.CaseProjectId AND pr.business_type = 'P'
@@ -291,6 +374,8 @@ router.get("/:id", async (req, res) => {
       LEFT JOIN dbo.TaskMaster pt ON pt.Id = t.ParentTaskId
       LEFT JOIN dbo.Entry_Type et ON et.E_Id = t.EntryTypeId
       LEFT JOIN dbo.TypeOfDoc ltd ON ltd.TypeOfDocId = t.LinkedTypeOfDocId
+      LEFT JOIN dbo.CancelTemplateMaster cr ON cr.Id = t.CancelReasonId
+      LEFT JOIN dbo.users cb ON cb.id = t.CancelledBy
       WHERE t.Id = @Id AND t.IsDeleted = 0
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Task not found" });
@@ -510,7 +595,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 router.patch("/:id/status", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
-  const { Status } = req.body;
+  const { Status, CancelReasonId } = req.body;
   if (!STATUSES.includes(Status)) {
     return res.status(400).json({ error: `Invalid Status. Must be: ${STATUSES.join(", ")}` });
   }
@@ -520,19 +605,37 @@ router.patch("/:id/status", allowRoles("admin", "super_admin", "dba"), async (re
     const existing = await pool.request().input("Id", sql.Int, id)
       .query("SELECT TaskNo FROM dbo.TaskMaster WHERE Id = @Id AND IsDeleted = 0");
     if (!existing.recordset.length) return res.status(404).json({ error: "Task not found" });
+
+    // Cancelling always needs a reason on record — same rule regardless of
+    // which surface triggers it (Follow-Up drawer or the Task Master grid).
+    let cancelReasonId = null;
+    if (Status === "Cancel") {
+      cancelReasonId = parseInt(CancelReasonId, 10);
+      if (!Number.isFinite(cancelReasonId) || cancelReasonId <= 0) {
+        return res.status(400).json({ error: "A Cancel Reason is required to cancel a task" });
+      }
+      const reason = await pool.request().input("Id", sql.Int, cancelReasonId)
+        .query("SELECT Id FROM dbo.CancelTemplateMaster WHERE Id = @Id AND IsActive = 1");
+      if (!reason.recordset.length) return res.status(400).json({ error: "Invalid or inactive Cancel Reason" });
+    }
+
     await pool
       .request()
       .input("Id", sql.Int, id)
       .input("Status", sql.NVarChar(20), Status)
+      .input("CancelReasonId", sql.Int, cancelReasonId)
       .input("UpdatedBy", sql.Int, updatedBy)
       // Closing a task any other way (this button, not just dragging the
       // progress slider to 100%) should also read as 100% complete —
       // otherwise a "Closed" task could sit at some stale partial % in
-      // reports/dashboards.
+      // reports/dashboards. Cancelling records who/when/why alongside it.
       .query(`
         UPDATE dbo.TaskMaster SET
           Status = @Status,
           Progress = CASE WHEN @Status = 'Closed' THEN 100 ELSE Progress END,
+          CancelReasonId = CASE WHEN @Status = 'Cancel' THEN @CancelReasonId ELSE CancelReasonId END,
+          CancelledBy = CASE WHEN @Status = 'Cancel' THEN @UpdatedBy ELSE CancelledBy END,
+          CancelledAt = CASE WHEN @Status = 'Cancel' THEN SYSUTCDATETIME() ELSE CancelledAt END,
           UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME()
         WHERE Id = @Id
       `);
@@ -798,21 +901,7 @@ router.post("/:id/followups", upload.array("files", 10), async (req, res) => {
       `);
     const followUpId = ins.recordset[0].Id;
 
-    for (const file of req.files || []) {
-      await pool
-        .request()
-        .input("TaskId", sql.Int, taskId)
-        .input("FollowUpId", sql.Int, followUpId)
-        .input("FileName", sql.NVarChar(255), file.originalname)
-        .input("MimeType", sql.NVarChar(100), file.mimetype)
-        .input("FileSize", sql.Int, file.size)
-        .input("FileData", sql.VarBinary(sql.MAX), file.buffer)
-        .input("UploadedBy", sql.Int, createdBy)
-        .query(`
-          INSERT INTO dbo.TaskAttachments (TaskId, FollowUpId, FileName, MimeType, FileSize, FileData, UploadedBy, UploadedAt)
-          VALUES (@TaskId, @FollowUpId, @FileName, @MimeType, @FileSize, @FileData, @UploadedBy, SYSUTCDATETIME())
-        `);
-    }
+    await saveAttachments(pool, taskId, followUpId, req.files, createdBy);
 
     await bumpTaskCaches();
     res.json({ message: "Follow-up added", Id: followUpId });
@@ -854,13 +943,16 @@ router.delete("/:id/followups/:followUpId", async (req, res) => {
 
 // PATCH /:id/followups/:followUpId/done — marks the current follow-up
 // reminder as completed, so it drops off the "most recent due date" shown on
-// the board/bell before the next one is logged.
-router.patch("/:id/followups/:followUpId/done", async (req, res) => {
+// the board/bell before the next one is logged. Optionally takes completion
+// evidence files (multipart) attached to this SAME follow-up row, not a new
+// one — "attach while completing", not "attach by logging a new note".
+router.patch("/:id/followups/:followUpId/done", upload.array("files", 10), async (req, res) => {
   const taskId = parseInt(req.params.id, 10);
   const followUpId = parseInt(req.params.followUpId, 10);
   if (!Number.isFinite(taskId) || !Number.isFinite(followUpId)) {
     return res.status(400).json({ error: "Invalid id" });
   }
+  const doneBy = req.user?.userId || null;
   try {
     const pool = getPool();
     const existing = await pool.request()
@@ -871,12 +963,14 @@ router.patch("/:id/followups/:followUpId/done", async (req, res) => {
 
     await pool.request()
       .input("Id", sql.Int, followUpId)
-      .input("DoneBy", sql.Int, req.user?.userId || null)
+      .input("DoneBy", sql.Int, doneBy)
       .query(`
         UPDATE dbo.TaskFollowUps
         SET IsDone = 1, DoneAt = SYSUTCDATETIME(), DoneBy = @DoneBy
         WHERE Id = @Id
       `);
+
+    await saveAttachments(pool, taskId, followUpId, req.files, doneBy);
 
     await bumpTaskCaches();
     res.json({ message: "Follow-up marked done" });
@@ -955,6 +1049,30 @@ router.post("/:id/chat", async (req, res) => {
 
 // ── Files tab (all attachments across every follow-up on the task) ─────────
 
+// POST /:id/attachments — direct upload from the Files tab itself, not tied
+// to any particular follow-up note (FollowUpId stays NULL — same table, same
+// row shape as a follow-up's attachments, just without that link).
+router.post("/:id/attachments", upload.array("files", 10), async (req, res) => {
+  const taskId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(taskId) || taskId <= 0) return res.status(400).json({ error: "Invalid id" });
+  if (!req.files?.length) return res.status(400).json({ error: "No files provided" });
+  const uploadedBy = req.user?.userId || null;
+  try {
+    const pool = getPool();
+    const task = await pool.request().input("Id", sql.Int, taskId)
+      .query("SELECT Id FROM dbo.TaskMaster WHERE Id = @Id AND IsDeleted = 0");
+    if (!task.recordset.length) return res.status(404).json({ error: "Task not found" });
+
+    await saveAttachments(pool, taskId, null, req.files, uploadedBy);
+
+    await bumpTaskCaches();
+    res.json({ message: `${req.files.length} file(s) attached` });
+  } catch (err) {
+    console.error("[task-master] POST attachments error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/:id/attachments", async (req, res) => {
   const taskId = parseInt(req.params.id, 10);
   if (!Number.isFinite(taskId) || taskId <= 0) return res.status(400).json({ error: "Invalid id" });
@@ -975,6 +1093,8 @@ router.get("/:id/attachments", async (req, res) => {
   }
 });
 
+// ?download=1 forces a Save-As instead of the default inline (view-in-tab)
+// behavior — same bytes either way, just a different Content-Disposition.
 router.get("/attachment/:attachmentId", async (req, res) => {
   const attachmentId = parseInt(req.params.attachmentId, 10);
   if (!Number.isFinite(attachmentId) || attachmentId <= 0) return res.status(400).json({ error: "Invalid id" });
@@ -985,11 +1105,43 @@ router.get("/attachment/:attachmentId", async (req, res) => {
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Attachment not found" });
     const { FileName, MimeType, FileData } = result.recordset[0];
+    const disposition = req.query.download ? "attachment" : "inline";
     res.setHeader("Content-Type", MimeType || "application/octet-stream");
-    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(FileName)}"`);
+    res.setHeader("Content-Disposition", `${disposition}; filename="${encodeURIComponent(FileName)}"`);
     res.send(FileData);
   } catch (err) {
     console.error("[task-master] GET attachment error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE — only the person who uploaded it, or an admin/super_admin/dba,
+// can remove an attachment (matches the "based on permissions" requirement;
+// unlike deleting a whole follow-up note, which any authenticated user can
+// already do, a single file someone else attached shouldn't be removable by
+// just anyone who happens to open the task).
+router.delete("/attachment/:attachmentId", async (req, res) => {
+  const attachmentId = parseInt(req.params.attachmentId, 10);
+  if (!Number.isFinite(attachmentId) || attachmentId <= 0) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const existing = await pool.request().input("Id", sql.Int, attachmentId).query(`
+      SELECT Id, TaskId, FileName, UploadedBy FROM dbo.TaskAttachments WHERE Id = @Id
+    `);
+    if (!existing.recordset.length) return res.status(404).json({ error: "Attachment not found" });
+    const attachment = existing.recordset[0];
+
+    const isOwner = attachment.UploadedBy != null && attachment.UploadedBy === (req.user?.userId ?? null);
+    const isPrivileged = FOLLOWUP_BOARD_PRIVILEGED_ROLES.has(req.user?.role);
+    if (!isOwner && !isPrivileged) {
+      return res.status(403).json({ error: "Only the uploader or an admin can delete this attachment" });
+    }
+
+    await pool.request().input("Id", sql.Int, attachmentId).query("DELETE FROM dbo.TaskAttachments WHERE Id = @Id");
+    await bumpTaskCaches();
+    res.json({ message: `"${attachment.FileName}" deleted`, TaskId: attachment.TaskId });
+  } catch (err) {
+    console.error("[task-master] DELETE attachment error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
