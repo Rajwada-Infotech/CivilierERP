@@ -7,7 +7,7 @@ import {
   type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 
-// Shared between the Reporting page's table and Work Reporting's own
+// Shared between the Reporting page's table and Work Allocation's own
 // "Saved Flow" list — a rung's status is editable from wherever it's
 // visible, not just from Reporting, so this always invalidates both pages'
 // query keys regardless of which one it was clicked from.
