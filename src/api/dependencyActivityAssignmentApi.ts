@@ -181,6 +181,8 @@ export interface ReportedAssignment {
   floor: string;
   flatId: number;
   flatName: string | null;
+  roomId: number | null;
+  roomName: string | null;
   scopePath: string;
   materials: { name: string; quantity: number; uom: string | null }[];
 }
@@ -201,4 +203,49 @@ export const updateAssignmentStatus = async (
     body: JSON.stringify({ status }),
   });
   return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
+};
+
+// ── Blueprint Annotation Workflow ───────────────────────────────────────────
+// Scoped per (rung, room, context) — see migration 345/346's own comments
+// for why: two activities in the same chain sharing a room's blueprint
+// (e.g. Fixture Installation and Electrical Wiring) each carry independent
+// markup, AND within one activity, the Work Allocation layer ("allocation")
+// and the field engineer's Work Reporting layer ("reporting") are two more
+// independent, separately-versioned rows on that same (rung, room) —
+// neither context can ever overwrite the other.
+export type BlueprintAnnotationContext = "allocation" | "reporting";
+
+export interface BlueprintAnnotation {
+  shapesJson: string;
+  thumbnailBase64: string | null;
+  version: number;
+  updatedBy: string | null;
+  updatedAt: string | null;
+}
+
+export const getBlueprintAnnotation = async (
+  rungId: number,
+  roomId: number,
+  context: BlueprintAnnotationContext = "allocation",
+): Promise<BlueprintAnnotation | null> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/blueprint-annotation?roomId=${roomId}&context=${context}`);
+  return handleResponse<BlueprintAnnotation | null>(res);
+};
+
+export const saveBlueprintAnnotation = async (
+  rungId: number,
+  payload: {
+    roomId: number;
+    context: BlueprintAnnotationContext;
+    shapesJson: string;
+    thumbnail: string | null;
+    version: number;
+  },
+): Promise<{ success: boolean; version: number }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/blueprint-annotation`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<{ success: boolean; version: number }>(res);
 };

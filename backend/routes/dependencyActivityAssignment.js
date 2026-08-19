@@ -49,7 +49,11 @@ router.get(
         dm.TowerId AS towerId, bm.BlockName AS towerName,
         dm.Floor AS floor,
         dm.FlatId AS flatId, um.UnitName AS flatName,
-        CONCAT(ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor, ' > ', ISNULL(um.UnitName, '—')) AS scopePath,
+        dm.RoomId AS roomId, rm.RoomName AS roomName,
+        CONCAT(
+          ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
+          ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+        ) AS scopePath,
         (
           SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
           FROM dbo.DependencyActivityEngineer dae
@@ -71,6 +75,7 @@ router.get(
       LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+      LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
       ${where}
       ORDER BY daa.UpdatedAt DESC
     `);
@@ -400,6 +405,115 @@ router.post("/:rungId", authMiddleware, async (req, res) => {
     res.json({ success: true, assignmentId });
   } catch (err) {
     console.error("[dependency-activity-assignment] POST /:rungId error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Blueprint Annotation Workflow ───────────────────────────────────────────
+// Scoped per (rung, room) — two activities in the same chain that share a
+// room's blueprint each get their own independent markup. The blueprint
+// itself lives on dbo.RoomMaster (see roomMaster.js's own /:id/blueprint);
+// this only stores what got drawn on top of it for one specific rung.
+
+const ANNOTATION_CONTEXTS = new Set(["allocation", "reporting"]);
+
+// GET /:rungId/blueprint-annotation?roomId=...&context=allocation|reporting
+// — the saved annotation for this rung+room+context, or null if nothing's
+// been drawn yet. context defaults to "allocation" so an older client that
+// never sends it still gets the original (pre-Part-B) layer.
+router.get("/:rungId/blueprint-annotation", authMiddleware, async (req, res) => {
+  const rungId = parseInt(req.params.rungId, 10);
+  const roomId = parseInt(req.query.roomId, 10);
+  const context = ANNOTATION_CONTEXTS.has(req.query.context) ? req.query.context : "allocation";
+  if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+  if (!Number.isFinite(roomId)) return res.status(400).json({ error: "roomId is required" });
+
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input("rungId", sql.Int, rungId)
+      .input("roomId", sql.Int, roomId)
+      .input("context", sql.NVarChar(20), context).query(`
+        SELECT ShapesJson AS shapesJson, ThumbnailBase64 AS thumbnailBase64, Version AS version,
+               UpdatedBy AS updatedBy, UpdatedAt AS updatedAt
+        FROM dbo.ActivityBlueprintAnnotation
+        WHERE DependencyMasterActivityId = @rungId AND RoomId = @roomId AND Context = @context
+      `);
+    res.json(result.recordset[0] || null);
+  } catch (err) {
+    console.error("[dependency-activity-assignment] GET /:rungId/blueprint-annotation error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /:rungId/blueprint-annotation — upsert. body: { roomId, context,
+// shapesJson, thumbnail, version }. version is the value the client loaded
+// (0/absent for a brand-new annotation) — a mismatch against what's
+// actually stored means someone else saved over this rung+context's markup
+// in the meantime, so the save is rejected as a conflict rather than
+// silently clobbering it. Allocation and reporting are separate rows (see
+// migration 346) — saving one never touches the other's version or shapes.
+router.put("/:rungId/blueprint-annotation", authMiddleware, async (req, res) => {
+  const rungId = parseInt(req.params.rungId, 10);
+  if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+
+  const { roomId, shapesJson, thumbnail, version } = req.body;
+  const context = ANNOTATION_CONTEXTS.has(req.body.context) ? req.body.context : "allocation";
+  const roomIdNum = parseInt(roomId, 10);
+  if (!Number.isFinite(roomIdNum)) return res.status(400).json({ error: "roomId is required" });
+  if (typeof shapesJson !== "string") return res.status(400).json({ error: "shapesJson must be a JSON string" });
+
+  const actor = req.user?.email || req.user?.name || "system";
+
+  try {
+    const pool = await getPool();
+
+    const rungCheck = await pool.request().input("rungId", sql.Int, rungId)
+      .query(`SELECT Id FROM dbo.DependencyMasterActivity WHERE Id = @rungId`);
+    if (!rungCheck.recordset.length) return res.status(404).json({ error: "Activity rung not found" });
+
+    const existing = await pool.request()
+      .input("rungId", sql.Int, rungId)
+      .input("roomId", sql.Int, roomIdNum)
+      .input("context", sql.NVarChar(20), context)
+      .query(`SELECT Id, Version FROM dbo.ActivityBlueprintAnnotation WHERE DependencyMasterActivityId = @rungId AND RoomId = @roomId AND Context = @context`);
+    const current = existing.recordset[0];
+
+    if (current && Number(version) !== current.Version) {
+      return res.status(409).json({
+        error: "This blueprint was annotated by someone else since you opened it. Reload and re-apply your markup.",
+      });
+    }
+
+    if (current) {
+      await pool.request()
+        .input("Id", sql.Int, current.Id)
+        .input("ShapesJson", sql.NVarChar(sql.MAX), shapesJson)
+        .input("Thumbnail", sql.NVarChar(sql.MAX), thumbnail || null)
+        .input("Version", sql.Int, current.Version + 1)
+        .input("UpdatedBy", sql.NVarChar(200), actor).query(`
+          UPDATE dbo.ActivityBlueprintAnnotation SET
+            ShapesJson = @ShapesJson, ThumbnailBase64 = @Thumbnail,
+            Version = @Version, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+          WHERE Id = @Id
+        `);
+      return res.json({ success: true, version: current.Version + 1 });
+    }
+
+    await pool.request()
+      .input("rungId", sql.Int, rungId)
+      .input("roomId", sql.Int, roomIdNum)
+      .input("context", sql.NVarChar(20), context)
+      .input("ShapesJson", sql.NVarChar(sql.MAX), shapesJson)
+      .input("Thumbnail", sql.NVarChar(sql.MAX), thumbnail || null)
+      .input("UpdatedBy", sql.NVarChar(200), actor).query(`
+        INSERT INTO dbo.ActivityBlueprintAnnotation
+          (DependencyMasterActivityId, RoomId, Context, ShapesJson, ThumbnailBase64, Version, UpdatedBy, UpdatedAt)
+        VALUES (@rungId, @roomId, @context, @ShapesJson, @Thumbnail, 1, @UpdatedBy, SYSDATETIME())
+      `);
+    res.json({ success: true, version: 1 });
+  } catch (err) {
+    console.error("[dependency-activity-assignment] PUT /:rungId/blueprint-annotation error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

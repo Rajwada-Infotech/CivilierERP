@@ -9,6 +9,12 @@ interface CivilWorkDprShellProps {
   icon?: React.ElementType;
   action?: React.ReactNode;
   children: React.ReactNode;
+  /** Opt-in: fills the height of a definite-height ancestor (e.g. a
+   *  viewport-fit modal) and flex-columns the header + content so content
+   *  can flex-1/min-h-0 into whatever's left, instead of growing with its
+   *  natural content height. Every existing full-page caller omits this
+   *  and keeps the original min-h-full/space-y-5 block layout unchanged. */
+  fillHeight?: boolean;
 }
 
 /**
@@ -24,6 +30,7 @@ export const CivilWorkDprShell: React.FC<CivilWorkDprShellProps> = ({
   icon: PageIcon,
   action,
   children,
+  fillHeight,
 }) => {
   const { theme } = useTheme();
   const isDark = theme !== "light";
@@ -47,7 +54,7 @@ export const CivilWorkDprShell: React.FC<CivilWorkDprShellProps> = ({
       };
 
   return (
-    <div className="relative min-h-full p-4 space-y-5">
+    <div className={fillHeight ? "relative h-full flex flex-col p-4 gap-5" : "relative min-h-full p-4 space-y-5"}>
       {/* ── Ambient background orbs ─────────────────────────────────────── */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden z-0">
         {/* Top-left cyan bloom */}
@@ -84,7 +91,7 @@ export const CivilWorkDprShell: React.FC<CivilWorkDprShellProps> = ({
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: "easeOut" }}
-        className="relative z-30 rounded-2xl px-5 py-4"
+        className={`relative z-30 rounded-2xl px-5 py-4 ${fillHeight ? "shrink-0" : ""}`}
         style={glassCard}
       >
         {/* Inner top gradient */}
@@ -139,7 +146,7 @@ export const CivilWorkDprShell: React.FC<CivilWorkDprShellProps> = ({
       </motion.div>
 
       {/* ── Page content ────────────────────────────────────────────────── */}
-      <div className="relative z-10 space-y-5">{children}</div>
+      <div className={fillHeight ? "relative z-10 flex-1 min-h-0 flex flex-col" : "relative z-10 space-y-5"}>{children}</div>
     </div>
   );
 };
