@@ -173,7 +173,6 @@ const ALL_ROUTES = [
   { path: "/api/entry-type", file: "./routes/entryType" },
   { path: "/api/expense-booking", file: "./routes/expenseBooking" },
   { path: "/api/material-chain", file: "./routes/materialChain" },
-  { path: "/api/amendments", file: "./routes/amendments" },
   { path: "/api/new-payment", file: "./routes/newPayment" },
   { path: "/api/on-account", file: "./routes/onAccount" },
   { path: "/api/received-payment", file: "./routes/receivedPayment" },

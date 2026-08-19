@@ -87,7 +87,6 @@ export const ENGINEER_ACCESS: PagePermission[] = [
   { page: "boq", actions: ["view"] },
   { page: "dpr", actions: ["view", "create"] },
   { page: "work-done", actions: ["view", "create"] },
-  { page: "amendments", actions: ["view", "create", "edit"] },
   { page: "tickets", actions: ["view", "create", "edit"] },
   { page: "ticket-dashboard", actions: ["view"] },
 ];

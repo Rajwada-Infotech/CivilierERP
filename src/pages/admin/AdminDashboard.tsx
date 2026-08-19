@@ -109,7 +109,6 @@ const PAGE_NAME_MAP: Record<string, string> = {
   "material/stock": "Stock",
   "material/stock-transfer": "Stock Transfer",
   "material/expense-booking": "Expense Booking",
-  "material/amendments": "Amendments",
   "material-dashboard": "Material Dashboard",
   "engineering/work-order": "Work Order",
   "engineering/boq": "BOQ",

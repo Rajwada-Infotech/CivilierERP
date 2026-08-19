@@ -1045,13 +1045,6 @@ export default function MaterialExpenseBooking() {
     setView("form");
   };
 
-  // Single entry point for both "Edit" (Draft/Rejected) and "Amend"
-  // (Approved) — same form either way. The backend PUT /:id route itself
-  // decides which one this actually is: a Draft/Rejected booking updates
-  // directly, an Approved one gets routed into a Pending amendment instead
-  // (see routes/expenseBooking.js, isAmendmentFlow). This replaces the old
-  // openAmend(), which always deep-linked into the separate free-text
-  // Amendment popup regardless of the record's real status.
   const openEditForm = async (rec: ExpenseRecord) => {
     if (!rec.id) return;
     setPreviewRecord(null);
@@ -1276,7 +1269,7 @@ export default function MaterialExpenseBooking() {
     try {
       if (isEditing) {
         if (!editingId) throw new Error("Missing booking id for update.");
-        const updateResult = await apiFetch(
+        await apiFetch(
           `${API}/${editingId}`,
           {
             method: "PUT",
@@ -1284,20 +1277,7 @@ export default function MaterialExpenseBooking() {
           },
           30000,
         );
-        // Editing an already-Approved invoice doesn't update it directly —
-        // the backend routes it into a Pending amendment instead (see
-        // routes/expenseBooking.js PUT /:id, isAmendmentFlow) and responds
-        // 202 rather than the normal 200. Same edit form either way; only
-        // the outcome message differs.
-        if (updateResult?.pending) {
-          toast.success(
-            updateResult.message ||
-              "This invoice is already approved — your changes were submitted as a pending amendment awaiting approval.",
-            { duration: 7000 },
-          );
-        } else {
-          toast.success("Expense booking updated.");
-        }
+        toast.success("Expense booking updated.");
         setSaved(true);
         await fetchRecords(page);
         fetchBookedSources();

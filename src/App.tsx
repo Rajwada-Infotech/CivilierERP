@@ -424,8 +424,6 @@ const PortalConstruction   = lazy(() => import("./pages/CrmCustomerPortal/Portal
 const PortalTickets        = lazy(() => import("./pages/CrmCustomerPortal/PortalTickets"));
 const PortalActivity       = lazy(() => import("./pages/CrmCustomerPortal/PortalActivity"));
 const PortalProfile        = lazy(() => import("./pages/CrmCustomerPortal/PortalProfile"));
-const AmendmentMenu = lazy(() => import("./pages/material/AmendmentMenu"));
-const Amendments = lazy(() => import("./pages/material/Amendments"));
 const Issues = lazy(() => import("./pages/material/Issues"));
 const IssueReturn = lazy(() => import("./pages/material/IssueReturn"));
 const MaterialRequestPage = lazy(
@@ -440,9 +438,6 @@ const EngineeringDashboard = lazy(
   () => import("./pages/engineering/EngineeringDashboard"),
 );
 const WorkDone = lazy(() => import("./pages/engineering/WorkDone"));
-const EngineeringAmendmentMenu = lazy(
-  () => import("./pages/engineering/EngineeringAmendmentMenu"),
-);
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -1150,22 +1145,6 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/material/amendments"
-        element={
-          <ProtectedRoute pageKey="amendments">
-            <Amendments />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/material/amendment-menu"
-        element={
-          <ProtectedRoute pageKey="amendments">
-            <AmendmentMenu />
-          </ProtectedRoute>
-        }
-      />
-      <Route
         path="/material/material-request"
         element={
           <ProtectedRoute pageKey="material-request">
@@ -1363,14 +1342,6 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="dpr">
             <DailyProgressReport />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/engineering/amendment-menu"
-        element={
-          <ProtectedRoute pageKey="engineering-amendment-menu">
-            <EngineeringAmendmentMenu />
           </ProtectedRoute>
         }
       />

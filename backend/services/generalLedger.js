@@ -735,10 +735,10 @@ async function reverseOnAccountAdjustmentPosting(pool, oaId) {
 }
 
 /** Generic version of the reversal pattern above, for any (sourceType,
- * sourceId) pair — used by the Amendment engine (services/amendments.js) to
- * undo a document's existing posting before reposting it with amended
- * values. Preserves the audit trail (flips IsReversed rather than
- * deleting), same as every other reversal in this file. */
+ * sourceId) pair — used by scripts/repostLegacyIntercompanyLoans.js to undo
+ * a document's existing posting before reposting it with corrected values.
+ * Preserves the audit trail (flips IsReversed rather than deleting), same
+ * as every other reversal in this file. */
 async function reversePostingBySource(pool, sourceType, sourceId) {
   await pool
     .request()

@@ -72,9 +72,6 @@ import { formatINR } from "@/utils/formatCurrency";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { usePageRights } from "@/hooks/usePageRights";
-import { EditOrAmendButton } from "@/components/EditOrAmendButton";
-import { AmendedBadge } from "@/components/AmendedBadge";
-import { useAmendmentStatus } from "@/hooks/useAmendmentStatus";
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
@@ -348,11 +345,6 @@ export default function ReceivedPaymentPage() {
   );
   const [viewingPayment, setViewingPayment] = useState<ReceivedPayment | null>(
     null,
-  );
-  const viewingAmendmentStatus = useAmendmentStatus(
-    "ReceivedPayment",
-    viewingPayment?.id,
-    viewingPayment?.status,
   );
   const PAGE_SIZE = 20;
 
@@ -1096,20 +1088,14 @@ export default function ReceivedPaymentPage() {
                                 <Printer size={13} />
                               </button>
                             )}
-                            {(p.status === "Draft" || p.status === "Approved") && (
-                              <EditOrAmendButton
-                                refDocType="ReceivedPayment"
-                                refDocId={p.id}
-                                docStatus={p.status}
-                                docNo={p.docNo}
-                                projectName={p.projectName}
-                                companyName={p.companyName}
-                                totalAmount={p.amount}
-                                amendTab="RECEIVED_PAYMENT"
-                                amendMenuPath="/material/amendment-menu"
-                                canEdit={rights.canEdit}
-                                onEdit={() => openEdit(p)}
-                              />
+                            {rights.canEdit && (p.status === "Draft" || p.status === "Approved") && (
+                              <button
+                                onClick={() => openEdit(p)}
+                                title="Edit"
+                                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                              >
+                                <Pencil size={12} />
+                              </button>
                             )}
                             {p.status === "Draft" && (
                               <button
@@ -1196,20 +1182,14 @@ export default function ReceivedPaymentPage() {
                             <Printer size={13} />
                           </button>
                         )}
-                        {(p.status === "Draft" || p.status === "Approved") && (
-                          <EditOrAmendButton
-                            refDocType="ReceivedPayment"
-                            refDocId={p.id}
-                            docStatus={p.status}
-                            docNo={p.docNo}
-                            projectName={p.projectName}
-                            companyName={p.companyName}
-                            totalAmount={p.amount}
-                            amendTab="RECEIVED_PAYMENT"
-                            amendMenuPath="/material/amendment-menu"
-                            canEdit={rights.canEdit}
-                            onEdit={() => openEdit(p)}
-                          />
+                        {rights.canEdit && (p.status === "Draft" || p.status === "Approved") && (
+                          <button
+                            onClick={() => openEdit(p)}
+                            className="p-1.5 text-muted-foreground/50 hover:text-foreground"
+                            title="Edit"
+                          >
+                            <Pencil size={13} />
+                          </button>
                         )}
                         {p.status === "Draft" && (
                           <button
@@ -1919,9 +1899,6 @@ export default function ReceivedPaymentPage() {
 
             {/* Footer */}
             <div className="px-5 py-3 border-t border-border bg-muted/10 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {viewingAmendmentStatus.isAmended && <AmendedBadge />}
-              </div>
               <p className="text-[10px] text-muted-foreground">
                 Created{" "}
                 {viewingPayment.createdAt
@@ -1966,20 +1943,16 @@ export default function ReceivedPaymentPage() {
                 </div>
               )}
               {viewingPayment.status === "Approved" && rights.canEdit && (
-                <EditOrAmendButton
-                  refDocType="ReceivedPayment"
-                  refDocId={viewingPayment.id}
-                  docStatus={viewingPayment.status}
-                  docNo={viewingPayment.docNo}
-                  projectName={viewingPayment.projectName}
-                  companyName={viewingPayment.companyName}
-                  totalAmount={viewingPayment.amount}
-                  amendTab="RECEIVED_PAYMENT"
-                  amendMenuPath="/material/amendment-menu"
-                  canEdit={rights.canEdit}
-                  size="sm"
-                  onEdit={() => {}}
-                />
+                <button
+                  onClick={() => {
+                    const p = viewingPayment;
+                    setViewingPayment(null);
+                    openEdit(p);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-primary/30 text-primary hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
+                >
+                  <Pencil size={12} /> Edit
+                </button>
               )}
             </div>
           </div>
