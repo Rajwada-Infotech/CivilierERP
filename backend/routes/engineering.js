@@ -315,9 +315,6 @@ router.get("/dashboard", async (req, res) => {
 router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
   try {
     const companyId = parseInt(req.query.companyId, 10) || null;
-    if (!companyId) {
-      return res.status(400).json({ error: "companyId is required" });
-    }
 
     const pool = getPool();
     if (!(await ensureWorkDoneTable(pool, res))) return;
@@ -333,22 +330,29 @@ router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
     const statusFilter = req.query.status
       ? String(req.query.status).trim()
       : null;
-    const whereParts = ["wd.CompanyId = @companyId"];
+    // companyId is optional — callers like Material Expense Booking's
+    // document picker load every approved Work Done entry unscoped (same
+    // as its PO/allPO master lists) and filter client-side once the user
+    // picks a company on the form, rather than requiring one up front.
+    const whereParts = [];
+    if (companyId) whereParts.push("wd.CompanyId = @companyId");
     if (statusFilter) whereParts.push("ISNULL(wd.Status, 'Draft') = @statusFilter");
-    const whereClause = `WHERE ${whereParts.join(" AND ")}`;
-    const countWhereParts = ["CompanyId = @companyId"];
+    const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
+    const countWhereParts = [];
+    if (companyId) countWhereParts.push("CompanyId = @companyId");
     if (statusFilter) countWhereParts.push("ISNULL(Status, 'Draft') = @statusFilter");
-    const countWhere = `WHERE ${countWhereParts.join(" AND ")}`;
+    const countWhere = countWhereParts.length ? `WHERE ${countWhereParts.join(" AND ")}` : "";
 
     const dataReq = pool
       .request()
-      .input("companyId", sql.Int, companyId)
       .input("limit", sql.Int, limit)
       .input("offset", sql.Int, offset);
+    if (companyId) dataReq.input("companyId", sql.Int, companyId);
     if (statusFilter)
       dataReq.input("statusFilter", sql.NVarChar(50), statusFilter);
 
-    const countReq = pool.request().input("companyId", sql.Int, companyId);
+    const countReq = pool.request();
+    if (companyId) countReq.input("companyId", sql.Int, companyId);
     if (statusFilter)
       countReq.input("statusFilter", sql.NVarChar(50), statusFilter);
 
