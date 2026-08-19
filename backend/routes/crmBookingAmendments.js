@@ -6,7 +6,7 @@
 // direct (pre-legal) path uses — never duplicated logic.
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -17,7 +17,7 @@ const extraChargesRouter = require("./crmExtraCharges");
 const parkingRouter = require("./crmParking");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 function isApprover(req) {
   return CRM_APPROVER_ROLES.includes(String(req.user?.role || "").toLowerCase());

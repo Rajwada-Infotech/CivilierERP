@@ -2,6 +2,7 @@ import React from "react";
 import { Calendar } from "lucide-react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -42,6 +43,7 @@ const toPayload = (r: Record<string, unknown>) => ({
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const FinancialYearMaster: React.FC = () => {
+  const rights = usePageRights("financial-year-master");
   const queryClient = useQueryClient();
   const {
     data: dbData,

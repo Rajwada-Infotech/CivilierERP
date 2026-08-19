@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -235,6 +236,13 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/cancellations",
     label: "CRM Cancellations",
   },
+  "crm-money-receipts": {
+    icon: Receipt,
+    color: "text-teal-600 bg-teal-600/10",
+    navPath: "/crm/money-receipts",
+    apiEndpoint: "/api/crm/money-receipts",
+    label: "CRM Money Receipts",
+  },
   "crm-noc": {
     icon: ClipboardCheck,
     color: "text-teal-500 bg-teal-500/10",
@@ -279,6 +287,7 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
 export const CRM_MODULES = new Set(["crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
 export const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
+const MR_APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
 const CRM_BOOKING_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "director"];
 // Agreement Date and Sales Deed Director approval are narrower, separate
 // gates — super_admin only, "for now" per instruction, unlike the rest of
@@ -296,6 +305,7 @@ export const RESTRICTED_MODULES = new Set([
   "journal-voucher",
   "inter-company-transfer",
   "fund-transfer",
+  "crm-money-receipts",
   ...SUB_GATE_MODULES,
 ]);
 
@@ -428,6 +438,7 @@ const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
   "fund-transfer": { icon: "text-violet-600", active: "bg-violet-600 border-violet-600" },
   "sale-orders": { icon: "text-lime-600", active: "bg-lime-600 border-lime-600" },
   "vehicle-in-out": { icon: "text-sky-600", active: "bg-sky-600 border-sky-600" },
+  "crm-money-receipts": { icon: "text-teal-600", active: "bg-teal-600 border-teal-600" },
   contracts: { icon: "text-purple-500", active: "bg-purple-500 border-purple-500" },
 };
 
@@ -610,6 +621,7 @@ const InboxRow: React.FC<{
         approverRoles={
           SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
           : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
+          : item.Module === "crm-money-receipts" ? MR_APPROVER_ROLES
           : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
           : undefined
         }
@@ -858,6 +870,7 @@ const InboxRow: React.FC<{
 
 const ApprovalInbox: React.FC = () => {
   const queryClient = useQueryClient();
+  const rights = usePageRights("approval-inbox");
   const [activeModule, setActiveModule] = useState<string | null>(null);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 

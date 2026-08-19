@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -177,17 +178,23 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
       qc.invalidateQueries({ queryKey: ["crm-welcome-checklist", row.BookingId] });
       onSaved();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
   };
 
+  const UPPERCASE_FIELDS: (keyof typeof EMPTY_FORM)[] = ["PanNo", "IfscCode"];
+
   const field = (key: keyof typeof form, label: string, type = "text", required = false) => (
     <div>
       <label className="text-xs text-muted-foreground block mb-1">{label}{required && " *"}</label>
       <input type={type} value={form[key]} readOnly={locked}
-        onChange={(e) => !locked && setForm((f) => ({ ...f, [key]: e.target.value }))}
+        onChange={(e) => {
+          if (locked) return;
+          const val = UPPERCASE_FIELDS.includes(key) ? e.target.value.toUpperCase() : e.target.value;
+          setForm((f) => ({ ...f, [key]: val }));
+        }}
         onBlur={() => setTouched(true)}
         className={`w-full text-sm border rounded-lg px-2.5 py-2 ${locked ? "bg-muted/30 text-muted-foreground cursor-not-allowed" : "bg-background"} ${touched && errors[key] ? "border-rose-400" : "border-border"}`} />
       {touched && errors[key] && <p className="text-[11px] text-rose-500 mt-0.5">{errors[key]}</p>}
@@ -415,7 +422,7 @@ const CrmCustomerBankDetails: React.FC = () => {
   }, [list, statusFilter, search]);
 
   return (
-    <SalesAutoShell title="CRM — Customer Bank & Nominee Details" subtitle="KYC captured before agreement preparation">
+    <CrmShell title="CRM — Customer Bank & Nominee Details" subtitle="KYC captured before agreement preparation">
       <div className="space-y-4">
         <div className="flex gap-3 items-center flex-wrap">
           <div className="relative flex-1 min-w-48">
@@ -480,7 +487,7 @@ const CrmCustomerBankDetails: React.FC = () => {
           onSaved={() => qc.invalidateQueries({ queryKey: ["crm-bank-details-list"] })}
         />
       )}
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

@@ -2,13 +2,14 @@ import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
+import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { formatINR } from "@/utils/formatCurrency";
 import {
-  Plus, CheckCircle2, AlertTriangle, XCircle, ExternalLink, Lock, Pencil, ScrollText,
+  Plus, CheckCircle2, AlertTriangle, XCircle, ExternalLink, Lock, Pencil, ScrollText, RotateCcw,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
@@ -19,7 +20,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 const API = "/api/crm/sales-deed";
 const BKG_API = "/api/crm/bookings";
 
-// Status is never manually picked — it's auto-derived server-side, level by
+// Status is never manually picked � it's auto-derived server-side, level by
 // level, from ExecutedBy / RegistrationNo / DeedDate actually being on
 // record (see deriveDeedStatus in backend/routes/crmSalesDeed.js).
 const STATUS_CFG: Record<string, { text: string; bar: string }> = {
@@ -66,7 +67,7 @@ function SectionLabel({ children, action }: { children: React.ReactNode; action?
 }
 
 function fmtDate(d?: string | null) {
-  if (!d) return "—";
+  if (!d) return "�";
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
@@ -105,7 +106,7 @@ const CrmSalesDeed: React.FC = () => {
   const [savingProgress, setSavingProgress] = useState(false);
   const [sendingToCustomer, setSendingToCustomer] = useState(false);
 
-  const { data: deeds = [], isLoading } = useQuery({ queryKey: ["crm-sales-deed"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: deeds = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-sales-deed"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: context, isFetching: contextLoading } = useQuery({
     queryKey: ["crm-sales-deed-context", form.BookingId],
@@ -118,7 +119,7 @@ const CrmSalesDeed: React.FC = () => {
 
   const agreementExecuted = context?.agreement?.Status === "Executed";
   // Loan Processing only exists as a gate at all for a booking explicitly
-  // marked Loan-Financed — Self-Funded and undeclared bookings never had a
+  // marked Loan-Financed � Self-Funded and undeclared bookings never had a
   // loan to process, so they clear immediately (see
   // checkLoanProcessingCleared in crmWorkflowGuards.js). Construction
   // milestone payments (Foundation, Slab Casting, etc.) are a separate,
@@ -130,7 +131,7 @@ const CrmSalesDeed: React.FC = () => {
   const detail = detailId != null ? (deeds as any[]).find((d: any) => d.Id === detailId) : null;
   // Deed Value / Stamp Duty / Registration Fee / Sub-Registrar Office / Deed
   // Date can only be corrected before the deed has been sent to the customer
-  // for approval — once sent, the customer (and later the director) is
+  // for approval � once sent, the customer (and later the director) is
   // signing off on those exact numbers, and Stamp Duty / Registration Fee
   // also feed Query Payment's live-computed amount (see crmSalesDeed.js
   // PUT /:id for the matching server-side guard).
@@ -165,8 +166,10 @@ const CrmSalesDeed: React.FC = () => {
       setDialogOpen(false);
       setForm({ ...EMPTY_FORM });
       qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -204,8 +207,9 @@ const CrmSalesDeed: React.FC = () => {
       toast.success("Deed details updated");
       setDeedFormEditing(false);
       qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSavingDeed(false);
     }
@@ -224,19 +228,23 @@ const CrmSalesDeed: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
       toast.success(`Deed status: ${data.status}`);
       qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      // Deed approval changes handover eligibility and dashboard KPIs
+      qc.invalidateQueries({ queryKey: ["crm-handover-eligible"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSavingProgress(false);
     }
   };
 
   // The customer-portal approval loop is normally auto-triggered the moment
-  // ExecutedBy is first set (see crmSalesDeed.js PUT /:id) — but that's a
+  // ExecutedBy is first set (see crmSalesDeed.js PUT /:id) � but that's a
   // best-effort convenience, not the only path, so staff need an explicit
   // fallback for cases the auto-trigger doesn't cover (e.g. it silently
   // missed a deed whose ExecutedBy and RegistrationNo were set together in
-  // one request — a real bug that left a deed fully Registered with the
+  // one request � a real bug that left a deed fully Registered with the
   // customer never having been asked to approve it).
   const handleSendToCustomer = async () => {
     if (!detailId) return;
@@ -247,8 +255,11 @@ const CrmSalesDeed: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
       toast.success("Sent to customer for approval");
       qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      // Customer sent ? dashboard "deeds awaiting customer" count changes
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSendingToCustomer(false);
     }
@@ -265,22 +276,31 @@ const CrmSalesDeed: React.FC = () => {
       cell: (i) => (
         <button onClick={() => openDetail(i.row.original)} className="text-left hover:underline">
           <div className="font-medium">{i.row.original.ApplicantName}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} � {i.row.original.UnitNo}</div>
         </button>
       ) },
     { accessorKey: "DeedValue", header: "Deed Value", size: 120,
-      cell: (i) => <span className="font-mono text-xs">{i.row.original.DeedValue ? formatINR(i.row.original.DeedValue) : "—"}</span> },
+      cell: (i) => <span className="font-mono text-xs">{i.row.original.DeedValue ? formatINR(i.row.original.DeedValue) : "�"}</span> },
     { accessorKey: "RegistrationNo", header: "Registration No", size: 130,
-      cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
+      cell: (i) => <span className="text-xs">{(i.getValue() as string) || "�"}</span> },
     { accessorKey: "Status", header: "Status", size: 110,
       cell: (i) => <StatusBadge status={i.row.original.Status} /> },
+    { id: "customerApproval", header: "Customer Approval", size: 140, enableSorting: false,
+      cell: (i) => {
+        const d = i.row.original;
+        return d.CustomerApprovalStatus && d.CustomerApprovalStatus !== "NotSent" ? (
+          <StatusBadge status={d.CustomerApprovalStatus} cfg={APPROVAL_CFG} />
+        ) : (
+          <span className="text-xs text-muted-foreground">Not sent</span>
+        );
+      } },
     { id: "directorApproval", header: "Director Approval", size: 140, enableSorting: false,
       cell: (i) => {
         const d = i.row.original;
         return d.DirectorApprovalStatus && d.DirectorApprovalStatus !== "NotRequired" ? (
           <StatusBadge status={d.DirectorApprovalStatus} cfg={APPROVAL_CFG} />
         ) : (
-          <span className="text-xs text-muted-foreground">—</span>
+          <span className="text-xs text-muted-foreground">�</span>
         );
       } },
     { id: "actions", header: "", size: 80, enableSorting: false,
@@ -292,14 +312,23 @@ const CrmSalesDeed: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
-      title="CRM — Sale Deed"
+    <CrmShell
+      title="CRM � Sale Deed"
       subtitle="Deed execution and registration tracking"
       action={
-        <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-          <Plus size={14} /> New Deed
-        </button>
+        <div className="flex items-center gap-3">
+          {dataUpdatedAt > 0 && (
+            <button onClick={() => refetch()} disabled={isFetching}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
+              <RotateCcw size={12} className={isFetching ? "animate-spin" : ""} />
+              {isFetching ? "Refreshing�" : "Refresh"}
+            </button>
+          )}
+          <button onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            <Plus size={14} /> New Deed
+          </button>
+        </div>
       }
     >
       <DataTable
@@ -310,7 +339,7 @@ const CrmSalesDeed: React.FC = () => {
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
 
-      {/* ── New Sale Deed ─────────────────────────────────────────────── */}
+      {/* -- New Sale Deed ----------------------------------------------- */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
         <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
           <DialogHeader className="px-6 py-4 border-b border-border">
@@ -332,7 +361,7 @@ const CrmSalesDeed: React.FC = () => {
                 className="w-full h-10 text-sm border border-border rounded-lg px-3 bg-background">
                 <option value="">Select booking</option>
                 {eligibleBookings.map((b: any) => (
-                  <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
+                  <option key={b.Id} value={String(b.Id)}>{b.BookingNo} � {b.ApplicantName}</option>
                 ))}
               </select>
               {eligibleBookings.length === 0 && (
@@ -349,16 +378,16 @@ const CrmSalesDeed: React.FC = () => {
                 ) : (
                   <>
                     <p className="text-sm font-semibold text-foreground">{context.booking?.ApplicantName}</p>
-                    <p className="text-xs text-muted-foreground -mt-1">{context.booking?.BookingNo} · {context.booking?.UnitNo} · Booking Value {formatINR(context.booking?.GrandTotal)}</p>
+                    <p className="text-xs text-muted-foreground -mt-1">{context.booking?.BookingNo} � {context.booking?.UnitNo} � Booking Value {formatINR(context.booking?.GrandTotal)}</p>
                     <div className={cn("flex items-center gap-1.5 text-xs pt-1", agreementExecuted ? "text-emerald-700" : "text-rose-600")}>
                       {agreementExecuted ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                      Agreement {context.agreement ? `(${context.agreement.AgreementNo}) — ${context.agreement.Status}` : "— not created yet"}
+                      Agreement {context.agreement ? `(${context.agreement.AgreementNo}) � ${context.agreement.Status}` : "� not created yet"}
                     </div>
                     {isLoanFinanced && (
                       <div className="space-y-1">
                         <div className={cn("flex items-center gap-1.5 text-xs", loanCleared ? "text-emerald-700" : "text-rose-600")}>
                           {loanCleared ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                          Loan Processing — {loanCleared ? context.loanDetail?.SanctionStatus : context.loanBlockReason}
+                          Loan Processing � {loanCleared ? context.loanDetail?.SanctionStatus : context.loanBlockReason}
                         </div>
                         {!loanCleared && (
                           <button
@@ -372,7 +401,7 @@ const CrmSalesDeed: React.FC = () => {
                     )}
                     {!canCreate && (
                       <div className="flex items-center gap-1.5 text-xs text-amber-600 pt-0.5">
-                        <AlertTriangle size={12} /> Not yet eligible — resolve the items above first.
+                        <AlertTriangle size={12} /> Not yet eligible � resolve the items above first.
                       </div>
                     )}
                   </>
@@ -415,9 +444,9 @@ const CrmSalesDeed: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ── Deed detail — the single place to view AND act on a deed: core
+      {/* -- Deed detail � the single place to view AND act on a deed: core
           deed fields (editable until sent to customer), execution/
-          registration progress, and the approval chain. ─────────────── */}
+          registration progress, and the approval chain. --------------- */}
       <Dialog open={!!detailId} onOpenChange={(o) => { if (!o) setDetailId(null); }}>
         <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden">
           {detail && (
@@ -440,7 +469,7 @@ const CrmSalesDeed: React.FC = () => {
               <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
                 <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
                   <p className="text-sm font-semibold text-foreground">{detail.ApplicantName}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{detail.BookingNo} · {detail.UnitNo} · {detail.Mobile}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{detail.BookingNo} � {detail.UnitNo} � {detail.Mobile}</p>
                 </div>
 
                 <div>
@@ -453,7 +482,7 @@ const CrmSalesDeed: React.FC = () => {
                   </SectionLabel>
                   {deedFieldsLocked && (
                     <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 mb-2">
-                      <Lock size={11} /> Locked — sent to the customer for approval on {fmtDate(detail.SentToCustomerAt)}.
+                      <Lock size={11} /> Locked � sent to the customer for approval on {fmtDate(detail.SentToCustomerAt)}.
                     </div>
                   )}
                   {deedFormEditing ? (
@@ -490,11 +519,11 @@ const CrmSalesDeed: React.FC = () => {
                     </div>
                   ) : (
                     <div>
-                      <DetailRow label="Deed Value" value={detail.DeedValue ? formatINR(detail.DeedValue) : "—"} mono />
-                      <DetailRow label="Stamp Duty" value={detail.StampDuty ? formatINR(detail.StampDuty) : "—"} mono />
-                      <DetailRow label="Registration Fee" value={detail.RegistrationFee ? formatINR(detail.RegistrationFee) : "—"} mono />
+                      <DetailRow label="Deed Value" value={detail.DeedValue ? formatINR(detail.DeedValue) : "�"} mono />
+                      <DetailRow label="Stamp Duty" value={detail.StampDuty ? formatINR(detail.StampDuty) : "�"} mono />
+                      <DetailRow label="Registration Fee" value={detail.RegistrationFee ? formatINR(detail.RegistrationFee) : "�"} mono />
                       <DetailRow label="Deed Date" value={fmtDate(detail.DeedDate)} />
-                      <DetailRow label="Sub-Registrar Office" value={detail.SubRegistrarOffice || "—"} />
+                      <DetailRow label="Sub-Registrar Office" value={detail.SubRegistrarOffice || "�"} />
                     </div>
                   )}
                 </div>
@@ -503,15 +532,15 @@ const CrmSalesDeed: React.FC = () => {
                   <SectionLabel>Execution &amp; Registration</SectionLabel>
                   {progressLocked ? (
                     <div>
-                      <DetailRow label="Executed By" value={detail.ExecutedBy || "—"} />
-                      <DetailRow label="Registration No." value={detail.RegistrationNo || "—"} mono />
+                      <DetailRow label="Executed By" value={detail.ExecutedBy || "�"} />
+                      <DetailRow label="Registration No." value={detail.RegistrationNo || "�"} mono />
                       <DetailRow label="Registration Date" value={fmtDate(detail.RegistrationDate)} />
-                      <DetailRow label="Book No. / Part No." value={`${detail.BookNo || "—"} / ${detail.PartNo || "—"}`} />
+                      <DetailRow label="Book No. / Part No." value={`${detail.BookNo || "�"} / ${detail.PartNo || "�"}`} />
                       <DetailRow label="Possession Date" value={fmtDate(detail.PossessionDate)} />
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      <p className="text-xs text-muted-foreground">Status advances automatically once these facts are on record — it is not picked manually.</p>
+                      <p className="text-xs text-muted-foreground">Status advances automatically once these facts are on record � it is not picked manually.</p>
                       <div className="space-y-1.5">
                         <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Executed By</label>
                         <Input className="h-10" value={progressForm.ExecutedBy} onChange={(e) => setProgressForm((f) => ({ ...f, ExecutedBy: e.target.value }))} />
@@ -589,7 +618,7 @@ const CrmSalesDeed: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

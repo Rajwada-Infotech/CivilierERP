@@ -1,8 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CheckCircle2, IndianRupee, Plus, Search } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -39,6 +42,7 @@ function money(value: any) {
 }
 
 const SaCommissions: React.FC = () => {
+  usePageRights("sa-commissions");
   const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
@@ -54,7 +58,7 @@ const SaCommissions: React.FC = () => {
     CpRate: "",
     Notes: "",
   });
-  const { data: commissions = [], isLoading, error } = useQuery({ queryKey: ["sa-commissions"], queryFn: fetchCommissions, staleTime: 30_000 });
+  const { data: commissions = [], isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-commissions"], queryFn: fetchCommissions, staleTime: 30_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-options"], queryFn: fetchLeads, staleTime: 60_000 });
   const { data: users = [] } = useQuery({ queryKey: ["sa-users-options"], queryFn: fetchUsers, staleTime: 60_000 });
   const { data: partners = [] } = useQuery({ queryKey: ["sa-channel-partners"], queryFn: fetchPartners, staleTime: 60_000 });
@@ -140,7 +144,9 @@ const SaCommissions: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell title="Commission Tracking" subtitle="Track sales, team lead and channel partner payouts from bookings">
+    <SalesAutoShell title="Commission Tracking" subtitle="Track sales, team lead and channel partner payouts from bookings"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
+      <Breadcrumbs items={["Sales Automation", "Commissions"]} />
       <div className="space-y-5">
         {canDoAction("sa-commissions", "create") && (
           <form onSubmit={createCommission} className="grid grid-cols-1 md:grid-cols-6 gap-3 rounded-lg border border-border p-4 bg-background">

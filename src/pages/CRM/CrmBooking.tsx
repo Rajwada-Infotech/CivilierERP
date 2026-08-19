@@ -1,6 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -143,10 +145,17 @@ function getNextStep(b: any): NextStep {
   // this, since that's not what unblocks Agreement auto-creation either.
   if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-amber-500 border-amber-200 bg-amber-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
   if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-amber-600 border-amber-200 bg-amber-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
+  // Agreement sub-stages: draft → senior approval → customer approval → date negotiation → date approval → executed
   if (!b.AgreementId || b.SeniorApprovalStatus !== "Approved" || b.CustomerApprovalStatus !== "Approved") {
     return { label: "Agreement", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
-  if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
+  if (!b.AgreementDate) {
+    return { label: "Agreement Date", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
+  }
+  if (b.DateApprovalStatus !== "Approved") {
+    return { label: "Date Approval", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
+  }
+if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
   return null; // every gated step is complete
 }
 
@@ -173,10 +182,10 @@ const CrmBooking: React.FC = () => {
   const [viewingBookingId, setViewingBookingId] = useState<number | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
 
-  const { data: bookings = [], isLoading } = useQuery({
+  const { data: bookings = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-bookings", appFilter],
     queryFn: () => fetchBookings(appFilter || undefined),
-    staleTime: 60_000,
+    staleTime: 30_000,
   });
 
   // Deep-link support: /crm/bookings?applicationId=X (from "View Booking"
@@ -395,37 +404,37 @@ const CrmBooking: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
       qc.invalidateQueries({ queryKey: ["crm-apps"] }); // the Application just became Converted — the New Booking dropdown's app list must reflect that immediately, not after the 5-minute staleTime
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
   };
 
-  // Unit change is a rare, authorized-only action (admin/super_admin/
-  // marketing_head, enforced server-side) — a lightweight prompt flow
-  // matches the other one-off actions on this page rather than a full
-  // dialog for something this infrequent.
-  const handleChangeUnit = async (b: any) => {
-    const options = (units as any[])
-      .filter((u: any) => u.IsActive && u.Id !== b.UnitId)
-      .map((u: any) => `${u.Id}: ${u.ProjectName} — ${u.BlockName} — ${u.UnitName}`)
-      .join("\n");
-    const newUnitId = window.prompt(`Enter the new Unit ID for ${b.BookingNo}:\n\n${options}`);
-    if (!newUnitId) return;
-    const reason = window.prompt("Reason for changing the unit (required):");
-    if (!reason?.trim()) { toast.error("Reason is required"); return; }
+  const [unitChangeBooking, setUnitChangeBooking] = useState<any | null>(null);
+  const [unitChangeNewId, setUnitChangeNewId] = useState("");
+  const [unitChangeReason, setUnitChangeReason] = useState("");
+  const [unitChangeSaving, setUnitChangeSaving] = useState(false);
+
+  const handleChangeUnit = async () => {
+    if (!unitChangeNewId) { toast.error("Select a unit"); return; }
+    if (!unitChangeReason.trim()) { toast.error("Reason is required"); return; }
+    setUnitChangeSaving(true);
     try {
-      const res = await fetchWithAuth(`${API}/${b.Id}/change-unit`, {
+      const res = await fetchWithAuth(`${API}/${unitChangeBooking.Id}/change-unit`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ NewUnitId: parseInt(newUnitId), Reason: reason.trim() }),
+        body: JSON.stringify({ NewUnitId: parseInt(unitChangeNewId), Reason: unitChangeReason.trim() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success(`Unit changed to ${data.unitNo}`);
+      setUnitChangeBooking(null);
+      setUnitChangeNewId(""); setUnitChangeReason("");
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
+    } finally {
+      setUnitChangeSaving(false);
     }
   };
 
@@ -456,18 +465,39 @@ const CrmBooking: React.FC = () => {
       } },
     { accessorKey: "AreaSqFt", header: "Area", size: 90,
       cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer text-sm">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sqft` : "—"}</span> },
-    { id: "value", header: "Value", size: 145, enableSorting: false,
+    { id: "value", header: "Value / Financial", size: 185, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
+        const storedGrand = Number(b.GrandTotal ?? 0);
+        const grand = storedGrand > 0 ? storedGrand : (Number(b.TotalValue || 0) + Number(b.UnitGstAmount || 0) + Number(b.ParkingTotal || 0) + Number(b.ExtraChargesTotal || 0));
+        const cleared = Number(b.TotalCleared ?? 0);
+        const mrOnAcc = Math.max(0, Number(b.MRReceivedTotal ?? 0) - cleared);
+        const onAcc = mrOnAcc + Number(b.ApprovedOnAccount ?? 0);
+        const outstanding = Math.max(0, grand - cleared - onAcc);
+        const clearedPct = grand > 0 ? Math.min(100, Math.round((cleared / grand) * 100)) : 0;
+        const onAccPct = grand > 0 ? Math.min(100 - clearedPct, Math.round((onAcc / grand) * 100)) : 0;
         return (
-          <div onClick={() => setViewingBookingId(b.Id)} className="cursor-pointer">
-            <div className="font-semibold">{fmt(b.GrandTotal ?? b.TotalValue)}</div>
+          <div onClick={() => setViewingBookingId(b.Id)} className="cursor-pointer space-y-1">
+            <div className="font-semibold">{fmt(grand)}</div>
             {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
               <div className="text-[10px] text-muted-foreground">
                 Unit {fmt(b.TotalValue)}
                 {b.UnitGstAmount > 0 && ` + Unit GST ${fmt(b.UnitGstAmount)}`}
                 {b.ParkingTotal > 0 && ` + Parking ${fmt(b.ParkingTotal)}`}
                 {b.ExtraChargesTotal > 0 && ` + Extra ${fmt(b.ExtraChargesTotal)}`}
+              </div>
+            )}
+            {grand > 0 && (
+              <div className="space-y-0.5">
+                <div className="h-1 w-full rounded-full bg-muted overflow-hidden flex">
+                  <div className="h-full bg-emerald-500 transition-all" style={{ width: `${clearedPct}%` }} />
+                  <div className="h-full bg-blue-400 transition-all" style={{ width: `${onAccPct}%` }} />
+                </div>
+                <div className="flex gap-2 text-[9px]">
+                  {cleared > 0 && <span className="text-emerald-600">✓ {fmt(cleared)}</span>}
+                  {onAcc > 0 && <span className="text-blue-600">⬡ {fmt(onAcc)}</span>}
+                  {outstanding > 0 && <span className="text-amber-600">○ {fmt(outstanding)}</span>}
+                </div>
               </div>
             )}
           </div>
@@ -511,7 +541,7 @@ const CrmBooking: React.FC = () => {
             {b.Status === "Pending" && (
               b.WorkflowStage && b.WorkflowStage !== "Review" ? (
                 <span className="text-xs text-muted-foreground">Pending {workflowStageLabel[b.WorkflowStage] || "Approval"}</span>
-              ) : b.UnitReviewConfirmed && b.PlanReviewConfirmed ? (
+              ) : b.ReadyForApprovalAt ? (
                 <span className="text-xs text-muted-foreground">Ready for Marketing Head Approval</span>
               ) : (
                 <button onClick={() => setViewingBookingId(b.Id)}
@@ -575,7 +605,7 @@ const CrmBooking: React.FC = () => {
                 {b.Status !== "Cancelled" && canEdit && (
                   <>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => handleChangeUnit(b)} className="gap-2 text-rose-600 focus:text-rose-600">
+                    <DropdownMenuItem onClick={() => { setUnitChangeBooking(b); setUnitChangeNewId(""); setUnitChangeReason(""); }} className="gap-2 text-rose-600 focus:text-rose-600">
                       <Repeat size={14} /> Change Unit
                     </DropdownMenuItem>
                   </>
@@ -603,12 +633,15 @@ const CrmBooking: React.FC = () => {
       title="CRM — Applications and Bookings"
       subtitle="Applications become pending bookings, then move through review, Marketing Head approval, and Director approval"
       action={
-        canEdit ? (
-          <button onClick={() => { setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); setDialogOpen(true); }}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
-            <Plus size={14} /> New Booking
-          </button>
-        ) : undefined
+        <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          {canEdit && (
+            <button onClick={() => { setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); setDialogOpen(true); }}
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+              <Plus size={14} /> New Booking
+            </button>
+          )}
+        </div>
       }
     >
       {/* Search + status filter + table live in one continuous glass card,
@@ -904,6 +937,46 @@ const CrmBooking: React.FC = () => {
             if (appFilter) navigate("/crm/bookings", { replace: true });
           }}
         />
+      )}
+
+      {unitChangeBooking && (
+        <Dialog open onOpenChange={(o) => !o && setUnitChangeBooking(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="font-heading flex items-center gap-2">
+                <Repeat size={16} className="text-rose-500" /> Change Unit — {unitChangeBooking.BookingNo}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">New Unit</label>
+                <select value={unitChangeNewId} onChange={(e) => setUnitChangeNewId(e.target.value)}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <option value="">— Select unit —</option>
+                  {(units as any[])
+                    .filter((u: any) => u.IsActive && u.Id !== unitChangeBooking.UnitId)
+                    .map((u: any) => (
+                      <option key={u.Id} value={u.Id}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Reason *</label>
+                <textarea value={unitChangeReason} onChange={(e) => setUnitChangeReason(e.target.value)}
+                  rows={3} placeholder="Reason for changing the unit..."
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={() => setUnitChangeBooking(null)}
+                  className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={handleChangeUnit} disabled={unitChangeSaving || !unitChangeNewId || !unitChangeReason.trim()}
+                  className="px-4 py-1.5 text-sm bg-rose-500 text-white rounded-lg font-medium hover:bg-rose-600 disabled:opacity-40">
+                  {unitChangeSaving ? "Changing..." : "Change Unit"}
+                </button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </CrmShell>
   );

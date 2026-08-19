@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
@@ -41,7 +42,10 @@ import {
   Pencil,
   Save,
   X as XIcon,
+  Search,
+  Filter,
 } from "lucide-react";
+import { useTheme } from "@/contexts/ThemeContext";
 import { MoneyRecive } from "iconsax-react";
 import { getCompanyOptions, getBanks, type CompanyOption, type BankRecord } from "@/api/bankMasterApi";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
@@ -59,12 +63,14 @@ import {
   uploadLoanNoc,
   getLoanDocuments,
   uploadLoanDocument,
+  closeLoan,
   type LoanSanction,
   type LoanType,
   type InterestCalcType,
   type CustomerOption,
   type BankOption,
   type CompanyExposure,
+  type LoanPayment,
 } from "@/api/loanSanctionApi";
 
 const ACCENT = "#22c55e";
@@ -118,6 +124,13 @@ const EMPTY_FORM = {
   dueDate: "",
   purpose: "",
   remarks: "",
+  paymentMode: "Cash" as string,
+  chequeLotId: "",
+  chequeLotNumber: "",
+  chequeNo: "",
+  chequeDate: "",
+  isPostDated: false,
+  digitalRefNumber: "",
 };
 
 const fmt = (n: number | null | undefined) =>
@@ -129,6 +142,27 @@ const fmtDate = (d?: string | null) =>
   d
     ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
     : "—";
+
+// What a repayment was actually paid WITH — a Loan EMI is always settled
+// through Finance > Payment first (see migration 340's NewPaymentId link),
+// which is where mode/cheque/bank/reference are genuinely captured.
+// Returns:
+//   string  — a human-readable description of the instrument (cheque/NEFT/UPI etc.)
+//   null    — PaymentMode is empty even though NewPaymentId is set (not expected)
+//   "NOT_ON_FILE" — NewPaymentId is null: this row pre-dates migration 340;
+//                   the caller should render "Payment mode not on file" in muted style.
+function paymentInstrumentLabel(p: LoanPayment): string | null | "NOT_ON_FILE" {
+  // BUG 3 FIX: distinguish "no NewPaymentId at all" from "has one but mode blank"
+  if (p.NewPaymentId == null) return "NOT_ON_FILE";
+  if (!p.PaymentMode) return null;
+  if (p.PaymentMode === "Cheque" || p.PaymentMode === "Post-Dated Cheque") {
+    const chequeInfo = p.ChequeNo ? `Cheque #${p.ChequeNo}${p.ChequeDate ? ` dated ${new Date(p.ChequeDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}${p.BankName ? ` (${p.BankName})` : ""}` : p.PaymentMode;
+    return chequeInfo;
+  }
+  const ref = p.NeftNumber || p.UpiTransactionId || p.RtgsReference || p.ImpsReference;
+  if (ref) return `${p.PaymentMode} (Ref: ${ref})${p.BankName ? ` — ${p.BankName}` : ""}`;
+  return p.BankName ? `${p.PaymentMode} — ${p.BankName}` : p.PaymentMode;
+}
 
 const LOAN_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Loan No", accessor: "LoanNo" },
@@ -152,6 +186,9 @@ const LOAN_TYPE_COLORS: Record<LoanType, string> = {
 
 export default function LoanSanctionPage() {
   const qc = useQueryClient();
+  usePageRights("loan-sanction");
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
   const [showForm, setShowForm] = useState(false);
   const [viewingLoan, setViewingLoan] = useState<LoanSanction | null>(null);
   const [tab, setTab] = useState<"overview" | "exposure" | "schedule" | "chain" | "posting">("overview");
@@ -198,24 +235,35 @@ export default function LoanSanctionPage() {
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const documentInputRef = useRef<HTMLInputElement>(null);
 
+  // Explicit loan closure — separate deliberate step from payment recording
+  const [closingLoan, setClosingLoan] = useState(false);
+
+  // null = "All companies" — the dashboard default. Picking one just narrows
+  // the same list to loans where that company is lender or borrower.
+  const [listCompanyId, setListCompanyId] = useState<number | null>(null);
+
   const { data: loans = [], isLoading } = useQuery({
-    queryKey: ["loan-sanctions"],
-    queryFn: getLoanSanctions,
+    queryKey: ["loan-sanctions", listCompanyId],
+    queryFn: () => getLoanSanctions(listCompanyId),
+    staleTime: 30_000,
   });
 
   const { data: companies = [] } = useQuery({
     queryKey: ["company-options-loan"],
     queryFn: getCompanyOptions,
+    staleTime: 5 * 60_000,
   });
 
   const { data: customers = [] } = useQuery({
     queryKey: ["customer-options-loan"],
     queryFn: getCustomerOptions,
+    staleTime: 5 * 60_000,
   });
 
   const { data: banks = [] } = useQuery({
     queryKey: ["bank-options-loan"],
     queryFn: getBankOptions,
+    staleTime: 5 * 60_000,
   });
 
   // Full bank records (with each bank's own company tag) — used to scope
@@ -224,6 +272,7 @@ export default function LoanSanctionPage() {
   const { data: bankRecords = [] } = useQuery({
     queryKey: ["bank-records-loan"],
     queryFn: getBanks,
+    staleTime: 5 * 60_000,
   });
   const banksForCompany = (companyLabel: string) =>
     bankRecords.filter(
@@ -234,18 +283,21 @@ export default function LoanSanctionPage() {
     queryKey: ["loan-schedule", viewingLoan?.LoanId],
     queryFn: () => getLoanSchedule(viewingLoan!.LoanId),
     enabled: !!viewingLoan,
+    staleTime: 30_000,
   });
 
   const { data: payments = [] } = useQuery({
     queryKey: ["loan-payments", viewingLoan?.LoanId],
     queryFn: () => getLoanPayments(viewingLoan!.LoanId),
     enabled: !!viewingLoan,
+    staleTime: 30_000,
   });
 
   const { data: loanDocuments = [] } = useQuery({
     queryKey: ["loan-documents", viewingLoan?.LoanId],
     queryFn: () => getLoanDocuments(viewingLoan!.LoanId),
     enabled: !!viewingLoan,
+    staleTime: 30_000,
   });
 
   // Exposure tab — live lookup of what's already lent/owed by whichever
@@ -415,7 +467,7 @@ export default function LoanSanctionPage() {
         qc.invalidateQueries({ queryKey: ["loan-schedule", viewingLoan.LoanId] }),
         qc.invalidateQueries({ queryKey: ["loan-payments", viewingLoan.LoanId] }),
       ]);
-      const fresh = await getLoanSanctions();
+      const fresh = await getLoanSanctions(listCompanyId);
       const updated = fresh.find((l) => l.LoanId === viewingLoan.LoanId);
       if (updated) setViewingLoan(updated);
     } catch (e: any) {
@@ -429,6 +481,25 @@ export default function LoanSanctionPage() {
     setShowForm(false);
     setViewingLoan(null);
     setEditingDetails(false);
+  };
+
+  // Explicit loan closure — called only when the user deliberately clicks
+  // "Close Loan". Backend validates all EMIs are paid and total paid >= schedule.
+  const handleCloseLoan = async () => {
+    if (!viewingLoan) return;
+    setClosingLoan(true);
+    try {
+      const result = await closeLoan(viewingLoan.LoanId);
+      toast.success(result.message || `Loan ${viewingLoan.LoanNo} has been closed.`);
+      await qc.invalidateQueries({ queryKey: ["loan-sanctions"] });
+      const fresh = await getLoanSanctions(listCompanyId);
+      const updated = fresh.find((l) => l.LoanId === viewingLoan.LoanId);
+      if (updated) setViewingLoan(updated);
+    } catch (e: any) {
+      toast.error(friendlyErrorMessage(e, "Could not close loan"));
+    } finally {
+      setClosingLoan(false);
+    }
   };
 
   const handleSave = async () => {
@@ -462,6 +533,13 @@ export default function LoanSanctionPage() {
         dueDate: isInterCompanyType && !form.hasInterest ? form.dueDate || null : null,
         purpose: form.purpose || null,
         remarks: form.remarks || null,
+        paymentMode: form.paymentMode || null,
+        chequeLotId: form.chequeLotId || null,
+        chequeLotNumber: form.chequeLotNumber || null,
+        chequeNo: form.chequeNo || null,
+        chequeDate: form.chequeDate || null,
+        isPostDated: form.isPostDated,
+        digitalRefNumber: form.digitalRefNumber || null,
       });
       toast.success(`Loan ${res.loanNo} sanctioned`);
       if (pendingDocumentFile) {
@@ -488,7 +566,7 @@ export default function LoanSanctionPage() {
       await uploadLoanNoc(viewingLoan.LoanId, file);
       toast.success("NOC uploaded — available in Records module");
       await qc.invalidateQueries({ queryKey: ["loan-sanctions"] });
-      const fresh = await getLoanSanctions();
+      const fresh = await getLoanSanctions(listCompanyId);
       const updated = fresh.find((l) => l.LoanId === viewingLoan.LoanId);
       if (updated) setViewingLoan(updated);
     } catch (e: any) {
@@ -606,7 +684,7 @@ export default function LoanSanctionPage() {
             }`}
           >
             <span className={`w-1.5 h-1.5 rounded-full inline-block ${closed ? "bg-border" : "bg-emerald-500"}`} />
-            {row.original.Status}
+            {closed ? "Sanctioned" : row.original.Status}
           </span>
         );
       },
@@ -683,10 +761,22 @@ export default function LoanSanctionPage() {
   const estimatedTotalRepayable = estimatedEmi * (Number(form.tenureMonths) || 1);
   const estimatedTotalInterest = Math.max(0, estimatedTotalRepayable - (Number(form.amount) || 0));
 
+  const chequeByPaymentId = new Map(
+    payments
+      .filter((p: any) => p.ChequeNo)
+      .map((p: any) => [p.PaymentId, { chequeNo: p.ChequeNo, chequeDate: p.ChequeDate }]),
+  );
   const totalEmis = schedule.length;
   const paidEmis = schedule.filter((e) => e.IsPaid).length;
-  const paidAmount = schedule.filter((e) => e.IsPaid).reduce((s, e) => s + Number(e.EMIAmount), 0);
-  const outstandingAmount = schedule.filter((e) => !e.IsPaid).reduce((s, e) => s + Number(e.EMIAmount), 0);
+  // BUG 8 FIX: paidAmount from actual LoanPayment records (authoritative) when
+  // they exist. Falls back to summing IsPaid EMI rows for loans whose repayments
+  // pre-date the LoanPayment table — those old rows won't appear in payments[]
+  // at all, so we must use the EMI schedule to avoid wrongly showing ₹0 paid.
+  const totalScheduledAmount = schedule.reduce((s, e) => s + Number(e.EMIAmount), 0);
+  const paidAmount = payments.length > 0
+    ? payments.reduce((s, p) => s + Number(p.PrincipalInterestAmount), 0)
+    : schedule.filter((e) => e.IsPaid).reduce((s, e) => s + Number(e.EMIAmount), 0);
+  const outstandingAmount = Math.max(0, Math.round((totalScheduledAmount - paidAmount) * 100) / 100);
   const nextDue = schedule.find((e) => !e.IsPaid) ?? null;
 
   const tabs: { id: typeof tab; label: string; icon: typeof FileText }[] = [
@@ -726,13 +816,62 @@ export default function LoanSanctionPage() {
     >
       <Breadcrumbs items={[{ label: "Loan", path: "/loan" }, { label: "Loan Sanction" }]} />
 
+      {!showForm && (
+        <div
+          className="rounded-xl px-4 py-3 mb-4 flex flex-wrap items-center gap-x-5 gap-y-3"
+          style={{
+            background: isDark ? "rgba(15,17,26,0.4)" : "rgba(248,250,252,0.72)",
+            border: isDark ? "1px solid rgba(34,197,94,0.14)" : "1px solid rgba(34,197,94,0.14)",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <div
+              className="flex items-center justify-center w-6 h-6 rounded-md shrink-0"
+              style={{ background: "rgba(34,197,94,0.15)" }}
+            >
+              <Filter size={12} style={{ color: ACCENT }} />
+            </div>
+            <span className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+              Filter loans
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Building2 size={13} className="text-muted-foreground shrink-0" />
+            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Company</span>
+            <CompanyFilterCombo companies={companies} value={listCompanyId} onChange={setListCompanyId} />
+          </div>
+
+          {listCompanyId != null && (
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+              {companies.find((c) => c.id === listCompanyId)?.label ?? "1 company"}
+              <button
+                type="button"
+                onClick={() => setListCompanyId(null)}
+                className="text-emerald-600/60 dark:text-emerald-400/60 hover:text-destructive transition-colors"
+              >
+                <XIcon size={9} />
+              </button>
+            </span>
+          )}
+
+          <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+            <span className="font-heading font-semibold text-foreground tabular-nums">{loans.length}</span>
+            <span>{loans.length === 1 ? "loan" : "loans"}</span>
+          </div>
+        </div>
+      )}
+
       {!showForm ? (
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <DataTable
             columns={columns}
             data={loans}
             loading={isLoading}
-            emptyMessage="No loans sanctioned yet. Click 'New Loan' to get started."
+            emptyMessage={listCompanyId ? "No loans sanctioned yet for this company. Click 'New Loan' to get started." : "No loans sanctioned yet. Click 'New Loan' to get started."}
           />
         </div>
       ) : (
@@ -768,9 +907,24 @@ export default function LoanSanctionPage() {
                     {viewingLoan.LoanType}
                   </span>
                 )}
+                {/* BUG 9 FIX: perspective badge — tells the user which direction
+                    the money flowed from OUR company's point of view.
+                    Customer Loan → we are the lender → "Loan Given"
+                    Bank Loan     → we are the borrower → "Loan Received"
+                    Inter-Company → could be either; show both party labels */}
+                {viewingLoan && viewingLoan.LoanType === "Customer Loan" && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                    <TrendingUp size={9} /> Loan Given
+                  </span>
+                )}
+                {viewingLoan && viewingLoan.LoanType === "Bank Loan" && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-purple-500/15 text-purple-600 dark:text-purple-400">
+                    <TrendingDown size={9} /> Loan Received
+                  </span>
+                )}
                 {viewingLoan && viewingLoan.Status === "Closed" && (
                   <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 size={10} /> Closed
+                    <CheckCircle2 size={10} /> Sanctioned
                   </span>
                 )}
                 {viewingLoan && viewingLoan.Status !== "Closed" && nextDue && (
@@ -1125,7 +1279,113 @@ export default function LoanSanctionPage() {
                         value={fmt(schedule.reduce((s, e) => s + Number(e.EMIAmount), 0))}
                         accent
                       />
+                      {viewingLoan?.PaymentMode && (
+                        <InfoCard
+                          label="Disbursed Via"
+                          value={
+                            viewingLoan.PaymentMode === "Cheque" || viewingLoan.PaymentMode === "Post-Dated Cheque"
+                              ? `${viewingLoan.PaymentMode} #${viewingLoan.ChequeNo || "—"}${viewingLoan.ChequeDate ? ` (${fmtDate(viewingLoan.ChequeDate)})` : ""}`
+                              : ["Cash"].includes(viewingLoan.PaymentMode)
+                                ? viewingLoan.PaymentMode
+                                : `${viewingLoan.PaymentMode} (Ref: ${viewingLoan.DigitalRefNumber || "—"})`
+                          }
+                        />
+                      )}
                     </div>
+
+                    {/* Repayment Status — live financial state of the loan.
+                        Shows how much has been paid, what's outstanding, and
+                        the EMI progress at a glance without switching tabs. */}
+                    {schedule.length > 0 && (
+                      <>
+                        <SectionLabel icon={Receipt} label="Repayment Status" />
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          <InfoCard
+                            label="Amount Paid"
+                            value={fmt(paidAmount)}
+                            accent={paidAmount > 0}
+                          />
+                          <InfoCard
+                            label="Outstanding"
+                            value={fmt(outstandingAmount)}
+                            accent={outstandingAmount > 0}
+                          />
+                          <InfoCard
+                            label="EMIs Paid"
+                            value={totalEmis ? `${paidEmis} / ${totalEmis}` : "—"}
+                          />
+                          <InfoCard
+                            label="Next Due"
+                            value={
+                              viewingLoan?.Status === "Closed"
+                                ? "Loan Sanctioned ✓"
+                                : nextDue
+                                  ? `${fmt(nextDue.EMIAmount)} on ${fmtDate(nextDue.DueDate)}`
+                                  : totalEmis > 0
+                                    ? "All paid"
+                                    : "—"
+                            }
+                          />
+                        </div>
+                        {/* Amount progress bar */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>Repayment progress</span>
+                            <span>
+                              {totalScheduledAmount > 0
+                                ? `${Math.min(100, Math.round((paidAmount / totalScheduledAmount) * 100))}%`
+                                : "—"}
+                            </span>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-emerald-500 to-green-400 rounded-full transition-all duration-500"
+                              style={{
+                                width: `${totalScheduledAmount > 0
+                                  ? Math.min(100, (paidAmount / totalScheduledAmount) * 100)
+                                  : 0}%`,
+                              }}
+                            />
+                          </div>
+                          {nextDue && viewingLoan?.Status !== "Closed" && (
+                            <p className={`text-[11px] flex items-center gap-1 ${
+                              new Date(nextDue.DueDate) < new Date(new Date().toDateString())
+                                ? "text-red-600 dark:text-red-400"
+                                : "text-amber-600 dark:text-amber-400"
+                            }`}>
+                              <AlertCircle size={11} />
+                              {new Date(nextDue.DueDate) < new Date(new Date().toDateString())
+                                ? `Next EMI overdue — ${fmt(nextDue.EMIAmount)} was due ${fmtDate(nextDue.DueDate)}`
+                                : `Next EMI: ${fmt(nextDue.EMIAmount)} due ${fmtDate(nextDue.DueDate)}`}
+                            </p>
+                          )}
+                        </div>
+                        {/* Close Loan CTA — shown only when all EMIs are paid
+                            and loan is still Sanctioned (not yet formally closed).
+                            The backend double-checks this before closing. */}
+                        {viewingLoan?.Status !== "Closed" && paidEmis === totalEmis && totalEmis > 0 && outstandingAmount <= 0 && (
+                          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] p-4 flex items-center justify-between gap-4">
+                            <div className="space-y-0.5">
+                              <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                                All installments paid — ready to close
+                              </p>
+                              <p className="text-[11px] text-muted-foreground">
+                                Formally closing the loan updates its status, records the closure date,
+                                and enables NOC upload. This step requires your confirmation.
+                              </p>
+                            </div>
+                            <button
+                              onClick={handleCloseLoan}
+                              disabled={closingLoan}
+                              className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 transition-colors"
+                            >
+                              <CheckCircle2 size={14} />
+                              {closingLoan ? "Closing…" : "Close Loan"}
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
 
                     {/* Documents — the agreement/sanction letter attached against Loan Doc No. */}
                     <SectionLabel icon={FileText} label="Documents" />
@@ -1430,6 +1690,65 @@ export default function LoanSanctionPage() {
                     )}
                     <div className="grid grid-cols-2 gap-5">
                       <div className="space-y-2">
+                        <label className={labelCls}>Payment Mode</label>
+                        <select
+                          className={inputCls}
+                          value={form.paymentMode}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            set("paymentMode", v);
+                            if (v !== "Cheque" && v !== "Post-Dated Cheque") {
+                              set("chequeNo", "");
+                              set("chequeDate", "");
+                            }
+                            if (["Cash", "Cheque", "Post-Dated Cheque"].includes(v)) {
+                              set("digitalRefNumber", "");
+                            }
+                          }}
+                        >
+                          {["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "RTGS", "IMPS", "UPI", "Card"].map((m) => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      {(form.paymentMode === "Cheque" || form.paymentMode === "Post-Dated Cheque") && (
+                        <>
+                          <div className="space-y-2">
+                            <label className={labelCls}>Cheque Number</label>
+                            <input
+                              className={inputCls}
+                              placeholder="Cheque No"
+                              value={form.chequeNo}
+                              onChange={(e) => set("chequeNo", e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className={labelCls}>Cheque Date</label>
+                            <input
+                              type="date"
+                              className={inputCls}
+                              value={form.chequeDate}
+                              onChange={(e) => set("chequeDate", e.target.value)}
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {!["Cash", "Cheque", "Post-Dated Cheque"].includes(form.paymentMode) && (
+                        <div className="space-y-2">
+                          <label className={labelCls}>Reference Number</label>
+                          <input
+                            className={inputCls}
+                            placeholder="UTR / Ref No"
+                            value={form.digitalRefNumber}
+                            onChange={(e) => set("digitalRefNumber", e.target.value)}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-5 mt-5">
+                      <div className="space-y-2">
                         <label className={labelCls}>Purpose</label>
                         <input
                           className={inputCls}
@@ -1544,19 +1863,20 @@ export default function LoanSanctionPage() {
                         <th className="text-right px-3 py-2.5">Principal</th>
                         <th className="text-right px-3 py-2.5">Interest</th>
                         <th className="text-right px-3 py-2.5">EMI Amount</th>
+                        <th className="text-left px-3 py-2.5">Cheque No.</th>
                         <th className="text-center px-3 py-2.5">Paid</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                       {scheduleLoading ? (
                         <tr>
-                          <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground text-xs">
+                          <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground text-xs">
                             Loading…
                           </td>
                         </tr>
                       ) : schedule.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground text-xs">
+                          <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground text-xs">
                             No EMI installments for this loan.
                           </td>
                         </tr>
@@ -1592,6 +1912,9 @@ export default function LoanSanctionPage() {
                                 {fmt(emi.InterestComponent)}
                               </td>
                               <td className="px-3 py-2.5 text-right font-mono font-medium">{fmt(emi.EMIAmount)}</td>
+                              <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">
+                                {chequeByPaymentId.get(emi.PaymentId)?.chequeNo ?? "—"}
+                              </td>
                               <td className="px-3 py-2.5 text-center">
                                 {emi.IsPaid ? (
                                   <CheckCircle2 size={15} className="text-emerald-500 inline-block" />
@@ -1701,7 +2024,16 @@ export default function LoanSanctionPage() {
                       key={p.PaymentId}
                       icon={<Receipt size={13} className="text-emerald-500" />}
                       title={`${p.PaymentType === "LumpSum" ? "Lump Sum Payment" : `${p.EmisCovered} EMI${p.EmisCovered === 1 ? "" : "s"} Paid`} — ${p.PaymentRef}`}
-                      subtitle={`${fmt(p.TotalAmount)}${p.LateFee > 0 ? ` (incl. ${fmt(p.LateFee)} late fee)` : ""} · Paid ${fmtDate(p.PaymentDate)}${p.CreatedBy ? ` by ${p.CreatedBy}` : ""}${p.ExcessCredited > 0 ? ` · ${fmt(p.ExcessCredited)} excess credited to lender's on-account` : ""}${p.ClosedLoan ? " · Loan closed" : ""}`}
+                      subtitle={(() => {
+                        const instrLabel = paymentInstrumentLabel(p);
+                        const instrPart = instrLabel === "NOT_ON_FILE"
+                          ? " · Payment mode not on file"
+                          : instrLabel
+                            ? ` · ${instrLabel}`
+                            : "";
+                        const docNoPart = p.PaymentDocNo ? ` · Finance ref: ${p.PaymentDocNo}` : "";
+                        return `${fmt(p.TotalAmount)}${p.LateFee > 0 ? ` (incl. ${fmt(p.LateFee)} late fee)` : ""} · Paid ${fmtDate(p.PaymentDate)}${instrPart}${docNoPart}${p.CreatedBy ? ` by ${p.CreatedBy}` : ""}${p.ExcessCredited > 0 ? ` · ${fmt(p.ExcessCredited)} excess credited to lender's on-account` : ""}${p.ClosedLoan && viewingLoan.Status !== "Closed" ? " · All installments settled" : ""}`;
+                      })()}
                       done
                       isLast={i === arr.length - 1 && viewingLoan.Status === "Closed"}
                     />
@@ -1717,7 +2049,7 @@ export default function LoanSanctionPage() {
                     <ChainNode
                       icon={<Receipt size={13} className="text-amber-500" />}
                       title={`${paidEmis} installment${paidEmis === 1 ? "" : "s"} marked paid`}
-                      subtitle={`No dbo.LoanPayment record on file for ${paidEmis === 1 ? "it" : "them"} — likely set before this loan's repayments moved to Finance → Payment.${schedule.find((e) => e.IsPaid)?.PaidDate ? ` Earliest: ${fmtDate(schedule.find((e) => e.IsPaid)!.PaidDate!)}.` : ""}`}
+                      subtitle={`Payment details not on record for ${paidEmis === 1 ? "this installment" : "these installments"} — recorded before the repayment system was updated.${schedule.find((e) => e.IsPaid)?.PaidDate ? ` Earliest paid: ${fmtDate(schedule.find((e) => e.IsPaid)!.PaidDate!)}.` : ""}`}
                       done
                       isLast={viewingLoan.Status !== "Closed"}
                     />
@@ -1747,6 +2079,29 @@ export default function LoanSanctionPage() {
                     />
                   )}
                 </div>
+
+                {/* Close Loan CTA in Repayment History tab — same logic as in
+                    Overview: show only when all EMIs paid and loan still open */}
+                {viewingLoan.Status !== "Closed" && paidEmis === totalEmis && totalEmis > 0 && outstandingAmount <= 0 && (
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] p-4 flex items-center justify-between gap-4">
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                        All installments paid — ready to close
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Click to formally close this loan, record the closure date, and unlock NOC upload.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleCloseLoan}
+                      disabled={closingLoan}
+                      className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 transition-colors"
+                    >
+                      <CheckCircle2 size={14} />
+                      {closingLoan ? "Closing…" : "Close Loan"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1938,8 +2293,8 @@ export default function LoanSanctionPage() {
           </DialogHeader>
           <p className="text-sm text-muted-foreground pt-1">
             This will permanently delete <strong>{deleteTarget?.LoanNo}</strong> ({fmt(deleteTarget?.Amount)}).
-            This cannot be undone. If any EMI has already been paid, deletion will be blocked —
-            reverse those payments first.
+            This cannot be undone. Deletion is blocked if any EMI has been marked paid or any
+            repayment transaction exists — reverse those payments first.
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <button
@@ -2095,6 +2450,154 @@ function PostingCard({ p }: { p: { companyId: number | null; companyName: string
           <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(total)}</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── CompanyFilterCombo ─────────────────────────────────────────────────────
+// The loan list's Company filter. Unlike the old plain <select>, "All
+// companies" is a real, always-visible option (not just placeholder text
+// that blocks the table until something else is picked) and the list is
+// searchable, matching the app's other combo pickers (CustomerComboField
+// below, VendorCombo in the Payment filter bar). Panel is portalled to
+// document.body so overflow:hidden on ancestors never clips it.
+function CompanyFilterCombo({
+  companies,
+  value,
+  onChange,
+}: {
+  companies: CompanyOption[];
+  value: number | null;
+  onChange: (id: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const updateRect = useCallback(() => {
+    if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updateRect();
+    window.addEventListener("scroll", updateRect, true);
+    window.addEventListener("resize", updateRect);
+    return () => {
+      window.removeEventListener("scroll", updateRect, true);
+      window.removeEventListener("resize", updateRect);
+    };
+  }, [open, updateRect]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        triggerRef.current && !triggerRef.current.contains(e.target as Node) &&
+        panelRef.current && !panelRef.current.contains(e.target as Node)
+      ) { setOpen(false); setQuery(""); }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const selected = value != null ? companies.find((c) => c.id === value) : null;
+  const filtered = query.trim()
+    ? companies.filter((c) => c.label.toLowerCase().includes(query.trim().toLowerCase()))
+    : companies;
+
+  const PANEL_MAX = 260;
+  const GAP = 6;
+  const spaceBelow = rect ? window.innerHeight - rect.bottom - GAP : 0;
+  const spaceAbove = rect ? rect.top - GAP : 0;
+  const openUpward = spaceAbove > spaceBelow && spaceBelow < PANEL_MAX;
+
+  const panel = open && rect && createPortal(
+    <div
+      ref={panelRef}
+      style={{
+        position: "fixed",
+        ...(openUpward
+          ? { bottom: window.innerHeight - rect.top + GAP }
+          : { top: rect.bottom + GAP }),
+        left: rect.left,
+        width: Math.max(rect.width, 220),
+        zIndex: 9999,
+      }}
+      className="rounded-lg border border-border bg-card shadow-2xl overflow-hidden"
+    >
+      <div className="p-1.5 border-b border-border">
+        <div className="relative">
+          <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            autoFocus
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search company…"
+            className="w-full pl-6 pr-2 py-1.5 text-xs bg-muted border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+      </div>
+      <div className="overflow-y-auto py-1" style={{ maxHeight: (openUpward ? spaceAbove : spaceBelow) - 44 }}>
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => { onChange(null); setOpen(false); setQuery(""); }}
+          className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-muted/60 ${
+            value == null ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-foreground"
+          }`}
+        >
+          All companies
+        </button>
+        {filtered.length === 0 ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">No companies found</p>
+        ) : (
+          filtered.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onChange(c.id); setOpen(false); setQuery(""); }}
+              className={`w-full text-left px-3 py-2 text-sm truncate transition-colors hover:bg-muted/60 ${
+                c.id === value ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-foreground"
+              }`}
+            >
+              {c.label}
+            </button>
+          ))
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => { setOpen((o) => !o); updateRect(); }}
+        className="flex items-center gap-2 h-9 min-w-[220px] rounded-lg border border-border bg-background px-3 text-sm hover:border-emerald-500/40 transition-colors"
+      >
+        <Building2 size={13} className="text-muted-foreground shrink-0" />
+        <span className={`flex-1 text-left truncate ${selected ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+          {selected ? selected.label : "All companies"}
+        </span>
+        {selected && (
+          <span
+            role="button"
+            tabIndex={-1}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onChange(null); setQuery(""); }}
+            className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+          >
+            <XIcon size={12} />
+          </span>
+        )}
+        <ChevronDown size={13} className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {panel}
     </div>
   );
 }

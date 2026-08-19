@@ -1,13 +1,16 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, History, FolderClock, Download } from "lucide-react";
+import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, FolderClock, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { promptNextStep } from "@/lib/workflowNav";
+import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 
 const API = "/api/crm/agreements";
 // NOTE: mount path assumed as "/api/users" to match users.js's PRIVILEGED_ROLES
@@ -224,7 +227,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
       toast.success("File uploaded");
       onReviewed();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setAttaching(false);
     }
@@ -258,7 +261,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
       toast.success(`Marked ${status}`);
       onReviewed();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -281,7 +284,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
           </button>
           <button onClick={() => setTab("history")}
             className={`text-xs font-medium px-3 py-1.5 border-b-2 -mb-px flex items-center gap-1 ${tab === "history" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-            <History size={12} /> History
+            <Clock size={12} /> History
           </button>
         </div>
 
@@ -441,7 +444,7 @@ const CrmAgreement: React.FC = () => {
   const [agrTab, setAgrTab] = useState<AgrTab>("Overview");
   useEffect(() => { setAgrTab("Overview"); }, [selectedId]);
 
-  const { data: agreements = [], isLoading } = useQuery({ queryKey: ["crm-agreements"], queryFn: fetchAgreements, staleTime: 60_000 });
+  const { data: agreements = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-agreements"], queryFn: fetchAgreements, staleTime: 30_000 });
   const { data: detail } = useQuery({
     queryKey: ["crm-agreement-detail", selectedId],
     queryFn: () => fetchAgreementDetail(selectedId!),
@@ -498,6 +501,8 @@ const CrmAgreement: React.FC = () => {
 
   const handleSaveAgreement = async () => {
     if (!agrForm.BookingId) { toast.error("Booking is required"); return; }
+    if (agrForm.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(agrForm.PanNo.trim())) { toast.error("Invalid PAN format (e.g. ABCDE1234F)"); return; }
+    if (agrForm.AadhaarNo && !/^\d{12}$/.test(agrForm.AadhaarNo.trim())) { toast.error("Aadhaar must be exactly 12 digits"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -511,14 +516,11 @@ const CrmAgreement: React.FC = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create agreement");
       toast.success(`Agreement ${data.AgreementNo} created`);
-      if (data.portal?.error) {
-        toast.warning(`Agreement created, but customer portal login could not be provisioned: ${data.portal.error}`, { duration: 8000 });
-      }
       setAgrDialog(false);
       setAgrForm({ ...EMPTY_AGR_FORM, BookingId: bkgFilter });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -542,7 +544,7 @@ const CrmAgreement: React.FC = () => {
       setShowUrlField(false);
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -564,7 +566,7 @@ const CrmAgreement: React.FC = () => {
       setDocRequestForm({ ...EMPTY_DOC_REQUEST_FORM });
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -588,7 +590,7 @@ const CrmAgreement: React.FC = () => {
       setShowUrlField(false);
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setUploadingDocs(false);
       if (docFileInputRef.current) docFileInputRef.current.value = "";
@@ -613,7 +615,7 @@ const CrmAgreement: React.FC = () => {
       toast.success(`Marked ${status}`);
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -635,7 +637,7 @@ const CrmAgreement: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -658,7 +660,7 @@ const CrmAgreement: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -678,7 +680,7 @@ const CrmAgreement: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -695,9 +697,11 @@ const CrmAgreement: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
       if (action === "mark-executed") {
         promptNextStep(navigate, "Agreement executed — Legal Milestones and NOC can now begin.", "/crm/legal-milestones", "Go to Legal Milestones");
+      } else if (action === "mark-registered") {
+        promptNextStep(navigate, "Agreement registered — Sales Deed can now be created.", "/crm/sales-deed", "Go to Sales Deed");
       }
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -712,7 +716,7 @@ const CrmAgreement: React.FC = () => {
       toast.success(deactivate ? "Portal access deactivated" : "Portal access reactivated");
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setTogglingPortal(false);
     }
@@ -752,7 +756,7 @@ const CrmAgreement: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setAssigningLegal(false);
     }
@@ -760,6 +764,8 @@ const CrmAgreement: React.FC = () => {
 
   const handleSaveEdit = async () => {
     if (!selectedId) return;
+    if (editForm.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(editForm.PanNo.trim())) { toast.error("Invalid PAN format (e.g. ABCDE1234F)"); return; }
+    if (editForm.AadhaarNo && !/^\d{12}$/.test(editForm.AadhaarNo.trim())) { toast.error("Aadhaar must be exactly 12 digits"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}`, {
@@ -776,21 +782,24 @@ const CrmAgreement: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-agreement-revisions", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Agreements"
       subtitle="Sale agreements and legal documents"
       action={
-        <button onClick={() => setAgrDialog(true)}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => setAgrDialog(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> New Agreement
         </button>
+        </div>
       }
     >
       <div className="flex gap-4 h-[calc(100vh-220px)]">
@@ -1068,41 +1077,20 @@ const CrmAgreement: React.FC = () => {
                     )}
                   </div>
                 </div>
-                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <span className="text-muted-foreground">Customer Portal Account: </span>
-                      {detail.agreement?.PortalEmail ? (
-                        <span className="font-medium">{detail.agreement.PortalEmail}</span>
-                      ) : (
-                        <span className="text-amber-600">Not yet provisioned — applicant needs an email and mobile on file</span>
-                      )}
-                    </div>
-                    {detail.agreement?.PortalEmail && (
-                      <span className={`px-2 py-0.5 rounded-full border font-medium ${detail.agreement.PortalMustChangePassword ? "text-orange-600 bg-orange-50 border-orange-200" : "text-green-600 bg-green-50 border-green-200"}`}>
-                        {detail.agreement.PortalMustChangePassword ? "First login pending" : "Password set"}
-                      </span>
-                    )}
-                  </div>
-                  {detail.agreement?.PortalEmail && (
-                    <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/60">
-                      <span className={`px-2 py-0.5 rounded-full border font-medium ${detail.agreement.PortalActive === false ? "text-rose-600 bg-rose-50 border-rose-200" : "text-green-600 bg-green-50 border-green-200"}`}>
-                        {detail.agreement.PortalActive === false ? "Access Deactivated" : "Access Active"}
-                      </span>
-                      <button
-                        onClick={() => handleTogglePortalAccess(detail.agreement.PortalActive !== false)}
-                        disabled={togglingPortal}
-                        className={`px-2.5 py-1 rounded-md border font-medium hover:bg-muted disabled:opacity-40 ${detail.agreement.PortalActive === false ? "border-green-200 text-green-600" : "border-rose-200 text-rose-600"}`}>
-                        {togglingPortal ? "Working..." : detail.agreement.PortalActive === false ? "Reactivate Access" : "Deactivate Access"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-                {detail.agreement?.PortalEmail && detail.agreement?.PortalMustChangePassword && (
-                  <p className="text-[11px] text-muted-foreground">
-                    Initial login: email above, password is the applicant's mobile number ({detail.agreement?.Mobile || "on file"}). They'll be asked to set a new password on first login.
-                  </p>
-                )}
+                {detail?.financialSummary && (() => {
+                  const ag = detail.agreement;
+                  const storedGrand = Number(ag?.GrandTotal ?? 0);
+                  const grandTotal = storedGrand > 0 ? storedGrand : (Number(ag?.TotalValue || 0) + Number(ag?.UnitGstAmount || 0) + Number(ag?.ParkingTotal || 0) + Number(ag?.ExtraChargesTotal || 0));
+                  return (
+                  <FinancialStatusBar
+                    grandTotal={grandTotal}
+                    cleared={Number(detail.financialSummary.cleared || 0)}
+                    pendingReceipts={Number(detail.financialSummary.mrOnAccount || 0)}
+                    approvedOnAccount={Number(detail.financialSummary.approvedOnAccount || 0)}
+                    compact
+                  />
+                  );
+                })()}
                 {revisions.length > 0 && (
                   <div className="text-xs">
                     <div className="text-muted-foreground mb-1">Version History (prior to v{detail.agreement?.VersionNo})</div>
@@ -1439,7 +1427,7 @@ const CrmAgreement: React.FC = () => {
                 <div key={key}>
                   <label className="text-xs text-muted-foreground block mb-1">{label}</label>
                   <input type={type} value={agrForm[key as keyof typeof agrForm]}
-                    onChange={(e) => setAgrForm((f) => ({ ...f, [key]: e.target.value }))}
+                    onChange={(e) => setAgrForm((f) => ({ ...f, [key]: key === "PanNo" ? e.target.value.toUpperCase() : e.target.value }))}
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                 </div>
               ))}
@@ -1664,7 +1652,7 @@ const CrmAgreement: React.FC = () => {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">PAN No.</label>
-                <input type="text" value={editForm.PanNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, PanNo: e.target.value }))}
+                <input type="text" value={editForm.PanNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, PanNo: e.target.value.toUpperCase() }))}
                   className={editInputCls} />
               </div>
               <div>
@@ -1702,7 +1690,7 @@ const CrmAgreement: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

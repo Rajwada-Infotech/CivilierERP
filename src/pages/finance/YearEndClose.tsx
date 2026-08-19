@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -486,9 +486,8 @@ export default function YearEndClose() {
                 </thead>
                 <tbody>
                   {history.map((h) => (
-                    <>
+                    <React.Fragment key={h.voucherNo}>
                       <tr
-                        key={h.voucherNo}
                         className="border-b border-border/25 hover:bg-muted/15 transition-colors cursor-pointer"
                         onClick={() => setExpandedHistory((v) => v === h.voucherNo ? null : h.voucherNo)}
                       >
@@ -516,7 +515,7 @@ export default function YearEndClose() {
                           </td>
                         </tr>
                       ))}
-                    </>
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

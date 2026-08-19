@@ -74,6 +74,15 @@ const MODULES = [
     ringRgb: "249,115,22",
   },
   {
+    id: "civilworkdpr" as Module,
+    icon: Building3,
+    label: "Civil Work DPR",
+    desc: "Internal operations workspace",
+    color: "#0891b2",
+    bg: "rgba(8,145,178,0.22)",
+    ringRgb: "8,145,178",
+  },
+  {
     id: "followup" as Module,
     icon: Notepad,
     label: "Follow-Up",
@@ -99,15 +108,6 @@ const MODULES = [
     color: "#a855f7",
     bg: "rgba(168,85,247,0.22)",
     ringRgb: "168,85,247",
-  },
-  {
-    id: "civilworkdpr" as Module,
-    icon: Building3,
-    label: "Civil Work DPR",
-    desc: "Internal operations workspace",
-    color: "#0891b2",
-    bg: "rgba(8,145,178,0.22)",
-    ringRgb: "8,145,178",
   },
   {
     id: "sales-automation" as Module,

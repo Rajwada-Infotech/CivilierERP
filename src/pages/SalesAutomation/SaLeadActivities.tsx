@@ -1,8 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { MessageCircle, Phone, Plus, Search } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -23,6 +26,7 @@ async function fetchLeads(): Promise<any[]> {
 }
 
 const SaLeadActivities: React.FC = () => {
+  usePageRights("sa-lead-activities");
   const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
@@ -34,7 +38,7 @@ const SaLeadActivities: React.FC = () => {
     Summary: "",
     NextFollowupDate: "",
   });
-  const { data: activities = [], isLoading, error } = useQuery({ queryKey: ["sa-lead-activities"], queryFn: fetchActivities, staleTime: 30_000 });
+  const { data: activities = [], isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-lead-activities"], queryFn: fetchActivities, staleTime: 30_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-options"], queryFn: fetchLeads, staleTime: 60_000 });
 
   const filtered = useMemo(() => {
@@ -90,7 +94,9 @@ const SaLeadActivities: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell title="Lead Activities" subtitle="Log calls, WhatsApp, meetings and next follow-up dates against leads">
+    <SalesAutoShell title="Lead Activities" subtitle="Log calls, WhatsApp, meetings and next follow-up dates against leads"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
+      <Breadcrumbs items={["Sales Automation", "Lead Activities"]} />
       <div className="space-y-5">
         {canDoAction("sa-lead-activities", "create") && (
           <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-6 gap-3 rounded-lg border border-border p-4 bg-background">

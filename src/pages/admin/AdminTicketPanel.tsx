@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -517,6 +518,7 @@ function TicketDetailDialog({
 
 export default function AdminTicketPanel() {
   const navigate = useNavigate();
+  const rights = usePageRights("tickets");
   const [filter, setFilter] = useState<"open" | "resolved" | "closed" | "all">(
     "open",
   );

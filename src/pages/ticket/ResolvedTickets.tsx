@@ -2,6 +2,8 @@ import React, { useMemo, useState, useRef, useEffect } from "react";
 import Webcam from "react-webcam";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { TicketShell } from "@/components/ticket/TicketShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { escapeHtml } from "@/utils/escapeHtml";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
@@ -807,6 +809,7 @@ type ResolutionTab = "Resolved" | "Closed";
 const ResolvedTickets: React.FC = () => {
   const { currentUser } = useAuth();
   const queryClient = useQueryClient();
+  const rights = usePageRights("tickets");
   const ADMIN_ROLES = ["super_admin", "admin", "dba"];
   const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
   const canSeeAllTickets = isAdmin || currentUser?.role === "engineer";
@@ -868,6 +871,8 @@ const ResolvedTickets: React.FC = () => {
   }
 
   return (
+    <>
+    <Breadcrumbs items={["Tickets", "Resolved Tickets"]} />
     <TicketShell
       title="Resolved Tickets"
       subtitle={`${resolvedCount} resolved · ${closedCount} closed`}
@@ -970,6 +975,7 @@ const ResolvedTickets: React.FC = () => {
           </p>
         )}
     </TicketShell>
+    </>
   );
 };
 

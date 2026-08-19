@@ -9,7 +9,7 @@ const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 
 // GET all menu entries
-router.get("/", cache("menu-master", 300), async (req, res) => {
+router.get("/", authMiddleware, cache("menu-master", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -25,7 +25,7 @@ router.get("/", cache("menu-master", 300), async (req, res) => {
 });
 
 // GET single
-router.get("/:id", async (req, res) => {
+router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool

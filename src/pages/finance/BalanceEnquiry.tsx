@@ -153,6 +153,7 @@ export default function BalanceEnquiry() {
   const { data: banks = [], isLoading: loadingBanks } = useQuery({
     queryKey: ["balance-enquiry-banks", selectedCompanyName],
     queryFn: () => getEnquiryBanks(selectedCompanyName || undefined),
+    staleTime: 5 * 60 * 1000,
   });
 
   // Auto-select the first bank whenever the filtered list changes and
@@ -176,7 +177,7 @@ export default function BalanceEnquiry() {
 
   const passbookQuery = useQuery({
     queryKey: ["balance-enquiry-passbook", bankId, fromDate, toDate],
-    queryFn: () => getPassbook(bankId as number, { from: fromDate || undefined, to: toDate || undefined, limit: 500 }),
+    queryFn: () => getPassbook(bankId as number, { from: fromDate || undefined, to: toDate || undefined, limit: 2000 }),
     enabled: !!bankId,
   });
 
@@ -369,8 +370,10 @@ export default function BalanceEnquiry() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               {[
                 { label: "Opening Balance", value: formatINR(summaryQuery.data?.windowOpeningBalance ?? 0), icon: Wallet, color: "text-primary", bg: "bg-primary/10", ring: "ring-primary/15", borderL: "border-l-primary" },
-                { label: "Money In", value: formatINR(summaryQuery.data?.periodCredit ?? 0), icon: TrendingUp, color: "text-emerald-500", bg: "bg-emerald-500/10", ring: "ring-emerald-500/15", borderL: "border-l-emerald-500" },
-                { label: "Money Out", value: formatINR(summaryQuery.data?.periodDebit ?? 0), icon: TrendingDown, color: "text-rose-500", bg: "bg-rose-500/10", ring: "ring-rose-500/15", borderL: "border-l-rose-500" },
+                // Bank is an asset account (see backend/routes/balanceEnquiry.js) —
+                // a Debit increases it (money in), a Credit decreases it (money out).
+                { label: "Money In", value: formatINR(summaryQuery.data?.periodDebit ?? 0), icon: TrendingUp, color: "text-emerald-500", bg: "bg-emerald-500/10", ring: "ring-emerald-500/15", borderL: "border-l-emerald-500" },
+                { label: "Money Out", value: formatINR(summaryQuery.data?.periodCredit ?? 0), icon: TrendingDown, color: "text-rose-500", bg: "bg-rose-500/10", ring: "ring-rose-500/15", borderL: "border-l-rose-500" },
                 { label: "Transactions", value: String(summaryQuery.data?.periodTxnCount ?? 0), icon: Receipt, color: "text-amber-500", bg: "bg-amber-500/10", ring: "ring-amber-500/15", borderL: "border-l-amber-500" },
               ].map(({ label, value, icon: Icon, color, bg, ring, borderL }) => (
                 <div key={label} className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}>
@@ -411,12 +414,18 @@ export default function BalanceEnquiry() {
               ) : transactions.length === 0 ? (
                 <div className="text-center py-14 text-sm text-muted-foreground">No transactions in this range.</div>
               ) : (
+                <>
+                {transactions.length >= 2000 && (
+                  <div className="px-5 py-2 text-xs text-amber-700 dark:text-amber-400 bg-amber-500/10 border-b border-amber-500/20">
+                    Showing first 2,000 transactions — apply a date filter to narrow results.
+                  </div>
+                )}
                 <div className="divide-y divide-border/50 max-h-[560px] overflow-y-auto">
                   {transactions.map((t) => {
                     const meta = sourceMeta(t.SourceType);
                     const Icon = meta.icon;
-                    const isCredit = Number(t.DebitAmount) > 0; // Dr = money in for a bank (asset)
-                    const amount = isCredit ? Number(t.DebitAmount) : Number(t.CreditAmount);
+                    const isDebit = Number(t.DebitAmount) > 0; // Dr = money in for a bank (asset)
+                    const amount = isDebit ? Number(t.DebitAmount) : Number(t.CreditAmount);
                     const ref = docRefFor(t);
                     return (
                       <div key={t.EntryId} className="flex items-center gap-2.5 sm:gap-3 px-4 sm:px-5 py-3 hover:bg-muted/20 transition-colors">
@@ -435,8 +444,8 @@ export default function BalanceEnquiry() {
                           </p>
                         </div>
                         <div className="text-right shrink-0">
-                          <p className={`text-sm font-bold font-heading tabular-nums ${isCredit ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                            {isCredit ? "+" : "−"}{formatINR(amount)}
+                          <p className={`text-sm font-bold font-heading tabular-nums ${isDebit ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                            {isDebit ? "+" : "−"}{formatINR(amount)}
                           </p>
                           <p className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">
                             Bal {formatINR(t.RunningBalance)}
@@ -446,6 +455,7 @@ export default function BalanceEnquiry() {
                     );
                   })}
                 </div>
+                </>
               )}
             </div>
           </>

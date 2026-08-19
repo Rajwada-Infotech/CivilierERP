@@ -1,7 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Phone, MapPin, Clock, AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -47,6 +51,7 @@ const EMPTY_LOG_FORM = { ActivityType: "Call", Outcome: "", Summary: "", NextFol
 const EMPTY_VISIT_FORM = { ProjectName: "", PreferredDate: "", PreferredTime: "", CustomerNotes: "" };
 
 const SaFollowups: React.FC = () => {
+  usePageRights("sa-followups");
   const qc = useQueryClient();
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null);
   const [logForm, setLogForm] = useState({ ...EMPTY_LOG_FORM });
@@ -55,7 +60,7 @@ const SaFollowups: React.FC = () => {
   const [visitForm, setVisitForm] = useState({ ...EMPTY_VISIT_FORM });
   const [schedulingVisit, setSchedulingVisit] = useState(false);
 
-  const { data: pending = [], isLoading: loadingPending } = useQuery({
+  const { data: pending = [], isLoading: loadingPending, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: ["sa-pending-followups"], queryFn: fetchPendingFollowups, staleTime: 30_000,
   });
   const { data: untouched = [] } = useQuery({
@@ -111,7 +116,7 @@ const SaFollowups: React.FC = () => {
       setLogForm({ ...EMPTY_LOG_FORM });
       invalidateAll();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -129,7 +134,7 @@ const SaFollowups: React.FC = () => {
       toast.success(`Marked as ${classification}`);
       invalidateAll();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -156,14 +161,16 @@ const SaFollowups: React.FC = () => {
       invalidateAll();
       setSelectedLeadId(null);
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSchedulingVisit(false);
     }
   };
 
   return (
-    <SalesAutoShell title="Follow-Up" subtitle="Leads due for their next touch — reminders, interest, and the next step onward to a site visit">
+    <SalesAutoShell title="Follow-Up" subtitle="Leads due for their next touch — reminders, interest, and the next step onward to a site visit"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
+      <Breadcrumbs items={["Sales Automation", "Follow-Ups"]} />
       <div className="flex gap-4 h-[calc(100vh-200px)]">
         <div className="w-80 shrink-0 flex flex-col gap-2">
           <div className="text-xs text-muted-foreground px-1">{queue.length} lead(s) need attention</div>

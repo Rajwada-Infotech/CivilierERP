@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
@@ -15,7 +15,7 @@ const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst } = require("../services/crmGst");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 // Recomputes CrmBooking.ParkingTotal/ExtraChargesTotal/GrandTotal AND the
 // fixed HSN-driven GST (which re-prices every active parking allotment to
@@ -95,7 +95,9 @@ async function resolveParkingRateForSlot(pool, parkingSlotId) {
 
 const ALLOTMENT_SELECT = `
   SELECT pa.*, p.ParkingType AS CurrentParkingType, p.ProjectId, p.BlockId,
-         s.SlotNo, a.ApplicantName, a.Mobile, b.BookingNo
+         s.SlotNo, a.ApplicantName, a.Mobile,
+         b.BookingNo, b.Status AS BookingStatus, b.GrandTotal AS BookingGrandTotal,
+         ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0) AS BookingTotalPaid
   FROM dbo.CrmParkingAllotment pa
   JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
   LEFT JOIN dbo.ParkingSlot s ON s.Id = pa.ParkingSlotId
@@ -238,7 +240,11 @@ async function applyEditParking(pool, id, b) {
   return { TotalAmount: totalAmount };
 }
 
-async function applyReleaseParking(pool, id) {
+// actorUserId/reason are optional so the internal cancellation-cascade
+// callers below (releaseAllParkingForApplication) keep working unchanged —
+// but the DELETE /:id route always supplies both, since a super_admin-only,
+// audit-logged release is the whole point of that endpoint.
+async function applyReleaseParking(pool, id, actorUserId = null, reason = null) {
   const row = await pool.request().input("id", sql.Int, id)
     .query("SELECT BookingId, PaymentStatus FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
   if (!row.recordset.length) throw parkingError("Allotment not found", 404);
@@ -250,6 +256,11 @@ async function applyReleaseParking(pool, id) {
     }
     await pool.request().input("id", sql.Int, id)
       .query("UPDATE dbo.CrmParkingAllotment SET IsActive = 0 WHERE Id = @id");
+    if (actorUserId) {
+      await logCrmAudit(pool, "ParkingAllotment", id, actorUserId, [
+        { field: "Released", oldVal: "Active", newVal: reason ? `Released — ${reason}` : "Released" },
+      ]);
+    }
     return {};
   }
 
@@ -279,6 +290,11 @@ async function applyReleaseParking(pool, id) {
 
   await rollupBookingTotals(pool, BookingId);
   await syncParkingPaymentStatus(pool, BookingId);
+  if (actorUserId) {
+    await logCrmAudit(pool, "Booking", BookingId, actorUserId, [
+      { field: "ParkingAllotment", oldVal: "Active", newVal: reason ? `Released — ${reason}` : "Released" },
+    ]);
+  }
   return {};
 }
 
@@ -403,13 +419,6 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
       slotsByType.get(s.ParkingType).push({ Id: s.Id, SlotNo: s.SlotNo });
     }
 
-    // Project-wide free-slot count per type, ignoring the block filter
-    // entirely — used only to tell "genuinely sold out across the whole
-    // project" apart from "just not available in this specific block" (the
-    // block-scoped `AvailableSlots` above can be empty while slots of the
-    // same type still sit free in a different block — e.g. Basement parking
-    // reserved per-tower). Same exclusion rule (no active allotment/hold) as
-    // the block-scoped query, just without the BlockId condition.
     const slotsAnyBlock = await pool.request().input("pid", sql.Int, projectId)
       .query(`
         SELECT s.ParkingType, COUNT(*) AS FreeCount
@@ -424,11 +433,6 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
       `);
     const freeCountByType = new Map(slotsAnyBlock.recordset.map((r) => [r.ParkingType, r.FreeCount]));
 
-    // A rate type with fixed slot inventory has HasSlots true even when
-    // currently zero-available (0 available is still meaningfully different
-    // from "sold by count, no fixed inventory at all") — that distinction
-    // comes from whether ANY ParkingSlot row of this type exists for the
-    // project at all, active-and-free or not.
     const anySlotOfType = await pool.request().input("pid", sql.Int, projectId).query(`
       SELECT DISTINCT ParkingType FROM dbo.ParkingSlot WHERE ProjectId = @pid AND IsActive = 1
     `);
@@ -441,29 +445,13 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
       return {
         ParkingMasterId: r.Id, ParkingType: r.ParkingType, Charge: r.Charge, GstRate: r.GstRate,
         HasSlots: hasInventory,
-        // No ParkingSlot rows exist for this type in the project at all yet
-        // (Ops hasn't set up inventory in Parking Slot Master) — distinct
-        // from "sold out" (SoldOutProjectWide below), which means slots
-        // exist but are all taken. Quantity-only selling is no longer
-        // supported for either case; the frontend greys the option out with
-        // a different message for each.
         NoInventory: !hasInventory,
         AvailableSlots: blockScoped,
-        // True only when zero slots of this type are free ANYWHERE in the
-        // project — distinguishes real sold-out inventory from "just none
-        // left in this particular block" (freeAnyBlock > blockScoped.length
-        // when a block filter was applied and other blocks still have some).
         SoldOutProjectWide: blockId != null && freeAnyBlock === 0,
         FreeCountProjectWide: freeAnyBlock,
       };
     });
 
-    // Types with real ParkingSlot inventory but no ParkingMaster rate at
-    // all — the "slots exist but nobody priced them" gap. Surfaced
-    // separately from `out` (which is driven entirely by rates) so the
-    // frontend can tell staff exactly what's missing instead of a flat
-    // "no parking rates configured" that reads as "no parking exists" even
-    // when the slots clearly do.
     const ratedTypes = new Set(rates.recordset.map((r) => r.ParkingType));
     const unratedTypesWithInventory = [...typesWithInventory].filter((t) => !ratedTypes.has(t));
 
@@ -518,10 +506,6 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
       holds.push({
         Id: h.Id, Kind: "Hold", ParkingSlotId: h.ParkingSlotId, SlotNo: h.SlotNo,
         CurrentParkingType: h.ParkingType, Quantity: 1,
-        // RateSnapshot exposed here too (real Allotment rows already carry
-        // their own via pa.* in ALLOTMENT_SELECT) so the frontend GST
-        // preview can sum a clean pre-tax base across both shapes without
-        // having to invert a tax-inclusive TotalAmount.
         RateSnapshot: lineAmount,
         TotalAmount: lineAmount + gstAmount, HoldUntil: h.HoldUntil,
       });
@@ -535,17 +519,9 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
 });
 
 // POST /standalone — buy parking only, no unit booking involved at all.
-// Payment is tracked directly on the allotment row (PaymentStatus) since
-// there's no CrmBooking/CrmPaymentMilestone schedule to hang it off of.
-// Never gated by legal work — a standalone sale has no CrmBooking/Agreement.
-//
 // Registered BEFORE POST /:bookingId deliberately — Express matches routes
 // in registration order, and "/:bookingId" is a single-segment param that
-// would otherwise greedily match the literal path "/standalone" too (as if
-// "standalone" were a bookingId), which is exactly what happened before this
-// reordering: every request here was silently swallowed by the other
-// handler, parsed "standalone" as NaN, and returned a misleading 404
-// "Booking not found" — this endpoint was unreachable dead code until now.
+// would otherwise greedily match the literal path "/standalone" too.
 router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -564,11 +540,6 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     if (!rate.recordset.length) return res.status(400).json({ error: "Selected parking rate is not active" });
     const { Charge, GstRate, ParkingType } = rate.recordset[0];
 
-    // The matrix's own dropdown lists every Application system-wide with no
-    // project filter — without this, parking in one Project could get sold
-    // to a customer whose actual Application is for a different Project
-    // entirely, a nonsensical record that'd never reconcile against real
-    // inventory. Same rule enforced for hold placement (crmHoldService.js).
     if (rate.recordset[0].ProjectId !== application.recordset[0].ProjectId) {
       return res.status(400).json({ error: "This Application is for a different project than the selected parking rate/slot" });
     }
@@ -580,34 +551,12 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const gstAmount = Math.round((lineAmount * GstRate) / 100 * 100) / 100;
     const totalAmount = lineAmount + gstAmount;
 
-    // A specific slot is real, exclusive inventory — same as a Unit, picking
-    // it here must only place a temporary hold (placeHoldIfNeeded, same 3-day
-    // window Units get on submit), not a permanent sale, UNLESS the caller
-    // explicitly says this is a genuinely standalone sale with `Immediate:
-    // true` (see CrmParkingBooking.tsx — a dedicated "sell parking with no
-    // unit" page where no Booking will ever exist later to convert a hold
-    // into a real allotment, so holding first would leave the "sale" stuck
-    // as a hold that just expires in 3 days). The Application wizard's
-    // Parking step is the default (hold-first) caller — the real allotment
-    // there only gets created once the Application's Booking actually
-    // exists, via the hold-conversion loop in crmEntityCreation.js's
-    // createCrmBookingRecord.
     const slot = await pool.request().input("sid", sql.Int, parkingSlotId)
       .query("SELECT SlotNo FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
     if (!slot.recordset.length) return res.status(400).json({ error: "Selected parking slot is not active" });
     const slotNo = slot.recordset[0].SlotNo;
 
     if (!b.Immediate) {
-      // Hold-first path — this is the Application wizard's own Parking step
-      // (see CrmApplication.tsx ParkingSelectionStep), the parking-side twin
-      // of the Company/Project/Unit lock on the Application itself (see
-      // PUT /:id's changingUnitSelection check in crmApplications.js). A
-      // slot picked here is still just a hold until the Application's
-      // Booking is created, so it can move freely pre-approval but never
-      // after — same reasoning, same Draft/Pending gate. The dedicated
-      // standalone sale page (Immediate: true, CrmParkingBooking.tsx) is a
-      // separate, independent sale and is deliberately NOT gated by this —
-      // it never depends on its linked Application's own approval state.
       if (!["Draft", "Pending"].includes(application.recordset[0].Status)) {
         return res.status(400).json({
           error: `Cannot change this application's parking selection once it is ${application.recordset[0].Status} — this is locked after approval.`,
@@ -662,14 +611,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
   }
 });
 
-// DELETE /hold/:holdId — release an Application-stage parking hold (a slot
-// picked in the wizard but not yet converted into a real allotment). Same
-// broad permission set as the rest of this file, unlike the stricter
-// "crm-bookings"-only crmHolds.js generic release route — staff who only
-// have crm-parking-booking rights can already add/remove parking here, so
-// removing a not-yet-converted hold must stay in that same permission
-// bracket. Scoped to EntityType='Parking' so this can't be pointed at a
-// Unit hold by mistake.
+// DELETE /hold/:holdId — release an Application-stage parking hold.
 router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -679,10 +621,6 @@ router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking
     if (!row.recordset.length || row.recordset[0].EntityType !== "Parking") {
       return res.status(404).json({ error: "Active parking hold not found" });
     }
-    // Same Draft/Pending lock as picking one in the first place (see POST
-    // /standalone above) — once the linked Application is Approved (or
-    // beyond), this hold either already converted into a real allotment or
-    // is about to, so it can no longer be pulled back out from here.
     if (row.recordset[0].ApplicationId) {
       const app = await pool.request().input("aid", sql.Int, row.recordset[0].ApplicationId)
         .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
@@ -700,12 +638,7 @@ router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking
   }
 });
 
-// POST /:bookingId — allot parking alongside a unit booking. Rate/GST are
-// always snapshotted from ParkingMaster at allotment time (never re-read
-// live), and a matching payment milestone is created so it's payable on its
-// own line within that booking's schedule. Once the booking's Agreement has
-// documents under verification, this queues a CrmBookingAmendmentRequest
-// instead of applying directly.
+// POST /:bookingId — allot parking alongside a unit booking.
 router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -732,13 +665,7 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
   }
 });
 
-// PUT /:id — edit an existing allotment's quantity (re-rates against the
-// same ParkingMaster rate snapshot). Blocked once its linked milestone has
-// been paid, or once the standalone sale itself is Paid. Slot/rate/type are
-// NOT editable here — changing those is a release-and-re-add, since a
-// different rate card or slot is really a different allotment, not an edit
-// of this one. Gated once legal work has started (unit-linked only —
-// standalone sales have no Agreement to gate on).
+// PUT /:id — edit an existing allotment's quantity.
 router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -772,10 +699,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
   }
 });
 
-// PUT /:id/mark-paid — record payment for a standalone (non-unit-linked)
-// parking sale. Unit-linked allotments are paid through the booking's own
-// CrmPaymentMilestone instead — this is only for the standalone path. Never
-// gated: recording a real payment received is not a definition change.
+// PUT /:id/mark-paid — record payment for a standalone parking sale only.
 router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -801,10 +725,6 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
         WHERE Id = @id
       `);
 
-    // Real cash received — post to GL instead of leaving this as a status
-    // flag with zero financial trail. Never blocks the payment confirmation
-    // itself if GL posting fails — same try/catch + recordGLPosting pattern
-    // used across the rest of CRM.
     const actorEmail = req.user?.name || req.user?.email || "system";
     try {
       const outcome = await postCrmParkingPaymentToGL(pool, id, actorEmail);
@@ -821,16 +741,24 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
   }
 });
 
-// DELETE /:id — release a parking allotment (soft delete). For a unit-linked
-// allotment, also removes the matching un-paid milestone; a milestone that's
-// already been paid blocks the release so money already collected can't
-// silently vanish. For a standalone sale, an already-Paid allotment is
-// blocked the same way. Gated once legal work has started (unit-linked only).
+// DELETE /:id — release a parking allotment (soft delete).
+//
+// Restricted to super_admin at the API level — not just hidden in the UI.
+// requireAnyPageRight alone is held by ordinary Sales/CRM staff, so without
+// this server-side check anyone with edit rights could call this endpoint
+// directly and bypass the frontend gate entirely.
+//
+// Reason is mandatory unconditionally and always written to the audit trail.
 router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
   try {
+    if (req.user?.role !== "super_admin") {
+      return res.status(403).json({ error: "Only a Super Admin can release a parking allotment" });
+    }
+
     const pool = getPool();
     const id = parseInt(req.params.id);
-    const reason = req.query.reason || req.body?.Reason;
+    const reason = (req.query.reason || req.body?.Reason || "").trim();
+    if (!reason) return res.status(400).json({ error: "A reason is required to release a parking allotment" });
 
     const row = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
@@ -843,15 +771,14 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"
     }
 
     if (bookingId && await isLegalWorkStarted(pool, bookingId)) {
-      if (!reason?.trim()) return res.status(400).json({ error: "A reason is required to request this change — legal documents are already under verification for this booking" });
       const requestId = await createAmendmentRequest(pool, {
         bookingId, changeType: "ParkingAllotment", action: "Release", targetId: id,
-        proposedChange: {}, reason: reason.trim(), requestedBy: actorId(req),
+        proposedChange: {}, reason, requestedBy: actorId(req),
       });
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
-    const result = await applyReleaseParking(pool, id);
+    const result = await applyReleaseParking(pool, id, actorId(req), reason);
     res.json({ success: true, ...result });
   } catch (e) {
     console.error("[crm-parking] DELETE error:", e.message);
@@ -860,9 +787,6 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"
 });
 
 module.exports = router;
-// Reused by crmEntityCreation.js's createCrmBookingRecord to recompute
-// ParkingTotal/GrandTotal right after backfilling Application-stage parking
-// allotments onto the newly created Booking.
 module.exports.rollupBookingTotals = rollupBookingTotals;
 module.exports.applyAddParking = applyAddParking;
 module.exports.applyEditParking = applyEditParking;

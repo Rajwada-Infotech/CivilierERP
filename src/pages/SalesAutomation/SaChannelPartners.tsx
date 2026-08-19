@@ -1,7 +1,10 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type DataChangeEvent, type FieldDef, type RecordWithId } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -50,9 +53,10 @@ async function fetchPartners(): Promise<any[]> {
 }
 
 const SaChannelPartners: React.FC = () => {
+  usePageRights("sa-channel-partners");
   const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
-  const { data = [], isLoading, error } = useQuery({ queryKey: ["sa-channel-partners"], queryFn: fetchPartners, staleTime: 60_000 });
+  const { data = [], isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-channel-partners"], queryFn: fetchPartners, staleTime: 30_000 });
 
   const mappedData: RecordWithId[] = React.useMemo(() => data.map((p) => ({
     _id: String(p.Id),
@@ -103,7 +107,9 @@ const SaChannelPartners: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load channel partners.</div>;
 
   return (
-    <SalesAutoShell title="Channel Partners" subtitle="Manage referral partners, broker leads and commission defaults">
+    <SalesAutoShell title="Channel Partners" subtitle="Manage referral partners, broker leads and commission defaults"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
+      <Breadcrumbs items={["Sales Automation", "Channel Partners"]} />
       <MasterPage
         title="Channel Partner"
         fields={fields}

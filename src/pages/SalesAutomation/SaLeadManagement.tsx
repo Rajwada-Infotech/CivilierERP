@@ -1,11 +1,15 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { CheckCircle2, IndianRupee, LayoutList, Kanban, GitMerge, ArrowRightLeft, History, Printer } from "lucide-react";
+import { CheckCircle2, IndianRupee, LayoutList, Kanban, GitMerge, ArrowRightLeft, Clock, Printer } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -157,6 +161,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const SaLeadManagement: React.FC = () => {
+  usePageRights("sa-leads");
   const queryClient = useQueryClient();
   const [handoffLoading, setHandoffLoading] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"list" | "pipeline" | "tracking" | "audit">("list");
@@ -212,12 +217,12 @@ const SaLeadManagement: React.FC = () => {
       setTransferToTLId("");
       setTransferNotes("");
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setTransferLoading(false);
     }
   };
-  const { data: leads, isLoading, error } = useQuery({ queryKey: ["sa-leads"], queryFn: fetchLeads, staleTime: 2 * 60 * 1000 });
+  const { data: leads, isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-leads"], queryFn: fetchLeads, staleTime: 30_000 });
 
   const { data: auditLog = [] } = useQuery({
     queryKey: ["sa-lead-audit", auditLeadId],
@@ -391,7 +396,9 @@ const SaLeadManagement: React.FC = () => {
   const booked = mappedData.filter((l) => l.BookingId);
 
   return (
-    <SalesAutoShell title="Lead Management" subtitle="Track, assign and manage the complete lead lifecycle">
+    <SalesAutoShell title="Lead Management" subtitle="Track, assign and manage the complete lead lifecycle"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
+      <Breadcrumbs items={["Sales Automation", "Lead Management"]} />
       <style>{`@media print { nav, header, aside, .print\\:hidden { display: none !important; } }`}</style>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -411,7 +418,7 @@ const SaLeadManagement: React.FC = () => {
               { key: "list",     icon: LayoutList, label: "List" },
               { key: "pipeline", icon: Kanban,     label: "Pipeline" },
               { key: "tracking", icon: GitMerge,   label: "Tracking" },
-              { key: "audit",    icon: History,    label: "Audit" },
+              { key: "audit",    icon: Clock,     label: "Audit" },
             ] as const).map(({ key, icon: Icon, label }) => (
               <button
                 key={key}
@@ -638,7 +645,7 @@ const SaLeadManagement: React.FC = () => {
                 className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
                 title="View audit trail"
               >
-                <History size={13} />
+                <Clock size={13} />
               </button>
             );
             if (hasBooking) {

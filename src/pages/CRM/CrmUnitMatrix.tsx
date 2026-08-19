@@ -6,7 +6,7 @@ import { Grid3x3, Layers, Clock, User, FileText, Building2, IndianRupee, Calenda
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FollowupShell } from "@/components/followup/FollowupShell";
+import { CrmShell } from "@/components/crm/CrmShell";
 import {
   Select,
   SelectContent,
@@ -86,23 +86,6 @@ async function fetchMatrix(projectId: string, blockId: string): Promise<MatrixUn
 
 const NONE = "__none__";
 
-// Hour/minute-precision countdown — HoldUntil is a real DATETIME2(3), so a
-// 72-hour auto-hold can show "68h 42m left" instead of a coarse day count
-// that would sit at "3 days" for most of its life and jump straight to "0".
-function timeLeft(until: string): string {
-  const ms = new Date(until).getTime() - Date.now();
-  if (ms <= 0) return "Overdue";
-  const totalMin = Math.floor(ms / 60000);
-  const d = Math.floor(totalMin / 1440);
-  const h = Math.floor((totalMin % 1440) / 60);
-  const m = totalMin % 60;
-  if (d > 0) return `${d}d ${h}h left`;
-  if (h > 0) return `${h}h ${m}m left`;
-  return `${m}m left`;
-}
-function isOverdue(until: string | null): boolean {
-  return !!until && new Date(until).getTime() - Date.now() <= 0;
-}
 
 // Available unit -> ask who it's being held for and for how long. Booking
 // itself still happens through the normal Application -> Booking flow; this
@@ -213,7 +196,6 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
   const [showExtend, setShowExtend] = useState(false);
   const isHold = unit.Status === "OnHold";
   const hasUnpaidBooking = isHold && !!unit.BookingId;
-  const overdue = isHold && isOverdue(unit.HoldUntil);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["unit-matrix"] });
 
@@ -290,8 +272,8 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
           <DialogTitle className="font-heading flex items-center gap-2">
             <Building2 size={18} className="text-primary" />
             Unit {unit.UnitName}
-            <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${overdue ? "bg-rose-500/15 text-rose-600 border-rose-400/30" : STATUS_STYLE[isHold ? "OnHold" : "Booked"]}`}>
-              {isHold ? (hasUnpaidBooking ? "Booked — Payment Pending" : overdue ? "Hold Overdue" : "On Hold") : "Booked"}
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${STATUS_STYLE[isHold ? "OnHold" : "Booked"]}`}>
+              {isHold ? (hasUnpaidBooking ? "Booked — Payment Pending" : "On Hold") : "Booked"}
             </span>
           </DialogTitle>
         </DialogHeader>
@@ -315,14 +297,10 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
         </div>
 
         {isHold ? (
-          <div className={`rounded-xl border p-4 space-y-2 ${overdue ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}`}>
-            <h3 className={`text-sm font-semibold flex items-center gap-1.5 ${overdue ? "text-rose-800" : "text-amber-800"}`}>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-amber-800">
               <Clock size={14} /> Hold Status
             </h3>
-            <div className="flex items-center justify-between text-xs">
-              <span className={overdue ? "text-rose-700" : "text-amber-700"}>{overdue ? "Overdue since" : "Expires in"}</span>
-              <span className={`font-bold text-sm ${overdue ? "text-rose-700" : "text-amber-700"}`}>{unit.HoldUntil ? timeLeft(unit.HoldUntil) : "—"}</span>
-            </div>
             {hasUnpaidBooking && (
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs pt-1 border-t border-current/10">
                 <div><span className="text-muted-foreground block">Booking No</span><span className="font-semibold">{unit.BookingNo || "—"}</span></div>
@@ -491,7 +469,7 @@ export function UnitMatrixPage() {
           { label: "Unit Matrix", path: "/crm/unit-matrix" },
         ]}
       />
-      <FollowupShell
+      <CrmShell
         title="Unit Matrix"
         icon={Grid3x3}
         action={
@@ -614,12 +592,8 @@ export function UnitMatrixPage() {
                               >
                                 <div className="flex items-center justify-between gap-2 mb-1.5">
                                   <span className="font-bold text-sm text-foreground truncate">{u.UnitName}</span>
-                                  <span
-                                    className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${
-                                      u.Status === "OnHold" && isOverdue(u.HoldUntil) ? "bg-rose-500/15 text-rose-600 border border-rose-400/30" : STATUS_STYLE[u.Status]
-                                    }`}
-                                  >
-                                    {u.Status === "OnHold" ? (isOverdue(u.HoldUntil) ? "Overdue" : "Hold") : u.Status}
+                                  <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${STATUS_STYLE[u.Status]}`}>
+                                    {u.Status === "OnHold" ? "Hold" : u.Status}
                                   </span>
                                 </div>
                                 <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
@@ -627,7 +601,7 @@ export function UnitMatrixPage() {
                                     : u.Status === "OnHold" ? (
                                       <>
                                         <Clock size={11} className="shrink-0" />
-                                        {(u.HoldApplicantName || u.ApplicantName)} · {u.HoldUntil ? timeLeft(u.HoldUntil) : ""}
+                                        {u.HoldApplicantName || u.ApplicantName || "—"}
                                       </>
                                     ) : "—"}
                                 </div>
@@ -643,7 +617,7 @@ export function UnitMatrixPage() {
             )}
           </>
         )}
-      </FollowupShell>
+      </CrmShell>
 
       {holdTarget && <PlaceHoldDialog unit={holdTarget} projectId={projectId} onClose={() => setHoldTarget(null)} />}
       {infoTarget && <TileInfoDialog unit={infoTarget} onClose={() => setInfoTarget(null)} />}

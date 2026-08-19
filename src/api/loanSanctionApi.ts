@@ -34,6 +34,13 @@ export interface LoanSanction {
   LenderLHeadId?: number | null;
   BorrowerLHeadId?: number | null;
   Remarks?: string | null;
+  PaymentMode?: string | null;
+  ChequeLotId?: number | null;
+  ChequeLotNumber?: string | null;
+  ChequeNo?: string | null;
+  ChequeDate?: string | null;
+  IsPostDated?: boolean;
+  DigitalRefNumber?: string | null;
   CreatedBy?: string | null;
   CreatedAt?: string | null;
   TotalEMIs?: number;
@@ -86,6 +93,13 @@ export interface LoanSanctionPayload {
   dueDate?: string | null;
   purpose?: string | null;
   remarks?: string | null;
+  paymentMode?: string | null;
+  chequeLotId?: number | string | null;
+  chequeLotNumber?: string | null;
+  chequeNo?: string | null;
+  chequeDate?: string | null;
+  isPostDated?: boolean;
+  digitalRefNumber?: string | null;
 }
 
 export interface LoanEMI {
@@ -138,6 +152,18 @@ export interface LoanPayment {
   CreatedBy?: string | null;
   CreatedAt: string;
   EmisCovered: number;
+  // The real dbo.NewPayment record this settlement was made through (see
+  // migration 340) — null for older rows recorded before this link existed.
+  NewPaymentId?: number | null;
+  PaymentMode?: string | null;
+  ChequeNo?: string | null;
+  ChequeDate?: string | null;
+  BankName?: string | null;
+  NeftNumber?: string | null;
+  UpiTransactionId?: string | null;
+  RtgsReference?: string | null;
+  ImpsReference?: string | null;
+  PaymentDocNo?: string | null;
 }
 
 export interface PayLoanPayload {
@@ -146,14 +172,27 @@ export interface PayLoanPayload {
   lateFee?: number | string;
   paymentDate: string;
   notes?: string;
+  // The dbo.NewPayment row Payment.tsx just created for this settlement —
+  // links the loan's own payment record back to the one that actually
+  // carries mode/cheque/bank details (see migration 340).
+  newPaymentId?: number;
 }
 
 export interface PayLoanResponse {
   paymentId: number;
   paymentRef: string;
   totalAmount: number;
-  loanClosed: boolean;
+  /** Always false now — loan closure requires an explicit closeLoan() call.
+   *  Use readyToClose to know when to show the "Close Loan" prompt. */
+  loanClosed: false;
+  /** True when all EMIs are paid and total paid ≥ scheduled total.
+   *  The UI should show the "Close Loan" button when this is true. */
+  readyToClose: boolean;
   excessCredited: number;
+  /** Non-null when the repayment was recorded but GL posting was skipped
+   *  (e.g. no Lender/Borrower Bank A/C tagged on the loan). Frontend should
+   *  show this as a warning toast so the user knows GL needs manual attention. */
+  glPostingWarning: string | null;
 }
 
 export interface CustomerOption {
@@ -170,8 +209,10 @@ async function handle<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export const getLoanSanctions = () =>
-  fetchWithAuth(BASE).then((r) => handle<LoanSanction[]>(r));
+// Pass a companyId to scope the list to loans where that company is the
+// lender or borrower; omit it (or pass null) for the "All companies" view.
+export const getLoanSanctions = (companyId?: number | null) =>
+  fetchWithAuth(companyId ? `${BASE}?companyId=${companyId}` : BASE).then((r) => handle<LoanSanction[]>(r));
 
 export const getLoanSanction = (id: number) =>
   fetchWithAuth(`${BASE}/${id}`).then((r) => handle<LoanSanction>(r));
@@ -224,8 +265,11 @@ export const updateLoanSanction = (id: number, payload: LoanEditPayload) =>
     body: JSON.stringify(payload),
   }).then((r) => handle(r));
 
-export const getPayableEmis = () =>
-  fetchWithAuth(`${BASE}/emi-payable`).then((r) => handle<PayableEmi[]>(r));
+// Scoped to the company the payment is being made from — a loan's EMI is
+// only "payable" from the company that is its lender or borrower, same
+// scoping the backend enforces (400s without a companyId).
+export const getPayableEmis = (companyId: number) =>
+  fetchWithAuth(`${BASE}/emi-payable?companyId=${companyId}`).then((r) => handle<PayableEmi[]>(r));
 
 export const getLoanPayments = (loanId: number) =>
   fetchWithAuth(`${BASE}/${loanId}/payments`).then((r) => handle<LoanPayment[]>(r));
@@ -236,6 +280,13 @@ export const payLoan = (loanId: number, payload: PayLoanPayload) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   }).then((r) => handle<PayLoanResponse>(r));
+
+/** Explicitly close a loan that has been fully repaid.
+ *  The backend validates that all EMIs are paid and total paid ≥ scheduled.
+ *  This is intentionally a separate step from recording the last payment. */
+export const closeLoan = (loanId: number) =>
+  fetchWithAuth(`${BASE}/${loanId}/close`, { method: "POST" })
+    .then((r) => handle<{ success: boolean; message: string }>(r));
 
 export const uploadLoanNoc = (loanId: number, file: File) => {
   const formData = new FormData();

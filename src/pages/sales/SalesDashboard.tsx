@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -23,6 +23,8 @@ import {
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
+import { getCompanyOptions, type CompanyOption } from "@/api/bankMasterApi";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   SalesShell,
   SalesGlassCard,
@@ -125,6 +127,14 @@ const EMPTY_DATA: SalesDashboardData = {
 const SalesDashboard = () => {
   const navigate = useNavigate();
   const { theme } = useTheme();
+  usePageRights("sales-dashboard");
+  const [companyId, setCompanyId] = useState<number | null>(null);
+
+  const { data: companies = [] } = useQuery<CompanyOption[]>({
+    queryKey: ["company-options-sales-dashboard"],
+    queryFn: getCompanyOptions,
+    staleTime: 5 * 60_000,
+  });
   const isDark = theme !== "light";
 
   const {
@@ -134,12 +144,13 @@ const SalesDashboard = () => {
     refetch,
     isFetching,
   } = useQuery<SalesDashboardData>({
-    queryKey: ["salesDashboard"],
+    queryKey: ["salesDashboard", companyId],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/sales-dashboard");
+      const res = await fetchWithAuth(`/api/sales-dashboard?companyId=${companyId}`);
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
       return res.json().catch(() => ({}));
     },
+    enabled: !!companyId,
     staleTime: 2 * 60_000,
     refetchInterval: 5 * 60_000,
     refetchOnWindowFocus: true,
@@ -165,6 +176,19 @@ const SalesDashboard = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Sales"]} />
+      <div className="flex items-center gap-3 mb-4">
+        <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Company</label>
+        <select
+          className="h-9 rounded-md border border-border bg-background px-3 text-sm"
+          value={companyId ?? ""}
+          onChange={(e) => setCompanyId(e.target.value ? Number(e.target.value) : null)}
+        >
+          <option value="">Select company…</option>
+          {companies.map((c) => (
+            <option key={c.id} value={c.id}>{c.label}</option>
+          ))}
+        </select>
+      </div>
       <DashboardBackground />
       <SalesShell
         title="Sales Overview"

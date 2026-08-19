@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -9,7 +9,7 @@ const { emitNotification } = require("../services/notify");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 const SNAG_CATEGORIES = ["Electrical", "Plumbing", "Civil", "Paint", "Carpentry", "Other"];
 
@@ -41,6 +41,54 @@ router.get("/", requirePageRight("crm-handover", "view"), async (req, res) => {
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-handover] GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /eligible-bookings — bookings that satisfy every handover prerequisite
+// (executed/registered agreement, sales deed customer+director approved, no
+// pending/approved-but-not-issued NOCs). Mirrors the POST / guard exactly so
+// the frontend dropdown never shows bookings that will fail on submit.
+// Registered ahead of GET /:id so "eligible-bookings" is not swallowed by :id.
+router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    // Candidates: active bookings with no handover yet
+    const candidates = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, b.UnitNo, a.ApplicantName
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected')
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id)
+      ORDER BY b.BookingNo
+    `);
+
+    const eligible = [];
+    for (const c of candidates.recordset) {
+      const bid = c.Id;
+      // 1. Agreement must be Executed or Registered
+      const agr = await pool.request().input("bid", sql.Int, bid)
+        .query("SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
+      if (!agr.recordset.length || !["Executed", "Registered"].includes(agr.recordset[0].Status)) continue;
+
+      // 2. Sales deed must exist, customer-approved, and director-approved
+      const deed = await pool.request().input("bid", sql.Int, bid)
+        .query("SELECT TOP 1 CustomerApprovalStatus, DirectorApprovalStatus FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+      if (!deed.recordset.length) continue;
+      if (deed.recordset[0].CustomerApprovalStatus !== "Approved") continue;
+      if (deed.recordset[0].DirectorApprovalStatus !== "Approved") continue;
+
+      // 3. No NOC left in Pending or Approved (must be Issued or never requested)
+      const openNoc = await pool.request().input("bid", sql.Int, bid)
+        .query("SELECT TOP 1 Id FROM dbo.CrmNoc WHERE BookingId = @bid AND Status IN ('Pending','Approved')");
+      if (openNoc.recordset.length) continue;
+
+      eligible.push({ Id: c.Id, BookingNo: c.BookingNo, UnitNo: c.UnitNo, ApplicantName: c.ApplicantName });
+    }
+
+    res.json(eligible);
+  } catch (e) {
+    console.error("[crm-handover] GET /eligible-bookings error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -146,17 +194,42 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
   }
 });
 
-// PUT /:id — update handover (progress through Scheduled → SnagInspection → SnagPending → Completed)
+// PUT /:id — progress handover through the forward-only state machine:
+//   Scheduled → SnagInspection → SnagPending → Completed
+//   Any non-terminal state → Cancelled
+// Generic field updates (ScheduledDate, Notes) are always allowed regardless
+// of the Status transition requested. Completing requires all 4 mandatory
+// fields: ActualHandoverDate, KeyHandoverBy, FinalDuesCleared=true, CustomerAcknowledged=true.
 router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     const id = parseInt(req.params.id);
 
-    const cur0 = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmHandover WHERE Id = @id");
+    const cur0 = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId, Status FROM dbo.CrmHandover WHERE Id = @id");
     if (!cur0.recordset.length) return res.status(404).json({ error: "Handover not found" });
     const activeErr0 = await requireActiveBooking(pool, cur0.recordset[0].BookingId);
     if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
+    const currentStatus = cur0.recordset[0].Status;
+
+    // Enforce forward-only state machine transitions when a new Status is requested
+    if (b.Status && b.Status !== currentStatus) {
+      const ALLOWED_TRANSITIONS = {
+        Scheduled:      ["SnagInspection", "Cancelled"],
+        SnagInspection: ["SnagPending", "Cancelled"],
+        SnagPending:    ["Completed", "Cancelled"],
+        Completed:      [],   // terminal
+        Cancelled:      [],   // terminal
+      };
+      const allowed = ALLOWED_TRANSITIONS[currentStatus] || [];
+      if (!allowed.includes(b.Status)) {
+        return res.status(400).json({
+          error: `Cannot transition from '${currentStatus}' to '${b.Status}'. Allowed: ${allowed.length ? allowed.join(", ") : "none (terminal state)"}`,
+        });
+      }
+    }
 
     // Guard: cannot mark Completed while open snags remain
     if (b.Status === "Completed") {
@@ -164,6 +237,19 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
         .query(`SELECT COUNT(*) AS cnt FROM dbo.CrmSnagItem WHERE HandoverId = @id AND Status IN ('Open','InProgress')`);
       if (openSnags.recordset[0].cnt > 0) {
         return res.status(400).json({ error: "Cannot complete handover — unresolved snag items remain" });
+      }
+      // All four completion fields are mandatory — these record the physical event
+      if (!b.ActualHandoverDate) {
+        return res.status(400).json({ error: "ActualHandoverDate is required to complete a handover" });
+      }
+      if (!b.KeyHandoverBy) {
+        return res.status(400).json({ error: "KeyHandoverBy (the staff member who handed the key) is required" });
+      }
+      if (!b.FinalDuesCleared) {
+        return res.status(400).json({ error: "FinalDuesCleared must be confirmed before completing handover" });
+      }
+      if (!b.CustomerAcknowledged) {
+        return res.status(400).json({ error: "CustomerAcknowledged must be confirmed before completing handover" });
       }
     }
 

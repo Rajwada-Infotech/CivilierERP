@@ -10,8 +10,12 @@ import {
   PartyPopper,
   Inbox,
 } from "lucide-react";
+import { useState } from "react";
 import { getLoanSanctions, type LoanType } from "@/api/loanSanctionApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { getCompanyOptions, type CompanyOption } from "@/api/bankMasterApi";
 
 const ACCENT = "#22c55e";
 
@@ -67,18 +71,30 @@ function EmptyState({ icon: Icon, message, accent }: { icon: typeof Inbox; messa
 
 export default function LoanDashboard() {
   const navigate = useNavigate();
+  usePageRights("loan-sanction");
+  const [companyId, setCompanyId] = useState<number | null>(null);
+
+  const { data: companies = [] } = useQuery<CompanyOption[]>({
+    queryKey: ["company-options-loan-dashboard"],
+    queryFn: getCompanyOptions,
+    staleTime: 5 * 60_000,
+  });
 
   const { data: loans = [], isLoading } = useQuery({
-    queryKey: ["loan-sanctions"],
-    queryFn: getLoanSanctions,
+    queryKey: ["loan-sanctions", companyId],
+    queryFn: () => getLoanSanctions(companyId!),
+    enabled: !!companyId,
+    staleTime: 30_000,
   });
 
   const { data: upcomingEmis = [] } = useQuery({
-    queryKey: ["loan-emi-reminders"],
+    queryKey: ["loan-emi-reminders", companyId],
     queryFn: () =>
-      fetchWithAuth("/api/loan-sanction/emi-reminders").then((r) =>
+      fetchWithAuth(`/api/loan-sanction/emi-reminders?companyId=${companyId}`).then((r) =>
         r.ok ? (r.json() as Promise<UpcomingEmi[]>) : [],
       ),
+    enabled: !!companyId,
+    staleTime: 30_000,
   });
 
   const totalSanctioned = loans.reduce((s, l) => s + Number(l.Amount || 0), 0);
@@ -102,6 +118,20 @@ export default function LoanDashboard() {
       icon={MoneyRecive as any}
       accentColor={ACCENT}
     >
+      <Breadcrumbs items={["Dashboard", "Loan"]} />
+      <div className="flex items-center gap-3 mb-2">
+        <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Company</label>
+        <select
+          className="h-9 rounded-md border border-border bg-background px-3 text-sm"
+          value={companyId ?? ""}
+          onChange={(e) => setCompanyId(e.target.value ? Number(e.target.value) : null)}
+        >
+          <option value="">Select company…</option>
+          {companies.map((c) => (
+            <option key={c.id} value={c.id}>{c.label}</option>
+          ))}
+        </select>
+      </div>
       {/* Stat tiles */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <GlassCard

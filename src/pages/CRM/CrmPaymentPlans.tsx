@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, Pencil, Layers, ListChecks, X, Calendar, Building2, Percent } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -108,7 +110,7 @@ const CrmPaymentPlans: React.FC = () => {
 
   const inputCls = "w-full text-sm border border-border rounded px-2 py-1.5 bg-background";
 
-  const { data: plans = [], isLoading } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: plans = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: milestoneMaster = [] } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchMilestoneMaster, staleTime: 5 * 60_000 });
   const { data: dropdownData } = useQuery({ queryKey: ["business-dropdown"], queryFn: fetchCompanyProjectDropdown, staleTime: 5 * 60_000 });
   const companies = dropdownData?.companies ?? [];
@@ -248,7 +250,7 @@ const CrmPaymentPlans: React.FC = () => {
       resetForm();
       qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -265,7 +267,7 @@ const CrmPaymentPlans: React.FC = () => {
       setPreviewPlan(null);
       qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setDeletingId(null);
     }
@@ -278,14 +280,17 @@ const CrmPaymentPlans: React.FC = () => {
   );
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Payment Plan Master"
       subtitle="Reusable milestone templates — tag them onto units from Unit Master"
       action={
-        <button onClick={openCreate}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={openCreate}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> New Plan
         </button>
+        </div>
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -717,7 +722,7 @@ const CrmPaymentPlans: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

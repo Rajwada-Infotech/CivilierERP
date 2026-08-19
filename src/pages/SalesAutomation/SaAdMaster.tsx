@@ -2,7 +2,10 @@ import React, { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { translateError } from "@/lib/translateError";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -165,7 +168,7 @@ const CreativesDialog: React.FC<{ adId: string; adName: string; onClose: () => v
       toast.success("Creative(s) uploaded");
       qc.invalidateQueries({ queryKey: ["sa-ad-creatives", adId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setUploading(false);
     }
@@ -178,7 +181,7 @@ const CreativesDialog: React.FC<{ adId: string; adName: string; onClose: () => v
       toast.success("Creative removed");
       qc.invalidateQueries({ queryKey: ["sa-ad-creatives", adId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -227,6 +230,7 @@ const CreativesDialog: React.FC<{ adId: string; adName: string; onClose: () => v
 };
 
 const SaAdMaster: React.FC = () => {
+  usePageRights("sa-ads");
   const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"list" | "performance">("list");
@@ -395,6 +399,7 @@ const SaAdMaster: React.FC = () => {
 
   return (
     <SalesAutoShell title="Ad Master" subtitle="Manage advertisements running under each campaign">
+      <Breadcrumbs items={["Sales Automation", "Ad Master"]} />
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">

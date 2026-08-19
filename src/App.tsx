@@ -120,6 +120,21 @@ const LoanSanction = lazy(() => import("./pages/loan/LoanSanction"));
 const CivilWorkDprDashboard = lazy(
   () => import("./pages/civilworkdpr/CivilWorkDprDashboard"),
 );
+const CivilWorkDprWorkDone = lazy(
+  () => import("./pages/civilworkdpr/WorkDone"),
+);
+const CivilWorkDprActivityReporting = lazy(
+  () => import("./pages/civilworkdpr/ActivityReporting"),
+);
+const RoomCategoryMaster = lazy(
+  () => import("./pages/civilworkdpr/RoomCategoryMaster"),
+);
+const RoomCompositionBuilder = lazy(
+  () => import("./pages/civilworkdpr/RoomCompositionBuilder"),
+);
+const WorkCheckpointMaster = lazy(
+  () => import("./pages/civilworkdpr/WorkCheckpointMaster"),
+);
 const DependencyTracker = lazy(
   () => import("./pages/civilworkdpr/DependencyTracker"),
 );
@@ -847,6 +862,46 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-dashboard">
             <CivilWorkDprDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/work-reporting"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-work-done">
+            <CivilWorkDprWorkDone />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/activity-reporting"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-activity-reporting">
+            <CivilWorkDprActivityReporting />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/room-category-master"
+        element={
+          <ProtectedRoute pageKey="room-category-master">
+            <RoomCategoryMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/room-composition"
+        element={
+          <ProtectedRoute pageKey="room-composition-builder">
+            <RoomCompositionBuilder />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/work-checkpoint-master"
+        element={
+          <ProtectedRoute pageKey="work-checkpoint-master">
+            <WorkCheckpointMaster />
           </ProtectedRoute>
         }
       />

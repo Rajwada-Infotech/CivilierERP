@@ -2,12 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Search, FileText, FileImage, FileSpreadsheet, File as FileIcon, Eye,
   Clock, XCircle, ArrowUpRight, Download, Check, X, ChevronDown, ChevronRight,
-  AlertTriangle, History, ListChecks, LayoutList, FolderClock, RotateCcw, Upload,
+  AlertTriangle, ListChecks, LayoutList, FolderClock, RotateCcw, Upload,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
@@ -152,7 +154,7 @@ function ReviewDialog({ doc, onClose, onReviewed }: { doc: any; onClose: () => v
       toast.success("File uploaded");
       onReviewed();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setAttaching(false);
     }
@@ -186,7 +188,7 @@ function ReviewDialog({ doc, onClose, onReviewed }: { doc: any; onClose: () => v
       toast.success(`Marked ${status}`);
       onReviewed();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -211,7 +213,7 @@ function ReviewDialog({ doc, onClose, onReviewed }: { doc: any; onClose: () => v
           </button>
           <button onClick={() => setTab("history")}
             className={`text-xs font-medium px-3 py-1.5 border-b-2 -mb-px flex items-center gap-1 ${tab === "history" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-            <History size={12} /> History
+            <Clock size={12} /> History
           </button>
         </div>
 
@@ -374,7 +376,7 @@ const CrmAgreementPapers: React.FC = () => {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
-  const { data: documents = [], isLoading, refetch } = useQuery({
+  const { data: documents = [], isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: ["crm-agreement-papers", status, documentType],
     queryFn: () => fetchAllDocuments(status, documentType),
     staleTime: 30_000,
@@ -451,7 +453,7 @@ const CrmAgreementPapers: React.FC = () => {
       setSelected(new Set());
       qc.invalidateQueries({ queryKey: ["crm-agreement-papers"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setBulkBusy(false);
       setBulkRejectOpen(false);
@@ -481,7 +483,7 @@ const CrmAgreementPapers: React.FC = () => {
       toast.success("Reverted to Submitted for re-review");
       qc.invalidateQueries({ queryKey: ["crm-agreement-papers"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -537,7 +539,8 @@ const CrmAgreementPapers: React.FC = () => {
   };
 
   return (
-    <SalesAutoShell title="CRM — Agreement Papers" subtitle="Every agreement document, across every booking, in one register">
+    <CrmShell title="CRM — Agreement Papers" subtitle="Every agreement document, across every booking, in one register"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       <div className="space-y-4">
         {/* Stats bar — doubles as quick filters onto the status dropdown */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -676,7 +679,7 @@ const CrmAgreementPapers: React.FC = () => {
           onConfirm={(remarks) => runBulk(Array.from(selected), "Rejected", remarks)}
         />
       )}
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

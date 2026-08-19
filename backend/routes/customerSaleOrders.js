@@ -332,6 +332,8 @@ const mapRow = (so) => ({
 
 // ── GET /  (List with pagination) ────────────────────────────────────────────
 router.get("/", cache("customer-sale-orders", 300, { shared: true }), async (req, res) => {
+  const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+  if (!companyId) return res.status(400).json({ error: "companyId is required" });
   try {
     const pool = getPool();
     const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -343,17 +345,16 @@ router.get("/", cache("customer-sale-orders", 300, { shared: true }), async (req
       ? parseInt(req.query.customerId, 10)
       : null;
 
-    const whereConditions = [];
+    const whereConditions = ["so.CompanyId = @companyId"];
     if (status) whereConditions.push("so.Status = @status");
     if (customerId) whereConditions.push("so.CustomerID = @customerId");
-    const extraWhere = whereConditions.length
-      ? `AND ${whereConditions.join(" AND ")}`
-      : "";
+    const extraWhere = `AND ${whereConditions.join(" AND ")}`;
 
     const result = await pool
       .request()
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, limit)
+      .input("companyId", sql.Int, companyId)
       .input("status", sql.NVarChar(50), status)
       .input("customerId", sql.Int, customerId).query(`
         SELECT *, COUNT(*) OVER() AS _total FROM (

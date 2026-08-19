@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -10,7 +10,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 const CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Legal", "Modification", "Other"];
 const PRIORITIES = ["Low", "Normal", "High", "Urgent"];
@@ -178,7 +178,7 @@ router.put("/:id/mark-in-progress", requirePageRight("crm-service-tickets", "edi
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
-    if (cur.recordset[0].Status !== "Assigned") {
+    if (!["Assigned", "Reopened"].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot mark-in-progress from status '${cur.recordset[0].Status}'` });
     }
     if (!cur.recordset[0].AssignedTo) {
@@ -208,7 +208,7 @@ router.put("/:id/resolve", requirePageRight("crm-service-tickets", "edit"), asyn
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
-    if (!["Assigned", "InProgress"].includes(cur.recordset[0].Status)) {
+    if (!["Assigned", "InProgress", "Reopened"].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot resolve from status '${cur.recordset[0].Status}'` });
     }
 

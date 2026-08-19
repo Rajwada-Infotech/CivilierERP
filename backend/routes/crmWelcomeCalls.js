@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -10,7 +10,7 @@ const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 const WC_SELECT = `
   SELECT
@@ -39,7 +39,8 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
         b.Id AS BookingId, b.BookingNo, b.UnitNo, b.ProjectName, b.BookingDate,
         a.ApplicantName, a.Mobile,
         last.Id AS LastCallId, last.Outcome AS LastOutcome, last.CallDate AS LastCallDate,
-        last.NextCallDate
+        last.NextCallDate,
+        streak.ConsecutiveNonReached
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       OUTER APPLY (
@@ -48,6 +49,16 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
         WHERE BookingId = b.Id
         ORDER BY CallDate DESC, CreatedAt DESC
       ) last
+      OUTER APPLY (
+        SELECT COUNT(*) AS ConsecutiveNonReached
+        FROM (
+          SELECT TOP 100 Outcome
+          FROM dbo.CrmWelcomeCall
+          WHERE BookingId = b.Id
+          ORDER BY CallDate DESC, CreatedAt DESC
+        ) recent
+        WHERE recent.Outcome IN ('NotReachable','Busy','SwitchedOff','VoiceMail')
+      ) streak
       WHERE b.Status = 'Approved' AND b.IsActive = 1
         AND (
           last.Id IS NULL
@@ -131,9 +142,10 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId);
 
-    const [bkRes, custRes, milRes, invRes, loanRes, oaRes] = await Promise.all([
+    const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, streakRes] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId).query(`
         SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.BookingAmount, b.GrandTotal,
+               b.ParkingTotal, b.ExtraChargesTotal, b.UnitGstAmount,
                b.PaymentPlanId, pp.PlanName AS PaymentPlanName,
                a.ApplicantName, a.Mobile, a.Email
         FROM dbo.CrmBooking b
@@ -167,6 +179,17 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
         .query("SELECT BankName, LoanAmount, SanctionStatus, LoanAccountNo FROM dbo.CrmLoanDetail WHERE BookingId = @bid"),
       pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT ReceiptNo, Amount, AppliedAmount, Status FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
+      pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT ISNULL(SUM(Amount), 0) AS MRTotal FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status IN ('Pending','Approved')"),
+      pool.request().input("bid", sql.Int, bookingId).query(`
+        SELECT COUNT(*) AS ConsecutiveNonReached
+        FROM (
+          SELECT TOP 100 Outcome
+          FROM dbo.CrmWelcomeCall WHERE BookingId = @bid
+          ORDER BY CallDate DESC, CreatedAt DESC
+        ) recent
+        WHERE recent.Outcome IN ('NotReachable','Busy','SwitchedOff','VoiceMail')
+      `),
     ]);
     if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
 
@@ -174,6 +197,7 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
     const totalDue = milestones.reduce((s, m) => s + (m.AmountDue || 0), 0);
     const totalPaid = milestones.reduce((s, m) => s + (m.AmountPaid || 0), 0);
     const onAccountBalance = oaRes.recordset.reduce((s, r) => s + (Number(r.Amount) - Number(r.AppliedAmount)), 0);
+    const mrReceived = Number(mrRes.recordset[0]?.MRTotal || 0);
 
     res.json({
       booking: bkRes.recordset[0],
@@ -182,6 +206,8 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
       invoices: invRes.recordset,
       loan: loanRes.recordset[0] || null,
       onAccount: { payments: oaRes.recordset, availableBalance: onAccountBalance },
+      mrReceived,
+      consecutiveNonReached: streakRes.recordset[0]?.ConsecutiveNonReached ?? 0,
     });
   } catch (e) {
     console.error("[crm-welcome-calls] GET /:bookingId/call-context error:", e.message);
@@ -215,6 +241,19 @@ router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, re
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const activeErr = await requireActiveBooking(pool, parseInt(b.BookingId));
     if (activeErr) return res.status(400).json({ error: activeErr });
+
+    // Idempotency window: reject a duplicate log for the same booking + outcome
+    // within 30 seconds (catches slow-network double-submits from the frontend).
+    const recent = await pool.request()
+      .input("bid", sql.Int, parseInt(b.BookingId))
+      .input("out", sql.NVarChar(50), b.Outcome || null)
+      .query(`SELECT TOP 1 Id FROM dbo.CrmWelcomeCall
+              WHERE BookingId = @bid AND Outcome = @out
+              AND CreatedAt >= DATEADD(second, -30, SYSDATETIME())`);
+    if (recent.recordset.length) {
+      return res.status(409).json({ error: "A call log with the same outcome was just submitted for this booking — please wait a moment before submitting again." });
+    }
+
     if (b.Outcome && !OUTCOMES.includes(b.Outcome))
       return res.status(400).json({ error: `Invalid Outcome. Must be: ${OUTCOMES.join(", ")}` });
 
@@ -442,13 +481,25 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
   }
 });
 
-// DELETE /:id — remove a mis-logged call entry
+// DELETE /:id — remove a mis-logged call entry.
+// Blocked once an Agreement exists for the booking — deleting the only
+// 'Welcomed' call log would leave the Agreement without its prerequisite.
 router.delete("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
-    const result = await pool.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeCall WHERE Id = @id");
-    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Call log not found" });
+    const call = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId, Outcome FROM dbo.CrmWelcomeCall WHERE Id = @id");
+    if (!call.recordset.length) return res.status(404).json({ error: "Call log not found" });
+    const { BookingId, Outcome } = call.recordset[0];
+    if (Outcome === "Welcomed") {
+      const agr = await pool.request().input("bid", sql.Int, BookingId)
+        .query("SELECT TOP 1 Id FROM dbo.CrmAgreement WHERE BookingId = @bid AND IsActive = 1");
+      if (agr.recordset.length) {
+        return res.status(400).json({ error: "This welcome call log cannot be deleted — an Agreement already exists for this booking. Delete the Agreement first if this call was mis-logged." });
+      }
+    }
+    await pool.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeCall WHERE Id = @id");
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-welcome-calls] DELETE error:", e.message);

@@ -1,5 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { formatINR } from "@/utils/formatCurrency";
 import {
@@ -87,7 +88,7 @@ export default function OnAccountReport() {
   };
 
   // initial load
-  useState(() => { loadTransactions(1); });
+  useEffect(() => { loadTransactions(1); }, []);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -99,6 +100,8 @@ export default function OnAccountReport() {
   );
 
   return (
+    <>
+    <Breadcrumbs items={["Dashboard", "Finance", "On Account Report"]} />
     <FinanceShell title="On Account Report" subtitle="Excess payment credits stored on account per party">
       <div className="p-4 md:p-6 space-y-4">
         {/* Header */}
@@ -351,5 +354,6 @@ export default function OnAccountReport() {
         )}
       </div>
     </FinanceShell>
+    </>
   );
 }

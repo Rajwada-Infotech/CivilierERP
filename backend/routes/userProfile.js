@@ -5,7 +5,12 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, getPoolStats, sql } = require("../db");
 const bcrypt = require("bcrypt");
 const logger = require("../logger");
+const authMiddleware = require("../middleware/auth");
 const { normalizeRole } = require("../middleware/role");
+
+// All routes require a valid JWT — applied once here so every handler below
+// is covered without repeating the middleware on each individual route.
+router.use(authMiddleware);
 
 const SALT_ROUNDS = 12;
 

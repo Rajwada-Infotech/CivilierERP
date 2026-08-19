@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Megaphone, TrendingUp, IndianRupee, Target, Award } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
 
 async function fetchMarketingDashboard(): Promise<any> {
@@ -25,6 +27,7 @@ const StatCard: React.FC<{ icon: React.ElementType; label: string; value: string
 );
 
 const SaMarketingDashboard: React.FC = () => {
+  usePageRights("sa-campaigns");
   const { data, isLoading, error } = useQuery({ queryKey: ["sa-dashboard-marketing"], queryFn: fetchMarketingDashboard, staleTime: 60_000 });
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading dashboard...</div>;
@@ -32,16 +35,17 @@ const SaMarketingDashboard: React.FC = () => {
 
   return (
     <SalesAutoShell title="Marketing Dashboard" subtitle="Campaign performance, spend, and lead generation overview" icon={Megaphone}>
+      <Breadcrumbs items={["Sales Automation", "Marketing Dashboard"]} />
       <div className="space-y-6">
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard icon={Megaphone} label="Total Campaigns" value={data?.totalCampaigns ?? 0} />
           <StatCard icon={TrendingUp} label="Active Ads" value={data?.activeAds ?? 0} />
           <StatCard icon={Target} label="Total Leads" value={data?.totalLeads ?? 0} />
-          <StatCard icon={IndianRupee} label="Marketing Spend" value={`₹${(data?.marketingSpend ?? 0).toLocaleString()}`} />
-          <StatCard icon={IndianRupee} label="Cost Per Lead" value={`₹${data?.costPerLead ?? 0}`} />
-          <StatCard icon={IndianRupee} label="Invoices Paid" value={`₹${(data?.invoicedPaid ?? 0).toLocaleString()}`} />
-          <StatCard icon={IndianRupee} label="Revenue Generated" value={`₹${(data?.revenueGenerated ?? 0).toLocaleString()}`} />
+          <StatCard icon={IndianRupee} label="Marketing Spend" value={`?${(data?.marketingSpend ?? 0).toLocaleString()}`} />
+          <StatCard icon={IndianRupee} label="Cost Per Lead" value={`?${data?.costPerLead ?? 0}`} />
+          <StatCard icon={IndianRupee} label="Invoices Paid" value={`?${(data?.invoicedPaid ?? 0).toLocaleString()}`} />
+          <StatCard icon={IndianRupee} label="Revenue Generated" value={`?${(data?.revenueGenerated ?? 0).toLocaleString()}`} />
           <StatCard icon={TrendingUp} label="ROI" value={`${data?.roi ?? 0}%`} />
           <StatCard icon={Award} label="Bookings Generated" value={data?.bookingsGenerated ?? 0} />
         </div>
@@ -54,7 +58,7 @@ const SaMarketingDashboard: React.FC = () => {
             {data?.bestCampaign ? (
               <div>
                 <p className="text-base font-medium text-foreground">{data.bestCampaign.Name}</p>
-                <p className="text-xs text-muted-foreground">{data.bestCampaign.CampaignCode} · {data.bestCampaign.LeadCount} leads</p>
+                <p className="text-xs text-muted-foreground">{data.bestCampaign.CampaignCode} � {data.bestCampaign.LeadCount} leads</p>
               </div>
             ) : <p className="text-sm text-muted-foreground">No campaign data yet</p>}
           </div>

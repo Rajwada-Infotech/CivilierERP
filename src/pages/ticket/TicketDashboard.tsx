@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import { unwrapTicketList } from "@/lib/ticketListResponse";
@@ -193,6 +194,7 @@ export default function TicketDashboard() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { currentUser } = useAuth();
+  const rights = usePageRights("tickets");
   const ADMIN_ROLES = ["super_admin", "admin", "dba"];
   const isAdmin = ADMIN_ROLES.includes(currentUser?.role ?? "");
   const canSeeAllTickets = isAdmin || currentUser?.role === "engineer";

@@ -13,12 +13,18 @@ const { getPool } = require("../db");
  * Live aggregates for the Civil Work DPR module:
  *   - Activities (dbo.ActivityMaster, activity_type = 1)
  *   - Contractor allocations (dbo.ContractorAllocation)
- *   - Work progress entries + review queue (dbo.WorkProgress)
  *   - Daily labour today (dbo.DailyLabourEntry)
- *   - Recent progress feed + status breakdown
+ *   - Work Reporting's rung-level assignments (dbo.DependencyActivityAssignment)
+ *     — recent feed + status breakdown
+ *
+ * dbo.WorkProgress used to back this dashboard's "recent progress" feed, but
+ * no page writes to that table anymore (Work Reporting's dependency-chain
+ * flow replaced it) — pulling from it here just meant showing frozen,
+ * un-updatable history. Dropped in favor of the real, currently-writable
+ * DependencyActivityAssignment feed below.
  *
  * No caching — the frontend polls this on a short interval for a
- * near-realtime feel, so a 60s+ cache would just show stale review counts.
+ * near-realtime feel, so a 60s+ cache would just show stale counts.
  */
 router.get("/", async (req, res) => {
   try {
@@ -27,10 +33,11 @@ router.get("/", async (req, res) => {
     const [
       activityStats,
       allocationStats,
-      progressStats,
       labourStats,
-      recentProgress,
-      statusBreakdown,
+      assignedWorkStats,
+      recentAssignments,
+      assignedTimeline,
+      completedTimeline,
     ] = await Promise.all([
       // ── Activities ──────────────────────────────────────────────────────────
       pool.request().query(`
@@ -53,18 +60,6 @@ router.get("/", async (req, res) => {
         FROM dbo.ContractorAllocation
       `),
 
-      // ── Work Progress ────────────────────────────────────────────────────────
-      pool.request().query(`
-        SELECT
-          COUNT(*)                                                              AS TotalCount,
-          COUNT(CASE WHEN ReviewStatus = 'Pending' THEN 1 END)                  AS PendingReviewCount,
-          COUNT(CASE WHEN ReviewStatus = 'Approved' THEN 1 END)                 AS ApprovedCount,
-          COUNT(CASE WHEN ReviewStatus = 'Rejected' THEN 1 END)                 AS RejectedCount,
-          COUNT(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END)
-                                                                                AS TodayCount
-        FROM dbo.WorkProgress
-      `),
-
       // ── Daily Labour (today) ────────────────────────────────────────────────
       pool.request().query(`
         SELECT
@@ -75,39 +70,96 @@ router.get("/", async (req, res) => {
         WHERE CAST(EntryDate AS DATE) = CAST(GETDATE() AS DATE)
       `),
 
-      // ── Recent progress feed (last 8) ───────────────────────────────────────
+      // ── Work Reporting's rung-level assignments (engineer/material,
+      // tracked through Pending → ... → Completed) ────────────────────────────
       pool.request().query(`
-        SELECT TOP 8
-          wp.WorkProgressId AS Id,
-          act.activity_name  AS ActivityName,
-          ahm.LHeadName      AS ContractorName,
-          pr.name            AS ProjectName,
-          CASE WHEN ISNULL(wp.QuantityPlanned, 0) > 0
-               THEN ROUND((ISNULL(wp.QuantityCompleted, 0) / wp.QuantityPlanned) * 100, 0)
-               ELSE 0 END    AS PercentageProgress,
-          wp.CurrentStatus   AS CurrentStatus,
-          wp.ReviewStatus    AS ReviewStatus,
-          wp.CreatedAt       AS CreatedAt
-        FROM dbo.WorkProgress wp
-        JOIN dbo.ContractorAllocation ca ON ca.AllocationId = wp.AllocationId
-        LEFT JOIN dbo.ActivityMaster act ON act.id = ca.ActivityId
-        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = ca.ContractorLHeadId
-        LEFT JOIN dbo.enterprise pr ON pr.id = ca.ProjectId
-        ORDER BY wp.CreatedAt DESC
+        SELECT
+          Status,
+          COUNT(*)                                                              AS StatusCount,
+          COUNT(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END)
+                                                                                AS TodayCount
+        FROM dbo.DependencyActivityAssignment
+        GROUP BY Status
       `),
 
-      // ── Status breakdown across all progress entries ───────────────────────
+      // ── Recent assignment feed (last 8) ─────────────────────────────────────
       pool.request().query(`
-        SELECT ISNULL(CurrentStatus, 'Not Started') AS Status, COUNT(*) AS Count
-        FROM dbo.WorkProgress
-        GROUP BY ISNULL(CurrentStatus, 'Not Started')
+        SELECT TOP 8
+          daa.Id             AS Id,
+          am.activity_name   AS ActivityName,
+          (
+            SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+            FROM dbo.DependencyActivityEngineer dae
+            JOIN dbo.users u ON u.id = dae.EngineerId
+            WHERE dae.AssignmentId = daa.Id
+          )                  AS EngineerNames,
+          dm.Alias           AS ChainAlias,
+          ep.name            AS ProjectName,
+          daa.Status         AS Status,
+          daa.UpdatedAt       AS UpdatedAt
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        ORDER BY daa.UpdatedAt DESC
+      `),
+
+      // ── Assignments created per day, last 14 days ───────────────────────────
+      pool.request().query(`
+        SELECT CAST(CreatedAt AS DATE) AS Day, COUNT(*) AS Cnt
+        FROM dbo.DependencyActivityAssignment
+        WHERE CAST(CreatedAt AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+        GROUP BY CAST(CreatedAt AS DATE)
+      `),
+
+      // ── Assignments that reached Completed per day, last 14 days — UpdatedAt
+      // is the closest proxy available since there's no dedicated
+      // CompletedAt column (status can move between any two states). ────────
+      pool.request().query(`
+        SELECT CAST(UpdatedAt AS DATE) AS Day, COUNT(*) AS Cnt
+        FROM dbo.DependencyActivityAssignment
+        WHERE Status = 'COMPLETED'
+          AND UpdatedAt IS NOT NULL
+          AND CAST(UpdatedAt AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+        GROUP BY CAST(UpdatedAt AS DATE)
       `),
     ]);
 
     const act = activityStats.recordset[0];
     const alloc = allocationStats.recordset[0];
-    const prog = progressStats.recordset[0];
     const labour = labourStats.recordset[0];
+
+    // One row per status, each carrying its own today-count (rows created
+    // today under that status) — sum both across rows for the totals.
+    const assignedWorkByStatus = {};
+    let assignedWorkTotal = 0;
+    let assignedWorkToday = 0;
+    for (const row of assignedWorkStats.recordset) {
+      assignedWorkByStatus[row.Status] = row.StatusCount;
+      assignedWorkTotal += row.StatusCount;
+      assignedWorkToday += row.TodayCount;
+    }
+
+    // Zero-fill all 14 days — the GROUP BY queries above only return days
+    // that actually had activity, so gaps would otherwise break the line.
+    const assignedByDay = new Map(
+      assignedTimeline.recordset.map((r) => [r.Day.toISOString().slice(0, 10), r.Cnt]),
+    );
+    const completedByDay = new Map(
+      completedTimeline.recordset.map((r) => [r.Day.toISOString().slice(0, 10), r.Cnt]),
+    );
+    const assignmentTimeline = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      assignmentTimeline.push({
+        date: key,
+        assigned: assignedByDay.get(key) ?? 0,
+        completed: completedByDay.get(key) ?? 0,
+      });
+    }
 
     res.json({
       activities: {
@@ -121,21 +173,25 @@ router.get("/", async (req, res) => {
         todayCount: alloc.TodayCount,
         newCount: alloc.NewCount,
       },
-      progress: {
-        totalCount: prog.TotalCount,
-        pendingReviewCount: prog.PendingReviewCount,
-        approvedCount: prog.ApprovedCount,
-        rejectedCount: prog.RejectedCount,
-        todayCount: prog.TodayCount,
-      },
       labour: {
         skilledToday: labour.SkilledToday,
         unskilledToday: labour.UnskilledToday,
         totalToday: labour.SkilledToday + labour.UnskilledToday,
         crewsToday: labour.CrewsToday,
       },
-      recentProgress: recentProgress.recordset,
-      statusBreakdown: statusBreakdown.recordset,
+      assignedWork: {
+        totalCount: assignedWorkTotal,
+        todayCount: assignedWorkToday,
+        pendingCount: assignedWorkByStatus.PENDING || 0,
+        inProgressCount: assignedWorkByStatus.IN_PROGRESS || 0,
+        completedCount: assignedWorkByStatus.COMPLETED || 0,
+        holdCount: assignedWorkByStatus.HOLD || 0,
+        cancelledCount: assignedWorkByStatus.CANCELLED || 0,
+        approvedCount: assignedWorkByStatus.APPROVED || 0,
+        reworkCount: assignedWorkByStatus.REWORK || 0,
+      },
+      recentAssignments: recentAssignments.recordset,
+      assignmentTimeline,
       asOf: new Date().toISOString(),
     });
   } catch (err) {

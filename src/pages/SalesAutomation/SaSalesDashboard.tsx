@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Users, PhoneCall, Flame, MapPin, Award, Percent } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
 
 async function fetchSalesDashboard(): Promise<any> {
@@ -24,6 +26,7 @@ const StatCard: React.FC<{ icon: React.ElementType; label: string; value: string
 );
 
 const SaSalesDashboard: React.FC = () => {
+  usePageRights("sa-leads");
   const { data, isLoading, error } = useQuery({ queryKey: ["sa-dashboard-sales"], queryFn: fetchSalesDashboard, staleTime: 60_000 });
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading dashboard...</div>;
@@ -31,6 +34,7 @@ const SaSalesDashboard: React.FC = () => {
 
   return (
     <SalesAutoShell title="Sales Dashboard" subtitle="Lead pipeline, classification, and conversion overview" icon={Users}>
+      <Breadcrumbs items={["Sales Automation", "Sales Dashboard"]} />
       <div className="space-y-6">
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

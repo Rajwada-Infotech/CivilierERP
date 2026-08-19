@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { XCircle, CheckCircle2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -53,9 +55,10 @@ const CrmCancellations: React.FC = () => {
   // across more than one bank (or has none on file) opens unlocked, since
   // there's no single "same account" to default to.
   const [refundBankLocked, setRefundBankLocked] = useState(true);
+  const [refundConfirmOpen, setRefundConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const { data: cancellations = [], isLoading } = useQuery({ queryKey: ["crm-cancellations"], queryFn: fetchCancellations, staleTime: 30_000 });
+  const { data: cancellations = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-cancellations"], queryFn: fetchCancellations, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: refundProjectBanks = [] } = useQuery({
     queryKey: ["crm-cancellation-project-banks", refundDialog?.ProjectId],
@@ -78,7 +81,7 @@ const CrmCancellations: React.FC = () => {
   const openRefundDialog = (c: any) => {
     setRefundDialog(c);
     const singleBank = c.DistinctDepositBankCount === 1 && c.SingleDepositBankId ? String(c.SingleDepositBankId) : "";
-    setRefundForm({ RefundDate: "", RefundMode: "", RefundRef: "", RefundBankId: singleBank });
+    setRefundForm({ RefundDate: new Date().toISOString().slice(0, 10), RefundMode: "", RefundRef: "", RefundBankId: singleBank });
     setRefundBankLocked(!!singleBank);
   };
 
@@ -104,8 +107,10 @@ const CrmCancellations: React.FC = () => {
       setDialogOpen(false);
       setForm({ BookingId: "", Reason: "", DeductionPercent: "10" });
       qc.invalidateQueries({ queryKey: ["crm-cancellations"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -129,8 +134,12 @@ const CrmCancellations: React.FC = () => {
       setRefundDialog(null);
       setRefundForm({ RefundDate: "", RefundMode: "", RefundRef: "", RefundBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-cancellations"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      // Refund finalises cancellation — booking status changes and dashboard counts update
+      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -170,6 +179,9 @@ const CrmCancellations: React.FC = () => {
               onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-cancellations"] })}
             />
             {c.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
+            {c.Status === "Rejected" && c.Notes && (
+              <span className="text-xs text-red-600" title={c.Notes}>Rejected: {c.Notes.length > 40 ? c.Notes.slice(0, 40) + "…" : c.Notes}</span>
+            )}
             {c.Status === "Approved" && (
               <button onClick={() => openRefundDialog(c)} className="text-xs text-primary hover:underline">Record Refund</button>
             )}
@@ -182,14 +194,17 @@ const CrmCancellations: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Cancellations & Refunds"
       subtitle="Booking cancellation requests with auto-calculated refund"
       action={
-        <button onClick={() => setDialogOpen(true)}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => setDialogOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <XCircle size={14} /> Request Cancellation
         </button>
+        </div>
       }
     >
       <DataTable
@@ -289,14 +304,73 @@ const CrmCancellations: React.FC = () => {
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => setRefundDialog(null)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleRefund} disabled={saving || (refundBankOptions.length > 0 && !refundForm.RefundBankId)}
+            <button
+              onClick={() => {
+                if (!refundForm.RefundDate || !refundForm.RefundMode) {
+                  toast.error("Please enter the refund date and payment mode before confirming.");
+                  return;
+                }
+                setRefundConfirmOpen(true);
+              }}
+              disabled={saving || (refundBankOptions.length > 0 && !refundForm.RefundBankId)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Saving..." : "Mark Refunded"}
+              Review & Confirm →
             </button>
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+
+      {/* ── Refund Confirmation ── shown before the irreversible mark-refunded call */}
+      <Dialog open={refundConfirmOpen} onOpenChange={(o) => { if (!o) setRefundConfirmOpen(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <CheckCircle2 size={16} className="text-amber-500" /> Confirm Refund
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">This action is <strong className="text-foreground">permanent and cannot be undone.</strong> Once confirmed:</p>
+            <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Customer</span>
+                <span className="font-medium">{refundDialog?.ApplicantName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Booking</span>
+                <span className="font-mono">{refundDialog?.BookingNo}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Refund Amount</span>
+                <span className="font-bold text-green-700">{fmt(refundDialog?.RefundAmount)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Mode</span>
+                <span>{refundForm.RefundMode}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Date</span>
+                <span>{refundForm.RefundDate}</span>
+              </div>
+            </div>
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+              The booking status will be updated to <strong>Refunded</strong> and the unit will be freed for rebooking.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <button onClick={() => setRefundConfirmOpen(false)}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+              Go Back
+            </button>
+            <button
+              onClick={async () => { setRefundConfirmOpen(false); await handleRefund(); }}
+              disabled={saving}
+              className="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-40">
+              {saving ? "Processing…" : "Yes, Record Refund"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </CrmShell>
   );
 };
 

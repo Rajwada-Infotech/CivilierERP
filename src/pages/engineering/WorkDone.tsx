@@ -1086,6 +1086,7 @@ export default function WorkDone() {
   const [editRecord, setEditRecord] = useState<WorkDoneEntry | null>(null);
   const [viewRecord, setViewRecord] = useState<WorkDoneEntry | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [filterCompanyId, setFilterCompanyId] = useState<number | null>(null);
   const viewRecordAmendmentStatus = useAmendmentStatus("WorkDone", viewRecord?.ID, viewRecord?.Status);
 
   const activeFinYear =
@@ -1146,13 +1147,17 @@ export default function WorkDone() {
     refetch,
     isFetching,
   } = useQuery<WorkDoneEntry[]>({
-    queryKey: ["engineering-work-done"],
-    queryFn: () =>
-      fetchWithAuth("/api/engineering/work-done").then(async (r) => {
+    queryKey: ["engineering-work-done", filterCompanyId],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (filterCompanyId) params.set("companyId", String(filterCompanyId));
+      return fetchWithAuth(`/api/engineering/work-done?${params}`).then(async (r) => {
         const json = await r.json().catch(() => ({}));
         return Array.isArray(json) ? json : (json.data ?? []);
-      }),
-    staleTime: 60 * 1000,
+      });
+    },
+    enabled: !!filterCompanyId,
+    staleTime: 30_000,
   });
 
   const filtered =
@@ -1485,8 +1490,20 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
               />
             </div>
 
-            {/* Filter pills */}
-            <div className="flex items-center gap-2 flex-wrap">
+            {/* Filter row */}
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Company filter */}
+              <select
+                value={filterCompanyId ?? ""}
+                onChange={(e) => setFilterCompanyId(e.target.value ? Number(e.target.value) : null)}
+                className={`${selectCls} h-9 w-52 text-xs`}
+              >
+                <option value="">Select company…</option>
+                {(companies as { id: number; name: string }[]).map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              {/* Status pills */}
               {["all", "Draft", "Pending", "Approved", "Rejected"].map((s) => (
                 <button
                   key={s}
@@ -1504,14 +1521,20 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
 
             {/* Table */}
             <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <DataTable
-                data={filtered}
-                columns={COLUMNS}
-                loading={isLoading}
-                searchable
-                paginated
-                emptyMessage="No work done entries found."
-              />
+              {!filterCompanyId ? (
+                <div className="flex items-center justify-center p-12 text-muted-foreground text-sm">
+                  Select a company above to view work done entries.
+                </div>
+              ) : (
+                <DataTable
+                  data={filtered}
+                  columns={COLUMNS}
+                  loading={isLoading}
+                  searchable
+                  paginated
+                  emptyMessage="No work done entries found."
+                />
+              )}
             </div>
           </>
         ) : (

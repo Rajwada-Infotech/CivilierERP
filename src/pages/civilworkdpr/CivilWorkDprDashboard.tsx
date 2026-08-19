@@ -9,20 +9,35 @@ import {
   GlassCard,
   GlassSection,
 } from "@/components/dashboard/GlassShell";
+import { ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
 import {
   Pickaxe,
   ClipboardList,
   HardHat,
   Users2,
   RefreshCw,
-  ArrowUpRight,
   AlertCircle,
-  CheckCircle2,
-  Clock,
-  GitBranch,
-  BarChart3,
   Sparkles,
+  ListChecks,
+  Hammer,
+  FileText,
+  GitBranch,
+  TrendingUp,
+  PieChart as PieChartIcon,
 } from "lucide-react";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Legend,
+} from "recharts";
 
 const ACCENT = "#0891b2"; // cyan — matches Civil Work DPR's ModuleStrip color
 const SECONDARY = "#10b981"; // emerald bloom
@@ -37,95 +52,64 @@ interface DashboardData {
     todayCount: number;
     newCount: number;
   };
-  progress: {
-    totalCount: number;
-    pendingReviewCount: number;
-    approvedCount: number;
-    rejectedCount: number;
-    todayCount: number;
-  };
   labour: {
     skilledToday: number;
     unskilledToday: number;
     totalToday: number;
     crewsToday: number;
   };
-  recentProgress: {
+  assignedWork: {
+    totalCount: number;
+    todayCount: number;
+    pendingCount: number;
+    inProgressCount: number;
+    completedCount: number;
+    holdCount: number;
+    cancelledCount: number;
+    approvedCount: number;
+    reworkCount: number;
+  };
+  recentAssignments: {
     Id: number;
     ActivityName: string | null;
-    ContractorName: string | null;
+    EngineerNames: string | null;
+    ChainAlias: string | null;
     ProjectName: string | null;
-    PercentageProgress: number;
-    CurrentStatus: string | null;
-    ReviewStatus: "Pending" | "Approved" | "Rejected";
-    CreatedAt: string;
+    Status: keyof typeof ASSIGNMENT_STATUS_META;
+    UpdatedAt: string;
   }[];
-  statusBreakdown: { Status: string; Count: number }[];
+  assignmentTimeline: { date: string; assigned: number; completed: number }[];
   asOf: string;
 }
 
 const EMPTY_DATA: DashboardData = {
   activities: { totalCount: 0, activeCount: 0 },
   allocations: { totalCount: 0, projectCount: 0, workerCount: 0, todayCount: 0, newCount: 0 },
-  progress: { totalCount: 0, pendingReviewCount: 0, approvedCount: 0, rejectedCount: 0, todayCount: 0 },
   labour: { skilledToday: 0, unskilledToday: 0, totalToday: 0, crewsToday: 0 },
-  recentProgress: [],
-  statusBreakdown: [],
+  assignedWork: {
+    totalCount: 0,
+    todayCount: 0,
+    pendingCount: 0,
+    inProgressCount: 0,
+    completedCount: 0,
+    holdCount: 0,
+    cancelledCount: 0,
+    approvedCount: 0,
+    reworkCount: 0,
+  },
+  recentAssignments: [],
+  assignmentTimeline: [],
   asOf: "",
 };
 
 const fmtNum = (n: number) => new Intl.NumberFormat("en-IN").format(n ?? 0);
 
-const reviewColors: Record<string, string> = {
-  Approved: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-  Rejected: "bg-red-500/10 text-red-600 border-red-400/20",
-  Pending: "bg-amber-500/10 text-amber-600 border-amber-400/20",
-};
-
-const statusColors: Record<string, string> = {
-  Completed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-  "In Progress": "bg-blue-500/10 text-blue-600 border-blue-400/20",
-  "Not Started": "bg-muted text-muted-foreground border-border",
-  "On Hold": "bg-amber-500/10 text-amber-600 border-amber-400/20",
-};
-
-function Badge({ label, map }: { label: string; map: Record<string, string> }) {
-  const cls = map[label] ?? "bg-muted text-muted-foreground border-border";
+function StatusBadge({ status }: { status: keyof typeof ASSIGNMENT_STATUS_META }) {
+  const meta = ASSIGNMENT_STATUS_META[status] ?? ASSIGNMENT_STATUS_META.PENDING;
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}>
-      {label}
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-heading font-bold uppercase tracking-wide ${meta.className}`}>
+      {meta.label}
     </span>
-  );
-}
-
-function SectionHeader({
-  icon: Icon,
-  title,
-  sub,
-  action,
-  onAction,
-}: {
-  icon: React.ElementType;
-  title: string;
-  sub?: string;
-  action?: string;
-  onAction?: () => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2 mb-1">
-      <div className="flex items-center gap-2 min-w-0">
-        <Icon size={16} style={{ color: ACCENT }} className="shrink-0" />
-        <div className="min-w-0">
-          <p className="text-sm font-heading font-semibold text-foreground truncate">{title}</p>
-          {sub && <p className="text-[10px] text-muted-foreground truncate">{sub}</p>}
-        </div>
-      </div>
-      {action && onAction && (
-        <button onClick={onAction} className="text-[10px] text-primary hover:underline flex items-center gap-0.5 shrink-0">
-          {action} <ArrowUpRight size={10} />
-        </button>
-      )}
-    </div>
   );
 }
 
@@ -138,25 +122,151 @@ function EmptyState({ label }: { label: string }) {
   );
 }
 
-function StatusBreakdown({ data }: { data: { Status: string; Count: number }[] }) {
-  if (!data?.length) return <p className="text-xs text-muted-foreground py-2">No progress entries yet</p>;
-  const total = data.reduce((s, r) => s + r.Count, 0);
+// Status order carries no workflow meaning (any status can move to any
+// other — see migration 334) — this is display order only, roughly
+// "least" to "most" resolved, so the bars read left-to-right sensibly.
+const ASSIGNED_WORK_STATUS_ORDER: (keyof typeof ASSIGNMENT_STATUS_META)[] = [
+  "PENDING",
+  "IN_PROGRESS",
+  "HOLD",
+  "REWORK",
+  "CANCELLED",
+  "APPROVED",
+  "COMPLETED",
+];
+
+// Hex fills for the pie chart — same semantic mapping as ASSIGNMENT_STATUS_META's
+// Tailwind classes (recharts needs real color values, not class names).
+const STATUS_HEX: Record<string, string> = {
+  PENDING: "#64748b",
+  IN_PROGRESS: "#3b82f6",
+  HOLD: "#f59e0b",
+  REWORK: "#d946ef",
+  CANCELLED: "#ef4444",
+  APPROVED: "#14b8a6",
+  COMPLETED: "#10b981",
+};
+
+// ─── Donut / trend chart cards — same shape MaterialDashboard/FinanceDashboard
+// use, kept local since each dashboard's data shape differs. ─────────────────
+interface DonutPoint { name: string; value: number; color: string; }
+
+function DonutCard({
+  title, icon: Icon, accentColor, data, glassStyle, emptyLabel = "No data yet",
+}: {
+  title: string; icon: React.ElementType; accentColor: string; data: DonutPoint[];
+  glassStyle: React.CSSProperties; emptyLabel?: string;
+}) {
+  const total = data.reduce((s, d) => s + d.value, 0);
   return (
-    <div className="space-y-2 mt-3">
-      {data.map((row) => {
-        const pct = total > 0 ? Math.round((row.Count / total) * 100) : 0;
-        return (
-          <div key={row.Status}>
-            <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
-              <span>{row.Status}</span>
-              <span className="font-medium text-foreground">{row.Count}</span>
-            </div>
-            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: ACCENT }} />
+    <div className="rounded-xl overflow-hidden flex-1 flex flex-col" style={glassStyle}>
+      <div className="flex items-center gap-2 px-4 py-3 border-b shrink-0" style={{ borderColor: `${accentColor}26` }}>
+        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${accentColor}26` }}>
+          <Icon size={11} style={{ color: accentColor }} />
+        </div>
+        <span className="text-xs font-heading font-semibold text-foreground">{title}</span>
+      </div>
+      <div className="p-4 flex-1 flex flex-col justify-center min-h-[220px]">
+        {total === 0 ? (
+          <div className="text-center text-muted-foreground py-10 text-sm">{emptyLabel}</div>
+        ) : (
+          <div className="flex flex-col sm:flex-row items-center gap-4">
+            <ResponsiveContainer width="100%" height={180}>
+              <PieChart>
+                <Pie
+                  data={data} dataKey="value" nameKey="name" cx="50%" cy="50%"
+                  innerRadius={45} outerRadius={75} paddingAngle={2} strokeWidth={0}
+                  isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
+                >
+                  {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+                </Pie>
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0];
+                    return (
+                      <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-lg">
+                        <p className="text-xs font-heading font-semibold text-foreground">{d.name}</p>
+                        <p className="text-xs text-muted-foreground">{fmtNum(d.value as number)}</p>
+                      </div>
+                    );
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="space-y-2 w-full sm:w-auto shrink-0">
+              {data.map((d) => (
+                <div key={d.name} className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                  <span className="text-xs text-foreground whitespace-nowrap">{d.name}</span>
+                  <span className="text-xs text-muted-foreground ml-auto sm:ml-3">{fmtNum(d.value)}</span>
+                </div>
+              ))}
             </div>
           </div>
-        );
-      })}
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface TrendSeries { key: string; name: string; color: string; }
+
+function TrendCard({
+  title, icon: Icon, accentColor, data, series, isDark, glassStyle,
+}: {
+  title: string; icon: React.ElementType; accentColor: string;
+  data: { date: string; [key: string]: number | string }[]; series: TrendSeries[];
+  isDark: boolean; glassStyle: React.CSSProperties;
+}) {
+  const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
+  return (
+    <div className="rounded-xl overflow-hidden flex-1 flex flex-col" style={glassStyle}>
+      <div className="flex items-center gap-2 px-4 py-3 border-b shrink-0" style={{ borderColor: `${accentColor}26` }}>
+        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${accentColor}26` }}>
+          <Icon size={11} style={{ color: accentColor }} />
+        </div>
+        <span className="text-xs font-heading font-semibold text-foreground">{title}</span>
+      </div>
+      <div className="p-4 flex-1 flex flex-col justify-center min-h-[240px]">
+        {!hasData ? (
+          <div className="text-center text-muted-foreground py-10 text-sm">No activity in the last 14 days</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "rgba(148,163,184,0.12)" : "rgba(100,116,139,0.15)"} vertical={false} />
+              <XAxis
+                dataKey="date"
+                tickFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
+                axisLine={false} tickLine={false}
+                interval={Math.max(0, Math.floor(data.length / 6) - 1)}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
+                axisLine={false} tickLine={false} width={28}
+                allowDecimals={false}
+              />
+              <Tooltip
+                labelFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                formatter={(value: number, name: string) => [fmtNum(value), name]}
+                contentStyle={{
+                  background: isDark ? "rgba(15,17,26,0.95)" : "rgba(255,255,255,0.95)",
+                  border: `1px solid ${accentColor}30`, borderRadius: 8, fontSize: 12,
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
+              {series.map((s) => (
+                <Line
+                  key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color}
+                  strokeWidth={2} dot={false} activeDot={{ r: 4 }}
+                  isAnimationActive animationDuration={1100} animationEasing="ease-in-out"
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
     </div>
   );
 }
@@ -195,6 +305,15 @@ export default function CivilWorkDprDashboard() {
   });
 
   const data = rawData ?? EMPTY_DATA;
+  const assignedWorkCounts: Record<string, number> = {
+    PENDING: data.assignedWork.pendingCount,
+    IN_PROGRESS: data.assignedWork.inProgressCount,
+    HOLD: data.assignedWork.holdCount,
+    REWORK: data.assignedWork.reworkCount,
+    CANCELLED: data.assignedWork.cancelledCount,
+    APPROVED: data.assignedWork.approvedCount,
+    COMPLETED: data.assignedWork.completedCount,
+  };
 
   const tableGlass = {
     background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
@@ -211,7 +330,7 @@ export default function CivilWorkDprDashboard() {
       <Breadcrumbs items={["Dashboard", "Civil Work DPR"]} />
       <GlassShell
         title="Civil Work DPR"
-        subtitle="Activities, contractor allocations, and daily progress at a glance"
+        subtitle="Activities, contractor allocations, and Work Reporting assignments at a glance"
         icon={Pickaxe}
         accentColor={ACCENT}
         secondaryColor={SECONDARY}
@@ -229,7 +348,7 @@ export default function CivilWorkDprDashboard() {
       >
         {/* KPI Cards */}
         <GlassSection title="Overview" icon={ClipboardList} accentColor={ACCENT}>
-          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <GlassCard
               label="Active Activities"
               value={fmtNum(data.activities.activeCount)}
@@ -247,27 +366,27 @@ export default function CivilWorkDprDashboard() {
               onClick={() => navigate("/civilworkdpr/contractor-register")}
             />
             <GlassCard
-              label="Pending Review"
-              value={fmtNum(data.progress.pendingReviewCount)}
-              sub="Awaiting engineer sign-off"
-              icon={Clock}
-              accentColor="#f59e0b"
-              onClick={() => navigate("/civilworkdpr/dependency")}
-            />
-            <GlassCard
               label="Labour on Site Today"
               value={fmtNum(data.labour.totalToday)}
               sub={`${data.labour.skilledToday} skilled · ${data.labour.unskilledToday} unskilled`}
               icon={Users2}
               accentColor={SECONDARY}
-              onClick={() => navigate("/civilworkdpr/contractor-register")}
+              onClick={() => navigate("/civilworkdpr/worker-attendance")}
+            />
+            <GlassCard
+              label="Assigned Work"
+              value={fmtNum(data.assignedWork.totalCount)}
+              sub={`${data.assignedWork.pendingCount} pending · ${data.assignedWork.completedCount} completed`}
+              icon={ListChecks}
+              accentColor="#8b5cf6"
+              onClick={() => navigate("/civilworkdpr/activity-reporting")}
             />
           </div>
         </GlassSection>
 
         {/* Secondary metric strip */}
         <GlassSection title="Today" icon={Sparkles} accentColor={ACCENT}>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <GlassCard
               label="New Allocations Today"
               value={fmtNum(data.allocations.todayCount)}
@@ -281,26 +400,25 @@ export default function CivilWorkDprDashboard() {
               accentColor="#f59e0b"
             />
             <GlassCard
-              label="Progress Logged Today"
-              value={fmtNum(data.progress.todayCount)}
-              icon={GitBranch}
-              accentColor="#3b82f6"
-            />
-            <GlassCard
-              label="Approved Entries"
-              value={fmtNum(data.progress.approvedCount)}
-              icon={CheckCircle2}
-              accentColor="#10b981"
+              label="Activities Assigned Today"
+              value={fmtNum(data.assignedWork.todayCount)}
+              icon={ListChecks}
+              accentColor="#8b5cf6"
             />
           </div>
         </GlassSection>
 
         {/* Recent activity + status breakdown */}
-        <GlassSection title="Recent Activity" icon={ClipboardList} accentColor={ACCENT}>
+        <GlassSection title="Work Reporting" icon={Hammer} accentColor={ACCENT}>
+          {/* Equal-height columns: the grid stretches both cells to the
+              tallest one, and each column is itself a flex column so its
+              content actually fills that height (a scrollable list on the
+              left, two flex-1 charts on the right) instead of leaving a
+              dead gap under shorter content. */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-xl overflow-hidden" style={tableGlass}>
+            <div className="rounded-xl overflow-hidden flex flex-col" style={tableGlass}>
               <div
-                className="flex items-center justify-between px-4 py-3 border-b"
+                className="flex items-center justify-between px-4 py-3 border-b shrink-0"
                 style={{ borderColor: `${ACCENT}26` }}
               >
                 <div className="flex items-center gap-2">
@@ -311,34 +429,33 @@ export default function CivilWorkDprDashboard() {
                     <ClipboardList size={11} style={{ color: ACCENT }} />
                   </div>
                   <span className="text-xs font-heading font-semibold text-foreground">
-                    Recent Progress
+                    Recent Assignments
                   </span>
                 </div>
                 <button
-                  onClick={() => navigate("/civilworkdpr/dependency")}
+                  onClick={() => navigate("/civilworkdpr/activity-reporting")}
                   className="text-[10px] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: ACCENT }}
                 >
                   View all →
                 </button>
               </div>
-              {!data.recentProgress.length ? (
-                <EmptyState label="No progress logged yet" />
+              {!data.recentAssignments.length ? (
+                <EmptyState label="No activities assigned yet — click an activity in Work Reporting's Link Dependency chain to assign one" />
               ) : (
-                <div className="divide-y divide-border">
-                  {data.recentProgress.map((p) => (
-                    <div key={p.Id} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div className="divide-y divide-border flex-1 overflow-y-auto flex flex-col justify-between">
+                  {data.recentAssignments.map((a) => (
+                    <div key={a.Id} className="flex items-center justify-between gap-3 px-4 py-4">
                       <div className="min-w-0">
                         <p className="text-xs font-medium text-foreground truncate max-w-[160px] sm:max-w-[220px]">
-                          {p.ActivityName || "—"} · {p.ContractorName || "—"}
+                          {a.ActivityName || "—"} · {a.ChainAlias || "—"}
                         </p>
                         <p className="text-[10px] text-muted-foreground truncate">
-                          {p.ProjectName || "—"} · {p.PercentageProgress}% · {timeAgo(p.CreatedAt)}
+                          {a.ProjectName || "—"} · {a.EngineerNames || "Unassigned"} · {timeAgo(a.UpdatedAt)}
                         </p>
                       </div>
-                      <div className="flex flex-col items-end gap-1 shrink-0">
-                        <Badge label={p.CurrentStatus || "Not Started"} map={statusColors} />
-                        <Badge label={p.ReviewStatus} map={reviewColors} />
+                      <div className="shrink-0">
+                        <StatusBadge status={a.Status} />
                       </div>
                     </div>
                   ))}
@@ -346,9 +463,31 @@ export default function CivilWorkDprDashboard() {
               )}
             </div>
 
-            <div className="rounded-xl overflow-hidden p-5" style={tableGlass}>
-              <SectionHeader icon={BarChart3} title="Progress Status Breakdown" />
-              <StatusBreakdown data={data.statusBreakdown} />
+            <div className="flex flex-col gap-4">
+              <DonutCard
+                title="Assignment Status Breakdown"
+                icon={PieChartIcon}
+                accentColor="#8b5cf6"
+                glassStyle={tableGlass}
+                emptyLabel="No activities assigned yet"
+                data={ASSIGNED_WORK_STATUS_ORDER.map((status) => ({
+                  name: ASSIGNMENT_STATUS_META[status].label,
+                  value: assignedWorkCounts[status],
+                  color: STATUS_HEX[status],
+                })).filter((d) => d.value > 0)}
+              />
+              <TrendCard
+                title="Assignment Activity — Last 14 Days"
+                icon={TrendingUp}
+                accentColor={ACCENT}
+                isDark={isDark}
+                glassStyle={tableGlass}
+                data={data.assignmentTimeline}
+                series={[
+                  { key: "assigned", name: "Assigned", color: "#8b5cf6" },
+                  { key: "completed", name: "Completed", color: "#10b981" },
+                ]}
+              />
             </div>
           </div>
         </GlassSection>
@@ -357,9 +496,12 @@ export default function CivilWorkDprDashboard() {
         <GlassSection title="Quick Actions" icon={Pickaxe} accentColor={ACCENT}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[
+              { label: "Work Reporting", icon: Hammer, path: "/civilworkdpr/work-reporting", color: "#8b5cf6" },
+              { label: "Reporting", icon: FileText, path: "/civilworkdpr/activity-reporting", color: "#10b981" },
               { label: "Activity Master", icon: ClipboardList, path: "/masters/activity", color: "#f97316" },
               { label: "Dependency", icon: GitBranch, path: "/civilworkdpr/dependency", color: ACCENT },
               { label: "Contractor Register", icon: HardHat, path: "/civilworkdpr/contractor-register", color: "#3b82f6" },
+              { label: "Attendance", icon: Users2, path: "/civilworkdpr/worker-attendance", color: "#eab308" },
             ].map(({ label, icon: Icon, path, color }) => (
               <button
                 key={label}

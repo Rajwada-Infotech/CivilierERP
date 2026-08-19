@@ -3,6 +3,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -96,6 +98,7 @@ function toNumber(value: unknown): number {
 }
 
 const SaCampaignMaster: React.FC = () => {
+  usePageRights("sa-campaigns");
   const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
 
@@ -179,6 +182,7 @@ const SaCampaignMaster: React.FC = () => {
 
   return (
     <SalesAutoShell title="Campaign Master" subtitle="Manage marketing campaigns across all social media platforms">
+      <Breadcrumbs items={["Sales Automation", "Campaign Master"]} />
       <div className="space-y-8">
         <MasterPage
           title="Campaign"

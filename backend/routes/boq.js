@@ -181,13 +181,19 @@ const syncBoqActivities = async (
 // ── GET /  (List with Pagination) ────────────────────────────────────────────
 router.get("/", cache("boq", 300), async (req, res) => {
   try {
+    const companyId = parseInt(req.query.companyId, 10) || null;
+    if (!companyId) {
+      return res.status(400).json({ error: "companyId is required" });
+    }
+
     const pool = getPool();
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
     const search = (req.query.search || "").toString().trim();
     const status = (req.query.status || "").toString().trim();
-    const where = [];
+    // Always scope to the requested company — no cross-company list allowed
+    const where = ["b.CompanyId = @companyId"];
 
     if (search) {
       where.push(`(
@@ -203,8 +209,9 @@ router.get("/", cache("boq", 300), async (req, res) => {
       where.push("b.Status = @status");
     }
 
-    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const whereSql = `WHERE ${where.join(" AND ")}`;
     const bindFilters = (request) => {
+      request.input("companyId", sql.Int, companyId);
       if (search) request.input("search", sql.NVarChar(100), `%${search}%`);
       if (status && status !== "All") {
         request.input("status", sql.NVarChar(50), status);

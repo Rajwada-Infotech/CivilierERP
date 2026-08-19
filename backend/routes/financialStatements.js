@@ -89,6 +89,7 @@ router.get("/balance-sheet", async (req, res) => {
         SELECT
           ahm.LHeadId AS id,
           ahm.LHeadName AS name,
+          ahm.LHeadCode AS code,
           ahm.LHeadType AS [type],
           ahm.LBelongsTo AS groupId,
           ISNULL((
@@ -135,7 +136,7 @@ router.get("/balance-sheet", async (req, res) => {
           ISNULL(SUM(gle.CreditAmount), 0) AS credit
         FROM dbo.AccountHeadMaster ahm
         JOIN dbo.GeneralLedgerEntry gle ON gle.LHeadId = ahm.LHeadId
-        WHERE ahm.LBelongsTo IS NOT NULL AND gle.IsReversed = 0
+        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1 AND gle.IsReversed = 0
           AND gle.VoucherDate < @fyStart
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
@@ -156,7 +157,7 @@ router.get("/balance-sheet", async (req, res) => {
           ISNULL(SUM(gle.CreditAmount), 0) AS credit
         FROM dbo.AccountHeadMaster ahm
         JOIN dbo.GeneralLedgerEntry gle ON gle.LHeadId = ahm.LHeadId
-        WHERE ahm.LBelongsTo IS NOT NULL AND gle.IsReversed = 0
+        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1 AND gle.IsReversed = 0
           AND gle.VoucherDate >= @fyStart AND gle.VoucherDate <= @asOf
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
@@ -202,9 +203,9 @@ router.get("/balance-sheet", async (req, res) => {
       let groupName = grp ? grp.name : `Group-${gid}`;
       let root = rootOf(groupMap, gid);
 
-      // If it's the Income Summary system head used for Year-End Close, capture 
+      // If it's the Income Summary system head used for Year-End Close, capture
       // its balance to offset the synthetic P&L prior years calculation, and skip rendering.
-      if (h.name === "Income Summary") {
+      if (h.code === "INCOME-SUMMARY") {
         // As a liability head, a debit balance (net > 0) means it was debited 
         // to transfer profit TO Retained Earnings. So its true liability balance is -net.
         incomeSummaryBalance = -net;
@@ -428,7 +429,7 @@ router.get("/profit-loss", async (req, res) => {
           ISNULL(SUM(gle.CreditAmount), 0) AS credit
         FROM dbo.AccountHeadMaster ahm
         JOIN dbo.GeneralLedgerEntry gle ON gle.LHeadId = ahm.LHeadId
-        WHERE ahm.LBelongsTo IS NOT NULL AND gle.IsReversed = 0
+        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1 AND gle.IsReversed = 0
           AND gle.VoucherDate BETWEEN @from AND @to
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
@@ -497,7 +498,9 @@ router.get("/profit-loss", async (req, res) => {
             taxExpense.total = Math.round((taxExpense.total + net) * 100) / 100;
           } else {
             const section = expenseSections.find((s) => s.groupIds.includes(bucket));
-            const target = section || expenseSections[expenseSections.length - 1];
+            // Unmatched groups fall to "Other Expenses" (not "Extraordinary Items")
+            const fallback = expenseSections.find((s) => s.key === "otherExpenses");
+            const target = section || fallback || expenseSections[expenseSections.length - 1];
             target.heads.push({ id: h.id, name: h.name, amount: net });
             target.total = Math.round((target.total + net) * 100) / 100;
           }

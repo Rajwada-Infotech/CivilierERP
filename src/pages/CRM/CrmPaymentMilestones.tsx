@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -88,7 +90,7 @@ const CrmPaymentMilestones: React.FC = () => {
   const [applyingId, setApplyingId] = useState<number | null>(null);
 
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings-dropdown"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
-  const { data: milestoneData, isLoading } = useQuery({
+  const { data: milestoneData, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-milestones", selectedBookingId],
     queryFn: () => fetchMilestones(selectedBookingId),
     enabled: !!selectedBookingId,
@@ -183,7 +185,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     }
   };
 
@@ -221,7 +223,7 @@ const CrmPaymentMilestones: React.FC = () => {
       setEditingId(null);
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -238,7 +240,7 @@ const CrmPaymentMilestones: React.FC = () => {
       toast.success(data.changed ? "Payment schedule resynced to the booking amount" : "Already up to date");
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setResyncing(false);
     }
@@ -265,7 +267,7 @@ const CrmPaymentMilestones: React.FC = () => {
       setAddForm({ MilestoneName: "", DueDate: "", AmountDue: "", ResponsibleDepartment: "", RequiredDocuments: "" });
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -298,7 +300,7 @@ const CrmPaymentMilestones: React.FC = () => {
       setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -324,7 +326,7 @@ const CrmPaymentMilestones: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
       qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setApplyingId(null);
     }
@@ -427,9 +429,10 @@ const CrmPaymentMilestones: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — Payment Milestones"
       subtitle="Milestone-wise payment tracking for bookings"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
     >
       {/* Booking selector */}
       <div className="flex gap-3 items-end flex-wrap">
@@ -810,7 +813,7 @@ const CrmPaymentMilestones: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

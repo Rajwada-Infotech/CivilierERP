@@ -2,7 +2,9 @@ import React, { useEffect, useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Landmark, Search, Pencil, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -47,7 +49,7 @@ const CrmLoanTracking: React.FC = () => {
   const [locked, setLocked] = useState(false);
   const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
-  const { data: bookings = [], isLoading } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 60_000 });
+  const { data: bookings = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 30_000 });
 
   // Fetch loan details for all bookings in parallel (small dataset expected)
   const { data: loanMap = {} } = useQuery({
@@ -108,7 +110,7 @@ const CrmLoanTracking: React.FC = () => {
       setLocked(false);
       qc.invalidateQueries({ queryKey: ["crm-loans"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -149,7 +151,8 @@ const CrmLoanTracking: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell title="CRM — Home Loan Tracking" subtitle="Bank coordination and loan disbursement status per booking">
+    <CrmShell title="CRM — Home Loan Tracking" subtitle="Bank coordination and loan disbursement status per booking"
+      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       <div className="relative max-w-md">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
         <input value={search} onChange={(e) => setSearch(e.target.value)}
@@ -250,7 +253,7 @@ const CrmLoanTracking: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

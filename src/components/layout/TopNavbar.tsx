@@ -48,6 +48,7 @@ import {
   Percent,
   GitBranch,
   XCircle,
+  ClipboardCheck,
 } from "lucide-react";
 import {
   Crown,
@@ -387,6 +388,27 @@ const civilWorkDprSetupItems = [
     path: "/masters/activity",
     color: "text-cyan-500",
     pageKey: "activity-master",
+  },
+  {
+    icon: LayoutGrid,
+    label: "Room Composition",
+    path: "/civilworkdpr/room-composition",
+    color: "text-cyan-500",
+    pageKey: "room-composition-builder",
+  },
+  {
+    icon: Tag,
+    label: "Room Categories",
+    path: "/civilworkdpr/room-category-master",
+    color: "text-cyan-500",
+    pageKey: "room-category-master",
+  },
+  {
+    icon: ClipboardCheck,
+    label: "Work Checkpoints",
+    path: "/civilworkdpr/work-checkpoint-master",
+    color: "text-cyan-500",
+    pageKey: "work-checkpoint-master",
   },
 ];
 

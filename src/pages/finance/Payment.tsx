@@ -1008,9 +1008,14 @@ const Payment: React.FC = () => {
   const [loanLumpSumAmount, setLoanLumpSumAmount] = useState("");
   const [loanLateFee, setLoanLateFee] = useState("");
   const [loanPaymentNotes, setLoanPaymentNotes] = useState("");
+  // Loan EMIs are only "payable" from the company that's actually the
+  // lender or borrower on that loan — same company the rest of this form
+  // is being booked under (form.company), not the FilterBar's list filter.
+  const loanEmiCompanyId = companyOptions.find((c) => c.label === form.company)?.id;
   const { data: loanEmiOptions = [], isLoading: loanEmisLoading } = useQuery<PayableEmi[]>({
-    queryKey: ["payment-loan-emis"],
-    queryFn: getPayableEmis,
+    queryKey: ["payment-loan-emis", loanEmiCompanyId],
+    queryFn: () => getPayableEmis(loanEmiCompanyId!),
+    enabled: !!loanEmiCompanyId,
     staleTime: 60_000,
   });
   // Every other pending EMI on the same loan — lets the modal offer "pay
@@ -1995,26 +2000,37 @@ const Payment: React.FC = () => {
         await updatePayment(editingId, payload);
         toast.success("Payment updated.");
       } else {
-        await addPayment(payload);
+        const newPaymentRes = await addPayment(payload);
         // A Loan EMI payment isn't just a NewPayment record — it also has to
         // actually settle the EMI on the loan itself (mark it paid, run the
         // payoff/early-closure check, generate the payment ref). That's what
         // the loan-sanction backend's own /pay endpoint does; this triggers
-        // it right after the payment record is created.
+        // it right after the payment record is created. Passing this
+        // payment's own id through (see migration 340) is what lets the
+        // loan's Repayment History later show the real cheque/mode/bank it
+        // was actually paid with, instead of nothing.
         if (selectedLoanEmi) {
           try {
             const res = await payLoan(selectedLoanEmi.LoanId, {
+              newPaymentId: newPaymentRes?.PPaymentID,
               emiIds: loanPayMode === "emis" ? selectedLoanEmiIds : undefined,
               lumpSumAmount: loanPayMode === "lumpsum" ? loanLumpSumAmount : undefined,
               paymentDate: form.date,
               lateFee: loanLateFee || undefined,
               notes: loanPaymentNotes || `Paid via Payment — ${form.paymentName}`,
             });
+            // loanClosed is always false now — closure is a deliberate step
+            // from Loan Sanction. readyToClose tells us all EMIs are now paid
+            // so we can guide the user to close it from the Loan Sanction page.
             toast.success(
-              res.loanClosed
-                ? `Loan ${selectedLoanEmi.LoanNo} fully repaid and closed. Ref: ${res.paymentRef}`
+              res.readyToClose
+                ? `All installments settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef} — go to Loan Sanction to formally close it.`
                 : `Loan payment settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef}`,
+              { duration: res.readyToClose ? 8000 : 4000 },
             );
+            if (res.glPostingWarning) {
+              toast.warning(`⚠️ GL posting skipped: ${res.glPostingWarning}`, { duration: 8000 });
+            }
             queryClient.invalidateQueries({ queryKey: ["payment-loan-emis"] });
             queryClient.invalidateQueries({ queryKey: ["loan-sanctions"] });
           } catch (loanErr: any) {
@@ -2347,6 +2363,7 @@ const Payment: React.FC = () => {
                           onContractClear={clearContractLink}
                           loanEmis={loanEmiOptions}
                           loanEmisLoading={loanEmisLoading}
+                          loanEmisNoCompany={!loanEmiCompanyId}
                           selectedLoanEmi={selectedLoanEmi}
                           onLoanEmiSelect={handleLoanEmiSelect}
                           onLoanEmiClear={clearLoanEmiLink}

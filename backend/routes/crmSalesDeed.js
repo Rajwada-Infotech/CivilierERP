@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -13,7 +13,7 @@ const { emitNotification } = require("../services/notify");
 const { postCrmSalesDeedStatutoryToGL } = require("../services/crmLedger");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 const DEED_SELECT = `
   SELECT d.*, b.BookingNo, b.UnitNo, b.TotalValue AS BookingValue, b.Status AS BookingStatus, a.ApplicantName, a.Mobile
@@ -346,6 +346,11 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
         .query("SELECT Status FROM dbo.CrmRegistry WHERE BookingId = @bid");
       if (!registry.recordset.length || registry.recordset[0].Status !== "Completed") {
         return res.status(400).json({ error: "Registration number can't be recorded until Registry is marked Completed (Query Payment must be Confirmed first)" });
+      }
+      const dirCheck = await pool.request().input("id", sql.Int, id)
+        .query("SELECT DirectorApprovalStatus FROM dbo.CrmSalesDeed WHERE Id = @id");
+      if (dirCheck.recordset[0]?.DirectorApprovalStatus !== "Approved") {
+        return res.status(400).json({ error: "Director must approve the sales deed before the registration number can be recorded" });
       }
     }
 

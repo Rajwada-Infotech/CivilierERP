@@ -52,6 +52,7 @@ const UNIFIED_CHEQUES_CTE = `
       np.PPaymentID              AS SourceID,
       'PAYMENT'                  AS SourceType,
       'Payable'                  AS Direction,
+      np.PCompanyId               AS CompanyId,
       np.PPartyId                AS PartyID,
       np.PPaymentName            AS PartyName,
       np.PBankID                 AS BankID,
@@ -86,6 +87,7 @@ const UNIFIED_CHEQUES_CTE = `
       rp.RPPaymentID              AS SourceID,
       'RECEIVED'                  AS SourceType,
       'Receivable'                 AS Direction,
+      rp.RPCompanyId               AS CompanyId,
       CAST(NULL AS INT)            AS PartyID,
       ISNULL(rp.RPCustomerName, rp.RPReceivedFrom) AS PartyName,
       rp.RPDepositBankId           AS BankID,
@@ -109,7 +111,7 @@ const UNIFIED_CHEQUES_CTE = `
     LEFT JOIN BankReconciliation brc2
       ON  brc2.SourceType = 'RECEIVED'
       AND brc2.SourceID   = rp.RPPaymentID
-    WHERE rp.RPMode = 'Check'
+    WHERE rp.RPMode IN ('Check', 'Cheque', 'Post-Dated Cheque')
       AND rp.RPCheckNumber IS NOT NULL
       AND ISNULL(rp.RPStatus, 'Draft') NOT IN ('Draft', 'Rejected')
   )
@@ -161,9 +163,10 @@ router.get("/", cache("pdc-report", 60), async (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 500);
     const offset = (page - 1) * limit;
-    const { direction, status, bankId, partyId, projectId, from, to } = req.query;
+    const { direction, status, bankId, partyId, projectId, from, to, companyId } = req.query;
 
     const conditions = ["1=1"];
+    if (companyId) conditions.push("u.CompanyId = @companyId");
     if (direction) conditions.push("u.Direction = @direction");
     if (bankId) conditions.push("u.BankID = @bankId");
     if (partyId) conditions.push("u.PartyID = @partyId");
@@ -178,6 +181,7 @@ router.get("/", cache("pdc-report", 60), async (req, res) => {
 
     const where = "WHERE " + conditions.join(" AND ");
     const bind = (r) => {
+      if (companyId) r.input("companyId", sql.Int, parseInt(companyId, 10));
       if (direction) r.input("direction", sql.NVarChar(20), direction);
       if (bankId) r.input("bankId", sql.Int, parseInt(bankId, 10));
       if (partyId) r.input("partyId", sql.Int, parseInt(partyId, 10));

@@ -173,6 +173,14 @@ const MODULE_META: Record<
     label: "Engineering",
     route: MODULE_DASHBOARD_ROUTES.engineering,
   },
+  civilworkdpr: {
+    h: 192,
+    s: 91,
+    l: 36,
+    icon: Chart21,
+    label: "Civil Work DPR",
+    route: MODULE_DASHBOARD_ROUTES.civilworkdpr,
+  },
   ticket: {
     h: 330,
     s: 80,
@@ -188,14 +196,6 @@ const MODULE_META: Record<
     icon: Archive,
     label: "Records",
     route: MODULE_DASHBOARD_ROUTES.records,
-  },
-  civilworkdpr: {
-    h: 192,
-    s: 91,
-    l: 36,
-    icon: Chart21,
-    label: "Civil Work DPR",
-    route: MODULE_DASHBOARD_ROUTES.civilworkdpr,
   },
   "sales-automation": {
     h: 330,

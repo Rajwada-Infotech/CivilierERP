@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CrmShell } from "@/components/crm/CrmShell";
+import { translateError } from "@/lib/translateError";
+import { RefreshButton } from "@/components/ui/RefreshButton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
 import { formatINR } from "@/utils/formatCurrency";
@@ -90,7 +92,7 @@ const CrmNoc: React.FC = () => {
   // bank genuinely differs from the customer's personal on-file bank).
   const [bankFieldsLocked, setBankFieldsLocked] = useState(true);
 
-  const { data: nocs = [], isLoading } = useQuery({ queryKey: ["crm-noc"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: nocs = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-noc"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: context, isFetching: contextLoading } = useQuery({
     queryKey: ["crm-noc-context", form.BookingId],
@@ -149,8 +151,9 @@ const CrmNoc: React.FC = () => {
       setDialogOpen(false);
       setForm({ ...EMPTY_FORM });
       qc.invalidateQueries({ queryKey: ["crm-noc"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -173,8 +176,10 @@ const CrmNoc: React.FC = () => {
       }
 
       qc.invalidateQueries({ queryKey: ["crm-noc"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setMarkingIssued(false);
     }
@@ -211,14 +216,17 @@ const CrmNoc: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell
+    <CrmShell
       title="CRM — NOC (Organisation & Bank)"
       subtitle="No-objection certificates and bank loan sanction/disbursement tracking"
       action={
-        <button onClick={() => setDialogOpen(true)}
+          <div className="flex items-center gap-3">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <button onClick={() => setDialogOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> Request NOC
         </button>
+        </div>
       }
     >
       <DataTable
@@ -387,7 +395,7 @@ const CrmNoc: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
-    </SalesAutoShell>
+    </CrmShell>
   );
 };
 

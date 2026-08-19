@@ -58,7 +58,7 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
     const pool = getPool();
     const mobile = req.params.mobile.trim();
 
-    const [customer, leads, apps, bookings, calls, tickets] = await Promise.all([
+    const [customer, leads, apps, bookings, calls, tickets, cancellations] = await Promise.all([
       pool.request().input("mob", sql.NVarChar(20), mobile).query(`
         SELECT TOP 1 Id, CustomerNo, CustomerName, Mobile, AltMobile, Email, PanNo, Address, City, State, Pincode
         FROM dbo.CrmCustomer WHERE Mobile = @mob OR AltMobile = @mob
@@ -90,12 +90,6 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
                (SELECT COUNT(*) FROM dbo.CrmNoc n WHERE n.BookingId = b.Id) AS NocTotalCount,
                (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalPaid,
                (SELECT ISNULL(SUM(AmountDue),0)  FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalDue,
-               -- Same formula crmCustomers.js's Customer Master detail view uses (the
-               -- one place this was originally computed correctly) — Waived milestones
-               -- don't count as still-owed, and a Cancelled/Rejected booking's balance
-               -- isn't real collectible debt. TotalPaid/TotalDue above are kept as raw
-               -- sums for reference; the frontend should use this for "what do they
-               -- still owe", not (TotalDue - TotalPaid).
                CASE WHEN b.Status IN ('Cancelled', 'Rejected') THEN 0 ELSE
                  (SELECT ISNULL(SUM(CASE WHEN m2.Status NOT IN ('Paid', 'Waived') THEN m2.AmountDue - ISNULL(m2.AmountPaid, 0) ELSE 0 END), 0)
                   FROM dbo.CrmPaymentMilestone m2 WHERE m2.BookingId = b.Id)
@@ -124,6 +118,14 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         WHERE a.Mobile = @mob OR a.AltMobile = @mob
         ORDER BY t.CreatedAt DESC
+      `),
+      pool.request().input("mob", sql.NVarChar(20), mobile).query(`
+        SELECT c.Id, c.Status, c.RefundAmount, c.CreatedAt
+        FROM dbo.CrmCancellation c
+        JOIN dbo.CrmBooking b ON b.Id = c.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE a.Mobile = @mob OR a.AltMobile = @mob
+        ORDER BY c.CreatedAt DESC
       `),
     ]);
 
@@ -224,6 +226,7 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
       bookings: enrichedBookings,
       calls: calls.recordset,
       serviceTickets: tickets.recordset,
+      cancellations: cancellations.recordset,
     });
   } catch (e) {
     console.error("[crm-customer-360] GET error:", e.message);

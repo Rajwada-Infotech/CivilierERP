@@ -572,6 +572,10 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
             BrokerId: a.BrokerId, BrokerageRatePercent: a.BrokerageRatePercent, BrokeragePaymentPlan: a.BrokeragePaymentPlan,
           }, actor);
           booking = { id: created.id, BookingNo: created.BookingNo };
+          // Sync SA Lead to Booked now that a Booking exists
+          await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id)
+            .query(`UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = 'Booked', UpdatedAt = SYSDATETIME()
+                    WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @aid)`);
         } catch (bkErr) {
           console.error("[crm-applications] auto-create-booking on submit failed:", bkErr.message);
           bookingError = bkErr.message;
