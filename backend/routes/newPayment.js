@@ -916,6 +916,13 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     }
 
     await bumpCacheVersion("new-payment");
+    // Cheque-mode payments (Post-Dated Cheque especially) feed the PDC
+    // report/reminder bell — without this a freshly-created PDC wouldn't
+    // show there for up to the report's own 60s cache TTL.
+    if (PMode === "Cheque" || PMode === "Post-Dated Cheque") {
+      await bumpCacheVersion("pdc-report");
+      await bumpCacheVersion("pdc-due-count");
+    }
     res.status(201).json({
       message: "Payment added successfully",
       PPaymentID: newId,
@@ -982,6 +989,15 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const pool = getPool();
     const beforeSnapshot = await snapshotRow(pool, "dbo.NewPayment", "PPaymentID", id);
     const wasApproved = beforeSnapshot?.Status === "Approved";
+
+    // A cancelled payment's GL posting was already reversed and the invoice
+    // recomputed on that assumption (see routes/chequeCancellation.js) —
+    // editing it back to life (e.g. changing PAmount) would silently
+    // desync both without redoing either, so it's a hard stop, not just a
+    // hidden Edit button on the frontend.
+    if (beforeSnapshot?.Status === "Cancelled") {
+      return res.status(400).json({ error: "This payment's cheque was cancelled and cannot be edited." });
+    }
 
     const expenseHeadAllocationsPut = normalizeAllocations(EExpenseHeadAllocations);
     if (expenseHeadAllocationsPut.length > 0) {
@@ -1133,6 +1149,10 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       await _syncBillStatus(pool,updatedRef.recordset[0].PExpenseRef);
     }
     await bumpCacheVersion("new-payment");
+    if (PMode === "Cheque" || PMode === "Post-Dated Cheque") {
+      await bumpCacheVersion("pdc-report");
+      await bumpCacheVersion("pdc-due-count");
+    }
 
     if (wasApproved && beforeSnapshot) {
       try {

@@ -8,6 +8,7 @@ import {
   Boxes, CheckCircle2, Layers,
 } from "lucide-react";
 import { GlassShell } from "@/components/dashboard/GlassShell";
+import { MaterialGlassCard } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -45,21 +46,6 @@ const emptyForm = (): DepreciationPayload => ({
 const inputCls  = "w-full h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow";
 const filterCls = "h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 shrink-0";
 const labelCls  = "block text-xs font-medium text-muted-foreground mb-1";
-
-function StatCard({ icon: Icon, label, value, sub, accent }: { icon: React.ElementType; label: string; value: string; sub?: string; accent: string }) {
-  return (
-    <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
-      <span className={`inline-flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${accent}`}>
-        <Icon size={18} />
-      </span>
-      <div className="min-w-0">
-        <p className="text-xs text-muted-foreground truncate">{label}</p>
-        <p className="text-lg font-bold tabular-nums leading-tight truncate">{value}</p>
-        {sub && <p className="text-[11px] text-muted-foreground truncate">{sub}</p>}
-      </div>
-    </div>
-  );
-}
 
 function CategoryBadge({ category }: { category: string }) {
   const Icon = CATEGORY_ICONS[category] || Package;
@@ -171,16 +157,37 @@ export default function DepreciationSetupPage() {
         )
       }
     >
-      {/* ── stat strip ── */}
+      {/* ── stat strip — same MaterialGlassCard language as the rest of the
+          Material module (see Fixed Asset Record, IssueReturn). ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        <StatCard icon={Boxes} label="Configured Rates" value={String(stats.total)}
-          sub={`${stats.categoriesCovered} of ${ASSET_CATEGORIES.length} categories`} accent="bg-violet-500/10 text-violet-600 dark:text-violet-400" />
-        <StatCard icon={CheckCircle2} label="Active Rates" value={String(stats.active)}
-          sub={`${stats.total - stats.active} inactive`} accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" />
-        <StatCard icon={Percent} label="Average Rate" value={`${stats.avgRate.toFixed(1)}%`}
-          sub="across active rates" accent="bg-blue-500/10 text-blue-600 dark:text-blue-400" />
-        <StatCard icon={Layers} label="Categories Covered" value={String(stats.categoriesCovered)}
-          sub={`of ${ASSET_CATEGORIES.length} total`} accent="bg-amber-500/10 text-amber-600 dark:text-amber-400" />
+        <MaterialGlassCard
+          label="Configured Rates"
+          value={stats.total}
+          sub={`${stats.categoriesCovered} of ${ASSET_CATEGORIES.length} categories`}
+          icon={Boxes}
+          accentColor="#8b5cf6"
+        />
+        <MaterialGlassCard
+          label="Active Rates"
+          value={stats.active}
+          sub={`${stats.total - stats.active} inactive`}
+          icon={CheckCircle2}
+          accentColor="#22c55e"
+        />
+        <MaterialGlassCard
+          label="Average Rate"
+          value={`${stats.avgRate.toFixed(1)}%`}
+          sub="across active rates"
+          icon={Percent}
+          accentColor="#3b82f6"
+        />
+        <MaterialGlassCard
+          label="Categories Covered"
+          value={stats.categoriesCovered}
+          sub={`of ${ASSET_CATEGORIES.length} total`}
+          icon={Layers}
+          accentColor="#f59e0b"
+        />
       </div>
 
       {/* ── filters ── */}

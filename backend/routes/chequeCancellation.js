@@ -20,6 +20,8 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { reversePostingBySource } = require("../services/generalLedger");
+const { syncBillStatus } = require("../utils/syncBillStatus");
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email || req.user?.name;
@@ -180,13 +182,21 @@ async function cancelOne(pool, { paymentId, chequeLotId, chequeNo, reason, userE
 }
 
 // The original path — a cheque that was actually issued against a payment.
+//
+// Cancelling here is treated as cancelling the *payment* the cheque backs
+// (not just detaching the cheque instrument from an otherwise-still-Approved
+// payment) — Status flips to 'Cancelled', its GL posting is reversed, and
+// the source invoice's outstanding amount is recomputed so it becomes
+// payable again. This mirrors syncBillStatus/the invoice-eligibility query
+// already excluding anything with Status <> 'Approved', so no changes were
+// needed there — flipping Status is what makes this payment stop counting.
 async function cancelPaymentCheque(pool, { paymentId, chequeNo, reason, userEmail }) {
   const payRes = await pool
     .request()
     .input("PPaymentID", sql.Int, paymentId)
     .query(`
       SELECT np.PPaymentID, np.PChequeNo, np.PChequeLotId, np.PChequeLotNumber,
-             np.PIsChequeCancelled, np.PBankID,
+             np.PIsChequeCancelled, np.PBankID, np.Status, np.PExpenseRef,
              ISNULL(bm.LHeadName, np.PBankName) AS BankName,
              np.PChequeAccountNumber
       FROM dbo.NewPayment np
@@ -198,11 +208,29 @@ async function cancelPaymentCheque(pool, { paymentId, chequeNo, reason, userEmai
   if (!payment.PChequeNo || (chequeNo && String(payment.PChequeNo) !== String(chequeNo))) {
     return { ok: false, error: "Cheque number does not match this payment." };
   }
-  if (payment.PIsChequeCancelled) {
+  if (payment.PIsChequeCancelled || payment.Status === "Cancelled") {
     return { ok: false, error: "This cheque has already been cancelled." };
   }
   if (!payment.PChequeLotId) {
     return { ok: false, error: "This payment is not linked to a cheque lot." };
+  }
+
+  // Guard: matched/cleared in BRS — the bank has already processed this
+  // cheque, so the money has (or may have) already moved. Cancelling now
+  // would reverse the GL posting and reopen the invoice while the bank still
+  // thinks it's settled. Must be unmatched in the BRS first.
+  const brsCheck = await pool
+    .request()
+    .input("PPaymentID", sql.Int, payment.PPaymentID)
+    .query(`
+      SELECT COUNT(*) AS cnt FROM dbo.BankReconciliation
+      WHERE SourceType = 'PAYMENT' AND SourceID = @PPaymentID AND IsMatched = 1
+    `);
+  if (Number(brsCheck.recordset[0]?.cnt) > 0) {
+    return {
+      ok: false,
+      error: "This cheque is already matched/cleared in the Bank Reconciliation Statement. Unmatch it in the BRS before cancelling.",
+    };
   }
 
   await pool
@@ -227,11 +255,23 @@ async function cancelPaymentCheque(pool, { paymentId, chequeNo, reason, userEmai
     .input("PPaymentID", sql.Int, payment.PPaymentID)
     .query(`
       UPDATE dbo.NewPayment
-      SET PIsChequeCancelled = 1, PChequeLotId = NULL
+      SET PIsChequeCancelled = 1, PChequeLotId = NULL, Status = 'Cancelled'
       WHERE PPaymentID = @PPaymentID
     `);
 
-  return { ok: true };
+  // Reverse whatever GL posting this payment made on approval — a no-op if
+  // it was never posted (e.g. still Pending) since the underlying UPDATE is
+  // scoped to IsReversed = 0 rows for this exact source.
+  await reversePostingBySource(pool, "NewPayment", payment.PPaymentID);
+
+  // Recompute the invoice's paid/remaining amount now that this payment no
+  // longer counts (Status='Cancelled' is already excluded by syncBillStatus's
+  // own query) — this is what makes the invoice payable again.
+  if (payment.PExpenseRef) {
+    await syncBillStatus(pool, sql, payment.PExpenseRef);
+  }
+
+  return { ok: true, expenseRef: payment.PExpenseRef || null };
 }
 
 // The new path — a cheque number that was never issued against any payment.
@@ -330,6 +370,7 @@ router.post("/", requirePageRight("cheque-cancellation", "create"), async (req, 
 
     await bumpCacheVersion("new-payment");
     await bumpCacheVersion("cheque-cancellation");
+    if (result.expenseRef) await bumpCacheVersion("expense-booking");
     res.json({ message: "Cheque cancelled successfully." });
   } catch (err) {
     console.error("CHEQUE CANCELLATION ERROR:", err.message);
@@ -350,6 +391,7 @@ router.post("/bulk", requirePageRight("cheque-cancellation", "create"), async (r
     const pool = getPool();
     const cancelled = [];
     const skipped = [];
+    let anyExpenseRef = false;
     for (const item of items) {
       const paymentId = item.paymentId ? parseInt(item.paymentId, 10) : null;
       const chequeLotId = item.chequeLotId ? parseInt(item.chequeLotId, 10) : null;
@@ -364,13 +406,18 @@ router.post("/bulk", requirePageRight("cheque-cancellation", "create"), async (r
         reason,
         userEmail,
       });
-      if (result.ok) cancelled.push(item.chequeNo);
-      else skipped.push({ chequeNo: item.chequeNo, error: result.error });
+      if (result.ok) {
+        cancelled.push(item.chequeNo);
+        if (result.expenseRef) anyExpenseRef = true;
+      } else {
+        skipped.push({ chequeNo: item.chequeNo, error: result.error });
+      }
     }
 
     if (cancelled.length) {
       await bumpCacheVersion("new-payment");
       await bumpCacheVersion("cheque-cancellation");
+      if (anyExpenseRef) await bumpCacheVersion("expense-booking");
     }
     res.json({ cancelled, skipped });
   } catch (err) {
