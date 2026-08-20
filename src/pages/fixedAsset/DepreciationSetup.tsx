@@ -7,7 +7,7 @@ import {
   Package,
   Boxes, CheckCircle2, Layers,
 } from "lucide-react";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { GlassShell } from "@/components/dashboard/GlassShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -156,15 +156,16 @@ export default function DepreciationSetupPage() {
 
   return (
     <>
-    <Breadcrumbs items={["Dashboard", "Material", "Depreciation Setup"]} />
-    <MaterialShell
+    <Breadcrumbs items={["Dashboard", "Fixed Asset", "Depreciation Setup"]} />
+    <GlassShell
       title="Depreciation Setup"
       subtitle="Define annual depreciation rates for fixed asset categories"
       icon={Percent}
+      accentColor="#eab308"
       action={
         rights.canCreate && (
           <button onClick={openCreate}
-            className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg transition">
+            className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 text-white text-sm font-semibold hover:shadow-lg transition">
             <Plus size={16} /> New Rate
           </button>
         )
@@ -297,7 +298,7 @@ export default function DepreciationSetupPage() {
             {/* header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2.5">
-                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
                   {React.createElement(selectedCategoryIcon, { size: 15 })}
                 </span>
                 <h2 className="text-base font-semibold">{editingId ? "Edit" : "New"} Depreciation Rate</h2>
@@ -365,7 +366,7 @@ export default function DepreciationSetupPage() {
                 Cancel
               </button>
               <button onClick={handleSave} disabled={saving}
-                className="h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-1.5 hover:shadow-lg transition">
+                className="h-9 px-4 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-1.5 hover:shadow-lg transition">
                 {saving ? "Saving…" : <><Check size={14} /> Save</>}
               </button>
             </div>
@@ -401,7 +402,7 @@ export default function DepreciationSetupPage() {
         </div>,
         document.body
       )}
-    </MaterialShell>
+    </GlassShell>
     </>
   );
 }

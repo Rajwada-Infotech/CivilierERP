@@ -6,6 +6,7 @@
 export type Module =
   | "finance"
   | "material"
+  | "fixed-asset"
   | "followup"
   | "engineering"
   | "ticket"
@@ -22,6 +23,7 @@ export type Module =
 export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
   finance: "/finance",
   material: "/material",
+  "fixed-asset": "/fixed-asset",
   followup: "/followup",
   engineering: "/engineering",
   ticket: "/ticket",
