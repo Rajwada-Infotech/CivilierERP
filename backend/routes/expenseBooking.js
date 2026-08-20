@@ -826,6 +826,10 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const finYear = (req.query.finYear || "").toString().trim() || null;
     const dateFrom = (req.query.from || "").toString().trim() || null;
     const dateTo = (req.query.to || "").toString().trim() || null;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectName = (req.query.projectName || "").toString().trim() || null;
+    const docNo = (req.query.docNo || "").toString().trim() || null;
+    const supplierId = req.query.supplierId ? parseInt(req.query.supplierId, 10) : null;
 
     const hasPaymentTermId = await ebHasPaymentTermId(pool);
     const hasDirectItemsCol = await ebHasDirectItemsData(pool);
@@ -849,7 +853,11 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         .input("limit", sql.Int, limit)
         .input("FinYear", sql.NVarChar(20), finYear)
         .input("DateFrom", sql.Date, dateFrom)
-        .input("DateTo", sql.Date, dateTo).query(`
+        .input("DateTo", sql.Date, dateTo)
+        .input("CompanyId", sql.Int, companyId)
+        .input("ProjectName", sql.NVarChar(255), projectName)
+        .input("DocNo", sql.NVarChar(100), docNo ? `%${docNo}%` : null)
+        .input("SupplierId", sql.Int, supplierId).query(`
         SELECT
           eb.Eid, eb.Eid AS id,
           eb.EProjectName, eb.EDocumentType, eb.EDocDate,
@@ -947,6 +955,10 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
           AND (@DateFrom IS NULL OR eb.EDocDate >= @DateFrom)
           AND (@DateTo IS NULL OR eb.EDocDate <= @DateTo)
+          AND (@CompanyId IS NULL OR eb.ECompanyId = @CompanyId)
+          AND (@ProjectName IS NULL OR eb.EProjectName = @ProjectName)
+          AND (@DocNo IS NULL OR eb.EDocNo LIKE @DocNo)
+          AND (@SupplierId IS NULL OR (${ebSupplierList.idExpr}) = @SupplierId)
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `),

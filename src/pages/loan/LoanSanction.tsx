@@ -692,12 +692,8 @@ export default function LoanSanctionPage() {
       cell: ({ row }) => {
         const closed = row.original.Status === "Closed";
         return (
-          <span
-            className={`inline-flex items-center gap-1.5 text-xs font-medium ${
-              closed ? "text-muted-foreground" : "text-emerald-600 dark:text-emerald-400"
-            }`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full inline-block ${closed ? "bg-border" : "bg-emerald-500"}`} />
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+            <span className="w-1.5 h-1.5 rounded-full inline-block bg-emerald-500" />
             {closed ? "Sanctioned" : row.original.Status}
           </span>
         );
