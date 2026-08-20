@@ -18,6 +18,7 @@ export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
     ],
   },
   { label: "Journal Voucher", icon: DocumentText, path: "/journal-voucher", pageKey: "journal-voucher" },
+  { label: "Amendment", icon: DocumentText, path: "/finance-amendment", pageKey: "finance-amendment" },
   {
     label: "Query",
     icon: Judge,

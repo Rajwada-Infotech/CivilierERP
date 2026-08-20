@@ -148,6 +148,7 @@ const ProfitAndLoss = lazy(() => import("./pages/finance/ProfitAndLoss"));
 const YearEndClose = lazy(() => import("./pages/finance/YearEndClose"));
 const BalanceEnquiry = lazy(() => import("./pages/finance/BalanceEnquiry"));
 const JournalVoucher = lazy(() => import("./pages/finance/JournalVoucher"));
+const FinanceAmendment = lazy(() => import("./pages/finance/FinanceAmendment"));
 const FundTransfer = lazy(() => import("./pages/finance/FundTransfer"));
 const FinanceContract = lazy(() => import("./pages/finance/Contract"));
 const OnAccountReport = lazy(() => import("./pages/finance/OnAccountReport"));
@@ -429,6 +430,7 @@ const IssueReturn = lazy(() => import("./pages/material/IssueReturn"));
 const MaterialRequestPage = lazy(
   () => import("./pages/material/MaterialRequest"),
 );
+const MaterialAmendment = lazy(() => import("./pages/material/MaterialAmendment"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
@@ -438,6 +440,7 @@ const EngineeringDashboard = lazy(
   () => import("./pages/engineering/EngineeringDashboard"),
 );
 const WorkDone = lazy(() => import("./pages/engineering/WorkDone"));
+const EngineeringAmendment = lazy(() => import("./pages/engineering/EngineeringAmendment"));
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -790,6 +793,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="journal-voucher">
             <JournalVoucher />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/finance-amendment"
+        element={
+          <ProtectedRoute pageKey="finance-amendment">
+            <FinanceAmendment />
           </ProtectedRoute>
         }
       />
@@ -1153,6 +1164,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/material/amendment"
+        element={
+          <ProtectedRoute pageKey="material-amendment">
+            <MaterialAmendment />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/material/issues"
         element={
           <ProtectedRoute pageKey="material-issues">
@@ -1342,6 +1361,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="dpr">
             <DailyProgressReport />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/engineering/amendment"
+        element={
+          <ProtectedRoute pageKey="engineering-amendment">
+            <EngineeringAmendment />
           </ProtectedRoute>
         }
       />

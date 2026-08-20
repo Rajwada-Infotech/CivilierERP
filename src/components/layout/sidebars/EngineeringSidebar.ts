@@ -1,4 +1,4 @@
-import { Chart2, Receipt21, ClipboardText } from "iconsax-react";
+import { Chart2, Receipt21, ClipboardText, Edit2 } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const engineeringNavItems: NavItem[] = [
@@ -13,4 +13,5 @@ export const engineeringNavItems: NavItem[] = [
     ],
   },
   { label: "DPR",       icon: ClipboardText, path: "/engineering/dpr",              pageKey: "dpr" },
+  { label: "Amendment", icon: Edit2,         path: "/engineering/amendment",        pageKey: "engineering-amendment" },
 ];

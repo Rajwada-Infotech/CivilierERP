@@ -3100,6 +3100,14 @@ const Payment: React.FC = () => {
                       className="w-full appearance-none px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     >
                       <option value="">— Select reason —</option>
+                      {/* An existing payment's purpose can be free text that predates
+                          the reasons master, or a reason since renamed/removed there —
+                          without this, re-saving such a record would silently swap it
+                          for whatever option the browser falls back to selecting. */}
+                      {form.paymentName &&
+                        !paymentReasons.some((r) => r.name === form.paymentName) && (
+                          <option value={form.paymentName}>{form.paymentName}</option>
+                        )}
                       {paymentReasons.map((r) => (
                         <option key={r.id} value={r.name}>
                           {r.name}

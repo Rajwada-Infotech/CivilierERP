@@ -7,6 +7,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, getRecordStatus } = require("../services/approvalService");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { validateBody } = require("../middleware/validateRequest");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -3104,10 +3105,16 @@ router.put(
     if (!Number.isFinite(numericId) || numericId <= 0)
       return res.status(400).json({ error: "Invalid record id" });
 
+    let wasApproved = false;
+    let beforeSnapshot = null;
     try {
       const currentStatus = await getRecordStatus("expense-booking", numericId);
       if (currentStatus === "Pending") {
         return res.status(400).json({ error: "Cannot edit a record that is pending approval. Reject it first." });
+      }
+      wasApproved = currentStatus === "Approved";
+      if (wasApproved) {
+        beforeSnapshot = await snapshotRow(getPool(), "dbo.ExpenseBooking", "Eid", numericId);
       }
     } catch (err) {
       return res.status(400).json({ error: err.message });
@@ -3447,6 +3454,25 @@ router.put(
       await bumpCacheVersion("expense-booking");
       await bumpCacheVersion("expense-booking-options");
       await bumpCacheVersion("expense-booking-source-ids");
+
+      if (wasApproved && beforeSnapshot) {
+        try {
+          const afterSnapshot = await snapshotRow(pool, "dbo.ExpenseBooking", "Eid", numericId);
+          await recordAmendment({
+            refDocType: "expense-booking",
+            refDocId: numericId,
+            refDocNo: afterSnapshot?.EDocNo || beforeSnapshot.EDocNo,
+            projectName: afterSnapshot?.EProjectName || beforeSnapshot.EProjectName,
+            companyName: null,
+            changedBy: req.user?.email || req.user?.name || null,
+            before: beforeSnapshot,
+            after: afterSnapshot,
+          });
+        } catch (logErr) {
+          console.error("Amendment log error (expense-booking):", logErr.message);
+        }
+      }
+
       res.json({ message: "Expense updated successfully" });
     } catch (err) {
       console.error("Update error:", err.message);

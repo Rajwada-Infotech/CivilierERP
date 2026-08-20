@@ -20,9 +20,8 @@ router.get("/", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const { companyId, projectId, finYear, status, search } = req.query;
-    if (!companyId) return res.status(400).json({ error: "companyId is required." });
     const request = pool.request();
-    request.input("CompanyId", sql.Int, parseInt(companyId, 10));
+    if (companyId) request.input("CompanyId", sql.Int, parseInt(companyId, 10));
     if (projectId) request.input("ProjectId", sql.Int, parseInt(projectId, 10));
     if (finYear)   request.input("FinYear", sql.NVarChar(20), finYear);
     if (status)    request.input("Status", sql.NVarChar(30), status);
@@ -66,7 +65,7 @@ router.get("/", authenticateToken, async (req, res) => {
       LEFT JOIN dbo.enterprise co ON co.id = c.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = c.ProjectId
       WHERE 1=1
-        AND c.CompanyId = @CompanyId
+        ${companyId ? "AND c.CompanyId = @CompanyId" : ""}
         ${projectId ? "AND c.ProjectId = @ProjectId" : ""}
         ${finYear   ? "AND c.FinYear = @FinYear" : ""}
         ${status    ? "AND c.Status = @Status" : ""}
