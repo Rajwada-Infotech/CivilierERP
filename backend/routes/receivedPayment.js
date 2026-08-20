@@ -13,6 +13,7 @@ const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { postReceivedPaymentApproval } = require("../services/generalLedger");
 const { recordGLPosting } = require("../services/approvalService");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const allowRoles = require("../middleware/role");
 
 // Only these roles may approve/reject — mirrors APPROVER_ROLES in the shared
@@ -427,6 +428,8 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
 
     const updatedBy = req.user?.name || req.user?.email || null;
     const pool = getPool();
+    const beforeSnapshot = await snapshotRow(pool, "dbo.ReceivedPayment", "RPPaymentID", id);
+    const wasApproved = beforeSnapshot?.RPStatus === "Approved";
 
     const extraSet = `, RPCompanyId=@RPCompanyId, RPProjectId=@RPProjectId,
       RPCustomerName=@RPCustomerName, RPFinYear=@RPFinYear,
@@ -508,6 +511,24 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
     }
 
     await invalidateReceivedPaymentWorkflowCaches();
+
+    if (wasApproved && beforeSnapshot) {
+      try {
+        await recordAmendment({
+          refDocType: "received-payment",
+          refDocId: parseInt(id, 10),
+          refDocNo: updated.RPDocNo || String(id),
+          projectName: updated.RPProjectName || beforeSnapshot.RPProjectName,
+          companyName: updated.RPCompanyName || beforeSnapshot.RPCompanyName,
+          changedBy: updatedBy,
+          before: beforeSnapshot,
+          after: updated,
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (received-payment):", logErr.message);
+      }
+    }
+
     res.json(result.recordset[0]);
   } catch (err) {
     console.error("PUT /received-payment error:", err);

@@ -1,7 +1,8 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -1050,12 +1051,19 @@ router.put(
   requirePageRight("grn-master", "edit"),
   validateBody(grnBodySchema),
   async (req, res) => {
+    let wasApproved = false;
+    let beforeSnapshot = null;
     try {
+      const currentStatus = await getRecordStatus("goods-receipt", req.params.id);
       const allowPostApproval = await resolveAllowPostApproval(
         req,
         "grn-master",
       );
       await guardEdit("goods-receipt", req.params.id, { allowPostApproval });
+      wasApproved = currentStatus === "Approved";
+      if (wasApproved) {
+        beforeSnapshot = await snapshotRow(getPool(), "dbo.GoodsReceiptNotes", "GRNID", req.params.id);
+      }
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -1199,6 +1207,25 @@ router.put(
       await bumpCacheVersion("grns");
       await bumpCacheVersion("expense-booking-options");
       await bumpCacheVersion("stock-ledger");
+
+      if (wasApproved && beforeSnapshot) {
+        try {
+          const afterSnapshot = await snapshotRow(pool, "dbo.GoodsReceiptNotes", "GRNID", grnId);
+          await recordAmendment({
+            refDocType: "grn",
+            refDocId: grnId,
+            refDocNo: afterSnapshot?.GRNNo || beforeSnapshot.GRNNo,
+            projectName: null,
+            companyName: null,
+            changedBy: req.user?.email || req.user?.name || null,
+            before: beforeSnapshot,
+            after: afterSnapshot,
+          });
+        } catch (logErr) {
+          console.error("Amendment log error (grn):", logErr.message);
+        }
+      }
+
       res.json({ message: "GRN updated successfully" });
     } catch (err) {
       await transaction.rollback().catch(() => {});

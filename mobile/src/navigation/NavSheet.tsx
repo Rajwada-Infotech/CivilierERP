@@ -75,7 +75,7 @@ const FINANCE_NAV_TREE: NavTree = [
 // RN port of materialNavItems (MaterialSidebar.ts) — same tree, same order,
 // same 9 entries (no "Suppliers" leaf — that doesn't exist on web's
 // Material sidebar and was mobile-only drift, removed). Leaves without a
-// `nav` (Quotation, Transfer, Debit Note, Amendment, Fixed Asset Record)
+// `nav` (Quotation, Transfer, Debit Note, Fixed Asset Record)
 // have no mobile screen yet and alert instead.
 const MATERIAL_NAV_TREE: NavTree = [
   { kind: "leaf", label: "Material Dashboard", icon: LayoutDashboard, nav: "MaterialDashboard" },
@@ -98,7 +98,6 @@ const MATERIAL_NAV_TREE: NavTree = [
   { kind: "leaf", label: "Stock", icon: SwapIcon, nav: "Stock" },
   { kind: "leaf", label: "Transfer", icon: Repeat, nav: "StockTransfer" },
   { kind: "leaf", label: "Debit Note", icon: ClipboardEdit, nav: "DebitNote" },
-  { kind: "leaf", label: "Amendment", icon: ClipboardEdit, nav: "Amendment" },
   { kind: "leaf", label: "Fixed Asset Record", icon: Cpu, nav: "FixedAssetRecord" },
 ];
 

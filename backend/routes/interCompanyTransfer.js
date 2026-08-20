@@ -199,12 +199,13 @@ router.get("/", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const { companyId, projectId, dateFrom, dateTo, status, limit = 100, page = 1 } = req.query;
-    if (!companyId) return res.status(400).json({ error: "companyId is required." });
     const request = pool.request();
     const where = [];
 
-    where.push("(ict.SenderCompanyId = @companyId OR ict.ReceiverCompanyId = @companyId)");
-    request.input("companyId", sql.Int, parsePositiveInt(companyId));
+    if (companyId) {
+      where.push("(ict.SenderCompanyId = @companyId OR ict.ReceiverCompanyId = @companyId)");
+      request.input("companyId", sql.Int, parsePositiveInt(companyId));
+    }
     if (projectId) {
       where.push("(ict.SenderProjectId = @projectId OR ict.ReceiverProjectId = @projectId)");
       request.input("projectId", sql.Int, parsePositiveInt(projectId));

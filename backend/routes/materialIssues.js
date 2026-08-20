@@ -26,6 +26,7 @@ router.use(routeLimiter);
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   lockNextDocNumber,
@@ -651,11 +652,15 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
       return res.status(404).json({ error: "Issue not found" });
 
     const { DocNo: docNo, Status: currentStatus } = existing.recordset[0];
-    if (!["Draft", "Rejected"].includes(currentStatus)) {
+    if (!["Draft", "Rejected", "Approved"].includes(currentStatus)) {
       return res.status(400).json({
-        error: `Cannot edit an issue with status "${currentStatus}". Only Draft or Rejected issues can be edited.`,
+        error: `Cannot edit an issue with status "${currentStatus}". Only Draft, Rejected, or Approved issues can be edited.`,
       });
     }
+    const wasApproved = currentStatus === "Approved";
+    const beforeSnapshot = wasApproved
+      ? await snapshotRow(pool, "dbo.MaterialIssues", "IssueId", id)
+      : null;
 
     const resolvedGodownId = GodownId
       ? parseInt(GodownId, 10)
@@ -733,6 +738,25 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
 
     await bumpCacheVersion("material-issues");
     await bumpCacheVersion("stock-ledger");
+
+    if (wasApproved && beforeSnapshot) {
+      try {
+        const afterSnapshot = await snapshotRow(pool, "dbo.MaterialIssues", "IssueId", id);
+        await recordAmendment({
+          refDocType: "material-issue",
+          refDocId: id,
+          refDocNo: afterSnapshot?.DocNo || beforeSnapshot.DocNo,
+          projectName: null,
+          companyName: null,
+          changedBy: req.user?.email || req.user?.name || null,
+          before: beforeSnapshot,
+          after: afterSnapshot,
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (material-issue):", logErr.message);
+      }
+    }
+
     res.json({ message: "Issue updated successfully" });
   } catch (error) {
     console.error("Error updating material issue:", error);

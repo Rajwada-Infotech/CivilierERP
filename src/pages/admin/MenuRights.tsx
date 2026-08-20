@@ -117,7 +117,6 @@ const ROLE_PRESETS: Record<
       "cheque-master",
       "brs",
       "debit-note",
-      "amendments",
       "reports",
       "tasks",
     ],

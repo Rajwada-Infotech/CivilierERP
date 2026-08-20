@@ -8,7 +8,8 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
@@ -625,9 +626,12 @@ router.post("/work-done", requirePageRight("engineering-work-order", "create"), 
 });
 
 router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
+  let wasApproved = false;
   try {
+    const currentStatus = await getRecordStatus("work-done", req.params.id);
     const allowPostApproval = await resolveAllowPostApproval(req, "engineering-work-order");
     await guardEdit("work-done", req.params.id, { allowPostApproval });
+    wasApproved = currentStatus === "Approved";
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -638,6 +642,10 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
 
     const pool = getPool();
     if (!(await ensureWorkDoneTable(pool, res))) return;
+
+    const beforeSnapshot = wasApproved
+      ? await snapshotRow(pool, "dbo.WorkDone", "ID", req.params.id)
+      : null;
 
     const body = req.body || {};
     const quantity = toNumber(body.QuantityDone);
@@ -774,6 +782,24 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
       }
     } catch (e) {
       console.warn("[Work Done auto-submit on update]", e.message);
+    }
+
+    if (wasApproved && beforeSnapshot) {
+      try {
+        const afterSnapshot = await snapshotRow(pool, "dbo.WorkDone", "ID", req.params.id);
+        await recordAmendment({
+          refDocType: "work-done",
+          refDocId: parseInt(req.params.id, 10),
+          refDocNo: afterSnapshot?.DocNo || beforeSnapshot.DocNo,
+          projectName: null,
+          companyName: null,
+          changedBy: userEmail,
+          before: beforeSnapshot,
+          after: afterSnapshot,
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (work-done):", logErr.message);
+      }
     }
 
     res.json({ message: "Work Done entry updated" });

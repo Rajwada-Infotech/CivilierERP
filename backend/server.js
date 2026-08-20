@@ -145,6 +145,7 @@ function isLocalRequest(req) {
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 const ALL_ROUTES = [
+  { path: "/api/amendments", file: "./routes/amendmentLog" },
   { path: "/api/roles", file: "./routes/roles" },
   { path: "/api/user-rights", file: "./routes/userRights" },
   { path: "/api/user-widget-rights", file: "./routes/userWidgetRights" },
@@ -173,7 +174,6 @@ const ALL_ROUTES = [
   { path: "/api/entry-type", file: "./routes/entryType" },
   { path: "/api/expense-booking", file: "./routes/expenseBooking" },
   { path: "/api/material-chain", file: "./routes/materialChain" },
-  { path: "/api/amendments", file: "./routes/amendments" },
   { path: "/api/new-payment", file: "./routes/newPayment" },
   { path: "/api/on-account", file: "./routes/onAccount" },
   { path: "/api/received-payment", file: "./routes/receivedPayment" },
