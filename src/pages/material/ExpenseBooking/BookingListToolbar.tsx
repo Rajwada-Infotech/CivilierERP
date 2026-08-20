@@ -74,7 +74,7 @@ export function BookingListToolbar({
     onVendorFilterChange("");
   };
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-5">
       <div>
         <CardTitle className="text-base font-semibold">
           Booking Register
@@ -102,7 +102,7 @@ export function BookingListToolbar({
       <button
         type="button"
         onClick={() => setShowFilters((v) => !v)}
-        className="flex items-center justify-between gap-3 pt-1 border-t border-border/60 pb-0.5 -mb-1"
+        className="flex items-center justify-between gap-3 pt-3 border-t border-border/60"
       >
         <span className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors">
           <Filter size={11} /> More Filters
@@ -134,7 +134,7 @@ export function BookingListToolbar({
 
       {showFilters && (
         <>
-          <div className="flex flex-wrap items-end gap-3 pt-1 border-t border-border/60">
+          <div className="flex flex-wrap items-end gap-4 pt-3 border-t border-border/60">
             <div className="space-y-1 mt-2">
               <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
                 <CalendarDays size={10} /> Fin Year
@@ -180,7 +180,7 @@ export function BookingListToolbar({
 
           {/* Company / Project / Doc No / Vendor — same filter set as the
               Finance > Payment page. */}
-          <div className="flex flex-wrap items-end gap-3 pt-1 border-t border-border/60">
+          <div className="flex flex-wrap items-end gap-4 pt-3 border-t border-border/60">
             <div className="space-y-1 mt-2">
               <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
                 <Building2 size={10} /> Company
