@@ -288,13 +288,26 @@ export default function MaterialExpenseBooking() {
   const [saved, setSaved] = useState(false);
   const saveInFlight = useRef(false);
   const [statusFilter, setStatusFilter] = useState<string>("All");
-  const [listSearch, setListSearch] = useState("");
   // List-view filters — Fin Year + Document Date range. Applied server-side
   // (see fetchRecords below) since the list is paginated, unlike
-  // statusFilter/listSearch which only ever narrow the current page.
+  // statusFilter which only ever narrows the current page.
   const [finYearFilter, setFinYearFilter] = useState("");
   const [dateFromFilter, setDateFromFilter] = useState("");
   const [dateToFilter, setDateToFilter] = useState("");
+  // Same filter set as the Finance > Payment page — Company, Project, Doc
+  // No, Vendor — all applied server-side alongside Fin Year/date above.
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [projectFilter, setProjectFilter] = useState("");
+  const [docNoFilter, setDocNoFilter] = useState("");
+  const [vendorFilter, setVendorFilter] = useState("");
+  // Same scoping as filteredProjectOptions above, but for the list-view
+  // filter panel (independent of the create/edit form's own company field).
+  const filterProjectOptions = useMemo(() => {
+    if (!companyFilter) return projectOptions;
+    return projectOptions.filter(
+      (p) => Number(p.company_id) === Number(companyFilter),
+    );
+  }, [projectOptions, companyFilter]);
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
   const [liveEmiSchedule, setLiveEmiSchedule] = useState<
@@ -323,6 +336,16 @@ export default function MaterialExpenseBooking() {
   const [brokerHeads, setBrokerHeads] = useState<
     { id: number; label: string; paymentTerms: string | null }[]
   >([]);
+  const [customerHeads, setCustomerHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
+  // "Vendor" spans every party type a booking can actually be billed
+  // against — Supplier, Contractor, and Customer/Applicant (LHeadType
+  // S/C/A) — not just supplierHeads alone.
+  const vendorOptions = useMemo(
+    () => [...supplierHeads, ...contractorHeads, ...customerHeads],
+    [supplierHeads, contractorHeads, customerHeads],
+  );
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
@@ -334,6 +357,16 @@ export default function MaterialExpenseBooking() {
 
   const isEditing = editingId !== null;
 
+  const handleCompanyFilterChange = (val: string) => {
+    setCompanyFilter(val);
+    if (projectFilter && val) {
+      const stillValid = projectOptions.some(
+        (p) => p.label === projectFilter && Number(p.company_id) === Number(val),
+      );
+      if (!stillValid) setProjectFilter("");
+    }
+  };
+
   const fetchRecords = useCallback(async (p = 1) => {
     try {
       setLoading(true);
@@ -341,6 +374,10 @@ export default function MaterialExpenseBooking() {
       if (finYearFilter) qs.set("finYear", finYearFilter);
       if (dateFromFilter) qs.set("from", dateFromFilter);
       if (dateToFilter) qs.set("to", dateToFilter);
+      if (companyFilter) qs.set("companyId", companyFilter);
+      if (projectFilter) qs.set("projectName", projectFilter);
+      if (docNoFilter) qs.set("docNo", docNoFilter);
+      if (vendorFilter) qs.set("supplierId", vendorFilter);
       const data = await apiFetch(`${API}?${qs.toString()}`);
       setRecords((data.data ?? []).map(dbToRecord));
       setTotalPages(data.totalPages ?? 1);
@@ -354,13 +391,12 @@ export default function MaterialExpenseBooking() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finYearFilter, dateFromFilter, dateToFilter]);
+  }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, docNoFilter, vendorFilter]);
 
   // Export must cover every matching record, not just whatever page happens
   // to be on screen — the list endpoint caps `limit` at 100 server-side, so
-  // this pages through everything (honoring the Fin Year / date filters
-  // server-side, same as the table) and then applies the client-only
-  // filters (statusFilter/listSearch) on top.
+  // this pages through everything (honoring all the server-side filters,
+  // same as the table) and then applies the client-only statusFilter on top.
   const fetchAllRecordsForExport = useCallback(async () => {
     const pageLimit = 100;
     let all: ExpenseRecord[] = [];
@@ -370,6 +406,10 @@ export default function MaterialExpenseBooking() {
     if (finYearFilter) qs.set("finYear", finYearFilter);
     if (dateFromFilter) qs.set("from", dateFromFilter);
     if (dateToFilter) qs.set("to", dateToFilter);
+    if (companyFilter) qs.set("companyId", companyFilter);
+    if (projectFilter) qs.set("projectName", projectFilter);
+    if (docNoFilter) qs.set("docNo", docNoFilter);
+    if (vendorFilter) qs.set("supplierId", vendorFilter);
     do {
       qs.set("page", String(p));
       const data = await apiFetch(`${API}?${qs.toString()}`);
@@ -380,18 +420,9 @@ export default function MaterialExpenseBooking() {
 
     return all.filter((r) => {
       if (statusFilter && statusFilter !== "All" && r.status !== statusFilter) return false;
-      if (listSearch) {
-        const q = listSearch.toLowerCase();
-        if (
-          !r.bookingReference?.toLowerCase().includes(q) &&
-          !r.supplier?.toLowerCase().includes(q) &&
-          !r.companyName?.toLowerCase().includes(q)
-        )
-          return false;
-      }
       return true;
     }) as unknown as Record<string, unknown>[];
-  }, [statusFilter, listSearch, finYearFilter, dateFromFilter, dateToFilter]);
+  }, [statusFilter, finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, docNoFilter, vendorFilter]);
 
   // Deep-link support — Linked Documents panels navigate here as
   // /material/expense-booking?view=<Eid> to open this exact Invoice/booking.
@@ -551,7 +582,7 @@ export default function MaterialExpenseBooking() {
       return;
     }
     fetchRecords(1);
-  }, [finYearFilter, dateFromFilter, dateToFilter, fetchRecords]);
+  }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, docNoFilter, vendorFilter, fetchRecords]);
 
   useEffect(() => {
     fetchRecords(1);
@@ -613,6 +644,20 @@ export default function MaterialExpenseBooking() {
           paymentTerms: h.LHeadPaymentTerms ?? null,
         }));
         setBrokerHeads(heads);
+      })
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    apiFetch("/api/account-head?type=A")
+      .then((list: any[]) => {
+        const heads = (Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        }));
+        setCustomerHeads(heads);
       })
       .catch((err) => {
         toast.error(
@@ -1339,15 +1384,6 @@ export default function MaterialExpenseBooking() {
   const filteredRecords = records.filter((r) => {
     if (statusFilter && statusFilter !== "All" && r.status !== statusFilter)
       return false;
-    if (listSearch) {
-      const q = listSearch.toLowerCase();
-      if (
-        !r.bookingReference?.toLowerCase().includes(q) &&
-        !r.supplier?.toLowerCase().includes(q) &&
-        !r.companyName?.toLowerCase().includes(q)
-      )
-        return false;
-    }
     return true;
   });
   const totalNet = records.reduce((sum, r) => {
@@ -2484,8 +2520,6 @@ export default function MaterialExpenseBooking() {
                   <CardHeader className="pb-3 border-b border-border">
                     <BookingListToolbar
                       totalRecords={totalRecords}
-                      search={listSearch}
-                      onSearchChange={setListSearch}
                       statusFilter={statusFilter}
                       onStatusFilterChange={setStatusFilter}
                       finYearOptions={finYears.map((fy) => fy.year)}
@@ -2495,6 +2529,17 @@ export default function MaterialExpenseBooking() {
                       dateTo={dateToFilter}
                       onDateFromChange={setDateFromFilter}
                       onDateToChange={setDateToFilter}
+                      companyOptions={companyOptions}
+                      companyFilter={companyFilter}
+                      onCompanyFilterChange={handleCompanyFilterChange}
+                      projectOptions={filterProjectOptions}
+                      projectFilter={projectFilter}
+                      onProjectFilterChange={setProjectFilter}
+                      docNoFilter={docNoFilter}
+                      onDocNoFilterChange={setDocNoFilter}
+                      vendorOptions={vendorOptions}
+                      vendorFilter={vendorFilter}
+                      onVendorFilterChange={setVendorFilter}
                     />
                   </CardHeader>
                   <CardContent className="p-0">
