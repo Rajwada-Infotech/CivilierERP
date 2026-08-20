@@ -20,6 +20,7 @@ export interface FixedAssetListItem {
   Location: string | null;
   Department: string | null;
   Custodian: string | null;
+  CustodianUserId: number | null;
   DepreciationRate: number | null;
   AssetStatus: "Pending" | "Active" | "Sold" | "Scrapped" | "Under Maintenance";
   SellingPrice: number | null;
@@ -64,7 +65,7 @@ export interface FixedAssetPayload {
   quantity?: number;
   location?: string;
   department?: string;
-  custodian?: string;
+  custodianUserId?: number | null;
   depreciationSetupId?: number | null;
   depreciationType?: string;
   depreciationRate?: number | null;

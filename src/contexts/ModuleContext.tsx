@@ -43,6 +43,8 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
       ? "💰 Finance"
       : activeModule === "material"
         ? "📦 Material"
+        : activeModule === "fixed-asset"
+          ? "🏷️ Fixed Asset"
         : activeModule === "followup"
           ? "📅 Follow-Up"
           : activeModule === "engineering"
@@ -99,6 +101,7 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     const valid: Module[] = [
       "finance",
       "material",
+      "fixed-asset",
       "followup",
       "engineering",
       "ticket",
@@ -120,6 +123,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     } else if (pathname.startsWith("/material")) {
       setActiveModuleState("material");
       localStorage.setItem("activeModule", "material");
+    } else if (pathname.startsWith("/fixed-asset")) {
+      setActiveModuleState("fixed-asset");
+      localStorage.setItem("activeModule", "fixed-asset");
     } else if (pathname.startsWith("/engineering")) {
       setActiveModuleState("engineering");
       localStorage.setItem("activeModule", "engineering");

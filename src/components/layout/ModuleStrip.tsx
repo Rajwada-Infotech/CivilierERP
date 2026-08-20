@@ -6,6 +6,7 @@ import { ChevronRight, ChevronDown } from "lucide-react";
 import {
   Bank,
   Box,
+  Cpu,
   Notepad,
   Message2,
   ShoppingCart,
@@ -54,6 +55,15 @@ const MODULES = [
     color: "#10b981",
     bg: "rgba(16,185,129,0.22)",
     ringRgb: "16,185,129",
+  },
+  {
+    id: "fixed-asset" as Module,
+    icon: Cpu,
+    label: "Fixed Asset",
+    desc: "Tagging, records & depreciation",
+    color: "#eab308",
+    bg: "rgba(234,179,8,0.22)",
+    ringRgb: "234,179,8",
   },
   {
     id: "loan" as Module,
@@ -197,6 +207,7 @@ export const ModuleStrip: React.FC = () => {
   const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
     finance:     ["finance-dashboard", "new-payment", "received-payment", "brs", "transactions", "expense-booking"],
     material:    ["material-dashboard", "purchase-orders", "grn-master", "material-request", "material-issues", "stock-ledger"],
+    "fixed-asset": ["fixed-asset-dashboard", "fixed-asset-record", "fixed-asset-tagging", "asset-transfer", "depreciation-setup"],
     followup:    ["followup-dashboard", "followup-applications", "followup-bookings", "followup-agreements", "followup-demands"],
     engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
     ticket:      ["ticket-dashboard", "tickets"],
