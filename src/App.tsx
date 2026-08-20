@@ -199,9 +199,12 @@ const FinancialYearMaster = lazy(
 );
 const ChequeMaster = lazy(() => import("./pages/masters/ChequeMaster"));
 const GRN = lazy(() => import("./pages/material/GRN"));
-const FixedAssetRecord = lazy(() => import("./pages/material/FixedAssetRecord"));
+const FixedAssetDashboard = lazy(() => import("./pages/fixedAsset/FixedAssetDashboard"));
+const FixedAssetRecord = lazy(() => import("./pages/fixedAsset/FixedAssetRecord"));
+const FixedAssetTagging = lazy(() => import("./pages/fixedAsset/FixedAssetTagging"));
+const AssetTransfer = lazy(() => import("./pages/fixedAsset/AssetTransfer"));
 const ShortClose = lazy(() => import("./pages/material/ShortClose"));
-const DepreciationSetup = lazy(() => import("./pages/material/DepreciationSetup"));
+const DepreciationSetup = lazy(() => import("./pages/fixedAsset/DepreciationSetup"));
 const VehicleInOut = lazy(() => import("./pages/material/VehicleInOut"));
 const MaterialDashboard = lazy(
   () => import("./pages/material/MaterialDashboard"),
@@ -1095,14 +1098,6 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/material/fixed-asset-record"
-        element={
-          <ProtectedRoute pageKey="fixed-asset-record">
-            <FixedAssetRecord />
-          </ProtectedRoute>
-        }
-      />
-      <Route
         path="/material/short-close"
         element={
           <ProtectedRoute pageKey="short-close">
@@ -1111,7 +1106,39 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/material/setup/depreciation"
+        path="/fixed-asset"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-dashboard">
+            <FixedAssetDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/record"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-record">
+            <FixedAssetRecord />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/tagging"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-tagging">
+            <FixedAssetTagging />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/transfer"
+        element={
+          <ProtectedRoute pageKey="asset-transfer">
+            <AssetTransfer />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/depreciation-setup"
         element={
           <ProtectedRoute pageKey="depreciation-setup">
             <DepreciationSetup />

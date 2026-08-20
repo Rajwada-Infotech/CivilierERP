@@ -224,6 +224,8 @@ const ALL_ROUTES = [
   { path: "/api/dependency-activity-assignment", file: "./routes/dependencyActivityAssignment" },
   { path: "/api/depreciation-setup", file: "./routes/depreciationSetup" },
   { path: "/api/fixed-assets",       file: "./routes/fixedAssets" },
+  { path: "/api/fixed-asset-tagging", file: "./routes/fixedAssetTagging" },
+  { path: "/api/asset-transfer", file: "./routes/assetTransfer" },
   { path: "/api/work-progress", file: "./routes/workProgress" },
   { path: "/api/contractor-allocation", file: "./routes/contractorAllocation" },
   { path: "/api/daily-labour", file: "./routes/dailyLabour" },

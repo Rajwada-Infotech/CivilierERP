@@ -24,6 +24,7 @@ import {
   FileText,
   Loader2,
   ChevronDown,
+  Printer,
 } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
@@ -75,6 +76,10 @@ export interface ExportMenuProps {
       };
     }
   >;
+  /** When provided, adds a "Print" option to the dropdown that calls this
+   *  instead of one of the export formats (e.g. `() => window.print()`) —
+   *  opt-in per page rather than a standalone button next to this menu. */
+  onPrint?: () => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -91,6 +96,7 @@ export function ExportMenu({
   logoBase64,
   stats,
   columnPadding,
+  onPrint,
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState<"pdf" | "xlsx" | "csv" | null>(null);
@@ -241,6 +247,41 @@ export function ExportMenu({
               );
             })}
           </div>
+
+          {onPrint && (
+            <>
+              <div className="border-t border-border" />
+              <div className="py-1">
+                <DropdownMenu.Item asChild>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setOpen(false);
+                      onPrint();
+                    }}
+                    disabled={isBusy}
+                    className="
+                      w-full flex items-center gap-3 px-3 py-2.5
+                      text-left transition-colors outline-none
+                      hover:bg-muted focus:bg-muted disabled:opacity-40 disabled:cursor-not-allowed
+                    "
+                  >
+                    <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-muted text-muted-foreground">
+                      <Printer size={14} />
+                    </span>
+                    <span className="flex flex-col">
+                      <span className="text-xs font-medium text-foreground leading-tight">
+                        Print
+                      </span>
+                      <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+                        Open the browser print dialog
+                      </span>
+                    </span>
+                  </button>
+                </DropdownMenu.Item>
+              </div>
+            </>
+          )}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

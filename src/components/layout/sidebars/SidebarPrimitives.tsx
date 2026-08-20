@@ -48,31 +48,20 @@ const IconChip = ({
   icon: Icon,
   size,
   active,
-  accentColor,
   compact,
 }: {
   icon: React.ElementType;
   size: number;
   active: boolean;
-  accentColor?: string;
   compact?: boolean;
 }) => {
   const pad = compact ? 6 : 12;
   return (
     <span
-      className={`flex items-center justify-center rounded-md shrink-0 transition-colors ${
-        active
-          ? accentColor
-            ? ""
-            : "bg-primary/10 text-primary"
-          : "bg-sidebar-accent/50 text-sidebar-foreground/60"
-      }`}
+      className="flex items-center justify-center rounded-md shrink-0 transition-colors bg-sidebar-accent/50 text-sidebar-foreground/60"
       style={{
         width: size + pad,
         height: size + pad,
-        ...(active && accentColor
-          ? { background: `${accentColor}18`, color: accentColor }
-          : {}),
       }}
     >
       <Icon size={size} variant={active ? "Bold" : "Linear"} />
@@ -128,7 +117,6 @@ const NavLabel = ({
   >
     <span
       className={`transition-all duration-200 ease-out ${active ? "font-bold" : "font-normal"}`}
-      style={active && accentColor ? { color: accentColor } : undefined}
     >
       {label}
     </span>
@@ -165,17 +153,16 @@ export const NavButton = ({
         item.isDashboard
           ? "px-2.5 py-1.5 mb-1 text-xs font-semibold"
           : "px-2.5 py-2 text-xs"
-      } ${
+      } text-sidebar-foreground ${
         isActive
           ? ""
-          : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       } ${collapsed ? "justify-center" : ""}`}
     >
       <IconChip
         icon={item.icon}
         size={iconSize}
         active={isActive}
-        accentColor={accentColor}
         compact={item.isDashboard}
       />
       {!collapsed && (
@@ -236,17 +223,16 @@ export const NavGroup = ({
     <div>
       <button
         onClick={handleClick}
-        className={`group relative w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs transition-all duration-200 ${
+        className={`group relative w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-sidebar-foreground transition-all duration-200 ${
           hasActiveChild
             ? ""
-            : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         } ${collapsed ? "justify-center" : ""}`}
       >
         <IconChip
           icon={item.icon}
           size={15}
           active={hasActiveChild}
-          accentColor={accentColor}
         />
         {!collapsed && (
           <NavLabel
@@ -273,10 +259,10 @@ export const NavGroup = ({
               <button
                 key={child.path}
                 onClick={() => navigate(child.path, child.state ? { state: child.state } : undefined)}
-                className={`w-full flex justify-between items-center gap-2 text-[11px] px-2 py-1 rounded-md transition-all duration-200 ${
+                className={`w-full flex justify-between items-center gap-2 text-[11px] px-2 py-1 rounded-md text-sidebar-foreground/70 transition-all duration-200 ${
                   childActive
                     ? ""
-                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                    : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 }`}
               >
                 <span
@@ -321,10 +307,10 @@ export const NavGroup = ({
                       <button
                         key={child.path}
                         onClick={() => navigate(child.path)}
-                        className={`w-full flex items-center gap-2 text-[11px] px-2 py-1 rounded-md transition-all duration-200 ${
+                        className={`w-full flex items-center gap-2 text-[11px] px-2 py-1 rounded-md text-sidebar-foreground/70 transition-all duration-200 ${
                           sChildActive
                             ? ""
-                            : "text-sidebar-foreground/70 hover:bg-sidebar-accent"
+                            : "hover:bg-sidebar-accent"
                         }`}
                       >
                         <span
