@@ -4,6 +4,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 router.use(authMiddleware);
@@ -214,8 +215,13 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
     const existing = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status FROM dbo.MaterialIssueReturn WHERE ReturnId = @id");
     if (!existing.recordset.length) return res.status(404).json({ error: "Not found" });
-    if (existing.recordset[0].Status !== "Draft")
-      return res.status(400).json({ error: "Only Draft returns can be edited" });
+    const currentStatus = existing.recordset[0].Status;
+    if (!["Draft", "Approved"].includes(currentStatus))
+      return res.status(400).json({ error: "Only Draft or Approved returns can be edited" });
+    const wasApproved = currentStatus === "Approved";
+    const beforeSnapshot = wasApproved
+      ? await snapshotRow(pool, "dbo.MaterialIssueReturn", "ReturnId", id)
+      : null;
 
     const tx = pool.transaction();
     await tx.begin();
@@ -264,6 +270,25 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
       }
 
       await tx.commit();
+
+      if (wasApproved && beforeSnapshot) {
+        try {
+          const afterSnapshot = await snapshotRow(pool, "dbo.MaterialIssueReturn", "ReturnId", id);
+          await recordAmendment({
+            refDocType: "material-issue-return",
+            refDocId: id,
+            refDocNo: afterSnapshot?.DocNo || beforeSnapshot.DocNo,
+            projectName: null,
+            companyName: null,
+            changedBy: req.user?.email || req.user?.name || null,
+            before: beforeSnapshot,
+            after: afterSnapshot,
+          });
+        } catch (logErr) {
+          console.error("Amendment log error (material-issue-return):", logErr.message);
+        }
+      }
+
       res.json({ message: "Issue return updated" });
     } catch (innerErr) {
       await tx.rollback();

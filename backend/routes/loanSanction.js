@@ -257,10 +257,14 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
 // Registered before "/:id" so it isn't swallowed by the param route.
 router.get("/emi-reminders", requirePageRight("loan-sanction", "view"), async (req, res) => {
   const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-  if (!companyId) return res.status(400).json({ error: "companyId is required" });
   try {
     const pool = getPool();
-    const result = await pool.request().input("CompanyId", sql.Int, companyId).query(`
+    const request = pool.request();
+    if (companyId) request.input("CompanyId", sql.Int, companyId);
+    // No companyId → the dashboard's "All companies" default: every
+    // upcoming EMI, unfiltered — same convention as GET / above.
+    const companyFilter = companyId ? "(ls.LenderCompanyId = @CompanyId OR ls.BorrowerCompanyId = @CompanyId)" : "1=1";
+    const result = await request.query(`
       SELECT
         e.EMIId, e.LoanId, e.InstallmentNo, e.DueDate, e.EMIAmount,
         ls.LoanNo,
@@ -271,7 +275,7 @@ router.get("/emi-reminders", requirePageRight("loan-sanction", "view"), async (r
       LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
       WHERE e.IsPaid = 0 AND e.DueDate <= DATEADD(day, 7, CAST(GETDATE() AS DATE))
-        AND (ls.LenderCompanyId = @CompanyId OR ls.BorrowerCompanyId = @CompanyId)
+        AND ${companyFilter}
       ORDER BY e.DueDate ASC
     `);
     res.json(result.recordset);
@@ -1074,7 +1078,6 @@ router.post("/:id/post-to-gl", requirePageRight("loan-sanction", "edit"), async 
   const userEmail = req.user?.email || req.user?.name || "system";
   try {
     const pool = getPool();
-    const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
     const { postVoucher } = require("../services/generalLedger");
 
     const loanRes = await pool.request().input("LoanId", sql.Int, loanId).query(`
@@ -1108,46 +1111,17 @@ router.post("/:id/post-to-gl", requirePageRight("loan-sanction", "edit"), async 
 
     // Dr the borrower's Loan ledger (they now owe this — a receivable from
     // the sanctioning side), Cr the lender's Loan ledger (funds went out).
+    // Direct posting straight to the General Ledger via postVoucher — same
+    // as the Inter-Company auto-post path above (POST /), not a formal
+    // JournalVoucher record. No dbo.JournalVoucher header/lines, no "JV-"
+    // doc-number lock; the loan's own LoanNo is the voucher reference.
     const lines = [
       { LHeadId: loan.BorrowerLHeadId, DebitAmount: amt, CreditAmount: 0, Narration: `Loan Posting: ${loan.LoanNo} — Borrower` },
       { LHeadId: loan.LenderLHeadId, DebitAmount: 0, CreditAmount: amt, Narration: `Loan Posting: ${loan.LoanNo} — Lender` },
     ];
 
-    const dtId = await resolveDocTypeId(pool, sql, "JV").catch(() => null);
-    const finalDocNo = dtId
-      ? await lockNextDocNumber(pool, sql, {
-          docTypeId: dtId,
-          tableName: "JournalVoucher",
-          docNoColumn: "JVNo",
-          issuedBy: userEmail,
-        }).catch(() => null)
-      : null;
-
-    const insertHdr = await pool.request()
-      .input("JVNo", sql.NVarChar(100), finalDocNo || null)
-      .input("JVDate", sql.Date, new Date())
-      .input("Narration", sql.NVarChar(500), `Loan Posting: ${loan.LoanNo}`)
-      .input("CompanyId", sql.Int, loan.LenderCompanyId || loan.BorrowerCompanyId || null)
-      .input("DocTypeId", sql.Int, dtId || null)
-      .input("CreatedBy", sql.NVarChar(150), userEmail)
-      .query(`INSERT INTO dbo.JournalVoucher (JVNo,JVDate,Narration,CompanyId,Status,DocTypeId,CreatedBy) OUTPUT INSERTED.JVID VALUES (@JVNo,@JVDate,@Narration,@CompanyId,'Approved',@DocTypeId,@CreatedBy)`);
-    const jvId = insertHdr.recordset[0].JVID;
-
-    let sortOrder = 0;
-    for (const line of lines) {
-      await pool.request()
-        .input("JVID", sql.Int, jvId)
-        .input("LHeadId", sql.Int, line.LHeadId)
-        .input("DebitAmount", sql.Decimal(18, 2), line.DebitAmount)
-        .input("CreditAmount", sql.Decimal(18, 2), line.CreditAmount)
-        .input("Narration", sql.NVarChar(255), line.Narration)
-        .input("SortOrder", sql.Int, sortOrder++)
-        .query(`INSERT INTO dbo.JournalVoucherLines (JVID,LHeadId,DebitAmount,CreditAmount,Narration,SortOrder) VALUES (@JVID,@LHeadId,@DebitAmount,@CreditAmount,@Narration,@SortOrder)`);
-    }
-    if (finalDocNo) await backPatchRecordId(pool, sql, finalDocNo, "JournalVoucher", jvId);
-
     await postVoucher(pool, {
-      voucherNo: finalDocNo || `JV-${jvId}`,
+      voucherNo: loan.LoanNo,
       voucherDate: new Date(),
       sourceType: "LoanPosting",
       sourceId: loanId,
@@ -1165,8 +1139,8 @@ router.post("/:id/post-to-gl", requirePageRight("loan-sanction", "edit"), async 
       .input("LoanId", sql.Int, loanId)
       .query("UPDATE dbo.LoanSanction SET DisbursedAt = SYSDATETIME() WHERE LoanId = @LoanId AND DisbursedAt IS NULL");
 
-    await Promise.all([bumpCacheVersion("journal-voucher"), bumpCacheVersion("loan-sanction")]);
-    res.json({ jvId, jvNo: finalDocNo, message: "Loan posted to GL successfully." });
+    await bumpCacheVersion("loan-sanction");
+    res.json({ voucherNo: loan.LoanNo, message: "Loan posted to GL successfully." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

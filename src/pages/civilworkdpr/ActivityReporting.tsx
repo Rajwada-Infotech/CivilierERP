@@ -7,16 +7,52 @@ import {
   ASSIGNMENT_STATUSES,
   ASSIGNMENT_STATUS_META as STATUS_META,
   getReportedAssignments,
+  getActivityPhotos,
   type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
-import { ClipboardList, UserRound, CalendarDays, Package, Loader2, ChevronDown, ChevronRight, GitBranch } from "lucide-react";
+import { ClipboardList, UserRound, CalendarDays, Package, Loader2, ChevronDown, ChevronRight, GitBranch, Camera } from "lucide-react";
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
+import ActivityPhotoSection from "./ActivityPhotoSection";
 
 const FILTER_OPTIONS: Array<{ value: AssignmentStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "All" },
   ...ASSIGNMENT_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label })),
 ];
+
+// A field engineer updates a work report by uploading before/after site
+// photos, not by drawing on the blueprint — that's Work Allocation's job.
+// One button per row opens the photo section; it fills in once at least
+// one photo has been captured for this rung.
+function ActivityPhotoButton({ rungId, roomLabel }: { rungId: number; roomLabel: string }) {
+  const [open, setOpen] = useState(false);
+  const { data: photos } = useQuery({
+    queryKey: ["activity-photos", rungId],
+    queryFn: () => getActivityPhotos(rungId),
+  });
+  const count = (photos?.before.length ?? 0) + (photos?.after.length ?? 0);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title={count > 0 ? `${count} photo${count === 1 ? "" : "s"}` : "Add before/after photos"}
+        className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
+          count > 0
+            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+        }`}
+      >
+        <Camera size={12} />
+        {count > 0 ? `${count} photo${count === 1 ? "" : "s"}` : "Add photos"}
+      </button>
+      {open && (
+        <ActivityPhotoSection rungId={rungId} roomLabel={roomLabel} onClose={() => setOpen(false)} />
+      )}
+    </>
+  );
+}
 
 export default function ActivityReporting() {
   const rights = usePageRights("civilworkdpr-activity-reporting");
@@ -71,7 +107,7 @@ export default function ActivityReporting() {
       />
       <CivilWorkDprShell
         title="Reporting"
-        subtitle="Every activity assigned an engineer or material from Work Reporting, tracked through to completion"
+        subtitle="Every activity assigned an engineer or material from Work Allocation, tracked through to completion"
         icon={ClipboardList}
       >
         {!rights.canView ? (
@@ -107,7 +143,7 @@ export default function ActivityReporting() {
             ) : filteredRows.length === 0 ? (
               <div className="p-8 text-center text-sm text-muted-foreground">
                 {rows.length === 0
-                  ? "No activities have been assigned yet — click an activity chip in Work Reporting's Link Dependency chain to assign one."
+                  ? "No activities have been assigned yet — click an activity chip in Work Allocation's Link Dependency chain to assign one."
                   : "No activities match this status."}
               </div>
             ) : (
@@ -155,6 +191,7 @@ export default function ActivityReporting() {
                               <th className="px-3 py-2">Engineer</th>
                               <th className="px-3 py-2">Start Date</th>
                               <th className="px-3 py-2">Material</th>
+                              <th className="px-3 py-2">Photos</th>
                               <th className="px-5 py-2">Status</th>
                             </tr>
                           </thead>
@@ -195,6 +232,9 @@ export default function ActivityReporting() {
                                       ))}
                                     </div>
                                   )}
+                                </td>
+                                <td className="px-3 py-3">
+                                  <ActivityPhotoButton rungId={row.rungId} roomLabel={row.scopePath} />
                                 </td>
                                 <td className="px-5 py-3">
                                   <AssignmentStatusSelect rungId={row.rungId} status={row.status} />

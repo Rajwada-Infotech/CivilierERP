@@ -3,7 +3,8 @@ const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -243,13 +244,14 @@ router.get(
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
       const offset = (page - 1) * limit;
       const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-      if (!companyId) return res.status(400).json({ error: "companyId is required." });
 
-      const result = await pool
+      const listRequest = pool
         .request()
         .input("offset", sql.Int, offset)
-        .input("limit", sql.Int, limit)
-        .input("companyId", sql.Int, companyId).query(`
+        .input("limit", sql.Int, limit);
+      if (companyId) listRequest.input("companyId", sql.Int, companyId);
+
+      const result = await listRequest.query(`
         SELECT h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt,
           ec.name AS CompanyName, h.CompanyId,
@@ -270,7 +272,7 @@ router.get(
         LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
         LEFT JOIN dbo.TypeOfDoc         td  ON td.TypeOfDocId = h.DocTypeId
         LEFT JOIN dbo.BOQ               b   ON b.BoqID = h.BoqID
-        WHERE h.CompanyId = @companyId
+        ${companyId ? "WHERE h.CompanyId = @companyId" : ""}
         GROUP BY h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt, h.CompanyId, h.ProjectId,
           h.ContractorId, h.SupplierId, h.Remarks, h.TermsAndConditions,
@@ -522,9 +524,16 @@ router.put("/:id", requirePageRight("work-order-master", "edit"), async (req, re
   const id = requireValidId(req, res);
   if (!id) return;
 
+  let wasApproved = false;
+  let beforeSnapshot = null;
   try {
+    const currentStatus = await getRecordStatus("work-orders", id);
     const allowPostApproval = await resolveAllowPostApproval(req, "work-order");
     await guardEdit("work-orders", id, { allowPostApproval });
+    wasApproved = currentStatus === "Approved";
+    if (wasApproved) {
+      beforeSnapshot = await snapshotRow(getPool(), "dbo.WorkOrderHeader", "Id", id);
+    }
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -626,6 +635,25 @@ router.put("/:id", requirePageRight("work-order-master", "edit"), async (req, re
       `);
     if (!checkRowsAffected(result, res, "Work order")) return;
     await bumpCacheVersion("work-orders");
+
+    if (wasApproved && beforeSnapshot) {
+      try {
+        const afterSnapshot = await snapshotRow(pool, "dbo.WorkOrderHeader", "Id", id);
+        await recordAmendment({
+          refDocType: "work-order",
+          refDocId: id,
+          refDocNo: afterSnapshot?.DocumentNumber || beforeSnapshot.DocumentNumber,
+          projectName: null,
+          companyName: null,
+          changedBy: req.user?.email || req.user?.name || null,
+          before: beforeSnapshot,
+          after: afterSnapshot,
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (work-order):", logErr.message);
+      }
+    }
+
     res.json({ message: "Work order updated" });
   } catch (err) {
     console.error("[PUT /work-orders/:id]", err.message);

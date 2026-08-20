@@ -713,8 +713,9 @@ export default function MaterialRequest() {
               <Eye size={15} />
             </button>
 
-            {/* Update — Draft only, or any status for admins */}
-            {rights.canEdit && status !== "Short Closed" && (status === "Draft" || isAdmin) && (
+            {/* Update — Draft or Approved (post-approval edits get logged
+                as amendments), or any status for admins */}
+            {rights.canEdit && status !== "Short Closed" && (status === "Draft" || status === "Approved" || isAdmin) && (
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
@@ -722,7 +723,9 @@ export default function MaterialRequest() {
                 title={
                   status === "Draft"
                     ? "Edit this request"
-                    : "Edit (admin override)"
+                    : status === "Approved"
+                      ? "Edit (will be logged as an amendment)"
+                      : "Edit (admin override)"
                 }
               >
                 <Edit3 size={15} />
@@ -1631,7 +1634,7 @@ export default function MaterialRequest() {
               >
                 <Printer size={13} /><span className="hidden sm:inline">Print</span>
               </button>
-            {rights.canEdit && viewingRecord.Status !== "Short Closed" && (viewingRecord.Status === "Draft" || isAdmin) && (
+            {rights.canEdit && viewingRecord.Status !== "Short Closed" && (viewingRecord.Status === "Draft" || viewingRecord.Status === "Approved" || isAdmin) && (
               <button
                 onClick={() => { closeOverlay(); handleEdit(viewingRecord); }}
                 className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"

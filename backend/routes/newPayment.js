@@ -6,6 +6,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
@@ -979,6 +980,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     if (!userEmail) return;
 
     const pool = getPool();
+    const beforeSnapshot = await snapshotRow(pool, "dbo.NewPayment", "PPaymentID", id);
+    const wasApproved = beforeSnapshot?.Status === "Approved";
 
     const expenseHeadAllocationsPut = normalizeAllocations(EExpenseHeadAllocations);
     if (expenseHeadAllocationsPut.length > 0) {
@@ -1023,44 +1026,24 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       }
     }
 
-    // TDS (migration 304) — see matching comment on POST /. ContractId/
-    // PPartyId aren't part of this PUT's own payload (never re-editable
-    // after creation, see the UPDATE below), so they're read from the
-    // existing row rather than the request body.
+    // TDS (migration 304) — see matching comment on POST /. Resolved and
+    // validated once, at creation time, then preserved as-is on every
+    // subsequent edit — it used to be re-derived
+    // from the linked invoice's *current* state on every PUT, which meant an
+    // edit as small as adding a NEFT UTR reference would hard-fail if the
+    // invoice's own TDS selection had since been cleared, blocking routine
+    // post-transaction edits on an already-approved payment for a reason
+    // that has nothing to do with the fields actually being changed.
     const existingLinkRes = await pool.request().input("id", sql.Int, id)
-      .query("SELECT ContractId, PPartyId FROM dbo.NewPayment WHERE PPaymentID = @id");
+      .query("SELECT TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount FROM dbo.NewPayment WHERE PPaymentID = @id");
     const existingLink = existingLinkRes.recordset[0] || {};
-    const isInvoiceLinkedForTdsPut = !!PExpenseRef && !existingLink.ContractId;
-    const companyIdForTdsPut = parseInt(PCompany, 10) || null;
-    const finYearIdForTdsPut = await resolveFinYearId(pool, PDate);
-    let tdsSnapshotPut;
-    try {
-      const { resolveInvoiceLinkedTds, resolveTds } = require("../services/tds");
-      if (isInvoiceLinkedForTdsPut) {
-        tdsSnapshotPut = await resolveInvoiceLinkedTds(pool, sql, {
-          expenseRef: PExpenseRef,
-          companyId: companyIdForTdsPut,
-          finYearId: finYearIdForTdsPut,
-        });
-      } else {
-        const { resolvePaymentSupplierHeadId } = require("../services/generalLedger");
-        const directPartyIdPut = await resolvePaymentSupplierHeadId(pool, { ContractId: existingLink.ContractId, PExpenseRef: null, PPartyId: existingLink.PPartyId });
-        const tdsFlagResPut = directPartyIdPut
-          ? await pool.request().input("Id", sql.Int, directPartyIdPut).query("SELECT IsTdsApplicable, ISNULL(TdsLimitApplicable, 1) AS TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id")
-          : null;
-        tdsSnapshotPut = await resolveTds(pool, sql, {
-          partyHeadId: directPartyIdPut,
-          tdsApplicableFlag: !!tdsFlagResPut?.recordset[0]?.IsTdsApplicable,
-          tdsLimitApplicable: !!tdsFlagResPut?.recordset[0]?.TdsLimitApplicable,
-          billAmount: PAmount,
-          companyId: companyIdForTdsPut,
-          finYearId: finYearIdForTdsPut,
-          selectedTdsId: req.body.TDSId,
-        });
-      }
-    } catch (tdsErr) {
-      return res.status(tdsErr.status || 400).json({ error: tdsErr.message });
-    }
+    const tdsSnapshotPut = {
+      tdsId: existingLink.TDSId ?? null,
+      tdsNature: existingLink.TDSNature ?? null,
+      tdsName: existingLink.TDSName ?? null,
+      tdsPercentage: existingLink.TDSPercentage ?? null,
+      tdsAmount: existingLink.TDSAmount ?? null,
+    };
 
     // Re-resolve the Financial Year whenever the payment date is edited — it
     // always tracks the payment's own PDate, same as on create.
@@ -1150,6 +1133,25 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       await _syncBillStatus(pool,updatedRef.recordset[0].PExpenseRef);
     }
     await bumpCacheVersion("new-payment");
+
+    if (wasApproved && beforeSnapshot) {
+      try {
+        const afterSnapshot = await snapshotRow(pool, "dbo.NewPayment", "PPaymentID", id);
+        await recordAmendment({
+          refDocType: "payment",
+          refDocId: parseInt(id, 10),
+          refDocNo: afterSnapshot?.DocNo || beforeSnapshot.DocNo,
+          projectName: afterSnapshot?.PProject || beforeSnapshot.PProject,
+          companyName: afterSnapshot?.PCompany || beforeSnapshot.PCompany,
+          changedBy: userEmail,
+          before: beforeSnapshot,
+          after: afterSnapshot,
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (payment):", logErr.message);
+      }
+    }
+
     res.json({ message: "Payment updated successfully" });
   } catch (err) {
     if (

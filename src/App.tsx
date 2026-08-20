@@ -138,9 +138,6 @@ const WorkCheckpointMaster = lazy(
 const DependencyTracker = lazy(
   () => import("./pages/civilworkdpr/DependencyTracker"),
 );
-const ContractorRegister = lazy(
-  () => import("./pages/civilworkdpr/ContractorRegister"),
-);
 const WorkerAttendance = lazy(
   () => import("./pages/civilworkdpr/WorkerAttendance"),
 );
@@ -151,6 +148,7 @@ const ProfitAndLoss = lazy(() => import("./pages/finance/ProfitAndLoss"));
 const YearEndClose = lazy(() => import("./pages/finance/YearEndClose"));
 const BalanceEnquiry = lazy(() => import("./pages/finance/BalanceEnquiry"));
 const JournalVoucher = lazy(() => import("./pages/finance/JournalVoucher"));
+const FinanceAmendment = lazy(() => import("./pages/finance/FinanceAmendment"));
 const FundTransfer = lazy(() => import("./pages/finance/FundTransfer"));
 const FinanceContract = lazy(() => import("./pages/finance/Contract"));
 const OnAccountReport = lazy(() => import("./pages/finance/OnAccountReport"));
@@ -427,13 +425,12 @@ const PortalConstruction   = lazy(() => import("./pages/CrmCustomerPortal/Portal
 const PortalTickets        = lazy(() => import("./pages/CrmCustomerPortal/PortalTickets"));
 const PortalActivity       = lazy(() => import("./pages/CrmCustomerPortal/PortalActivity"));
 const PortalProfile        = lazy(() => import("./pages/CrmCustomerPortal/PortalProfile"));
-const AmendmentMenu = lazy(() => import("./pages/material/AmendmentMenu"));
-const Amendments = lazy(() => import("./pages/material/Amendments"));
 const Issues = lazy(() => import("./pages/material/Issues"));
 const IssueReturn = lazy(() => import("./pages/material/IssueReturn"));
 const MaterialRequestPage = lazy(
   () => import("./pages/material/MaterialRequest"),
 );
+const MaterialAmendment = lazy(() => import("./pages/material/MaterialAmendment"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
@@ -443,9 +440,7 @@ const EngineeringDashboard = lazy(
   () => import("./pages/engineering/EngineeringDashboard"),
 );
 const WorkDone = lazy(() => import("./pages/engineering/WorkDone"));
-const EngineeringAmendmentMenu = lazy(
-  () => import("./pages/engineering/EngineeringAmendmentMenu"),
-);
+const EngineeringAmendment = lazy(() => import("./pages/engineering/EngineeringAmendment"));
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -802,6 +797,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/finance-amendment"
+        element={
+          <ProtectedRoute pageKey="finance-amendment">
+            <FinanceAmendment />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/fund-transfer"
         element={
           <ProtectedRoute pageKey="fund-transfer">
@@ -866,7 +869,7 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/civilworkdpr/work-reporting"
+        path="/civilworkdpr/work-allocation"
         element={
           <ProtectedRoute pageKey="civilworkdpr-work-done">
             <CivilWorkDprWorkDone />
@@ -910,14 +913,6 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-dependency">
             <DependencyTracker />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/civilworkdpr/contractor-register"
-        element={
-          <ProtectedRoute pageKey="civilworkdpr-contractor-register">
-            <ContractorRegister />
           </ProtectedRoute>
         }
       />
@@ -1161,26 +1156,18 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/material/amendments"
-        element={
-          <ProtectedRoute pageKey="amendments">
-            <Amendments />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/material/amendment-menu"
-        element={
-          <ProtectedRoute pageKey="amendments">
-            <AmendmentMenu />
-          </ProtectedRoute>
-        }
-      />
-      <Route
         path="/material/material-request"
         element={
           <ProtectedRoute pageKey="material-request">
             <MaterialRequestPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/amendment"
+        element={
+          <ProtectedRoute pageKey="material-amendment">
+            <MaterialAmendment />
           </ProtectedRoute>
         }
       />
@@ -1378,10 +1365,10 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/engineering/amendment-menu"
+        path="/engineering/amendment"
         element={
-          <ProtectedRoute pageKey="engineering-amendment-menu">
-            <EngineeringAmendmentMenu />
+          <ProtectedRoute pageKey="engineering-amendment">
+            <EngineeringAmendment />
           </ProtectedRoute>
         }
       />

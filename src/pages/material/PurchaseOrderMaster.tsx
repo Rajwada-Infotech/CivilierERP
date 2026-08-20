@@ -2371,22 +2371,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const goToAmend = (item: POListItem) => {
-    navigate("/material/amendment-menu", {
-      state: {
-        prefill: {
-          tab: "PO",
-          docId: item._id,
-          docNo: item.poNumber || item.docNo,
-          supplierName: item.supplierName,
-          projectName: item.projectName,
-          companyName: item.companyName,
-          totalAmount: item.totalAmount,
-        },
-      },
-    });
-  };
-
   // ── Import/Export handlers ────────────────────────────────────────────────────
   const handleDownloadTemplate = () => {
     exportToCsv([], PO_TEMPLATE_COLUMNS, "purchase-order-template");
@@ -2963,11 +2947,11 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             String(viewingPO.PurchaseOrderID ?? viewingPO._id),
                         );
                         setViewingPO(null);
-                        if (item) goToAmend(item);
+                        if (item) goToEdit(item);
                       }}
                       className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
                     >
-                      <FilePenLine size={13} /><span className="hidden sm:inline">Amend</span>
+                      <FilePenLine size={13} /><span className="hidden sm:inline">Edit</span>
                     </button>
                   )}
                   <button
@@ -3569,11 +3553,11 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     <button
                       onClick={() => {
                         const item = listData.find((r) => r._id === editingId);
-                        if (item) goToAmend(item);
+                        if (item) goToEdit(item);
                       }}
                       className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-sm font-semibold transition shadow-sm"
                     >
-                      <FilePenLine size={14} /> Amend
+                      <FilePenLine size={14} /> Edit
                     </button>
                   )}
                 </>

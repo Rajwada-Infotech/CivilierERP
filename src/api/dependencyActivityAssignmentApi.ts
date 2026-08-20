@@ -142,7 +142,7 @@ export const ASSIGNMENT_STATUSES = [
 ] as const;
 export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
 
-// Shared with Work Reporting's inline "saved flow" view, so a status reads
+// Shared with Work Allocation's inline "saved flow" view, so a status reads
 // the same badge color wherever it's shown — purely presentational, no
 // bearing on the order rows can move through.
 export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; className: string }> = {
@@ -181,6 +181,8 @@ export interface ReportedAssignment {
   floor: string;
   flatId: number;
   flatName: string | null;
+  roomId: number | null;
+  roomName: string | null;
   scopePath: string;
   materials: { name: string; quantity: number; uom: string | null }[];
 }
@@ -201,4 +203,107 @@ export const updateAssignmentStatus = async (
     body: JSON.stringify({ status }),
   });
   return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
+};
+
+// ── Blueprint Annotation Workflow ───────────────────────────────────────────
+// Scoped per (rung, room, context) — see migration 345/346's own comments
+// for why: two activities in the same chain sharing a room's blueprint
+// (e.g. Fixture Installation and Electrical Wiring) each carry independent
+// markup, AND within one activity, the Work Allocation layer ("allocation")
+// and the field engineer's Work Reporting layer ("reporting") are two more
+// independent, separately-versioned rows on that same (rung, room) —
+// neither context can ever overwrite the other.
+export type BlueprintAnnotationContext = "allocation" | "reporting";
+
+export interface BlueprintAnnotation {
+  shapesJson: string;
+  thumbnailBase64: string | null;
+  version: number;
+  updatedBy: string | null;
+  updatedAt: string | null;
+}
+
+export const getBlueprintAnnotation = async (
+  rungId: number,
+  roomId: number,
+  context: BlueprintAnnotationContext = "allocation",
+): Promise<BlueprintAnnotation | null> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/blueprint-annotation?roomId=${roomId}&context=${context}`);
+  return handleResponse<BlueprintAnnotation | null>(res);
+};
+
+export const saveBlueprintAnnotation = async (
+  rungId: number,
+  payload: {
+    roomId: number;
+    context: BlueprintAnnotationContext;
+    shapesJson: string;
+    thumbnail: string | null;
+    version: number;
+  },
+): Promise<{ success: boolean; version: number }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/blueprint-annotation`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<{ success: boolean; version: number }>(res);
+};
+
+// ── Before/After Photo Capture ──────────────────────────────────────────────
+// Replaces the reporting-context blueprint markup as how a field engineer
+// actually updates a work report — see migration 348.
+export type PhotoPhase = "before" | "after";
+
+export interface ActivityPhotoMeta {
+  id: number;
+  phase: PhotoPhase;
+  fileName: string;
+  mimeType: string;
+  note: string | null;
+  capturedBy: string | null;
+  capturedAt: string;
+}
+
+export interface ActivityPhotos {
+  before: ActivityPhotoMeta[];
+  after: ActivityPhotoMeta[];
+}
+
+export interface ActivityPhotoData {
+  fileName: string;
+  mimeType: string;
+  dataBase64: string;
+}
+
+export const getActivityPhotos = async (rungId: number): Promise<ActivityPhotos> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos`);
+  return handleResponse<ActivityPhotos>(res);
+};
+
+export const getActivityPhoto = async (rungId: number, photoId: number): Promise<ActivityPhotoData> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos/${photoId}`);
+  return handleResponse<ActivityPhotoData>(res);
+};
+
+export const uploadActivityPhoto = async (
+  rungId: number,
+  phase: PhotoPhase,
+  file: File,
+  note?: string,
+): Promise<{ id: number }> => {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("phase", phase);
+  if (note) formData.append("note", note);
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos`, {
+    method: "POST",
+    body: formData,
+  });
+  return handleResponse<{ id: number }>(res);
+};
+
+export const deleteActivityPhoto = async (rungId: number, photoId: number): Promise<{ success: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos/${photoId}`, { method: "DELETE" });
+  return handleResponse<{ success: boolean }>(res);
 };

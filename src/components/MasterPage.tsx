@@ -172,7 +172,14 @@ interface MasterPageProps {
    */
   viewConfig?: {
     title: string;
-    fields: { key: string; label: string; mono?: boolean }[];
+    fields: {
+      key: string;
+      label: string;
+      mono?: boolean;
+      /** Custom display for this field in the view modal (e.g. a download
+       *  link for an attached file) instead of the plain stringified value. */
+      render?: (value: unknown, row: RecordWithId) => React.ReactNode;
+    }[];
   };
   /**
    * When provided, a Print button appears per row. Called with the row record
@@ -1056,7 +1063,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             </DialogHeader>
             {viewRow && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-1">
-                {viewConfig.fields.map(({ key, label, mono }) => {
+                {viewConfig.fields.map(({ key, label, mono, render }) => {
                   const val = viewRow[key];
                   const display =
                     typeof val === "boolean"
@@ -1071,11 +1078,15 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
                         {label}
                       </p>
-                      <p
-                        className={`text-sm text-foreground break-words ${mono ? "font-mono" : "font-body"}`}
-                      >
-                        {display}
-                      </p>
+                      {render ? (
+                        render(val, viewRow)
+                      ) : (
+                        <p
+                          className={`text-sm text-foreground break-words ${mono ? "font-mono" : "font-body"}`}
+                        >
+                          {display}
+                        </p>
+                      )}
                     </div>
                   );
                 })}

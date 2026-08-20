@@ -1,6 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { FileText, Upload } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
 import { FollowupShell } from "@/components/followup/FollowupShell";
@@ -14,6 +15,105 @@ import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/room-master";
+
+const BLUEPRINT_ACCEPT = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
+const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg", "image/png"]);
+
+// GET /:id/blueprint returns base64 JSON rather than a raw file stream —
+// the app's auth is a Bearer token attached only by fetchWithAuth's own
+// header, so a plain <a href> straight to the API 401s with "No token
+// provided". This decodes the base64 into a Blob and opens that instead,
+// going through fetchWithAuth so the request is actually authenticated.
+async function openBlueprint(roomId: string) {
+  try {
+    const res = await fetchWithAuth(`${API}/${roomId}/blueprint`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || "Could not load blueprint");
+    }
+    const { mimeType, dataBase64 } = await res.json();
+    const byteChars = atob(dataBase64);
+    const byteNumbers = new Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+    const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType || "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (err: any) {
+    toast.error(err.message || "Could not open blueprint");
+  }
+}
+
+// The "custom" field's render prop is just a function, not a component, so
+// it can't hold a ref/hook itself — pulled out into its own component so a
+// hidden <input type="file"> + a normal styled <button> can drive it. The
+// native input's own "block w-full" + pseudo-element styling used to leave
+// a full-row invisible click target (clicking anywhere past the visible
+// "Choose File"/"No file chosen" text still opened the picker) and its
+// browser-default button never matched the app's own controls — this
+// button-triggers-hidden-input pattern fixes both at once.
+function BlueprintUploadField({
+  value,
+  onChange,
+  formData,
+}: {
+  value: unknown;
+  onChange: (v: unknown) => void;
+  formData?: Record<string, unknown>;
+}) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const pendingFile = value as File | undefined;
+  const existingName = formData?.blueprintFileName as string | undefined;
+  const existingId = formData?._id as string | undefined;
+  return (
+    <div className="space-y-2">
+      {pendingFile ? (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+          <Upload size={13} className="text-muted-foreground shrink-0" />
+          <span className="flex-1 truncate">{pendingFile.name}</span>
+          <span className="text-[10px] text-muted-foreground shrink-0">Will upload on save</span>
+        </div>
+      ) : existingName ? (
+        <button
+          type="button"
+          onClick={() => existingId && openBlueprint(existingId)}
+          className="flex items-center gap-2 w-full rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40 transition-colors text-left"
+        >
+          <FileText size={13} className="text-muted-foreground shrink-0" />
+          <span className="flex-1 truncate font-medium text-foreground">{existingName}</span>
+          <span className="text-[10px] text-muted-foreground shrink-0">View current</span>
+        </button>
+      ) : (
+        <p className="text-xs text-muted-foreground">No blueprint uploaded yet.</p>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept={BLUEPRINT_ACCEPT}
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          if (!BLUEPRINT_MIME_TYPES.has(file.type)) {
+            toast.error("Blueprint must be a PDF, JPG, or PNG file");
+            e.target.value = "";
+            return;
+          }
+          onChange(file);
+          e.target.value = "";
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border bg-background text-foreground hover:bg-muted/40 transition-colors"
+      >
+        <Upload size={12} />
+        {pendingFile || existingName ? "Replace file" : "Choose file"}
+      </button>
+    </div>
+  );
+}
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 async function fetchRooms(): Promise<any[]> {
@@ -90,6 +190,15 @@ const fields: FieldDef[] = [
     type: "text",
   },
   {
+    name: "blueprintUpload",
+    label: "Blueprint (PDF, JPG or PNG)",
+    type: "custom",
+    fullWidth: true,
+    render: ({ value, onChange, formData }) => (
+      <BlueprintUploadField value={value} onChange={onChange} formData={formData} />
+    ),
+  },
+  {
     name: "isActive",
     label: "Status",
     type: "toggle",
@@ -157,6 +266,8 @@ const RoomMaster: React.FC = () => {
       roomName: item.RoomName ?? "",
       floor: item.Floor ?? "",
       isActive: Boolean(item.IsActive),
+      blueprintFileName: item.BlueprintFileName ?? null,
+      blueprintMimeType: item.BlueprintMimeType ?? null,
     }));
   }, [rooms]);
 
@@ -171,6 +282,27 @@ const RoomMaster: React.FC = () => {
     IsActive: r.isActive !== false,
   });
 
+  // Blueprint upload is a separate multipart request, kept out of
+  // toPayload's plain-JSON body (a File can't be JSON.stringify'd
+  // meaningfully) — fired right after the room record itself is
+  // created/updated, once its id is known. A failure here is reported but
+  // doesn't roll back the room save, same as Loan Sanction's own
+  // document-attach-after-create flow.
+  const uploadBlueprintIfStaged = async (roomId: string, record: Record<string, unknown>) => {
+    const file = record.blueprintUpload as File | undefined;
+    if (!file) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetchWithAuth(`${API}/${roomId}/blueprint`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || "Blueprint upload failed");
+    }
+  };
+
   const handleDataEvent = async (event: DataChangeEvent) => {
     try {
       if (event.action === "add") {
@@ -181,7 +313,13 @@ const RoomMaster: React.FC = () => {
         });
         if (!res.ok)
           throw new Error((await res.json()).error || "Failed to add room");
+        const body = await res.json().catch(() => ({}));
         toast.success("Room added!");
+        try {
+          await uploadBlueprintIfStaged(String(body.id), event.record);
+        } catch (err: any) {
+          toast.error(`Room saved, but blueprint upload failed: ${err.message}`);
+        }
       }
       if (event.action === "update") {
         const res = await fetchWithAuth(`${API}/${event.id}`, {
@@ -192,6 +330,11 @@ const RoomMaster: React.FC = () => {
         if (!res.ok)
           throw new Error((await res.json()).error || "Failed to update room");
         toast.success("Room updated!");
+        try {
+          await uploadBlueprintIfStaged(event.id, event.record);
+        } catch (err: any) {
+          toast.error(`Room updated, but blueprint upload failed: ${err.message}`);
+        }
       }
       if (event.action === "delete") {
         const res = await fetchWithAuth(`${API}/${event.id}`, {
@@ -245,6 +388,23 @@ const RoomMaster: React.FC = () => {
             { key: "roomName", label: "Room Name" },
             { key: "floor", label: "Floor" },
             { key: "isActive", label: "Status" },
+            {
+              key: "blueprintFileName",
+              label: "Blueprint",
+              render: (val, row) =>
+                val ? (
+                  <button
+                    type="button"
+                    onClick={() => openBlueprint(row._id)}
+                    className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+                  >
+                    <FileText size={13} className="shrink-0" />
+                    <span className="truncate">{String(val)}</span>
+                  </button>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Not uploaded</p>
+                ),
+            },
           ],
         }}
         onPrint={(row) => {

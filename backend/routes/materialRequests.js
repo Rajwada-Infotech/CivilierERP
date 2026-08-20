@@ -29,6 +29,7 @@ const {
   previewNextDocNumber,
 } = require("../utils/docNumberLock");
 const { transition } = require("../services/approvalService");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   getMRItemFulfillment,
@@ -830,19 +831,24 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       items = [],
     } = req.body;
 
-    // Bug 1 — guard against editing a non-Draft MR.
-    // The frontend restricts Edit to Draft rows, but a direct API call or race
-    // condition could reach here with an Approved/Pending record.
+    // Guard against editing a Pending/Rejected MR — Draft is normal editing,
+    // Approved is allowed too (logged as an amendment below) so an approved
+    // request doesn't become permanently frozen.
     const statusCheck = await pool
       .request()
       .input("id", sql.Int, id)
       .query("SELECT Status FROM dbo.MaterialRequests WHERE MRId=@id");
     if (!statusCheck.recordset.length)
       return res.status(404).json({ error: "Not found" });
-    if (statusCheck.recordset[0].Status !== "Draft")
+    const currentMRStatus = statusCheck.recordset[0].Status;
+    if (!["Draft", "Approved"].includes(currentMRStatus))
       return res.status(409).json({
-        error: `Cannot edit a Material Request with status "${statusCheck.recordset[0].Status}". Only Draft requests can be edited.`,
+        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft or Approved requests can be edited.`,
       });
+    const wasApproved = currentMRStatus === "Approved";
+    const beforeSnapshot = wasApproved
+      ? await snapshotRow(pool, "dbo.MaterialRequests", "MRId", id)
+      : null;
 
     // Header update + item replacement must be one atomic unit — previously
     // each ran on the plain pool (auto-committing individually). The item
@@ -865,14 +871,19 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
         .input("Priority", sql.NVarChar(20), Priority)
         .input("Reason", sql.NVarChar(sql.MAX), Reason)
         .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
-        .input("Status", sql.NVarChar(20), Status || "Draft")
+        // The edit form never actually sends Status back (it only edits
+        // header/item fields), so this must preserve whatever status the
+        // record already has via COALESCE rather than overwrite it — an
+        // unconditional overwrite would silently revert an Approved
+        // request to Draft on every post-approval edit.
+        .input("Status", sql.NVarChar(20), Status || null)
         .input("UpdatedBy", sql.NVarChar(200), user).query(`
           UPDATE dbo.MaterialRequests
           SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
               RequestDate=@RequestDate, RequiredByDate=@RequiredByDate,
               Priority=@Priority, Reason=@Reason, Remarks=@Remarks,
-              Status=@Status, UpdatedBy=@UpdatedBy, UpdatedAt=GETDATE()
-          WHERE MRId=@id AND Status='Draft'
+              Status=COALESCE(@Status, Status), UpdatedBy=@UpdatedBy, UpdatedAt=GETDATE()
+          WHERE MRId=@id AND Status IN ('Draft', 'Approved')
         `);
 
       // Race-condition guard: if another request approved/submitted this MR
@@ -916,6 +927,25 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     }
 
     await bumpCacheVersion("material-requests");
+
+    if (wasApproved && beforeSnapshot) {
+      try {
+        const afterSnapshot = await snapshotRow(pool, "dbo.MaterialRequests", "MRId", id);
+        await recordAmendment({
+          refDocType: "material-request",
+          refDocId: id,
+          refDocNo: afterSnapshot?.DocNo || beforeSnapshot.DocNo,
+          projectName: null,
+          companyName: null,
+          changedBy: user,
+          before: beforeSnapshot,
+          after: afterSnapshot,
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (material-request):", logErr.message);
+      }
+    }
+
     res.json({ message: "Material request updated" });
   } catch (err) {
     res.status(500).json({ error: err.message });

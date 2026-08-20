@@ -71,7 +71,7 @@ export const saveBhkTemplate = (
     body: JSON.stringify(payload),
   }).then((r) => handle(r));
 
-// Work Reporting page's Room dropdown source — generated {alias} {index}
+// Work Allocation page's Room dropdown source — generated {alias} {index}
 // instances for the given Unit, resolved via its own UnitType against the
 // matching layout template.
 export const getRoomInstancesForUnit = (unitId: number) =>

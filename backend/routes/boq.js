@@ -6,7 +6,8 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
@@ -485,10 +486,15 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
+    const currentStatus = await getRecordStatus("boq", id);
     const allowPostApproval = await resolveAllowPostApproval(req, "boq");
     await guardEdit("boq", id, { allowPostApproval });
+    const wasApproved = currentStatus === "Approved";
 
     const pool = getPool();
+    const beforeSnapshot = wasApproved
+      ? await snapshotRow(pool, "dbo.BOQ", "BoqID", id)
+      : null;
     const uomMap = await buildUomMap(pool);
     transaction = pool.transaction();
     await transaction.begin();
@@ -546,6 +552,24 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
       }
     } catch (e) {
       console.warn("[BOQ auto-submit on update]", e.message);
+    }
+
+    if (wasApproved && beforeSnapshot) {
+      try {
+        const afterSnapshot = await snapshotRow(pool, "dbo.BOQ", "BoqID", id);
+        await recordAmendment({
+          refDocType: "boq",
+          refDocId: id,
+          refDocNo: afterSnapshot?.DocNo || afterSnapshot?.BoqNo || beforeSnapshot.DocNo || beforeSnapshot.BoqNo,
+          projectName: null,
+          companyName: null,
+          changedBy: userEmail,
+          before: beforeSnapshot,
+          after: afterSnapshot,
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (boq):", logErr.message);
+      }
     }
 
     res.json({ message: "BOQ updated successfully" });

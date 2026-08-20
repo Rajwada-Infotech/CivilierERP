@@ -516,7 +516,6 @@ let onEdit: (grn: any) => void;
 let onView: (grn: any) => void;
 let deleteMutation: { mutate: (id: string) => void };
 let handleDeleteGrn: (id: string) => void;
-let goToGRNAmend: (grn: any) => void;
 let _canDelete = true;
 
 // ─── List Columns ─────────────────────────────────────────────────────────────
@@ -1710,23 +1709,6 @@ export default function GRN() {
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
-
-  const goToGRNAmendLocal = (grn: any) => {
-    navigate("/material/amendment-menu", {
-      state: {
-        prefill: {
-          tab: "GRN",
-          docId: String(grn.GRNID),
-          docNo: grn.GRNNo,
-          supplierName: grn.SupplierName,
-          projectName: grn.ProjectName ?? "",
-          companyName: grn.CompanyName ?? "",
-          totalAmount: grn.TotalAmount ?? 0,
-        },
-      },
-    });
-  };
-  goToGRNAmend = goToGRNAmendLocal;
 
   const resetForm = () => {
     setFormData(buildEmptyForm());

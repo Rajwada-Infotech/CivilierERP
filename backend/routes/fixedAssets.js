@@ -47,7 +47,6 @@ router.get("/", async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
-    if (!req.query.companyId) return res.status(400).json({ error: "companyId is required." });
     let where = [];
 
     if (req.query.companyId)  { request.input("CompanyId",  sql.Int,          parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }

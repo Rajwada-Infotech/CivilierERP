@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -9,8 +8,6 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { type DbItem } from "@/api/itemMasterApi";
 import { type DbActivity } from "@/api/activityMasterApi";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { AmendedBadge } from "@/components/AmendedBadge";
-import { useAmendmentStatus } from "@/hooks/useAmendmentStatus";
 import {
   FileText,
   Save,
@@ -21,7 +18,6 @@ import {
   RefreshCw,
   X,
   Edit3,
-  FilePenLine,
   Package,
   Settings2,
   Printer,
@@ -1745,8 +1741,6 @@ const DetailModal: React.FC<DetailModalProps> = ({
 }) => {
   const [lineTab, setLineTab] = useState<"items" | "activities">("items");
   const [acting, setActing] = useState(false);
-  const navigate = useNavigate();
-  const amendmentStatus = useAmendmentStatus("BOQ", record.BoqID, record.Status);
 
   const doDelete = async () => {
     if (!window.confirm("Delete this BOQ and all its items/activities?"))
@@ -1832,7 +1826,6 @@ const DetailModal: React.FC<DetailModalProps> = ({
               {record.BoqNo || record.DocNo}
             </span>
             <ApprovalStatusChain table="BOQ" recordId={record.BoqID} />
-            {amendmentStatus.isAmended && <AmendedBadge />}
           </div>
 
           {/* Right-side actions */}
@@ -1848,47 +1841,23 @@ const DetailModal: React.FC<DetailModalProps> = ({
                 <Trash2 size={13} className="mr-1.5" /> Delete
               </Button>
             )}
-            {record.Status === "Draft" && (
-              <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={acting}
-                  onClick={onEdit}
-                >
-                  <Edit3 size={13} className="mr-1.5" /> Edit
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={acting}
-                  onClick={() => doTransition("submit")}
-                >
-                  Submit for Approval <Send size={12} className="ml-1.5" />
-                </Button>
-              </>
-            )}
-            {record.Status === "Approved" && (
+            {(record.Status === "Draft" || record.Status === "Approved") && (
               <Button
                 variant="secondary"
                 size="sm"
                 disabled={acting}
-                onClick={() =>
-                  navigate("/engineering/amendment-menu", {
-                    state: {
-                      prefill: {
-                        tab: "BOQ",
-                        docId: record.BoqID,
-                        docNo: record.BoqNo || record.DocNo,
-                        projectName: record.ProjectName,
-                        companyName: record.CompanyName,
-                        totalAmount: record.TotalAmount,
-                      },
-                    },
-                  })
-                }
-                className="text-violet-600 dark:text-violet-400 hover:bg-violet-500/10"
+                onClick={onEdit}
               >
-                <FilePenLine size={13} className="mr-1.5" /> Amend
+                <Edit3 size={13} className="mr-1.5" /> Edit
+              </Button>
+            )}
+            {record.Status === "Draft" && (
+              <Button
+                size="sm"
+                disabled={acting}
+                onClick={() => doTransition("submit")}
+              >
+                Submit for Approval <Send size={12} className="ml-1.5" />
               </Button>
             )}
           </div>
@@ -2035,26 +2004,8 @@ const DetailModal: React.FC<DetailModalProps> = ({
               </>
             )}
             {record.Status === "Approved" && (
-              <Button
-                variant="secondary"
-                disabled={acting}
-                onClick={() =>
-                  navigate("/engineering/amendment-menu", {
-                    state: {
-                      prefill: {
-                        tab: "BOQ",
-                        docId: record.BoqID,
-                        docNo: record.BoqNo || record.DocNo,
-                        projectName: record.ProjectName,
-                        companyName: record.CompanyName,
-                        totalAmount: record.TotalAmount,
-                      },
-                    },
-                  })
-                }
-                className="text-violet-600 dark:text-violet-400 hover:bg-violet-500/10"
-              >
-                <FilePenLine size={14} className="mr-1.5" /> Amend
+              <Button variant="secondary" disabled={acting} onClick={onEdit}>
+                <Edit3 size={14} className="mr-1.5" /> Edit
               </Button>
             )}
           </div>

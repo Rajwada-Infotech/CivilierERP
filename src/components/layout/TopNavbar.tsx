@@ -47,8 +47,8 @@ import {
   Wand2,
   Percent,
   GitBranch,
-  XCircle,
   ClipboardCheck,
+  XCircle,
 } from "lucide-react";
 import {
   Crown,

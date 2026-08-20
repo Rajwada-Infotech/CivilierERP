@@ -13,5 +13,5 @@ export const engineeringNavItems: NavItem[] = [
     ],
   },
   { label: "DPR",       icon: ClipboardText, path: "/engineering/dpr",              pageKey: "dpr" },
-  { label: "Amendment", icon: Edit2,   path: "/engineering/amendment-menu",   pageKey: "amendments" },
+  { label: "Amendment", icon: Edit2,         path: "/engineering/amendment",        pageKey: "engineering-amendment" },
 ];

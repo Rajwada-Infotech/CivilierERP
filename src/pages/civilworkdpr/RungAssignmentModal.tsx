@@ -8,6 +8,7 @@ import {
   getProjectContractors,
   getRungAssignment,
   saveRungAssignment,
+  getBlueprintAnnotation,
   SOURCE_META,
   type AssignmentMaterial,
   type AssignmentCheckpoint,
@@ -15,8 +16,10 @@ import {
   type Engineer,
 } from "@/api/dependencyActivityAssignmentApi";
 import { getActivityCheckpoints } from "@/api/activityCheckpointApi";
+import { getRoomBlueprint } from "@/api/roomMasterApi";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
+import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
 
 const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -71,6 +74,76 @@ function EngineerMultiSelect({
   );
 }
 
+// Shows the room's blueprint (annotated thumbnail if this rung already has
+// markup on it, the raw blueprint otherwise) and opens the Konva editor on
+// click. Two activities in the same chain can mark up the same room's
+// blueprint independently — see migration 345.
+function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number; rungId: number; roomLabel: string }) {
+  const [editorOpen, setEditorOpen] = useState(false);
+  const { data: blueprint, isLoading: blueprintLoading } = useQuery({
+    queryKey: ["room-blueprint", roomId],
+    queryFn: () => getRoomBlueprint(roomId),
+  });
+  const { data: annotation } = useQuery({
+    queryKey: ["blueprint-annotation", rungId, roomId, "allocation"],
+    queryFn: () => getBlueprintAnnotation(rungId, roomId, "allocation"),
+  });
+
+  const thumbnailSrc = annotation?.thumbnailBase64
+    ? `data:image/png;base64,${annotation.thumbnailBase64}`
+    : blueprint && blueprint.mimeType !== "application/pdf"
+      ? `data:${blueprint.mimeType};base64,${blueprint.dataBase64}`
+      : null;
+
+  return (
+    <div>
+      <label className={labelCls}>
+        <FileText size={11} /> Reference Blueprint
+      </label>
+      {blueprintLoading ? (
+        <div className="rounded-lg border border-border bg-muted/30 h-24 flex items-center justify-center">
+          <Loader2 size={16} className="animate-spin text-muted-foreground" />
+        </div>
+      ) : !blueprint ? (
+        <p className="text-xs text-muted-foreground italic py-1.5">
+          No blueprint uploaded for this room yet — upload one from Setup &gt; Room Master.
+        </p>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditorOpen(true)}
+          className="relative w-full max-w-[240px] rounded-lg border border-border overflow-hidden hover:border-primary/40 transition-colors group"
+        >
+          {thumbnailSrc ? (
+            <img src={thumbnailSrc} alt="Blueprint" className="w-full h-32 object-cover bg-white" />
+          ) : (
+            <div className="w-full h-32 flex items-center justify-center bg-muted/40">
+              <FileText size={22} className="text-muted-foreground" />
+            </div>
+          )}
+          {annotation && (
+            <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-500/90 text-white">
+              Marked
+            </span>
+          )}
+          <span className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[10px] px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            Click to mark up
+          </span>
+        </button>
+      )}
+      {editorOpen && (
+        <BlueprintAnnotationEditor
+          rungId={rungId}
+          roomId={roomId}
+          roomLabel={roomLabel}
+          editableContext="allocation"
+          onClose={() => setEditorOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 interface Props {
   rung: LadderActivity;
   chain: DependencyMasterListRow;
@@ -108,7 +181,7 @@ function givenByValue(source: SourceType | "", contractorId: number | null): str
   return "";
 }
 
-// Centered modal opened by clicking an activity chip in Work Reporting's
+// Centered modal opened by clicking an activity chip in Work Allocation's
 // linked Dependency chain preview — lets the user assign one or more
 // engineers, a start date + duration (auto-fills the end date), who's
 // supplying labour/material (Developer or a project-allocated contractor),
@@ -258,7 +331,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     onSuccess: () => {
       toast.success("Assignment saved.");
       queryClient.invalidateQueries({ queryKey: ["dependency-activity-assignment", rungId] });
-      // Prefix match — refreshes Work Reporting's "Saved Flow" list for
+      // Prefix match — refreshes Work Allocation's "Saved Flow" list for
       // whichever chain is currently open there, without this modal needing
       // to know that page's exact query key/params.
       queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
@@ -419,6 +492,15 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                 <p className="text-[10px] text-muted-foreground mt-1">Auto-filled from location — edit freely.</p>
               )}
             </div>
+
+            {/* Reference blueprint — click to open the markup editor */}
+            {rung.rungId != null && chain.roomId != null && (
+              <BlueprintPreviewSection
+                roomId={chain.roomId}
+                rungId={rung.rungId}
+                roomLabel={chain.scopePath}
+              />
+            )}
 
             {/* Material */}
             <div>

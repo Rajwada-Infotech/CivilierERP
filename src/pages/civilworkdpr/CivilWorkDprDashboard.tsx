@@ -330,7 +330,7 @@ export default function CivilWorkDprDashboard() {
       <Breadcrumbs items={["Dashboard", "Civil Work DPR"]} />
       <GlassShell
         title="Civil Work DPR"
-        subtitle="Activities, contractor allocations, and Work Reporting assignments at a glance"
+        subtitle="Activities, contractor allocations, and Work Allocation assignments at a glance"
         icon={Pickaxe}
         accentColor={ACCENT}
         secondaryColor={SECONDARY}
@@ -363,7 +363,6 @@ export default function CivilWorkDprDashboard() {
               sub={`${data.allocations.totalCount} allocations · ${data.allocations.projectCount} projects`}
               icon={HardHat}
               accentColor="#3b82f6"
-              onClick={() => navigate("/civilworkdpr/contractor-register")}
             />
             <GlassCard
               label="Labour on Site Today"
@@ -409,7 +408,7 @@ export default function CivilWorkDprDashboard() {
         </GlassSection>
 
         {/* Recent activity + status breakdown */}
-        <GlassSection title="Work Reporting" icon={Hammer} accentColor={ACCENT}>
+        <GlassSection title="Work Allocation" icon={Hammer} accentColor={ACCENT}>
           {/* Equal-height columns: the grid stretches both cells to the
               tallest one, and each column is itself a flex column so its
               content actually fills that height (a scrollable list on the
@@ -441,7 +440,7 @@ export default function CivilWorkDprDashboard() {
                 </button>
               </div>
               {!data.recentAssignments.length ? (
-                <EmptyState label="No activities assigned yet — click an activity in Work Reporting's Link Dependency chain to assign one" />
+                <EmptyState label="No activities assigned yet — click an activity in Work Allocation's Link Dependency chain to assign one" />
               ) : (
                 <div className="divide-y divide-border flex-1 overflow-y-auto flex flex-col justify-between">
                   {data.recentAssignments.map((a) => (
@@ -496,11 +495,10 @@ export default function CivilWorkDprDashboard() {
         <GlassSection title="Quick Actions" icon={Pickaxe} accentColor={ACCENT}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[
-              { label: "Work Reporting", icon: Hammer, path: "/civilworkdpr/work-reporting", color: "#8b5cf6" },
+              { label: "Work Allocation", icon: Hammer, path: "/civilworkdpr/work-allocation", color: "#8b5cf6" },
               { label: "Reporting", icon: FileText, path: "/civilworkdpr/activity-reporting", color: "#10b981" },
               { label: "Activity Master", icon: ClipboardList, path: "/masters/activity", color: "#f97316" },
               { label: "Dependency", icon: GitBranch, path: "/civilworkdpr/dependency", color: ACCENT },
-              { label: "Contractor Register", icon: HardHat, path: "/civilworkdpr/contractor-register", color: "#3b82f6" },
               { label: "Attendance", icon: Users2, path: "/civilworkdpr/worker-attendance", color: "#eab308" },
             ].map(({ label, icon: Icon, path, color }) => (
               <button

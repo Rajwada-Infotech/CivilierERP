@@ -5,8 +5,9 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
@@ -1000,10 +1001,15 @@ router.put(
 
       await assertNoMixedItemTypes(getPool(), poItemsArray);
 
+      const currentStatus = await getRecordStatus("purchase-orders", id);
       const allowPostApproval = await resolveAllowPostApproval(req, "purchase-orders");
       await guardEdit("purchase-orders", id, { allowPostApproval });
+      const wasApproved = currentStatus === "Approved";
 
       const pool = getPool();
+      const beforeSnapshot = wasApproved
+        ? await snapshotRow(pool, "dbo.PurchaseOrders", "PurchaseOrderID", id)
+        : null;
       const uomMap = await buildUomMap(pool);
       const fyId = await resolveFyId(pool, finYear);
       const { hasCC, hasVID, hasVIN, hasPT } = await getPOCols(pool);
@@ -1099,6 +1105,24 @@ router.put(
 
       await transaction.commit();
       await bumpCacheVersion("purchase-orders");
+
+      if (wasApproved && beforeSnapshot) {
+        try {
+          const afterSnapshot = await snapshotRow(pool, "dbo.PurchaseOrders", "PurchaseOrderID", id);
+          await recordAmendment({
+            refDocType: "purchase-order",
+            refDocId: id,
+            refDocNo: afterSnapshot?.PurchaseOrderNo || beforeSnapshot.PurchaseOrderNo,
+            projectName: null,
+            companyName: null,
+            changedBy: userEmail,
+            before: beforeSnapshot,
+            after: afterSnapshot,
+          });
+        } catch (logErr) {
+          console.error("Amendment log error (purchase-order):", logErr.message);
+        }
+      }
 
       res.json({ message: "Purchase order updated successfully" });
     } catch (err) {
