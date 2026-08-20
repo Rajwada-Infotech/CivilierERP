@@ -36,7 +36,11 @@ router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 // Redis GET (~2ms) instead of a SQL Server sys.columns scan (~200ms+).
 let _hasNewCols = null;
 
-const MUTATION_CACHE_KEYS = ["received-payment", "brs", "finance-dashboard"];
+// pdc-report/pdc-due-count feed the PDC report and reminder bell — bumped
+// unconditionally on every mutation here (cheap, and simpler than threading
+// RPMode through every call site) rather than risk a cheque-mode receipt
+// silently going stale in the bell for up to the report's own cache TTL.
+const MUTATION_CACHE_KEYS = ["received-payment", "brs", "finance-dashboard", "pdc-report", "pdc-due-count"];
 
 async function invalidateReceivedPaymentWorkflowCaches() {
   MUTATION_CACHE_KEYS.forEach((key) => localVersionCache.invalidate(key));

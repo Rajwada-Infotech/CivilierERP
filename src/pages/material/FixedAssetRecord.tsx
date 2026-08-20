@@ -8,11 +8,11 @@ import {
   FileText, MapPin, Hash, Cpu, Check, X,
   Boxes, Wallet, PackageCheck, Circle, CheckCircle2, PlayCircle,
 } from "lucide-react";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { MaterialShell, MaterialGlassCard } from "@/components/material/MaterialShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
+import { useTheme } from "@/contexts/ThemeContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getSuppliers } from "@/api/grnApi";
 import { getActiveDepreciationSetups, type DepreciationSetup } from "@/api/depreciationApi";
@@ -140,7 +140,10 @@ type ViewMode = "list" | "form" | "detail";
 // ── small presentational helpers ──────────────────────────────────────────────
 const inputCls    = "w-full h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow";
 const labelCls    = "flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1";
-const sectionCls  = "bg-card border border-border rounded-xl p-5 space-y-4";
+// Layout only — the glass background/border/blur comes from the
+// `glassSection` style object (computed per-theme inside the component) so
+// every section shares the same glass-panel look the list view uses.
+const sectionCls  = "rounded-2xl p-5 space-y-4";
 
 function SectionHeader({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
   return (
@@ -198,7 +201,7 @@ function CategoryBadge({ category }: { category: string }) {
   );
 }
 
-function LivePreviewCard({ form, saving }: { form: FormState; saving: boolean }) {
+function LivePreviewCard({ form, saving, glassStyle }: { form: FormState; saving: boolean; glassStyle: React.CSSProperties }) {
   const Icon = CATEGORY_ICONS[form.assetCategory] || FileText;
   const fields = [
     { label: "Asset Name",     value: form.assetName || "—", done: !!form.assetName },
@@ -215,7 +218,7 @@ function LivePreviewCard({ form, saving }: { form: FormState; saving: boolean })
   const pct = Math.round((doneCount / fields.length) * 100);
 
   return (
-    <div className="relative bg-card border border-border rounded-xl overflow-hidden h-fit shadow-lg shadow-black/5 dark:shadow-black/20">
+    <div className="relative rounded-2xl overflow-hidden h-fit" style={glassStyle}>
       <div className="bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 p-4 text-white">
         <p className="text-[10px] uppercase tracking-wide text-white/70 mb-1.5">Draft Document</p>
         <div className="flex items-center gap-2.5">
@@ -264,6 +267,18 @@ export default function FixedAssetRecord() {
   const qc     = useQueryClient();
   const { finYears } = useFinYear();
   const activeFinYear = finYears.find((f) => f.status === "Active")?.year || "";
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
+  // Same glass-panel treatment the rest of the Material module uses (see
+  // MaterialGlassCard / IssueReturn.tsx) — keeps this page visually
+  // consistent with its siblings instead of a one-off flat-Card look.
+  const glassSection = {
+    background: isDark ? "rgba(10,18,15,0.45)" : "rgba(255,255,255,0.72)",
+    border: `1px solid ${isDark ? "rgba(16,185,129,0.15)" : "rgba(16,185,129,0.18)"}`,
+    backdropFilter: "blur(16px) saturate(160%)",
+    WebkitBackdropFilter: "blur(16px) saturate(160%)",
+    boxShadow: isDark ? "0 4px 24px rgba(0,0,0,0.25)" : "0 4px 24px rgba(16,185,129,0.07)",
+  } as const;
 
   const [viewMode,   setViewMode]   = useState<ViewMode>("list");
   const [editingId,  setEditingId]  = useState<number | null>(null);
@@ -643,7 +658,7 @@ export default function FixedAssetRecord() {
           </div>
 
           {/* details grid */}
-          <div className={sectionCls}>
+          <div className={sectionCls} style={glassSection}>
             <SectionHeader icon={Package}>Asset Details</SectionHeader>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
               {[
@@ -673,7 +688,7 @@ export default function FixedAssetRecord() {
 
           {/* depreciation */}
           {dc && (
-            <div className={sectionCls}>
+            <div className={sectionCls} style={glassSection}>
               <SectionHeader icon={TrendingDown}>Depreciation Details</SectionHeader>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                 {[
@@ -695,7 +710,7 @@ export default function FixedAssetRecord() {
 
           {/* sale info */}
           {d.AssetStatus === "Sold" && (
-            <div className={sectionCls}>
+            <div className={sectionCls} style={glassSection}>
               <SectionHeader icon={IndianRupee}>Sale Information</SectionHeader>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
                 {[
@@ -722,7 +737,7 @@ export default function FixedAssetRecord() {
           )}
 
           {d.Remarks && (
-            <div className={sectionCls}>
+            <div className={sectionCls} style={glassSection}>
               <SectionHeader icon={FileText}>Remarks</SectionHeader>
               <p className="text-sm text-muted-foreground">{d.Remarks}</p>
             </div>
@@ -757,7 +772,7 @@ export default function FixedAssetRecord() {
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-5 xl:gap-8 items-start w-full max-w-[1600px]">
         <div className="space-y-5 min-w-0">
           {/* ── Header Info ── */}
-          <div className={sectionCls}>
+          <div className={sectionCls} style={glassSection}>
             <SectionHeader icon={FileText}>Header Information</SectionHeader>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
               <div>
@@ -795,7 +810,7 @@ export default function FixedAssetRecord() {
           </div>
 
           {/* ── Asset Details ── */}
-          <div className={`${sectionCls} space-y-5`}>
+          <div className={`${sectionCls} space-y-5`} style={glassSection}>
             <SectionHeader icon={Package}>Asset Details</SectionHeader>
 
             <SubGroup label="Identity">
@@ -888,7 +903,7 @@ export default function FixedAssetRecord() {
           </div>
 
           {/* ── Depreciation Details ── */}
-          <div className={sectionCls}>
+          <div className={sectionCls} style={glassSection}>
             <SectionHeader icon={TrendingDown}>Depreciation Details</SectionHeader>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
               <div>
@@ -933,7 +948,7 @@ export default function FixedAssetRecord() {
 
           {/* ── Sale Section ── */}
           {(form.assetStatus === "Sold" || form.sellingPrice) && (
-            <div className={sectionCls}>
+            <div className={sectionCls} style={glassSection}>
               <SectionHeader icon={IndianRupee}>Asset Sale</SectionHeader>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
                 <div>
@@ -980,7 +995,7 @@ export default function FixedAssetRecord() {
           )}
         </div>
 
-        <LivePreviewCard form={form} saving={saving} />
+        <LivePreviewCard form={form} saving={saving} glassStyle={glassSection} />
         </div>
       </MaterialShell>
     );
@@ -1005,90 +1020,108 @@ export default function FixedAssetRecord() {
         )
       }
     >
-      {/* ── Portfolio summary — value hero + book-value-by-category chart,
-          styled the same as PO/GRN's Card-based summary sections ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-4 mb-5">
-        <Card className="border-border shadow-sm overflow-hidden">
-          <div className="bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 px-5 py-4 text-white">
-            <p className="text-[10px] uppercase tracking-widest text-white/70">
-              Total Book Value
-            </p>
-            <p className="text-3xl font-bold tabular-nums mt-1">
-              {fmtCur(portfolioStats.totalBookValue)}
-            </p>
-            <p className="text-xs text-white/70 mt-1">
-              of {fmtCur(portfolioStats.totalCost)} original purchase value
-            </p>
-          </div>
-          <CardContent className="p-4">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <SummaryCard label="Total Assets" value={fmt(portfolioStats.count)} icon={Boxes} />
-              {portfolioStats.pendingCount > 0 && (
-                <SummaryCard label="Pending" value={fmt(portfolioStats.pendingCount)} color="text-violet-600 dark:text-violet-400" icon={AlertCircle} />
-              )}
-              <SummaryCard label="Active" value={fmt(portfolioStats.activeCount)} color="text-emerald-600 dark:text-emerald-400" icon={PlayCircle} />
-              <SummaryCard label="Sold" value={fmt(portfolioStats.soldCount)} color="text-amber-600 dark:text-amber-400" icon={IndianRupee} />
-            </div>
-          </CardContent>
-        </Card>
+      {/* ── KPI strip — same MaterialGlassCard language as every other
+          Material-module list page (see IssueReturn.tsx). ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <MaterialGlassCard
+          label="Total Book Value"
+          value={fmtCur(portfolioStats.totalBookValue)}
+          sub={`of ${fmtCur(portfolioStats.totalCost)} original`}
+          icon={Wallet}
+          accentColor="#10b981"
+        />
+        <MaterialGlassCard
+          label="Total Assets"
+          value={fmt(portfolioStats.count)}
+          sub={portfolioStats.pendingCount > 0 ? `${fmt(portfolioStats.pendingCount)} pending` : undefined}
+          icon={Boxes}
+          accentColor="#3b82f6"
+        />
+        <MaterialGlassCard
+          label="Active"
+          value={fmt(portfolioStats.activeCount)}
+          icon={PlayCircle}
+          accentColor="#22c55e"
+        />
+        <MaterialGlassCard
+          label="Sold"
+          value={fmt(portfolioStats.soldCount)}
+          icon={IndianRupee}
+          accentColor="#f59e0b"
+        />
+      </div>
 
-        <Card className="border-border shadow-sm">
-          <CardHeader className="pb-3 border-b border-border">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <TrendingUp size={14} className="text-emerald-600 dark:text-emerald-400" />
-              Book Value by Category
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-4">
-            {categoryBreakdown.entries.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-9">
-                No assets yet
-              </p>
-            ) : (
-              <div className="flex items-end justify-between gap-2.5 h-[148px]">
-                {categoryBreakdown.entries.map(([cat, value], i) => {
-                  const Icon = CATEGORY_ICONS[cat] || Package;
-                  const barColor = BAR_PALETTE[i % BAR_PALETTE.length];
-                  const pct =
-                    categoryBreakdown.max > 0
-                      ? Math.max(8, (value / categoryBreakdown.max) * 100)
-                      : 0;
-                  return (
-                    <div
-                      key={cat}
-                      className="flex-1 flex flex-col items-center gap-1.5 min-w-0 h-full"
-                    >
-                      <span
-                        className="text-[9px] font-mono text-muted-foreground truncate w-full text-center"
-                        title={fmtCurCompact(value)}
-                      >
-                        {fmtCurCompact(value)}
-                      </span>
-                      <div className="flex-1 w-full flex items-end justify-center">
+      {/* ── Book Value by Category ── */}
+      <div className="rounded-2xl overflow-hidden mb-4" style={glassSection}>
+        <div className="px-5 py-3.5 border-b border-emerald-500/15 flex items-center gap-2">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+            <TrendingUp size={14} />
+          </span>
+          <p className="text-sm font-semibold text-foreground">Book Value by Category</p>
+        </div>
+        <div className="p-5">
+          {categoryBreakdown.entries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-9 text-muted-foreground">
+              <Boxes size={20} className="opacity-40" />
+              <p className="text-xs">No assets yet</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3.5">
+              {categoryBreakdown.entries.map(([cat, value], i) => {
+                const Icon = CATEGORY_ICONS[cat] || Package;
+                const barColor = BAR_PALETTE[i % BAR_PALETTE.length];
+                const pct =
+                  categoryBreakdown.max > 0
+                    ? Math.max(4, (value / categoryBreakdown.max) * 100)
+                    : 0;
+                return (
+                  <div key={cat} className="flex items-center gap-3">
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground shrink-0">
+                      <Icon size={13} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline justify-between gap-2 mb-1">
+                        <span className="text-xs font-medium text-foreground truncate" title={cat}>
+                          {cat}
+                        </span>
+                        <span className="text-xs font-mono tabular-nums text-muted-foreground shrink-0">
+                          {fmtCurCompact(value)}
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                         <div
-                          className={`w-6 rounded-t-md ${barColor} transition-all`}
-                          style={{ height: `${pct}%` }}
+                          className={`h-full rounded-full ${barColor} transition-all`}
+                          style={{ width: `${pct}%` }}
                         />
                       </div>
-                      <Icon size={11} className="text-muted-foreground shrink-0" />
-                      <span
-                        className="text-[9px] text-muted-foreground truncate w-full text-center"
-                        title={cat}
-                      >
-                        {cat}
-                      </span>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── filters ── */}
-      <Card className="border-border shadow-sm mb-5">
-        <CardContent className="p-4 space-y-3">
+      <div className="rounded-2xl overflow-hidden mb-4" style={glassSection}>
+        <div className="px-5 py-3.5 border-b border-emerald-500/15 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+              <Search size={14} />
+            </span>
+            <p className="text-sm font-semibold text-foreground">Filters</p>
+          </div>
+          {(filterCategory || filterStatus || filterFinYear || search) && (
+            <button
+              onClick={() => { setFilterCategory(""); setFilterStatus(""); setFilterFinYear(""); setSearch(""); }}
+              className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 shrink-0"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+        <div className="p-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div className="lg:col-span-2">
               <label className={labelCls}>Search</label>
@@ -1126,34 +1159,17 @@ export default function FixedAssetRecord() {
               </select>
             </div>
           </div>
+        </div>
+      </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
-            <div className="flex items-center gap-3">
-              {(filterCategory || filterStatus || filterFinYear || search) && (
-                <button
-                  onClick={() => { setFilterCategory(""); setFilterStatus(""); setFilterFinYear(""); setSearch(""); }}
-                  className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 shrink-0"
-                >
-                  Clear filters
-                </button>
-              )}
-              <span className="text-xs text-muted-foreground shrink-0">
-                {filtered.length} of {portfolioStats.count} assets
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── register — same Card wrapper GRN.tsx uses for its register ── */}
-      <Card className="border-border shadow-sm">
-        <CardHeader className="pb-3 border-b border-border">
-          <CardTitle className="text-base font-semibold">Asset Register</CardTitle>
+      {/* ── register ── */}
+      <div className="rounded-2xl overflow-hidden" style={glassSection}>
+        <div className="px-5 py-3.5 border-b border-emerald-500/15">
+          <p className="text-sm font-semibold text-foreground">Asset Register</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {filtered.length} of {portfolioStats.count} asset{portfolioStats.count !== 1 ? "s" : ""}
           </p>
-        </CardHeader>
-        <CardContent className="p-0">
+        </div>
       {isLoading ? (
         <div className="text-center py-20 text-muted-foreground text-sm">Loading…</div>
       ) : filtered.length === 0 ? (
@@ -1173,7 +1189,7 @@ export default function FixedAssetRecord() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[900px]">
             <thead>
-              <tr className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
+              <tr className="bg-emerald-500/5 text-muted-foreground text-xs uppercase tracking-wide">
                 <th className="px-4 py-3 text-left">Asset</th>
                 <th className="px-4 py-3 text-left">Category</th>
                 <th className="px-4 py-3 text-left">Company / Project</th>
@@ -1184,14 +1200,14 @@ export default function FixedAssetRecord() {
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody className="divide-y divide-border/60">
               {filtered.map((a) => {
                 const dc = a.PurchaseDate && a.DepreciationRate
                   ? calcDepreciation(a.PurchaseCost, a.DepreciationRate, a.PurchaseDate)
                   : null;
                 const bookValue = dc ? dc.bookValue : a.PurchaseCost;
                 return (
-                  <tr key={a.AssetId} className="hover:bg-muted/30 transition-colors cursor-pointer"
+                  <tr key={a.AssetId} className="hover:bg-emerald-500/[0.04] transition-colors cursor-pointer"
                     onClick={() => goToView(a)}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
@@ -1244,8 +1260,7 @@ export default function FixedAssetRecord() {
           </table>
         </div>
       )}
-        </CardContent>
-      </Card>
+      </div>
 
       {/* ── delete confirm ── */}
       {deleteId && createPortal(
