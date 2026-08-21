@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { MessageCircle, Save, Loader2, CheckCircle2, AlertCircle, Info, ListChecks } from "lucide-react";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { cn } from "@/lib/utils";
 
@@ -58,11 +59,13 @@ export default function WhatsAppSetup() {
   const isConfigured = !!(form.accessToken && form.phoneNumberId && form.businessAccountId);
 
   return (
-    <AdminShell
-      title="WhatsApp Integration"
-      subtitle="WhatsApp Cloud API or third-party provider settings"
-      icon={MessageCircle}
-    >
+    <>
+      <Breadcrumbs items={["Dashboard", "Admin", "Communicator", "WhatsApp"]} />
+      <AdminShell
+        title="WhatsApp Integration"
+        subtitle="WhatsApp Cloud API or third-party provider settings"
+        icon={MessageCircle}
+      >
       <div className="flex gap-6 items-start">
 
         {/* LEFT — form */}
@@ -192,5 +195,6 @@ export default function WhatsAppSetup() {
         </div>
       </div>
     </AdminShell>
+    </>
   );
 }

@@ -12,6 +12,8 @@ import {
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -268,6 +270,7 @@ const UserPanel: React.FC<{
 
 const TaskTransfer: React.FC = () => {
   const queryClient = useQueryClient();
+  usePageRights("followup-task-transfer");
   const { glassCard } = useGlass();
 
   const [userAId, setUserAId] = React.useState<number | null>(null);
@@ -352,8 +355,10 @@ const TaskTransfer: React.FC = () => {
   const confirmToName = confirmDirection === "AtoB" ? userBName : userAName;
 
   return (
-    <FollowupShell
-      title="Task Transfer"
+    <>
+      <Breadcrumbs items={["Dashboard", "Follow-Up", "Task Transfer"]} />
+      <FollowupShell
+        title="Task Transfer"
       subtitle="Move pending & ongoing tasks between two users"
       icon={ArrowRight}
     >
@@ -501,7 +506,8 @@ const TaskTransfer: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </FollowupShell>
+      </FollowupShell>
+    </>
   );
 };
 

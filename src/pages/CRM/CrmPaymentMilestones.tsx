@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -428,9 +430,13 @@ const CrmPaymentMilestones: React.FC = () => {
       } },
   ];
 
+  usePageRights("crm-payments");
+
   return (
-    <CrmShell
-      title="CRM — Payment Milestones"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Payments"]} />
+      <CrmShell
+        title="CRM — Payment Milestones"
       subtitle="Milestone-wise payment tracking for bookings"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
     >
@@ -814,6 +820,7 @@ const CrmPaymentMilestones: React.FC = () => {
         </DialogContent>
       </Dialog>
     </CrmShell>
+    </>
   );
 };
 

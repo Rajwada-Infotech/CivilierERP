@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { MessageSquare, Save, Loader2, CheckCircle2, AlertCircle, Info, Zap } from "lucide-react";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { cn } from "@/lib/utils";
 
@@ -54,11 +55,13 @@ export default function SmsSetup() {
   const isConfigured = !!(form.apiKey && form.apiUrl && form.senderId && form.provider);
 
   return (
-    <AdminShell
-      title="SMS Gateway"
-      subtitle="Configure your SMS provider for transactional messages"
-      icon={MessageSquare}
-    >
+    <>
+      <Breadcrumbs items={["Dashboard", "Admin", "Communicator", "SMS"]} />
+      <AdminShell
+        title="SMS Gateway"
+        subtitle="Configure your SMS provider for transactional messages"
+        icon={MessageSquare}
+      >
       <div className="flex gap-6 items-start">
 
         {/* LEFT — form */}
@@ -184,5 +187,6 @@ export default function SmsSetup() {
         </div>
       </div>
     </AdminShell>
+    </>
   );
 }

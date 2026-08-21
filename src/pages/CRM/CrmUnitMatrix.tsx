@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Grid3x3, Layers, Clock, User, FileText, Building2, IndianRupee, CalendarClock, CheckCircle2 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CrmShell } from "@/components/crm/CrmShell";
 import {
@@ -400,6 +401,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
 
 export function UnitMatrixPage() {
   const navigate = useNavigate();
+  usePageRights("crm-unit-matrix");
   const [projectId, setProjectId] = useState("");
   const [blockId, setBlockId] = useState("");
   const [holdTarget, setHoldTarget] = useState<MatrixUnit | null>(null);

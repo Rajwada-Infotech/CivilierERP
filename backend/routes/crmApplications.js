@@ -14,6 +14,7 @@ const { transition: approvalTransition } = require("../services/approvalService"
 const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
 const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releaseHold } = require("../services/crmHoldService");
 const { releaseAllParkingForApplication } = require("../routes/crmParking");
+const { ensureBrokerForChannelPartner } = require("../services/channelPartnerBrokerBridge");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -381,6 +382,15 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       return res.status(400).json({ error: `BrokeragePaymentPlan must be one of ${BROKERAGE_PLANS.join(", ")}` });
     }
 
+    const channelPartnerId = b.ChannelPartnerId ? parseInt(b.ChannelPartnerId) : null;
+    const bridge = !b.BrokerId && channelPartnerId
+      ? await ensureBrokerForChannelPartner(pool, channelPartnerId, actor)
+      : null;
+    const brokerId = b.BrokerId ? parseInt(b.BrokerId) : (bridge?.brokerId || null);
+    const brokerageRatePercent = b.BrokerageRatePercent != null && b.BrokerageRatePercent !== ""
+      ? parseFloat(b.BrokerageRatePercent)
+      : (bridge?.commissionRate ?? null);
+
     await pool.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.ApplicantName || null)
@@ -398,7 +408,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("platid", sql.Int, platformId ?? null)
       .input("campid", sql.Int, campaignId ?? null)
       .input("adid",   sql.Int, adId ?? null)
-      .input("cpid",   sql.Int, b.ChannelPartnerId ? parseInt(b.ChannelPartnerId) : null)
+      .input("cpid",   sql.Int, channelPartnerId)
       .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
       .input("ppid", sql.Int,           effectivePaymentPlanId)
@@ -410,8 +420,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("dbid", sql.Int,           b.DepositBankId ? parseInt(b.DepositBankId) : null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub",   sql.Int,           actor)
-      .input("brkid", sql.Int,          b.BrokerId ? parseInt(b.BrokerId) : null)
-      .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
+      .input("brkid", sql.Int,          brokerId)
+      .input("brkpct", sql.Decimal(5,2), brokerageRatePercent)
       .input("brkplan", sql.NVarChar(20), b.BrokeragePaymentPlan || null)
       // Wizard resume progress. Clamped to the 1-6 step range the frontend
       // stepper actually has; CurrentStep only ever moves forward (see the

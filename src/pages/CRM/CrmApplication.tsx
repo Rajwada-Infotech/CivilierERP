@@ -4,6 +4,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -1292,9 +1294,13 @@ const CrmApplication: React.FC = () => {
   };
   const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
 
+  usePageRights("crm-applications");
+
   return (
-    <CrmShell
-      title="CRM — Applications"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Applications"]} />
+      <CrmShell
+        title="CRM — Applications"
       subtitle="Every detail captured once, here — Bookings is review-only from this point on"
       action={
         <button onClick={() => { resetWizard(); setDialogOpen(true); }}
@@ -2384,6 +2390,7 @@ const CrmApplication: React.FC = () => {
         </DialogContent>
       </Dialog>
     </CrmShell>
+    </>
   );
 };
 

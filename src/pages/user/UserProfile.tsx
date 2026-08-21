@@ -1,6 +1,7 @@
 import React from "react";
 import { useState, useEffect } from "react";
 import { useAuth, PAGE_DEFINITIONS } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getUserProfile,
@@ -79,6 +80,7 @@ const ACTIVITY_COLUMNS = [
 ];
 
 export default function UserProfile() {
+  usePageRights("user-profile");
   const {
     currentUser,
     canAccessPage,
