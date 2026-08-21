@@ -389,7 +389,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     const unitRow = unit.recordset[0];
 
     const taken = await pool.request().input("uid", sql.Int, newUnitId).input("id", sql.Int, id)
-      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
+      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())");
     if (taken.recordset.length) return res.status(409).json({ error: "This unit is already booked" });
 
     const bookingAppId = await pool.request().input("id", sql.Int, id)
