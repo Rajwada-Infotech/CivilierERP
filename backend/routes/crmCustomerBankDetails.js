@@ -213,6 +213,19 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
       notes: b.Notes || null,
     };
 
+    if (fields.pan && !/^[A-Z]{5}\d{4}[A-Z]$/.test(fields.pan.toUpperCase()))
+      return res.status(400).json({ error: "PAN must be in the format ABCDE1234F (5 letters, 4 digits, 1 letter)" });
+    if (fields.pan) fields.pan = fields.pan.toUpperCase();
+    if (fields.aadh && !/^\d{12}$/.test(fields.aadh))
+      return res.status(400).json({ error: "Aadhaar must be exactly 12 digits" });
+    if (fields.ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(fields.ifsc))
+      return res.status(400).json({ error: "IFSC code must be in the format ABCD0123456 (4 letters, 0, 6 alphanumeric)" });
+    if (fields.ifsc) fields.ifsc = fields.ifsc.toUpperCase();
+    if (fields.ncon && !/^\d{10}$/.test(fields.ncon))
+      return res.status(400).json({ error: "Nominee contact must be exactly 10 digits" });
+    if (fields.acc && fields.acc.length > 20 && !/^\d+$/.test(fields.acc))
+      return res.status(400).json({ error: "Account number must be numeric" });
+
     if (existing.recordset.length) {
       await pool.request()
         .input("bid", sql.Int, bid)
@@ -369,6 +382,17 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
       cheque: b.ChequeNo || null, chqdate: b.ChequeDate || null, tref: b.TransactionRef || null,
       notes: b.Notes || null,
     };
+
+    if (fields.pan && !/^[A-Z]{5}\d{4}[A-Z]$/.test(fields.pan.toUpperCase()))
+      return res.status(400).json({ error: "PAN must be in the format ABCDE1234F (5 letters, 4 digits, 1 letter)" });
+    if (fields.pan) fields.pan = fields.pan.toUpperCase();
+    if (fields.aadh && !/^\d{12}$/.test(fields.aadh))
+      return res.status(400).json({ error: "Aadhaar must be exactly 12 digits" });
+    if (fields.ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(fields.ifsc))
+      return res.status(400).json({ error: "IFSC code must be in the format ABCD0123456 (4 letters, 0, 6 alphanumeric)" });
+    if (fields.ifsc) fields.ifsc = fields.ifsc.toUpperCase();
+    if (fields.ncon && !/^\d{10}$/.test(fields.ncon))
+      return res.status(400).json({ error: "Nominee contact must be exactly 10 digits" });
 
     // VerifyBookingStage is only ever sent (true) by the Booking-tab "Save
     // Bank/KYC Details" button (CrmBookingDetail.tsx) — that's the one

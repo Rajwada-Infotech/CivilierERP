@@ -498,6 +498,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
   const handleSaveBank = async () => {
     if (!booking?.ApplicationId) return;
+    if (bank.PanNo && !/^[A-Z]{5}\d{4}[A-Z]$/i.test(bank.PanNo.trim())) { toast.error("PAN must be in the format ABCDE1234F"); return; }
+    if (bank.AadhaarNo && !/^\d{12}$/.test(bank.AadhaarNo.trim())) { toast.error("Aadhaar must be exactly 12 digits"); return; }
+    if (bank.IfscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(bank.IfscCode.trim())) { toast.error("IFSC must be in the format ABCD0123456"); return; }
+    if (bank.NomineeContact && !/^\d{10}$/.test(bank.NomineeContact.trim())) { toast.error("Nominee contact must be exactly 10 digits"); return; }
     setBankSaving(true);
     try {
       const res = await fetchWithAuth(`${BANK_DETAIL_API}/application/${booking.ApplicationId}`, {

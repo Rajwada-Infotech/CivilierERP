@@ -285,6 +285,7 @@ const StatSkeleton = () => (
 // --- Main Component -----------------------------------------------------------
 const CrmDashboard: React.FC = () => {
   usePageRights("crm-dashboard");
+  const navigate = useNavigate();
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const qc = useQueryClient();
@@ -569,7 +570,7 @@ const CrmDashboard: React.FC = () => {
                       const conv  = prev != null && prev > 0 ? Math.round((count / prev) * 100) : null;
                       return (
                         <button
-                          key={s.key}
+                          key={s.label}
                           onClick={() => navigate(s.route)}
                           className="w-full text-left group"
                         >

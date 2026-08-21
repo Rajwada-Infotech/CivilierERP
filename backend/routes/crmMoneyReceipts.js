@@ -64,7 +64,7 @@ router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res)
     }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`
-      SELECT mr.Id, mr.ReceiptNo, mr.BookingId, mr.Amount, mr.PaymentMode, mr.ChequeNo, mr.ChequeDate,
+      SELECT mr.Id, mr.ReceiptNo, mr.BookingId, mr.Amount, mr.BaseAmount, mr.GSTAmount, mr.PaymentMode, mr.ChequeNo, mr.ChequeDate,
              mr.TransactionRef, mr.ReceivedDate, mr.CreatedAt, mr.ReceivedPaymentId, mr.Status AS MoneyReceiptStatus,
              mr.BouncedReason, mr.ApprovedAt,
              rp.RPStatus, rp.RPDocNo, rp.RPRejectionNote,

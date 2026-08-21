@@ -3,6 +3,7 @@ const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { triggerBookingConfirmed } = require("../services/communicationTriggers");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -813,6 +814,9 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
           "Welcome Call Due",
           `Booking ${booking.BookingNo} is approved — make the welcome call to proceed.`,
           id, "crm_booking");
+
+        // A12: Trigger automated communication (SMS/WhatsApp/Email)
+        await triggerBookingConfirmed(pool, id);
       }
     }
 

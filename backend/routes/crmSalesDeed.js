@@ -23,15 +23,20 @@ const DEED_SELECT = `
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
 `;
 
-// Status is never a free pick — it is derived, level by level, from the
-// actual data on record: RegistrationNo present -> Registered; else
-// ExecutedBy present -> Executed; else the deed date having already passed
-// -> Overdue; else Draft. A cancelled booking always wins (Cancelled).
-function deriveDeedStatus({ bookingStatus, registrationNo, executedBy, deedDate }) {
+// Status is never a free pick — it is derived, level by level:
+//   Cancelled booking → Cancelled
+//   RegistrationNo present → Registered
+//   Executed (ExecutedBy set) but RegistrationDeadline passed → Overdue
+//   ExecutedBy present → Executed
+//   DeedDate scheduled but already past (not yet executed) → Overdue
+//   Otherwise → Draft
+function deriveDeedStatus({ bookingStatus, registrationNo, executedBy, deedDate, registrationDeadline }) {
+  const today = new Date(new Date().toDateString());
   if (bookingStatus === CrmStatus.CANCELLED) return CrmStatus.CANCELLED;
   if (registrationNo) return CrmStatus.REGISTERED;
+  if (executedBy && registrationDeadline && new Date(registrationDeadline) < today) return "Overdue";
   if (executedBy) return CrmStatus.EXECUTED;
-  if (deedDate && new Date(deedDate) < new Date(new Date().toDateString())) return "Overdue";
+  if (deedDate && new Date(deedDate) < today) return "Overdue";
   return CrmStatus.DRAFT;
 }
 
@@ -45,6 +50,7 @@ router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => 
       Status: deriveDeedStatus({
         bookingStatus: r.BookingStatus, registrationNo: r.RegistrationNo,
         executedBy: r.ExecutedBy, deedDate: r.DeedDate,
+        registrationDeadline: r.RegistrationDeadline,
       }),
     }));
     res.json(status ? rows.filter((r) => r.Status === status) : rows);
@@ -139,16 +145,17 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), async (req, res) 
       .input("regfee",sql.Decimal(18,2), b.RegistrationFee != null ? parseFloat(b.RegistrationFee) : null)
       .input("sro",  sql.NVarChar(255), b.SubRegistrarOffice || null)
       .input("dt",   sql.Date,          b.DeedDate || null)
+      .input("regdl",sql.Date,          b.RegistrationDeadline || null)
       .input("exby", sql.NVarChar(200), b.ExecutedBy || null)
       .input("wit",  sql.NVarChar(500), b.WitnessNames || null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cb",   sql.Int,           actorId(req))
-      .input("st",   sql.NVarChar(30),  deriveDeedStatus({ bookingStatus: null, registrationNo: null, executedBy: b.ExecutedBy || null, deedDate: b.DeedDate || null }))
+      .input("st",   sql.NVarChar(30),  deriveDeedStatus({ bookingStatus: null, registrationNo: null, executedBy: b.ExecutedBy || null, deedDate: b.DeedDate || null, registrationDeadline: b.RegistrationDeadline || null }))
       .query(`
         INSERT INTO dbo.CrmSalesDeed
-          (DeedNo, BookingId, AgreementId, DeedValue, StampDuty, RegistrationFee, SubRegistrarOffice, DeedDate, ExecutedBy, WitnessNames, Status, Notes, CreatedBy, CreatedAt)
+          (DeedNo, BookingId, AgreementId, DeedValue, StampDuty, RegistrationFee, SubRegistrarOffice, DeedDate, RegistrationDeadline, ExecutedBy, WitnessNames, Status, Notes, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@no, @bid, @agid, @val, @stamp, @regfee, @sro, @dt, @exby, @wit, @st, @note, @cb, SYSDATETIME())
+        VALUES (@no, @bid, @agid, @val, @stamp, @regfee, @sro, @dt, @regdl, @exby, @wit, @st, @note, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id, DeedNo: deedNo });
   } catch (e) {
@@ -314,7 +321,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     const id = parseInt(req.params.id);
 
     const cur = await pool.request().input("id", sql.Int, id).query(`
-      SELECT d.RegistrationNo, d.ExecutedBy, d.DeedDate, d.BookingId, d.DeedNo, d.SentToCustomerAt, b.Status AS BookingStatus
+      SELECT d.RegistrationNo, d.ExecutedBy, d.DeedDate, d.RegistrationDeadline, d.BookingId, d.DeedNo, d.SentToCustomerAt, b.Status AS BookingStatus
       FROM dbo.CrmSalesDeed d JOIN dbo.CrmBooking b ON b.Id = d.BookingId
       WHERE d.Id = @id
     `);
@@ -355,11 +362,13 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
       }
     }
 
+    const newRegDeadline = b.RegistrationDeadline !== undefined ? (b.RegistrationDeadline || null) : row.RegistrationDeadline;
     const newStatus = deriveDeedStatus({
       bookingStatus: row.BookingStatus,
       registrationNo: b.RegistrationNo || row.RegistrationNo,
       executedBy: b.ExecutedBy || row.ExecutedBy,
       deedDate: b.DeedDate || row.DeedDate,
+      registrationDeadline: newRegDeadline,
     });
 
     await pool.request()
@@ -369,6 +378,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
       .input("partno",sql.NVarChar(100), b.PartNo || null)
       .input("regdt", sql.Date, b.RegistrationDate || null)
       .input("posdt", sql.Date, b.PossessionDate || null)
+      .input("regdl", sql.Date, b.RegistrationDeadline !== undefined ? (b.RegistrationDeadline || null) : row.RegistrationDeadline)
       .input("exby",  sql.NVarChar(200), b.ExecutedBy || null)
       .input("st",    sql.NVarChar(30), newStatus)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
@@ -383,6 +393,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
           RegistrationNo = ISNULL(@regno, RegistrationNo), BookNo = ISNULL(@bookno, BookNo),
           PartNo = ISNULL(@partno, PartNo), RegistrationDate = ISNULL(@regdt, RegistrationDate),
           PossessionDate = ISNULL(@posdt, PossessionDate), ExecutedBy = ISNULL(@exby, ExecutedBy),
+          RegistrationDeadline = @regdl,
           DeedValue = ISNULL(@dval, DeedValue), StampDuty = ISNULL(@stamp, StampDuty),
           RegistrationFee = ISNULL(@regfee, RegistrationFee), SubRegistrarOffice = ISNULL(@sro, SubRegistrarOffice),
           DeedDate = ISNULL(@ddt, DeedDate),

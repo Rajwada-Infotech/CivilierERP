@@ -88,6 +88,13 @@ async function createMoneyReceiptForBooking(pool, bookingId, data = {}, actorUse
     : Number(defaults.TokenValue != null ? defaults.TokenValue : defaults.BookingAmount);
   if (!amount || amount <= 0) throw new MoneyReceiptError("Amount must be greater than 0");
 
+  const gstRow = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal FROM dbo.CrmBooking WHERE Id = @bid");
+  const { TotalGstAmount: totalGstAmt, GrandTotal: grandTotal } = gstRow.recordset[0] || {};
+  const gstRatio = grandTotal > 0 ? Number(totalGstAmt) / Number(grandTotal) : 0;
+  const gstAmount = Math.round(amount * gstRatio * 100) / 100;
+  const baseAmount = Math.round((amount - gstAmount) * 100) / 100;
+
   const paymentMode = cleanString(data.PaymentMode) || cleanString(defaults.PaymentMode) || "Other";
   const transactionRef = cleanString(data.TransactionRef) || cleanString(defaults.TransactionRef);
   const chequeNo = cleanString(data.ChequeNo) || cleanString(defaults.ChequeNo) || (paymentMode === "Cheque" ? transactionRef : null);
@@ -108,13 +115,15 @@ async function createMoneyReceiptForBooking(pool, bookingId, data = {}, actorUse
     .input("rcvd", sql.Date, receivedDate)
     .input("rem", sql.NVarChar(500), cleanString(data.Remarks))
     .input("cb", sql.Int, actorUserId || null)
+    .input("gst", sql.Decimal(18, 2), gstAmount)
+    .input("base", sql.Decimal(18, 2), baseAmount)
     .query(`
       INSERT INTO dbo.CrmMoneyReceipt
-        (ReceiptNo, BookingId, Amount, PaymentMode, ChequeNo, ChequeDate, BankName,
+        (ReceiptNo, BookingId, Amount, BaseAmount, GSTAmount, PaymentMode, ChequeNo, ChequeDate, BankName,
          TransactionRef, ReceivedDate, Remarks, Status, CreatedBy, CreatedAt, UpdatedAt)
       OUTPUT INSERTED.Id, INSERTED.ReceiptNo, INSERTED.Status
       VALUES
-        (@no, @bid, @amt, @mode, @chq, @chqDt, @bank,
+        (@no, @bid, @amt, @base, @gst, @mode, @chq, @chqDt, @bank,
          @ref, @rcvd, @rem, 'Pending', @cb, SYSDATETIME(), SYSDATETIME())
     `);
 

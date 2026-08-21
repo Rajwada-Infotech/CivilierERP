@@ -74,8 +74,8 @@ function fmtDate(d?: string | null) {
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-const EMPTY_FORM = { BookingId: "", DeedValue: "", StampDuty: "", RegistrationFee: "", SubRegistrarOffice: "", DeedDate: "" };
-const EMPTY_DEED_FORM = { DeedValue: "", StampDuty: "", RegistrationFee: "", SubRegistrarOffice: "", DeedDate: "" };
+const EMPTY_FORM = { BookingId: "", DeedValue: "", StampDuty: "", RegistrationFee: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "" };
+const EMPTY_DEED_FORM = { DeedValue: "", StampDuty: "", RegistrationFee: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "" };
 const EMPTY_PROGRESS_FORM = { ExecutedBy: "", RegistrationNo: "", BookNo: "", PartNo: "", RegistrationDate: "", PossessionDate: "" };
 
 async function fetchAll(): Promise<any[]> {
@@ -185,6 +185,7 @@ const CrmSalesDeed: React.FC = () => {
       RegistrationFee: d.RegistrationFee != null ? String(d.RegistrationFee) : "",
       SubRegistrarOffice: d.SubRegistrarOffice || "",
       DeedDate: d.DeedDate ? String(d.DeedDate).slice(0, 10) : "",
+      RegistrationDeadline: d.RegistrationDeadline ? String(d.RegistrationDeadline).slice(0, 10) : "",
     });
     setProgressForm({
       ExecutedBy: d.ExecutedBy || "", RegistrationNo: d.RegistrationNo || "",
@@ -434,6 +435,11 @@ const CrmSalesDeed: React.FC = () => {
               <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Sub-Registrar Office</label>
               <Input className="h-10" value={form.SubRegistrarOffice} onChange={(e) => setForm((f) => ({ ...f, SubRegistrarOffice: e.target.value }))} />
             </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Registration Deadline (RERA)</label>
+              <Input type="date" className="h-10" value={form.RegistrationDeadline} onChange={(e) => setForm((f) => ({ ...f, RegistrationDeadline: e.target.value }))} />
+              <p className="text-[10px] text-muted-foreground">SLA engine alerts when this passes without a Registration No. being recorded.</p>
+            </div>
           </div>
 
           <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20">
@@ -507,6 +513,10 @@ const CrmSalesDeed: React.FC = () => {
                           <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Deed Date</label>
                           <Input type="date" className="h-10" value={deedForm.DeedDate} onChange={(e) => setDeedForm((f) => ({ ...f, DeedDate: e.target.value }))} />
                         </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Registration Deadline</label>
+                          <Input type="date" className="h-10" value={deedForm.RegistrationDeadline} onChange={(e) => setDeedForm((f) => ({ ...f, RegistrationDeadline: e.target.value }))} />
+                        </div>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Sub-Registrar Office</label>
@@ -526,6 +536,7 @@ const CrmSalesDeed: React.FC = () => {
                       <DetailRow label="Stamp Duty" value={detail.StampDuty ? formatINR(detail.StampDuty) : "�"} mono />
                       <DetailRow label="Registration Fee" value={detail.RegistrationFee ? formatINR(detail.RegistrationFee) : "�"} mono />
                       <DetailRow label="Deed Date" value={fmtDate(detail.DeedDate)} />
+                      <DetailRow label="Registration Deadline" value={fmtDate(detail.RegistrationDeadline)} />
                       <DetailRow label="Sub-Registrar Office" value={detail.SubRegistrarOffice || "�"} />
                     </div>
                   )}

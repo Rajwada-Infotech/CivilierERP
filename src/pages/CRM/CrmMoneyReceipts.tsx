@@ -21,6 +21,8 @@ interface ReceiptRow {
   BookingId: number;
   ReceivedPaymentId: number;
   Amount: number;
+  BaseAmount: number | null;
+  GSTAmount: number | null;
   PaymentMode: string;
   ChequeNo: string | null;
   ReceivedDate: string;
@@ -156,7 +158,19 @@ const CrmMoneyReceipts: React.FC = () => {
           {i.row.original.Mobile && <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>}
         </div>
       ) },
-    { accessorKey: "Amount", header: "Amount", size: 100, cell: (i) => <span className="font-semibold text-sm">{fmtMoney(i.row.original.Amount)}</span> },
+    { accessorKey: "Amount", header: "Amount", size: 130, cell: (i) => {
+        const r = i.row.original;
+        return (
+          <div>
+            <div className="font-semibold text-sm">{fmtMoney(r.Amount)}</div>
+            {r.BaseAmount != null && r.GSTAmount != null && (
+              <div className="text-[11px] text-muted-foreground font-mono">
+                Base {fmtMoney(r.BaseAmount)} + GST {fmtMoney(r.GSTAmount)}
+              </div>
+            )}
+          </div>
+        );
+      } },
     { accessorKey: "PaymentMode", header: "Mode", size: 90,
       cell: (i) => (
         <div>

@@ -234,13 +234,19 @@ function renderMoneyReceiptPdfBuffer(d) {
     doc.roundedRect(left, heroTop, pageWidth, heroH, 8).fillColor("#f8fafc").fill();
     doc.roundedRect(left, heroTop, pageWidth, heroH, 8).strokeColor("#e2e8f0").lineWidth(0.75).stroke();
     
-    // Split GST cleanly from principal
-    const grandTotal = Number(d.GrandTotal || 1); // fallback to 1 to avoid NaN
-    const totalGst = Number(d.TotalGstAmount || 0);
+    // Use stored snapshot if available (set at receipt creation time via migration 357);
+    // fall back to deriving from booking-level GST for older receipts.
     const amount = Number(d.Amount || 0);
-    const gstRatio = totalGst / grandTotal;
-    const amountGst = amount * gstRatio;
-    const amountPrin = amount - amountGst;
+    let amountGst, amountPrin;
+    if (d.BaseAmount != null && d.GSTAmount != null) {
+      amountGst = Number(d.GSTAmount);
+      amountPrin = Number(d.BaseAmount);
+    } else {
+      const grandTotal = Number(d.GrandTotal || 1);
+      const gstRatio = Number(d.TotalGstAmount || 0) / grandTotal;
+      amountGst = amount * gstRatio;
+      amountPrin = amount - amountGst;
+    }
 
     doc.font("Helvetica").fontSize(8).fillColor("#64748b")
       .text("AMOUNT RECEIVED", left, heroTop + 12, { width: pageWidth, align: "center", characterSpacing: 0.5 });

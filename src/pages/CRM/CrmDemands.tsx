@@ -12,7 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Search, Send, Undo2, Clock, CheckCircle2, AlertTriangle,
   ChevronDown, ChevronRight, Building2, User, Phone,
-  CalendarClock, FileText, Hash, LayoutList, Rows3,
+  CalendarClock, FileText, Hash, LayoutList, Rows3, Zap,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -264,6 +264,10 @@ const CrmDemands: React.FC = () => {
   const [undoRow, setUndoRow] = useState<DemandRow | null>(null);
   const [raising, setRaising] = useState(false);
   const [undoing, setUndoing] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkProject, setBulkProject] = useState("");
+  const [bulkMilestone, setBulkMilestone] = useState("");
+  const [bulkRunning, setBulkRunning] = useState(false);
 
   // canDoAction is AuthContext's own permission check (backed by
   // AuthUtils.createPermissionCheckers) — using it directly instead of
@@ -362,6 +366,31 @@ const CrmDemands: React.FC = () => {
     }
   }
 
+  async function handleBulkRaise() {
+    setBulkRunning(true);
+    try {
+      const res = await fetchWithAuth(`${API}/demands/bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectName: bulkProject.trim() || undefined,
+          milestoneName: bulkMilestone.trim() || undefined,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "Bulk demand failed");
+      toast.success(`Raised ${body.raised} demand${body.raised !== 1 ? "s" : ""}${body.skipped ? ` · ${body.skipped} already raised` : ""}${body.errors?.length ? ` · ${body.errors.length} error(s)` : ""}`);
+      setBulkOpen(false);
+      setBulkProject("");
+      setBulkMilestone("");
+      qc.invalidateQueries({ queryKey: ["crm-demands"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setBulkRunning(false);
+    }
+  }
+
   // Single source of truth: derived from tabbed (classify()), same as the
   // tab bar below. Previously read from the backend's `summary` object,
   // which classifies overdue as an ADDITIVE flag (a Pending-and-overdue row
@@ -383,7 +412,19 @@ const CrmDemands: React.FC = () => {
       <CrmShell
         title="CRM — Payment Demands"
       subtitle="Raise and track formal payment demands across all bookings"
-      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
+      action={
+        <div className="flex items-center gap-2">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          {canEdit && (
+            <button
+              onClick={() => setBulkOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
+            >
+              <Zap size={14} /> Raise All
+            </button>
+          )}
+        </div>
+      }
     >
       {/* Summary strip — always computed from the FULL result set (view=all,
           search only), so these numbers never collapse to 0 just because a
@@ -563,6 +604,50 @@ const CrmDemands: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* Bulk Raise Dialog */}
+      <Dialog open={bulkOpen} onOpenChange={(o) => { if (!o) { setBulkOpen(false); setBulkProject(""); setBulkMilestone(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Zap size={16} /> Raise All Eligible Demands</DialogTitle></DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-xs text-muted-foreground">
+              Raises demands for every <strong>Pending</strong> milestone that has an outstanding balance.
+              Leave filters blank to target all projects and milestones.
+            </p>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Filter by Project (optional)</label>
+              <input
+                type="text"
+                value={bulkProject}
+                onChange={(e) => setBulkProject(e.target.value)}
+                placeholder="e.g. Sunrise Heights"
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Filter by Milestone Name (optional)</label>
+              <input
+                type="text"
+                value={bulkMilestone}
+                onChange={(e) => setBulkMilestone(e.target.value)}
+                placeholder="e.g. Slab Completion"
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+              />
+            </div>
+            <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              This action raises demands in bulk. Already-raised or paid milestones are skipped automatically.
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <button onClick={() => { setBulkOpen(false); setBulkProject(""); setBulkMilestone(""); }}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleBulkRaise} disabled={bulkRunning}
+              className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              <Zap className="w-3.5 h-3.5" /> {bulkRunning ? "Raising…" : "Raise All"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </CrmShell>
     </>
   );

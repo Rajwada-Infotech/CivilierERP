@@ -1,6 +1,6 @@
 import { CrmStatus } from "@/constants/crmStatuses";
 import { useEffect, useMemo, useState } from "react";
-import socket from '@/lib/socket';
+import { getSocket } from '@/lib/socket';
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -404,6 +404,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
 export function UnitMatrixPage() {
   const navigate = useNavigate();
   usePageRights("crm-unit-matrix");
+  const qc = useQueryClient();
   const [projectId, setProjectId] = useState("");
   const [blockId, setBlockId] = useState("");
   const [holdTarget, setHoldTarget] = useState<MatrixUnit | null>(null);
@@ -411,15 +412,17 @@ export function UnitMatrixPage() {
 
   // Forces a re-render every minute so the hold countdown badges (and any
   // open TileInfoDialog) tick down live instead of only updating on refetch.
-    useEffect(() => {
+  useEffect(() => {
+    const sock = getSocket();
+    if (!sock) return;
     const handleMatrixUpdate = (payload: any) => {
       if (!payload?.projectId || payload.projectId === Number(projectId)) {
         qc.invalidateQueries({ queryKey: ["unit-matrix", projectId] });
       }
     };
-    socket.on("matrix:update", handleMatrixUpdate);
+    sock.on("matrix:update", handleMatrixUpdate);
     return () => {
-      socket.off("matrix:update", handleMatrixUpdate);
+      sock.off("matrix:update", handleMatrixUpdate);
     };
   }, [projectId, qc]);
 

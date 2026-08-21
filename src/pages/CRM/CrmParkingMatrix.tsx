@@ -1,6 +1,6 @@
 import { CrmStatus } from "@/constants/crmStatuses";
 import { useEffect, useMemo, useState } from "react";
-import socket from '@/lib/socket';
+import { getSocket } from '@/lib/socket';
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -493,6 +493,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
 export function ParkingMatrixPage() {
   const navigate = useNavigate();
   usePageRights("crm-parking-matrix");
+  const qc = useQueryClient();
   const [projectId, setProjectId] = useState("");
   const [blockId, setBlockId] = useState("");
   const [choiceSlot, setChoiceSlot] = useState<MatrixSlot | null>(null);
@@ -502,15 +503,17 @@ export function ParkingMatrixPage() {
 
   // Forces a re-render every minute so hold countdown badges (and any open
   // TileInfoDialog) tick down live instead of only updating on refetch.
-    useEffect(() => {
+  useEffect(() => {
+    const sock = getSocket();
+    if (!sock) return;
     const handleMatrixUpdate = (payload: any) => {
       if (!payload?.projectId || payload.projectId === Number(projectId)) {
         qc.invalidateQueries({ queryKey: ["parking-matrix", projectId] });
       }
     };
-    socket.on("matrix:update", handleMatrixUpdate);
+    sock.on("matrix:update", handleMatrixUpdate);
     return () => {
-      socket.off("matrix:update", handleMatrixUpdate);
+      sock.off("matrix:update", handleMatrixUpdate);
     };
   }, [projectId, qc]);
 

@@ -166,6 +166,20 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
       return res.status(400).json({ error: `Handover requires the ${openNoc.recordset[0].NocType} NOC to be issued first (currently ${openNoc.recordset[0].Status})` });
     }
 
+    // Workflow guard: all payment milestones must be paid or waived — no
+    // outstanding balance should remain at possession time.
+    const unpaid = await pool.request().input("bid", sql.Int, parseInt(b.BookingId)).query(`
+      SELECT COUNT(*) AS Cnt, ISNULL(SUM(AmountDue - ISNULL(AmountPaid, 0)), 0) AS Balance
+      FROM dbo.CrmPaymentMilestone
+      WHERE BookingId = @bid AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
+        AND AmountDue > ISNULL(AmountPaid, 0)
+    `);
+    const unpaidRow = unpaid.recordset[0];
+    if (unpaidRow.Cnt > 0) {
+      const bal = Math.round(unpaidRow.Balance);
+      return res.status(400).json({ error: `Handover cannot be scheduled — ${unpaidRow.Cnt} milestone(s) have an outstanding balance of ₹${bal.toLocaleString("en-IN")}` });
+    }
+
     const result = await pool.request()
       .input("bid",  sql.Int,  parseInt(b.BookingId))
       .input("sdt",  sql.Date, b.ScheduledDate || null)

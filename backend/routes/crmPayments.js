@@ -15,6 +15,15 @@ const { recordGLPosting } = require("../services/approvalService");
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
+async function getGstSplit(pool, bookingId, amount) {
+  const r = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal FROM dbo.CrmBooking WHERE Id = @bid");
+  const row = r.recordset[0] || {};
+  const ratio = Number(row.GrandTotal) > 0 ? Number(row.TotalGstAmount) / Number(row.GrandTotal) : 0;
+  const gst = Math.round(amount * ratio * 100) / 100;
+  return { gstAmount: gst, baseAmount: Math.round((amount - gst) * 100) / 100 };
+}
+
 // Spec: "BROKER PAYMENT -> NEXT MILESTONE DUE". Business confirmed this should
 // be a soft warning, not a hard block (a customer's payment must never be
 // refused over unrelated broker bookkeeping) — so this fires alongside the
@@ -95,6 +104,10 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   // with UPDLOCK+HOLDLOCK inside one transaction serialises any such pair:
   // the second call blocks until the first commits, then re-reads the
   // now-updated balances instead of computing off a stale snapshot.
+  // GST ratio is derived pre-transaction from the booking (read-only; rate
+  // doesn't change mid-payment) so the split is available for the INSERT.
+  const bookingGstData = { bookingId: targetRow.BookingId };
+
   const tx = new sql.Transaction(pool);
   let requested, becamePaidCheck;
   try {
@@ -122,16 +135,19 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
     // pool.transaction() internally, which only exists on ConnectionPool.
     // Passing tx here throws at runtime; caught late.
     const receiptNo = await getNextDocNumber(pool, "RCP", "RCP");
+    const { gstAmount: rcpGst, baseAmount: rcpBase } = await getGstSplit(pool, bookingGstData.bookingId, requested);
     await tx.request()
-      .input("no",  sql.NVarChar(30),  receiptNo)
-      .input("mid", sql.Int,           milestoneId)
-      .input("amt", sql.Decimal(18,2), requested)
-      .input("oaid",sql.Int,           onAccountId)
-      .input("cb",  sql.Int,           actorUserId)
+      .input("no",   sql.NVarChar(30),  receiptNo)
+      .input("mid",  sql.Int,           milestoneId)
+      .input("amt",  sql.Decimal(18,2), requested)
+      .input("base", sql.Decimal(18,2), rcpBase)
+      .input("gst",  sql.Decimal(18,2), rcpGst)
+      .input("oaid", sql.Int,           onAccountId)
+      .input("cb",   sql.Int,           actorUserId)
       .query(`
         INSERT INTO dbo.CrmPaymentReceipt
-          (ReceiptNo, MilestoneId, Amount, ReceivedDate, PaymentMode, Notes, OnAccountPaymentId, CreatedBy, CreatedAt)
-        VALUES (@no, @mid, @amt, CAST(SYSDATETIME() AS DATE), 'OnAccount', 'Auto-applied from on-account balance', @oaid, @cb, SYSDATETIME())
+          (ReceiptNo, MilestoneId, Amount, BaseAmount, GSTAmount, ReceivedDate, PaymentMode, Notes, OnAccountPaymentId, CreatedBy, CreatedAt)
+        VALUES (@no, @mid, @amt, @base, @gst, CAST(SYSDATETIME() AS DATE), 'OnAccount', 'Auto-applied from on-account balance', @oaid, @cb, SYSDATETIME())
       `);
 
     await tx.request().input("id", sql.Int, milestoneId).query(`
@@ -397,6 +413,63 @@ async function handleMilestoneBecamePaid(pool, { bookingId, bookingNo, milestone
   return { brokerWarning };
 }
 
+// POST /demands/bulk — raise demands for all eligible Pending milestones in
+// one shot.  Accepts optional filters { projectName, milestoneName } —
+// without filters it targets every Pending milestone that has a balance.
+// Returns { raised, skipped, errors } so the caller knows exactly what
+// happened; partial success is the expected case (some milestones may already
+// be Demanded or have no balance).
+router.post("/demands/bulk", requirePageRight("crm-payments", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { projectName, milestoneName } = req.body || {};
+
+    const req0 = pool.request();
+    const conds = [
+      "m.DemandStatus = 'Pending'",
+      "b.IsActive = 1",
+      "a.Status NOT IN ('Cancelled','Rejected','Expired')",
+      "(m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0",
+    ];
+    if (projectName) {
+      req0.input("pname", sql.NVarChar(200), projectName);
+      conds.push("b.ProjectName = @pname");
+    }
+    if (milestoneName) {
+      req0.input("mname", sql.NVarChar(200), milestoneName);
+      conds.push("m.MilestoneName = @mname");
+    }
+    const rows = await req0.query(`
+      SELECT m.Id
+      FROM dbo.CrmPaymentMilestone m
+      JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE ${conds.join(" AND ")}
+    `);
+
+    const ids = rows.recordset.map((r) => r.Id);
+    if (!ids.length) return res.json({ raised: 0, skipped: 0, errors: [] });
+
+    let raised = 0, skipped = 0;
+    const errors = [];
+    for (const id of ids) {
+      try {
+        await raiseDemandForMilestone(pool, id, null);
+        raised++;
+      } catch (e) {
+        // Already-demanded / paid / zero-balance — skip silently; anything
+        // unexpected is logged and collected for the response.
+        if (e.status === 400) { skipped++; }
+        else { errors.push({ id, message: e.message }); console.error("[crm-payments] bulk demand error for milestone", id, e.message); }
+      }
+    }
+    res.json({ raised, skipped, errors });
+  } catch (e) {
+    console.error("[crm-payments] POST /demands/bulk error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /:id/demand — raise a payment demand for a milestone: assigns a real
 // DemandNo, moves DemandStatus Pending -> Demanded, and notifies the
 // applicant's assignee. Blocked on an already-fully-paid milestone (nothing
@@ -606,6 +679,7 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
   let receiptId = null, receiptNo = null, overflowAmount = 0, receiptAmount = 0;
   let becamePaid = false;
   let onAccountId = null, onAccountReceiptNo = null, brokerWarning = null;
+  const { gstAmount: gstSplitFull, baseAmount: baseSplitFull } = await getGstSplit(pool, targetRow.BookingId, amount);
 
   // Everything from here reads-then-writes the milestone's outstanding
   // balance — two concurrent RP approvals against the same milestone (two
@@ -636,10 +710,16 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
       // pool.transaction() call in docNumber.js; only ConnectionPool has
       // that method, passing a Transaction would throw.
       receiptNo = await getNextDocNumber(pool, "RCP", "RCP");
+      // Scale GST split proportionally if receiptAmount < full amount (rest goes on-account)
+      const rcpGstRatio = amount > 0 ? gstSplitFull / amount : 0;
+      const rcpGst  = Math.round(receiptAmount * rcpGstRatio * 100) / 100;
+      const rcpBase = Math.round((receiptAmount - rcpGst) * 100) / 100;
       const insResult = await tx.request()
         .input("no",   sql.NVarChar(30),  receiptNo)
         .input("mid",  sql.Int,           milestoneId)
         .input("amt",  sql.Decimal(18,2), receiptAmount)
+        .input("base", sql.Decimal(18,2), rcpBase)
+        .input("gst",  sql.Decimal(18,2), rcpGst)
         .input("rdt",  sql.Date,          rp.RPDocDate || null)
         .input("mode", sql.NVarChar(50),  rp.RPMode || null)
         .input("tref", sql.NVarChar(200), rp.RPTransactionID || null)
@@ -651,9 +731,9 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
         .input("srp",  sql.Int,           rp.RPPaymentID)
         .query(`
           INSERT INTO dbo.CrmPaymentReceipt
-            (ReceiptNo, MilestoneId, Amount, ReceivedDate, PaymentMode, TransactionRef, ChequeDate, Notes, CreatedBy, CreatedAt, DepositBankId, DepositBankName, SourceReceivedPaymentId)
+            (ReceiptNo, MilestoneId, Amount, BaseAmount, GSTAmount, ReceivedDate, PaymentMode, TransactionRef, ChequeDate, Notes, CreatedBy, CreatedAt, DepositBankId, DepositBankName, SourceReceivedPaymentId)
           OUTPUT INSERTED.Id
-          VALUES (@no, @mid, @amt, ISNULL(@rdt, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @cdt, @note, @cb, SYSDATETIME(), @bkid, @bkname, @srp)
+          VALUES (@no, @mid, @amt, @base, @gst, ISNULL(@rdt, CAST(SYSDATETIME() AS DATE)), @mode, @tref, @cdt, @note, @cb, SYSDATETIME(), @bkid, @bkname, @srp)
         `);
       receiptId = insResult.recordset[0].Id;
 

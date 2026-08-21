@@ -264,6 +264,69 @@ const REGISTRY = [
     },
   },
   {
+    // Notifies the assigned salesperson when a Sale Deed's RegistrationDeadline
+    // passes without a RegistrationNo being recorded (C6 — RERA compliance).
+    // Status is re-derived on each GET by deriveDeedStatus(), so no status
+    // mutation needed here — just the notification.
+    entityType: "crm-sales-deed-registration",
+    async fetch(pool) {
+      const r = await pool.request().query(`
+        SELECT d.Id, d.DeedNo, d.RegistrationDeadline, b.BookingNo, b.AssignedTo, a.ApplicantName
+        FROM dbo.CrmSalesDeed d
+        JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE d.RegistrationDeadline IS NOT NULL
+          AND d.RegistrationDeadline < CAST(SYSDATETIME() AS DATE)
+          AND d.RegistrationNo IS NULL
+          AND d.Status NOT IN ('Registered','Cancelled')
+          AND b.IsActive = 1
+          AND ${NOT_RECENTLY_ESCALATED("'crm-sales-deed-registration'", "d.Id")}
+      `);
+      return r.recordset;
+    },
+    async notify(pool, row) {
+      if (!row.AssignedTo) return false;
+      const deadline = row.RegistrationDeadline ? new Date(row.RegistrationDeadline).toLocaleDateString("en-IN") : "—";
+      await emitNotification(pool, row.AssignedTo, "sla_registration_overdue",
+        "Sale Deed Registration Overdue",
+        `${row.DeedNo} (${row.BookingNo} · ${row.ApplicantName}) — registration deadline was ${deadline}. RegistrationNo not yet recorded.`,
+        row.Id, "crm_sales_deed");
+      return true;
+    },
+  },
+  {
+    // C9 — Possession notice response overdue: fires when ResponseDeadline passes
+    // and the notice is still in 'Sent' status (customer hasn't acknowledged or disputed).
+    entityType: "crm-possession-response-overdue",
+    async fetch(pool) {
+      const r = await pool.request().query(`
+        SELECT pn.Id, pn.NoticeNo, pn.BookingId, pn.ResponseDeadline,
+               b.ApplicantName, b.AssignedTo
+        FROM dbo.CrmPossessionNotice pn
+        JOIN dbo.CrmBookings b ON b.Id = pn.BookingId
+        WHERE pn.Status = 'Sent'
+          AND pn.ResponseDeadline < CAST(GETDATE() AS DATE)
+          AND b.IsActive = 1
+          AND ${NOT_RECENTLY_ESCALATED("'crm-possession-response-overdue'", "pn.Id")}
+      `);
+      return r.recordset;
+    },
+    async notify(pool, row) {
+      const deadline = row.ResponseDeadline
+        ? new Date(row.ResponseDeadline).toLocaleDateString("en-IN")
+        : "N/A";
+      await emitNotification(pool, {
+        userId: row.AssignedTo,
+        type: "sla_possession_response_overdue",
+        message: `Possession notice ${row.NoticeNo} (Booking ${row.BookingId} — ${row.ApplicantName}) has passed its response deadline of ${deadline} without acknowledgement or dispute.`,
+        entityId: row.BookingId,
+        entityType: "crm_possession_notice",
+      });
+      await logEscalation(pool, "crm-possession-response-overdue", row.Id);
+      return true;
+    },
+  },
+  {
     // Daily reminder while a hold is still active — the 24h cooldown via
     // CrmSlaEscalationLog is what turns the hourly engine tick into an
     // actual once-a-day cadence for this entry.
