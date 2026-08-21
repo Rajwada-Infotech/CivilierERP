@@ -271,14 +271,14 @@ function PhotosTab({ rungId }: { rungId: number }) {
               key={tag}
               type="button"
               onClick={() => setActiveTag(tag)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-heading font-medium border transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border transition-colors"
               style={
                 active
                   ? { background: `${meta.color}1A`, borderColor: `${meta.color}60`, color: meta.color }
                   : { borderColor: "var(--border)", color: "var(--muted-foreground)" }
               }
             >
-              <Icon size={12} /> {meta.label}
+              <Icon size={11} /> {meta.label}
             </button>
           );
         })}
