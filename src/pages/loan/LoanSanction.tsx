@@ -52,7 +52,9 @@ import { CompanyFilterCombo } from "@/components/CompanyFilterCombo";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { fetchChequeLots, fetchChequeNumbers, deductChequeFromLot } from "@/pages/finance/payment/api";
+import { PAYMENT_MODES } from "@/pages/finance/payment/types";
 import type { ChequeLot } from "@/pages/finance/payment/types";
+import { MODE_STYLE } from "@/pages/finance/payment/constants";
 import {
   getLoanSanctions,
   getLoanSchedule,
@@ -1752,6 +1754,21 @@ export default function LoanSanctionPage() {
                           onChange={(e) => set("amount", e.target.value)}
                         />
                       </div>
+                      {isInterCompanyType && !form.hasInterest && (
+                        <div className="space-y-2">
+                          <label className={labelCls}>Repayment Due Date</label>
+                          <input
+                            type="date"
+                            className={inputCls}
+                            value={form.dueDate}
+                            min={form.loanDate || undefined}
+                            onChange={(e) => set("dueDate", e.target.value)}
+                          />
+                          <p className="text-[11px] text-muted-foreground">
+                            No EMIs — whole amount due back on this date.
+                          </p>
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center justify-between rounded-lg border border-border px-3.5 py-3">
                       <div>
@@ -1778,22 +1795,6 @@ export default function LoanSanctionPage() {
                         />
                       </button>
                     </div>
-
-                    {isInterCompanyType && !form.hasInterest && (
-                      <div className="space-y-2 max-w-[220px]">
-                        <label className={labelCls}>Repayment Due Date</label>
-                        <input
-                          type="date"
-                          className={inputCls}
-                          value={form.dueDate}
-                          min={form.loanDate || undefined}
-                          onChange={(e) => set("dueDate", e.target.value)}
-                        />
-                        <p className="text-[11px] text-muted-foreground">
-                          This loan isn't broken into EMIs — set when the whole amount is due back.
-                        </p>
-                      </div>
-                    )}
 
                     {(!isInterCompanyType || form.hasInterest) && (
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -1851,33 +1852,44 @@ export default function LoanSanctionPage() {
                         </p>
                       </div>
                     )}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      <div className="space-y-2">
-                        <label className={labelCls}>Payment Mode</label>
-                        <select
-                          className={inputCls}
-                          value={form.paymentMode}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            set("paymentMode", v);
-                            set("isPostDated", v === "Post-Dated Cheque");
-                            if (v !== "Cheque" && v !== "Post-Dated Cheque") {
-                              set("chequeLotId", "");
-                              set("chequeLotNumber", "");
-                              set("chequeNo", "");
-                              set("chequeDate", "");
-                            }
-                            if (["Cash", "Cheque", "Post-Dated Cheque"].includes(v)) {
-                              set("digitalRefNumber", "");
-                            }
-                          }}
-                        >
-                          {["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "RTGS", "IMPS", "UPI", "Card"].map((m) => (
-                            <option key={m} value={m}>{m}</option>
-                          ))}
-                        </select>
+                    <div className="space-y-2">
+                      <label className={labelCls}>Payment Mode</label>
+                      <div className="flex flex-wrap gap-2">
+                        {PAYMENT_MODES.map((m) => {
+                          const s = MODE_STYLE[m] ?? { ring: "ring-border bg-muted", text: "text-muted-foreground", dot: "bg-muted-foreground" };
+                          const active = form.paymentMode === m;
+                          return (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => {
+                                set("paymentMode", m);
+                                set("isPostDated", m === "Post-Dated Cheque");
+                                if (m !== "Cheque" && m !== "Post-Dated Cheque") {
+                                  set("chequeLotId", "");
+                                  set("chequeLotNumber", "");
+                                  set("chequeNo", "");
+                                  set("chequeDate", "");
+                                }
+                                if (["Cash", "Cheque", "Post-Dated Cheque"].includes(m)) {
+                                  set("digitalRefNumber", "");
+                                }
+                              }}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ring-1 ${
+                                active
+                                  ? `${s.ring} ${s.text} border-transparent shadow-sm`
+                                  : "bg-background border-border text-muted-foreground ring-transparent hover:border-primary/40"
+                              }`}
+                            >
+                              {active && <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />}
+                              {m}
+                            </button>
+                          );
+                        })}
                       </div>
+                    </div>
 
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                       {(form.paymentMode === "Cheque" || form.paymentMode === "Post-Dated Cheque") && (
                         <LoanChequePicker
                           // Bank Loan: the lender IS the bank. Otherwise: the
