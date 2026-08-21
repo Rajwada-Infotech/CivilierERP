@@ -196,6 +196,31 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
             AND DATEADD(DAY, 30, CAST(SYSDATETIME() AS DATE))
     `);
 
+    // Funnel stage counts — Applications → Bookings → Agreements → Possessions
+    const funnelQ = addPid(pool.request()).query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.CrmApplication a
+          WHERE a.IsActive = 1
+          ${projectId ? "AND EXISTS (SELECT 1 FROM dbo.CrmBooking bx WHERE bx.ApplicationId = a.Id AND bx.ProjectId = @pid)" : ""}
+        ) AS Applications,
+        (SELECT COUNT(*) FROM dbo.CrmBooking b
+          WHERE b.IsActive = 1
+            AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired')
+            ${projectId ? "AND b.ProjectId = @pid" : ""}
+        ) AS Bookings,
+        (SELECT COUNT(*) FROM dbo.CrmAgreement ag
+          JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+          WHERE ag.Status IN ('${CrmStatus.EXECUTED}','${CrmStatus.REGISTERED}')
+            AND b.IsActive = 1
+            ${projectId ? "AND b.ProjectId = @pid" : ""}
+        ) AS Agreements,
+        (SELECT COUNT(*) FROM dbo.CrmHandover h
+          JOIN dbo.CrmBooking b ON b.Id = h.BookingId
+          WHERE h.Status = 'Completed'
+            ${projectId ? "AND b.ProjectId = @pid" : ""}
+        ) AS Possessions
+    `);
+
     // Existing aggregates (scoped to project where possible)
     const appsQ = addPid(pool.request()).query(`
       SELECT a.Status, COUNT(*) AS Count
@@ -282,6 +307,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       alertDeedsCustomer, alertDeedsDirector, alertNocsNotIssued, alertAgreements,
       thisWeek, unitsSoldThisMonth, collectionPerProject, forwardDue,
       apps, bkgs, payments, tickets, cancellations, handovers, monthlyTrend,
+      funnel,
     ] = await Promise.all([
       projectsQ,
       alertWelcomeCallQ, alertOverdueDemandsQ, alertDisputedNoticesQ,
@@ -290,6 +316,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       alertNocsNotIssuedQ, alertAgreementsPendingQ,
       thisWeekQ, unitsSoldThisMonthQ, collectionPerProjectQ, forwardDueQ,
       appsQ, bookingsQ, paymentsQ, ticketsQ, cancellationsQ, handoversQ, monthlyTrendQ,
+      funnelQ,
     ]);
 
     res.json({
@@ -321,6 +348,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       cancellations:  cancellations.recordset,
       handovers:      handovers.recordset,
       monthlyTrend:   monthlyTrend.recordset,
+      funnel:         funnel.recordset[0] ?? { Applications: 0, Bookings: 0, Agreements: 0, Possessions: 0 },
     });
   } catch (e) {
     console.error("[crm-dashboard] GET error:", e.message);

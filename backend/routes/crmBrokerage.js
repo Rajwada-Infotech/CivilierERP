@@ -18,6 +18,8 @@ const { bumpCacheVersion } = require("../redis");
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
+const { calculateTds } = require("../services/tds");
+
 const BROKERAGE_SELECT = `
   SELECT br.*, b.BookingNo, b.UnitNo, b.TotalValue, a.ApplicantName,
          ahm.LHeadName AS BrokerMasterName, ahm.LHeadPhone AS BrokerMasterPhone,
@@ -128,8 +130,8 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
   if (existing.recordset.length) return { existing: true, ...existing.recordset[0] };
 
   const br = await pool.request().input("id", sql.Int, brokerageId).query(`
-    SELECT br.Id, br.Status, br.ComputedAmount, br.BrokerId, br.BrokerName,
-           br.TrancheLabel, b.BookingNo, b.CompanyId, b.ProjectId
+    SELECT br.Id, br.Status, br.ComputedAmount, br.TDSPercentage, br.TDSAmount, br.NetPayable,
+           br.BrokerId, br.BrokerName, br.TrancheLabel, b.BookingNo, b.CompanyId, b.ProjectId
     FROM dbo.CrmBrokerageMaster br
     JOIN dbo.CrmBooking b ON b.Id = br.BookingId
     WHERE br.Id = @id
@@ -139,8 +141,11 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
   if (row.Status !== CrmStatus.APPROVED) throw new Error(`Brokerage must be Approved before finance handoff (currently ${row.Status})`);
   if (!row.BrokerId) throw new Error("Brokerage has no broker ledger head");
 
-  const amount = Number(row.ComputedAmount) || 0;
-  if (amount <= 0) throw new Error("Approved brokerage amount must be greater than 0");
+  // Finance disburses net-of-TDS — the TDS portion is remitted to the government
+  // separately by the company. Using NetPayable (gross minus TDS) ensures Finance
+  // only pays out what's legally due to the broker.
+  const amount = Number(row.NetPayable ?? row.ComputedAmount) || 0;
+  if (amount <= 0) throw new Error("Approved brokerage net payable amount must be greater than 0");
 
   const actorEmail = req.user?.email || req.user?.name || null;
   const docTypeId = await resolveDocTypeId(pool, sql, "PAY");
@@ -165,7 +170,7 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
 
   const result = await pool.request()
     .input("name", sql.VarChar, "Brokerage Payment")
-    .input("remarks", sql.NVarChar(1000), `Approved brokerage for ${row.BookingNo} (${milestoneText}) - finance to complete payment details`)
+    .input("remarks", sql.NVarChar(1000), `Approved brokerage for ${row.BookingNo} (${milestoneText}) — gross ₹${Number(row.ComputedAmount).toLocaleString("en-IN")}, TDS ${row.TDSPercentage ?? 0}% (₹${Number(row.TDSAmount ?? 0).toLocaleString("en-IN")}), net payable ₹${amount.toLocaleString("en-IN")} — finance to complete payment details`)
     .input("amt", sql.Decimal(18,2), amount)
     .input("dt", sql.Date, today)
     .input("project", sql.VarChar, row.ProjectId != null ? String(row.ProjectId) : "")
@@ -275,6 +280,21 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     }
     const computedAmount = rateType === "Percentage" ? Math.round(dealValue * rateValue) / 100 : rateValue;
 
+    // Resolve TDS snapshot from TDSMaster (same pattern as ExpenseBooking)
+    let tdsId = null, tdsNature = null, tdsName = null, tdsPercentage = 0, tdsAmount = 0;
+    if (b.TDSId) {
+      const tdsRow = await pool.request().input("TDSId", sql.Int, parseInt(b.TDSId, 10))
+        .query("SELECT TDSId, Nature, Name, Percentage, Status FROM dbo.TDSMaster WHERE TDSId = @TDSId");
+      const tds = tdsRow.recordset[0];
+      if (!tds || !tds.Status) return res.status(400).json({ error: "Selected TDS is not a valid, active TDS record" });
+      tdsId = tds.TDSId;
+      tdsNature = tds.Nature;
+      tdsName = tds.Name;
+      tdsPercentage = Number(tds.Percentage) || 0;
+      tdsAmount = calculateTds(computedAmount, tdsPercentage);
+    }
+    const netPayable = Math.round((computedAmount - tdsAmount) * 100) / 100;
+
     const result = await pool.request()
       .input("bid",   sql.Int,           parseInt(b.BookingId))
       .input("brid",  sql.Int,           broker.recordset[0].LHeadId)
@@ -282,15 +302,25 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
       .input("firm",  sql.NVarChar(200), b.BrokerFirm || null)
       .input("con",   sql.NVarChar(20),  broker.recordset[0].LHeadPhone || null)
       .input("rt",    sql.NVarChar(20),  rateType)
-      .input("rv",    sql.Decimal(18,2),rateValue)
-      .input("camt",  sql.Decimal(18,2),computedAmount)
+      .input("rv",    sql.Decimal(18,2), rateValue)
+      .input("camt",  sql.Decimal(18,2), computedAmount)
+      .input("tdsid", sql.Int,           tdsId)
+      .input("tdsnature", sql.NVarChar(200), tdsNature)
+      .input("tdsname",   sql.NVarChar(200), tdsName)
+      .input("tdspct",sql.Decimal(5,2),  tdsPercentage)
+      .input("tdsamt",sql.Decimal(18,2), tdsAmount)
+      .input("net",   sql.Decimal(18,2), netPayable)
       .input("notes", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cb",    sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmBrokerageMaster
-          (BookingId, BrokerId, BrokerName, BrokerFirm, BrokerContact, RateType, RateValue, ComputedAmount, Status, Notes, CreatedBy, CreatedAt)
+          (BookingId, BrokerId, BrokerName, BrokerFirm, BrokerContact, RateType, RateValue,
+           ComputedAmount, TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount, NetPayable,
+           Status, Notes, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@bid, @brid, @name, @firm, @con, @rt, @rv, @camt, 'Pending', @notes, @cb, SYSDATETIME())
+        VALUES (@bid, @brid, @name, @firm, @con, @rt, @rv, @camt,
+                @tdsid, @tdsnature, @tdsname, @tdspct, @tdsamt, @net,
+                'Pending', @notes, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
@@ -311,6 +341,7 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
     const b = req.body;
     const cur = await pool.request().input("id", sql.Int, id).query(`
       SELECT br.Status, br.RateType, br.RateValue,
+             br.TDSId, br.TDSNature, br.TDSName, br.TDSPercentage,
              b.TotalValue, b.ParkingTotal
       FROM dbo.CrmBrokerageMaster br
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
@@ -338,12 +369,39 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
       return res.status(400).json({ error: "ComputedAmount must be greater than 0" });
     }
 
+    // Re-resolve TDS snapshot if a new TDSId is supplied, otherwise keep existing
+    let putTdsId = row.TDSId ?? null;
+    let putTdsNature = row.TDSNature ?? null;
+    let putTdsName = row.TDSName ?? null;
+    let putTdsPct = Number(row.TDSPercentage) || 0;
+    if (b.TDSId != null) {
+      if (b.TDSId === "" || b.TDSId === 0) {
+        // Caller explicitly cleared TDS
+        putTdsId = null; putTdsNature = null; putTdsName = null; putTdsPct = 0;
+      } else {
+        const tdsRow = await pool.request().input("TDSId", sql.Int, parseInt(b.TDSId, 10))
+          .query("SELECT TDSId, Nature, Name, Percentage, Status FROM dbo.TDSMaster WHERE TDSId = @TDSId");
+        const tds = tdsRow.recordset[0];
+        if (!tds || !tds.Status) return res.status(400).json({ error: "Selected TDS is not a valid, active TDS record" });
+        putTdsId = tds.TDSId; putTdsNature = tds.Nature; putTdsName = tds.Name;
+        putTdsPct = Number(tds.Percentage) || 0;
+      }
+    }
+    const putTdsAmt = calculateTds(computedAmount, putTdsPct);
+    const putNet = Math.round((computedAmount - putTdsAmt) * 100) / 100;
+
     await pool.request()
       .input("id", sql.Int, id)
       .input("firm", sql.NVarChar(200), b.BrokerFirm || null)
       .input("rt", sql.NVarChar(20), rateType)
       .input("rv", sql.Decimal(18,2), rateValue)
       .input("camt", sql.Decimal(18,2), computedAmount)
+      .input("tdsid",    sql.Int,            putTdsId)
+      .input("tdsnature",sql.NVarChar(200),  putTdsNature)
+      .input("tdsname",  sql.NVarChar(200),  putTdsName)
+      .input("tdspct",   sql.Decimal(5,2),   putTdsPct)
+      .input("tdsamt",   sql.Decimal(18,2),  putTdsAmt)
+      .input("net",      sql.Decimal(18,2),  putNet)
       .input("notes", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub", sql.Int, actorId(req))
       .query(`
@@ -352,6 +410,12 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
           RateType = @rt,
           RateValue = @rv,
           ComputedAmount = @camt,
+          TDSId = @tdsid,
+          TDSNature = @tdsnature,
+          TDSName = @tdsname,
+          TDSPercentage = @tdspct,
+          TDSAmount = @tdsamt,
+          NetPayable = @net,
           Notes = @notes,
           UpdatedBy = @ub,
           UpdatedAt = SYSDATETIME()

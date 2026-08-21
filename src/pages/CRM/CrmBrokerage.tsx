@@ -13,6 +13,7 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { useTds } from "@/contexts/TdsContext";
 
 const API = "/api/crm/brokerage";
 const BKG_API = "/api/crm/bookings";
@@ -24,7 +25,7 @@ const statusColor: Record<string, string> = {
   Paid: "text-green-600 bg-green-50 border-green-200",
 };
 
-const EMPTY_FORM = { BookingId: "", BrokerId: "", BrokerFirm: "", RateType: "Percentage", RateValue: "", ComputedAmount: "", Notes: "" };
+const EMPTY_FORM = { BookingId: "", BrokerId: "", BrokerFirm: "", RateType: "Percentage", RateValue: "", ComputedAmount: "", TDSId: "", Notes: "" };
 
 async function fetchAll(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
@@ -49,6 +50,7 @@ const CrmBrokerage: React.FC = () => {
   const { data: records = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-brokerage"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["broker-master"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
+  const { tdsRecords } = useTds();
   // Broker Master is the source of truth for the broker's own identity —
   // once picked, his details are only ever displayed read-only here, never
   // re-typed. Only the Firm/Rate below are genuinely per-deal fields.
@@ -69,6 +71,7 @@ const CrmBrokerage: React.FC = () => {
       RateType: r.RateType || "Percentage",
       RateValue: r.RateValue != null ? String(r.RateValue) : "",
       ComputedAmount: r.ComputedAmount != null ? String(r.ComputedAmount) : "",
+      TDSId: r.TDSId != null ? String(r.TDSId) : "",
       Notes: r.Notes || "",
     });
     setDialogOpen(true);
@@ -103,6 +106,7 @@ const CrmBrokerage: React.FC = () => {
           BrokerId: form.BrokerId ? parseInt(form.BrokerId) : undefined,
           RateValue: form.RateValue ? Number(form.RateValue) : undefined,
           ComputedAmount: form.ComputedAmount ? Number(form.ComputedAmount) : undefined,
+          TDSId: form.TDSId ? parseInt(form.TDSId) : null,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
@@ -152,8 +156,24 @@ const CrmBrokerage: React.FC = () => {
           </span>
         );
       } },
-    { accessorKey: "ComputedAmount", header: "Computed Amount", size: 130,
-      cell: (i) => <span className="font-semibold">₹{Number(i.row.original.ComputedAmount).toLocaleString("en-IN")}</span> },
+    { accessorKey: "ComputedAmount", header: "Amount / TDS / Net", size: 180,
+      cell: (i) => {
+        const r = i.row.original;
+        const gross = Number(r.ComputedAmount || 0);
+        const tds   = Number(r.TDSAmount || 0);
+        const net   = Number(r.NetPayable ?? gross);
+        return (
+          <div className="text-xs space-y-0.5">
+            <div className="font-semibold text-foreground">₹{gross.toLocaleString("en-IN")}</div>
+            {tds > 0 && (
+              <div className="text-orange-600">− TDS {r.TDSPercentage}%: ₹{tds.toLocaleString("en-IN")}</div>
+            )}
+            <div className={`font-bold ${tds > 0 ? "text-green-600" : "text-foreground"}`}>
+              Net: ₹{net.toLocaleString("en-IN")}
+            </div>
+          </div>
+        );
+      } },
     { accessorKey: "Status", header: "Status", size: 100,
       cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
     { id: "actions", header: "Actions", size: 160, enableSorting: false,
@@ -276,10 +296,22 @@ const CrmBrokerage: React.FC = () => {
                 </select>
               </div>
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Rate Value * ({form.RateType === "Percentage" ? "%" : "₹"})</label>
-              <input type="number" value={form.RateValue} onChange={(e) => setForm((f) => ({ ...f, RateValue: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Rate Value * ({form.RateType === "Percentage" ? "%" : "₹"})</label>
+                <input type="number" value={form.RateValue} onChange={(e) => setForm((f) => ({ ...f, RateValue: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">TDS (Sec. 194H)</label>
+                <select value={form.TDSId} onChange={(e) => setForm((f) => ({ ...f, TDSId: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <option value="">None / Nil certificate</option>
+                  {tdsRecords.filter((t) => t.status).map((t) => (
+                    <option key={t.id} value={t.id}>{t.name} ({t.percentage}%)</option>
+                  ))}
+                </select>
+              </div>
             </div>
             {editingId && (
               <div>

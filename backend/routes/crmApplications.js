@@ -152,10 +152,11 @@ const APP_SELECT = `
 router.get("/", requirePageRight("crm-applications", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search, stage, includeConverted, forBooking } = req.query;
+    const { status, search, stage, includeConverted, forBooking, companyId } = req.query;
     const req0 = pool.request();
     const conds = ["a.IsActive = 1"];
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
+    if (companyId) { req0.input("companyId", sql.Int, parseInt(companyId, 10)); conds.push("a.CompanyId = @companyId"); }
     if (search) {
       req0.input("srch", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @srch OR a.Mobile LIKE @srch OR a.ApplicationNo LIKE @srch)");

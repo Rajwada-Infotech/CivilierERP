@@ -47,7 +47,7 @@ function requireMoneyReceiptApprover(req, res) {
 router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { bookingId, status } = req.query;
+    const { bookingId, status, companyId } = req.query;
     const req0 = pool.request();
     const conds = [];
     if (bookingId) {
@@ -57,6 +57,10 @@ router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res)
     if (status && [CrmStatus.PENDING, CrmStatus.APPROVED, "Bounced"].includes(status)) {
       req0.input("st", sql.NVarChar(20), status);
       conds.push("mr.Status = @st");
+    }
+    if (companyId) {
+      req0.input("companyId", sql.Int, parseInt(companyId, 10));
+      conds.push("b.CompanyId = @companyId");
     }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`
