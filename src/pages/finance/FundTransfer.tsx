@@ -44,9 +44,6 @@ import { fetchChequeLots, fetchChequeNumbers } from "@/pages/finance/payment/api
 import type { ChequeLot } from "@/pages/finance/payment/types";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useAmendmentStatus } from "@/hooks/useAmendmentStatus";
-import { AmendedBadge } from "@/components/AmendedBadge";
-import { EditOrAmendButton } from "@/components/EditOrAmendButton";
 
 const PAYMENT_MODES: FundTransferMode[] = ["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "UPI", "RTGS", "IMPS", "Card"];
 const CHEQUE_MODES: FundTransferMode[] = ["Cheque", "Post-Dated Cheque"];
@@ -188,7 +185,6 @@ function TransferDetailDialog({
   const [detail, setDetail] = useState<FundTransferDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const rights = usePageRights("fund-transfer");
-  const amendmentStatus = useAmendmentStatus("FundTransfer", ftId, detail?.Status);
 
   useEffect(() => {
     let cancelled = false;
@@ -218,7 +214,6 @@ function TransferDetailDialog({
               <div className="ml-auto flex items-center gap-1.5">
                 <TypeBadge type={detail.TransferType} />
                 <StatusBadge status={detail.Status} />
-                {amendmentStatus.isAmended && <AmendedBadge />}
               </div>
             )}
           </div>
@@ -287,22 +282,6 @@ function TransferDetailDialog({
         )}
 
         <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20 flex items-center justify-between sm:justify-between">
-          {detail?.Status === "Approved" && rights.canEdit && (
-            <EditOrAmendButton
-              refDocType="FundTransfer"
-              refDocId={ftId}
-              docStatus={detail.Status}
-              docNo={detail.DocNo}
-              companyName={detail.SourceCompanyName}
-              totalAmount={detail.Amount}
-              amendTab="FUND_TRANSFER"
-              amendMenuPath="/material/amendment-menu"
-              canEdit={rights.canEdit}
-              size="sm"
-              onEdit={() => {}}
-              showBadge={false}
-            />
-          )}
           <button
             onClick={onClose}
             className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors ml-auto"

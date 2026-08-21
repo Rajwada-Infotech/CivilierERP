@@ -1,4 +1,4 @@
-import { Chart2, Hierarchy, Building3, Profile2User, TaskSquare, DocumentText } from "iconsax-react";
+import { Chart2, Hierarchy, Profile2User, TaskSquare, DocumentText } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Room Composition and Room Categories are reachable from the TopNavbar's
@@ -15,9 +15,9 @@ export const civilWorkDprNavItems: NavItem[] = [
     isDashboard: true,
   },
   {
-    label: "Work Reporting",
+    label: "Work Allocation",
     icon: TaskSquare,
-    path: "/civilworkdpr/work-reporting",
+    path: "/civilworkdpr/work-allocation",
     pageKey: "civilworkdpr-work-done",
   },
   {
@@ -31,12 +31,6 @@ export const civilWorkDprNavItems: NavItem[] = [
     icon: Hierarchy,
     path: "/civilworkdpr/dependency",
     pageKey: "civilworkdpr-dependency",
-  },
-  {
-    label: "Contractor",
-    icon: Building3,
-    path: "/civilworkdpr/contractor-register",
-    pageKey: "civilworkdpr-contractor-register",
   },
   {
     label: "Attendance",

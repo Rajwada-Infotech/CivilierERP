@@ -1,10 +1,7 @@
 import React from "react";
-import { Eye, Trash2, CreditCard } from "lucide-react";
+import { Eye, Trash2, CreditCard, PenSquare } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { AmendedBadge } from "@/components/AmendedBadge";
-import { useAmendmentStatus } from "@/hooks/useAmendmentStatus";
-import { EditOrAmendButton } from "@/components/EditOrAmendButton";
 import { computeBreakdown, computeGrnNetWithTerms, fmt } from "./helpers";
 import type { ExpenseRecord } from "./types";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -28,7 +25,6 @@ export function RecordCard({
   canEdit = true,
   canDelete = true,
 }: Props) {
-  const amendmentStatus = useAmendmentStatus("ExpenseBooking", rec.id, rec.status);
   const effectiveNet = (() => {
     if (rec.eSourceType === "GRN" && rec.grnTotalAmount != null) {
       const terms =
@@ -71,7 +67,6 @@ export function RecordCard({
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {amendmentStatus.isAmended && <AmendedBadge />}
           <StatusBadge status={rec.status} />
         </div>
       </div>
@@ -150,20 +145,15 @@ export function RecordCard({
             >
               <Eye size={14} />
             </button>
-            <EditOrAmendButton
-              refDocType="ExpenseBooking"
-              refDocId={rec.id}
-              docStatus={rec.status}
-              docNo={rec.bookingReference}
-              projectName={rec.projectName}
-              companyName={rec.companyName}
-              totalAmount={rec.netAmount ?? undefined}
-              amendTab="EB"
-              amendMenuPath="/material/amendment-menu"
-              canEdit={canEdit}
-              onEdit={onEdit}
-              reuseEditForm
-            />
+            {canEdit && (
+              <button
+                onClick={onEdit}
+                title="Edit"
+                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <PenSquare size={12} />
+              </button>
+            )}
             {canDelete && (
               <button
                 type="button"

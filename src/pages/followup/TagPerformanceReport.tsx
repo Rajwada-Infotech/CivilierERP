@@ -595,17 +595,17 @@ const TagPerformanceReport: React.FC = () => {
     { header: "Due Date", accessor: (r) => formatDate(r.TaskDueDate as string) },
   ];
 
-  const handleTaskStatusChange = async (id: string, status: string) => {
+  const handleTaskStatusChange = async (id: string, status: string, cancelReasonId?: string) => {
     const res = await fetchWithAuth(`/api/task-master/${id}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ Status: status }),
+      body: JSON.stringify({ Status: status, CancelReasonId: cancelReasonId }),
     });
     if (!res.ok) {
       toast.error((await res.json().catch(() => ({}))).error || "Failed to update status");
       return;
     }
-    toast.success(`Task marked ${status}`);
+    toast.success(status === "Cancel" ? "Task cancelled" : `Task marked ${status}`);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["tag-performance-report"] }),
       queryClient.invalidateQueries({ queryKey: ["followup-task", id] }),

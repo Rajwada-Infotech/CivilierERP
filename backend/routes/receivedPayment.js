@@ -13,6 +13,7 @@ const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { postReceivedPaymentApproval } = require("../services/generalLedger");
 const { recordGLPosting } = require("../services/approvalService");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const allowRoles = require("../middleware/role");
 
 // Only these roles may approve/reject — mirrors APPROVER_ROLES in the shared
@@ -35,7 +36,11 @@ router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 // Redis GET (~2ms) instead of a SQL Server sys.columns scan (~200ms+).
 let _hasNewCols = null;
 
-const MUTATION_CACHE_KEYS = ["received-payment", "brs", "finance-dashboard"];
+// pdc-report/pdc-due-count feed the PDC report and reminder bell — bumped
+// unconditionally on every mutation here (cheap, and simpler than threading
+// RPMode through every call site) rather than risk a cheque-mode receipt
+// silently going stale in the bell for up to the report's own cache TTL.
+const MUTATION_CACHE_KEYS = ["received-payment", "brs", "finance-dashboard", "pdc-report", "pdc-due-count"];
 
 async function invalidateReceivedPaymentWorkflowCaches() {
   MUTATION_CACHE_KEYS.forEach((key) => localVersionCache.invalidate(key));
@@ -427,6 +432,8 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
 
     const updatedBy = req.user?.name || req.user?.email || null;
     const pool = getPool();
+    const beforeSnapshot = await snapshotRow(pool, "dbo.ReceivedPayment", "RPPaymentID", id);
+    const wasApproved = beforeSnapshot?.RPStatus === "Approved";
 
     const extraSet = `, RPCompanyId=@RPCompanyId, RPProjectId=@RPProjectId,
       RPCustomerName=@RPCustomerName, RPFinYear=@RPFinYear,
@@ -508,6 +515,24 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
     }
 
     await invalidateReceivedPaymentWorkflowCaches();
+
+    if (wasApproved && beforeSnapshot) {
+      try {
+        await recordAmendment({
+          refDocType: "received-payment",
+          refDocId: parseInt(id, 10),
+          refDocNo: updated.RPDocNo || String(id),
+          projectName: updated.RPProjectName || beforeSnapshot.RPProjectName,
+          companyName: updated.RPCompanyName || beforeSnapshot.RPCompanyName,
+          changedBy: updatedBy,
+          before: beforeSnapshot,
+          after: updated,
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (received-payment):", logErr.message);
+      }
+    }
+
     res.json(result.recordset[0]);
   } catch (err) {
     console.error("PUT /received-payment error:", err);

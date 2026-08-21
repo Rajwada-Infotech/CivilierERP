@@ -7,7 +7,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, getRecordStatus } = require("../services/approvalService");
-const { resolveAllowPostApproval } = require("../middleware/permissions");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { validateBody } = require("../middleware/validateRequest");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -829,6 +829,9 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const companyId = req.query.companyId
       ? parseInt(req.query.companyId, 10) || null
       : null;
+    const projectName = (req.query.projectName || "").toString().trim() || null;
+    const docNo = (req.query.docNo || "").toString().trim() || null;
+    const supplierId = req.query.supplierId ? parseInt(req.query.supplierId, 10) : null;
 
     const hasPaymentTermId = await ebHasPaymentTermId(pool);
     const hasDirectItemsCol = await ebHasDirectItemsData(pool);
@@ -853,7 +856,10 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         .input("FinYear", sql.NVarChar(20), finYear)
         .input("DateFrom", sql.Date, dateFrom)
         .input("DateTo", sql.Date, dateTo)
-        .input("CompanyId", sql.Int, companyId).query(`
+        .input("CompanyId", sql.Int, companyId)
+        .input("ProjectName", sql.NVarChar(255), projectName)
+        .input("DocNo", sql.NVarChar(100), docNo ? `%${docNo}%` : null)
+        .input("SupplierId", sql.Int, supplierId).query(`
         SELECT
           eb.Eid, eb.Eid AS id,
           eb.EProjectName, eb.EDocumentType, eb.EDocDate,
@@ -952,6 +958,9 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           AND (@DateFrom IS NULL OR eb.EDocDate >= @DateFrom)
           AND (@DateTo IS NULL OR eb.EDocDate <= @DateTo)
           AND (@CompanyId IS NULL OR eb.ECompanyId = @CompanyId)
+          AND (@ProjectName IS NULL OR eb.EProjectName = @ProjectName)
+          AND (@DocNo IS NULL OR eb.EDocNo LIKE @DocNo)
+          AND (@SupplierId IS NULL OR (${ebSupplierList.idExpr}) = @SupplierId)
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `),
@@ -1511,11 +1520,6 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
   const EReminder = null;
   const EWorkDoneRef = null;
 
-  if (!EProjectName) {
-    const err = new Error("EProjectName is required.");
-    err.status = 400;
-    throw err;
-  }
   if (!EDocumentType) {
     const err = new Error("EDocumentType is required.");
     err.status = 400;
@@ -1776,7 +1780,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
     const insertReq = transaction
       .request()
       .input("EName", sql.NVarChar(200), EName || null)
-      .input("EProjectName", sql.NVarChar(150), EProjectName)
+      .input("EProjectName", sql.NVarChar(150), EProjectName || null)
       .input("EDocumentType", sql.NVarChar(50), EDocumentType)
       .input("EDocDate", sql.Date, EDocDate)
       .input(
@@ -1977,15 +1981,14 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     TDSId,
   } = req.body;
 
-  // EProjectName, EDocumentType, EDocDate and ECompanyId are NOT NULL columns
-  // with no fallback default in the INSERT below — omitting any of them used
-  // to reach the database and crash with a raw, unhandled SQL "Cannot insert
+  // EDocumentType, EDocDate and ECompanyId are NOT NULL columns with no
+  // fallback default in the INSERT below — omitting any of them used to
+  // reach the database and crash with a raw, unhandled SQL "Cannot insert
   // the value NULL" 500 (leaking internal table/column names) instead of a
-  // clean validation error. Caught live: creating a booking without
-  // EProjectName 500'd instead of 400'ing.
-  if (!EProjectName) {
-    return res.status(400).json({ error: "EProjectName is required." });
-  }
+  // clean validation error. Caught live: creating a booking without one of
+  // them 500'd instead of 400'ing. EProjectName itself is no longer in
+  // this list — the column was widened to nullable (migration 347) since
+  // a project isn't always known at booking time.
   if (!EDocumentType) {
     return res.status(400).json({ error: "EDocumentType is required." });
   }
@@ -2441,7 +2444,7 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     const insertReq = transaction
       .request()
       .input("EName", sql.NVarChar(200), EName || null)
-      .input("EProjectName", sql.NVarChar(150), EProjectName)
+      .input("EProjectName", sql.NVarChar(150), EProjectName || null)
       .input("EDocumentType", sql.NVarChar(50), EDocumentType)
       .input("EDocDate", sql.Date, EDocDate)
       .input(
@@ -3116,22 +3119,17 @@ router.put(
     if (!Number.isFinite(numericId) || numericId <= 0)
       return res.status(400).json({ error: "Invalid record id" });
 
-    // Approved invoices no longer hard-block edits (the old behaviour —
-    // guardEdit throwing "Cannot edit an approved record", forcing the user
-    // into a separate free-text Amendment popup). They still edit this
-    // exact form; every field below is validated/computed exactly as a
-    // normal save. Only right before the UPDATE would run, an Approved
-    // record (without the allowPostApproval override right) diverts into a
-    // Pending Amendment instead of writing the row directly — see
-    // isAmendmentFlow below and services/amendments.js proposeAmendment().
-    let isAmendmentFlow = false;
+    let wasApproved = false;
+    let beforeSnapshot = null;
     try {
-      const allowPostApproval = await resolveAllowPostApproval(req, "expense-booking");
       const currentStatus = await getRecordStatus("expense-booking", numericId);
       if (currentStatus === "Pending") {
         return res.status(400).json({ error: "Cannot edit a record that is pending approval. Reject it first." });
       }
-      isAmendmentFlow = currentStatus === "Approved" && !allowPostApproval;
+      wasApproved = currentStatus === "Approved";
+      if (wasApproved) {
+        beforeSnapshot = await snapshotRow(getPool(), "dbo.ExpenseBooking", "Eid", numericId);
+      }
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -3185,10 +3183,8 @@ router.put(
     // Same NOT NULL columns as POST / — this UPDATE overwrites them
     // unconditionally (not a COALESCE-style partial update), so omitting any
     // of them here would null out the existing value and crash the same way
-    // the create path did before the fix above.
-    if (!EProjectName) {
-      return res.status(400).json({ error: "EProjectName is required." });
-    }
+    // the create path did before the fix above. EProjectName is exempt —
+    // nullable since migration 347, a project isn't always known/applicable.
     if (!EDocumentType) {
       return res.status(400).json({ error: "EDocumentType is required." });
     }
@@ -3298,7 +3294,7 @@ router.put(
         .request()
         .input("Eid", sql.Int, numericId)
         .input("EName", sql.NVarChar(200), EName || null)
-        .input("EProjectName", sql.NVarChar(150), EProjectName)
+        .input("EProjectName", sql.NVarChar(150), EProjectName || null)
         .input("EDocumentType", sql.NVarChar(50), EDocumentType)
         .input("EDocDate", sql.Date, EDocDate)
         .input(
@@ -3391,92 +3387,6 @@ router.put(
       if (hasPayTermColPut) putReq.input("PaymentTermIdPut", sql.Int, PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null);
       if (hasDirectItemsColPut) putReq.input("EDirectItemsDataPut", sql.NVarChar(sql.MAX), EDirectItemsDataPut || null);
 
-      // Amendment flow (Approved doc, no allowPostApproval override) — same
-      // resolved values the direct UPDATE below would have written, just
-      // captured as plain JS values (column name → new value) instead of
-      // executed. Deliberately mirrors every .input() call above field for
-      // field. NOTE: this covers the ExpenseBooking row itself only —
-      // Expense Head allocations and EMI schedule sync (below) still apply
-      // immediately even mid-amendment-flow-adoption; a follow-up should
-      // fold those into the same propose/apply cycle.
-      if (isAmendmentFlow) {
-        const resolvedFields = {
-          EName: EName || null,
-          EProjectName,
-          EDocumentType,
-          EDocDate,
-          EAmount: bookingAmount != null && bookingAmount !== "" ? Number(bookingAmount) : 0,
-          ENetAmount: bookingNetAmount != null && bookingNetAmount !== "" ? Math.round(Number(bookingNetAmount) * 100) / 100 : 0,
-          ECgstRate: bookingCgstRate ?? 0,
-          ESgstRate: bookingSgstRate ?? 0,
-          EIgstRate: bookingIgstRate ?? 0,
-          EPaymentType: EPaymentType === "partial" ? "partial" : "full",
-          EPartialAmount: EPartialAmount != null ? Number(EPartialAmount) : null,
-          EDiscountData: EDiscountData ? (typeof EDiscountData === "string" ? EDiscountData : JSON.stringify(EDiscountData)) : null,
-          EDocNo: EDocNo || null,
-          EEmiPayment: EEmiPayment ? 1 : 0,
-          EEmiData: EEmiData ? JSON.stringify(EEmiData) : null,
-          EInstallmentCount: EInstallmentCount || null,
-          EEmiAmount: EEmiAmount || null,
-          EEmiStartDate: EEmiStartDate || null,
-          EReminder: EReminder || null,
-          ERemarks: ERemarks || null,
-          EStatus: EStatus || "Draft",
-          ECompanyId: parseInt(ECompanyId, 10),
-          EDocTypeId: EDocTypeId ? parseInt(EDocTypeId, 10) : null,
-          EFinYear: EFinYear || null,
-          ESourceType: ESourceType || null,
-          ESourceId: ESourceId ? parseInt(ESourceId, 10) : null,
-          EBillingTermId: EBillingTermId ? parseInt(EBillingTermId, 10) : null,
-          EBillingTermName: EBillingTermName || null,
-          EBillingTermsData: EBillingTermsData ? (typeof EBillingTermsData === "string" ? EBillingTermsData : JSON.stringify(EBillingTermsData)) : null,
-          ETCId: ETCId ? parseInt(ETCId, 10) : null,
-          ETCName: ETCName || null,
-          ETCText: ETCText || null,
-          EVendorInvoiceNo: EVendorInvoiceNo || null,
-          EVendorInvoiceDate: EVendorInvoiceDate || null,
-          EAdditionalCharges: EAdditionalCharges ? JSON.stringify(EAdditionalCharges) : null,
-          ECostCenter: ECostCenter || null,
-          EGLAccount: EGLAccount || null,
-          EGLAccountId: EGLAccountId ? parseInt(EGLAccountId, 10) : null,
-          EWorkDoneRef: EWorkDoneRef || null,
-          LHeadId: LHeadId ? parseInt(LHeadId, 10) : null,
-          TDSId: tdsSnapshotPut.TDSId,
-          TDSNature: tdsSnapshotPut.TDSNature,
-          TDSName: tdsSnapshotPut.TDSName,
-          TDSPercentage: tdsSnapshotPut.TDSPercentage,
-          TDSAmount: tdsSnapshotPut.TDSAmount,
-        };
-        if (hasPayTermColPut) resolvedFields.PaymentTermId = PaymentTermIdPut ? parseInt(PaymentTermIdPut, 10) : null;
-        if (hasDirectItemsColPut) resolvedFields.EDirectItemsData = EDirectItemsDataPut || null;
-
-        try {
-          const { proposeAmendment } = require("./amendments");
-          const userEmail = requireUserEmail(req, res);
-          if (!userEmail) return;
-          const ebRow = await pool.request().input("Eid", sql.Int, numericId)
-            .query("SELECT EDocNo, EProjectName, ECompanyId FROM dbo.ExpenseBooking WHERE Eid = @Eid");
-          const eb = ebRow.recordset[0];
-          const amendment = await proposeAmendment({
-            refDocType: "ExpenseBooking",
-            refDocId: numericId,
-            refDocNo: eb?.EDocNo,
-            proposedChanges: resolvedFields,
-            description: `Edit proposed for ${eb?.EDocNo || `#${numericId}`}`,
-            reason: req.body.amendmentReason || null,
-            projectName: eb?.EProjectName,
-            userName: userEmail,
-          });
-          return res.status(202).json({
-            message: "This invoice is already approved — your changes were submitted as a pending amendment awaiting approval.",
-            pending: true,
-            amendment,
-          });
-        } catch (err) {
-          return res.status(err.status || 500).json({ error: err.message || "Failed to submit amendment" });
-        }
-      }
-
       const result = await putReq.query(`
         UPDATE dbo.ExpenseBooking SET
           EName=@EName, EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
@@ -3558,6 +3468,25 @@ router.put(
       await bumpCacheVersion("expense-booking");
       await bumpCacheVersion("expense-booking-options");
       await bumpCacheVersion("expense-booking-source-ids");
+
+      if (wasApproved && beforeSnapshot) {
+        try {
+          const afterSnapshot = await snapshotRow(pool, "dbo.ExpenseBooking", "Eid", numericId);
+          await recordAmendment({
+            refDocType: "expense-booking",
+            refDocId: numericId,
+            refDocNo: afterSnapshot?.EDocNo || beforeSnapshot.EDocNo,
+            projectName: afterSnapshot?.EProjectName || beforeSnapshot.EProjectName,
+            companyName: null,
+            changedBy: req.user?.email || req.user?.name || null,
+            before: beforeSnapshot,
+            after: afterSnapshot,
+          });
+        } catch (logErr) {
+          console.error("Amendment log error (expense-booking):", logErr.message);
+        }
+      }
+
       res.json({ message: "Expense updated successfully" });
     } catch (err) {
       console.error("Update error:", err.message);

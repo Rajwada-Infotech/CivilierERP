@@ -7,7 +7,7 @@ import {
   Package,
   Boxes, CheckCircle2, Layers,
 } from "lucide-react";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { GlassShell, GlassCard } from "@/components/dashboard/GlassShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -45,21 +45,6 @@ const emptyForm = (): DepreciationPayload => ({
 const inputCls  = "w-full h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow";
 const filterCls = "h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 shrink-0";
 const labelCls  = "block text-xs font-medium text-muted-foreground mb-1";
-
-function StatCard({ icon: Icon, label, value, sub, accent }: { icon: React.ElementType; label: string; value: string; sub?: string; accent: string }) {
-  return (
-    <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
-      <span className={`inline-flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${accent}`}>
-        <Icon size={18} />
-      </span>
-      <div className="min-w-0">
-        <p className="text-xs text-muted-foreground truncate">{label}</p>
-        <p className="text-lg font-bold tabular-nums leading-tight truncate">{value}</p>
-        {sub && <p className="text-[11px] text-muted-foreground truncate">{sub}</p>}
-      </div>
-    </div>
-  );
-}
 
 function CategoryBadge({ category }: { category: string }) {
   const Icon = CATEGORY_ICONS[category] || Package;
@@ -156,30 +141,52 @@ export default function DepreciationSetupPage() {
 
   return (
     <>
-    <Breadcrumbs items={["Dashboard", "Material", "Depreciation Setup"]} />
-    <MaterialShell
+    <Breadcrumbs items={["Dashboard", "Fixed Asset", "Depreciation Setup"]} />
+    <GlassShell
       title="Depreciation Setup"
       subtitle="Define annual depreciation rates for fixed asset categories"
       icon={Percent}
+      accentColor="#eab308"
       action={
         rights.canCreate && (
           <button onClick={openCreate}
-            className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg transition">
+            className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 text-white text-sm font-semibold hover:shadow-lg transition">
             <Plus size={16} /> New Rate
           </button>
         )
       }
     >
-      {/* ── stat strip ── */}
+      {/* ── stat strip — same GlassCard language as the rest of the Fixed
+          Asset module (see FixedAssetDashboard, FixedAssetRecord). ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        <StatCard icon={Boxes} label="Configured Rates" value={String(stats.total)}
-          sub={`${stats.categoriesCovered} of ${ASSET_CATEGORIES.length} categories`} accent="bg-violet-500/10 text-violet-600 dark:text-violet-400" />
-        <StatCard icon={CheckCircle2} label="Active Rates" value={String(stats.active)}
-          sub={`${stats.total - stats.active} inactive`} accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" />
-        <StatCard icon={Percent} label="Average Rate" value={`${stats.avgRate.toFixed(1)}%`}
-          sub="across active rates" accent="bg-blue-500/10 text-blue-600 dark:text-blue-400" />
-        <StatCard icon={Layers} label="Categories Covered" value={String(stats.categoriesCovered)}
-          sub={`of ${ASSET_CATEGORIES.length} total`} accent="bg-amber-500/10 text-amber-600 dark:text-amber-400" />
+        <GlassCard
+          label="Configured Rates"
+          value={stats.total}
+          sub={`${stats.categoriesCovered} of ${ASSET_CATEGORIES.length} categories`}
+          icon={Boxes}
+          accentColor="#8b5cf6"
+        />
+        <GlassCard
+          label="Active Rates"
+          value={stats.active}
+          sub={`${stats.total - stats.active} inactive`}
+          icon={CheckCircle2}
+          accentColor="#22c55e"
+        />
+        <GlassCard
+          label="Average Rate"
+          value={`${stats.avgRate.toFixed(1)}%`}
+          sub="across active rates"
+          icon={Percent}
+          accentColor="#3b82f6"
+        />
+        <GlassCard
+          label="Categories Covered"
+          value={stats.categoriesCovered}
+          sub={`of ${ASSET_CATEGORIES.length} total`}
+          icon={Layers}
+          accentColor="#eab308"
+        />
       </div>
 
       {/* ── filters ── */}
@@ -297,7 +304,7 @@ export default function DepreciationSetupPage() {
             {/* header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2.5">
-                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
                   {React.createElement(selectedCategoryIcon, { size: 15 })}
                 </span>
                 <h2 className="text-base font-semibold">{editingId ? "Edit" : "New"} Depreciation Rate</h2>
@@ -365,7 +372,7 @@ export default function DepreciationSetupPage() {
                 Cancel
               </button>
               <button onClick={handleSave} disabled={saving}
-                className="h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-1.5 hover:shadow-lg transition">
+                className="h-9 px-4 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-1.5 hover:shadow-lg transition">
                 {saving ? "Saving…" : <><Check size={14} /> Save</>}
               </button>
             </div>
@@ -401,7 +408,7 @@ export default function DepreciationSetupPage() {
         </div>,
         document.body
       )}
-    </MaterialShell>
+    </GlassShell>
     </>
   );
 }

@@ -529,7 +529,6 @@ export default function HomePage() {
     civilworkdpr: [
       "civilworkdpr-dashboard",
       "civilworkdpr-dependency",
-      "civilworkdpr-contractor-register",
       "civilworkdpr-worker-attendance",
     ],
     crm: [

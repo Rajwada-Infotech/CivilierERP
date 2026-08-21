@@ -209,8 +209,10 @@ async function handle<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export const getLoanSanctions = (companyId: number) =>
-  fetchWithAuth(`${BASE}?companyId=${companyId}`).then((r) => handle<LoanSanction[]>(r));
+// Pass a companyId to scope the list to loans where that company is the
+// lender or borrower; omit it (or pass null) for the "All companies" view.
+export const getLoanSanctions = (companyId?: number | null) =>
+  fetchWithAuth(companyId ? `${BASE}?companyId=${companyId}` : BASE).then((r) => handle<LoanSanction[]>(r));
 
 export const getLoanSanction = (id: number) =>
   fetchWithAuth(`${BASE}/${id}`).then((r) => handle<LoanSanction>(r));
@@ -263,6 +265,9 @@ export const updateLoanSanction = (id: number, payload: LoanEditPayload) =>
     body: JSON.stringify(payload),
   }).then((r) => handle(r));
 
+// Scoped to the company the payment is being made from — a loan's EMI is
+// only "payable" from the company that is its lender or borrower, same
+// scoping the backend enforces (400s without a companyId).
 export const getPayableEmis = (companyId: number) =>
   fetchWithAuth(`${BASE}/emi-payable?companyId=${companyId}`).then((r) => handle<PayableEmi[]>(r));
 

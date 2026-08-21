@@ -21,7 +21,6 @@ import {
   BarChart2,
   Layers,
   Minus,
-  Printer,
   ToggleLeft,
   ToggleRight,
   AlertCircle,
@@ -140,12 +139,16 @@ function revenueLabel(cls: EntityClass): string {
 // ─── KPI Card ────────────────────────────────────────────────────────────────
 
 function KpiCard({
-  label, amount, icon: Icon, variant = "neutral", subtitle,
+  label, amount, icon: Icon, variant, subtitle,
 }: {
   label: string;
   amount: number;
   icon: React.ElementType;
-  variant?: "profit" | "loss" | "neutral" | "accent";
+  // Omit variant to auto-color by sign (profit=green, loss=red) — every
+  // real profit-line metric (Gross Profit, EBITDA, PBT) should do this so a
+  // loss actually reads as a loss, not plain gray. Pass "neutral" only for
+  // metrics that aren't a profit/loss figure at all (e.g. top-line Revenue).
+  variant?: "profit" | "loss" | "neutral";
   subtitle?: string;
 }) {
   const isProfit = amount >= 0;
@@ -153,13 +156,11 @@ function KpiCard({
     profit:  "from-emerald-500/10 to-emerald-500/5 border-emerald-500/20",
     loss:    "from-red-500/10 to-red-500/5 border-red-500/20",
     neutral: "from-primary/8 to-primary/3 border-primary/15",
-    accent:  "from-violet-500/10 to-violet-500/5 border-violet-500/20",
   };
   const iconColorMap = {
     profit:  "text-emerald-500",
     loss:    "text-red-500",
     neutral: "text-primary",
-    accent:  "text-violet-500",
   };
   const resolvedVariant = variant === "neutral" ? "neutral" : isProfit ? "profit" : "loss";
 
@@ -169,7 +170,7 @@ function KpiCard({
         <div className="flex-1 min-w-0">
           <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/70 mb-1 truncate">{label}</p>
           <p className={`text-sm font-bold tabular-nums leading-tight ${
-            variant === "neutral" || variant === "accent"
+            resolvedVariant === "neutral"
               ? "text-foreground"
               : isProfit ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
           }`}>
@@ -247,12 +248,29 @@ function StructuredStatement({
   const [openKey, setOpenKey] = useState<string | null>(null);
   const toggle = (k: string) => setOpenKey((c) => (c === k ? null : k));
 
+  // Printing should show every ledger-head drilldown at once, not just
+  // whichever single row happens to be expanded on screen — openKey is a
+  // one-at-a-time accordion by design for interactive use, so this is a
+  // separate override rather than changing that. beforeprint/afterprint
+  // fire for any print trigger (the toolbar button or Ctrl+P alike).
+  const [printExpandAll, setPrintExpandAll] = useState(false);
+  useEffect(() => {
+    const onBeforePrint = () => setPrintExpandAll(true);
+    const onAfterPrint = () => setPrintExpandAll(false);
+    window.addEventListener("beforeprint", onBeforePrint);
+    window.addEventListener("afterprint", onAfterPrint);
+    return () => {
+      window.removeEventListener("beforeprint", onBeforePrint);
+      window.removeEventListener("afterprint", onAfterPrint);
+    };
+  }, []);
+
   const showPrior = showComparison && !!priorStatement;
   const base = statement.totalRevenue; // for % column
 
   // ── Drilldown expansion ──
   const HeadsDrilldown = ({ rowKey, heads }: { rowKey: string; heads: Head[] }) =>
-    openKey === rowKey && heads.length > 0 ? (
+    (printExpandAll || openKey === rowKey) && heads.length > 0 ? (
       <tr>
         <td colSpan={showPrior ? 6 : 5} className="pb-2">
           <div className="ml-8 border-l-2 border-primary/20 pl-3 space-y-0.5 py-1">
@@ -286,7 +304,7 @@ function StructuredStatement({
             {label}
             {formula && <span className="text-[10px] text-muted-foreground ml-1">{formula}</span>}
             {clickable && (
-              openKey === rowKey
+              printExpandAll || openKey === rowKey
                 ? <ChevronDown size={10} className="inline ml-1.5 -mt-0.5 text-primary/60" />
                 : <ChevronRight size={10} className="inline ml-1.5 -mt-0.5 text-muted-foreground/60" />
             )}
@@ -329,7 +347,7 @@ function StructuredStatement({
           <td className="py-1 pr-3 text-[11px] text-foreground">
             {label}
             {clickable && (
-              openKey === rowKey
+              printExpandAll || openKey === rowKey
                 ? <ChevronDown size={9} className="inline ml-1.5 -mt-0.5 text-primary/60" />
                 : <ChevronRight size={9} className="inline ml-1.5 -mt-0.5 text-muted-foreground/50" />
             )}
@@ -362,14 +380,24 @@ function StructuredStatement({
     formula?: string;
   }) => {
     const isProfit = amount >= 0;
+    // A single mid-tone/10 tint (no separate dark: override needed) instead
+    // of pairing a near-white -50 shade with a near-black -950 shade — the
+    // -50 one was winning even in dark mode here, rendering as a flat gray
+    // bar instead of a red/green tint.
     const grandStyle = variant === "grand"
       ? isProfit
-        ? "text-emerald-700 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/30"
-        : "text-red-700 dark:text-red-400 bg-red-50/50 dark:bg-red-950/30"
+        ? "text-emerald-700 dark:text-emerald-400 bg-emerald-500/10"
+        : "text-red-700 dark:text-red-400 bg-red-500/10"
       : "";
+    // The double-rule divider above a grand-total row should read as part of
+    // that row's profit/loss color, not a flat neutral white/gray line
+    // clashing against a red- or green-tinted background.
+    const doubleBorderColor = variant === "grand"
+      ? isProfit ? "border-emerald-500/40" : "border-red-500/40"
+      : "border-foreground/40";
 
     return (
-      <tr className={`${isDouble ? "border-t-2 border-double border-foreground/40" : "border-t border-border/70"} ${grandStyle}`}>
+      <tr className={`${isDouble ? `border-t-2 border-double ${doubleBorderColor}` : "border-t border-border/70"} ${grandStyle}`}>
         <td className="py-1.5 pr-1.5 w-7" />
         <td className={`py-1.5 pr-3 text-xs font-bold text-foreground ${variant === "grand" ? "text-[11px]" : ""}`}>
           {label}
@@ -935,13 +963,6 @@ export default function ProfitAndLoss() {
 
             {/* Action buttons */}
             <div className="flex items-end gap-2 ml-auto">
-              {/* Print */}
-              <button
-                onClick={() => window.print()}
-                className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted text-foreground transition-colors"
-              >
-                <Printer size={12} /> Print
-              </button>
               <button
                 onClick={fetchData}
                 className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted text-foreground transition-colors"
@@ -949,7 +970,13 @@ export default function ProfitAndLoss() {
                 <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh
               </button>
               {rights.canExport && data && (
-                <ExportMenu title="Profit & Loss" filename="profit-and-loss" columns={exportColumns} data={exportRows} />
+                <ExportMenu
+                  title="Profit & Loss"
+                  filename="profit-and-loss"
+                  columns={exportColumns}
+                  data={exportRows}
+                  onPrint={() => window.print()}
+                />
               )}
             </div>
           </div>
@@ -1036,7 +1063,6 @@ export default function ProfitAndLoss() {
                       label="EBITDA"
                       amount={st.ebitda}
                       icon={Activity}
-                      variant="accent"
                       subtitle={`Margin: ${pct(st.ebitda, st.totalRevenue)}`}
                     />
                     <KpiCard
@@ -1136,11 +1162,44 @@ export default function ProfitAndLoss() {
 
       </FinanceShell>
 
-      {/* ── Print styles ── */}
+      {/* ── Print styles ──
+          #pl-printable sits many levels deep inside the app's layout tree
+          (sidebar shell, content wrappers, ...), not as a direct child of
+          <body> — a `body > *:not(#pl-printable) { display: none }` rule
+          only ever matches body's immediate children, so it hid the app's
+          root wrapper (not #pl-printable itself) and took the printable
+          content down with it, printing a blank page. `visibility: hidden`
+          on everything, then `visibility: visible` back on just the target
+          and its descendants, works regardless of nesting depth. ── */}
       <style>{`
         @media print {
-          body > *:not(#pl-printable) { display: none !important; }
-          #pl-printable { display: block !important; box-shadow: none !important; border: none !important; }
+          body * { visibility: hidden !important; }
+          #pl-printable, #pl-printable * { visibility: visible !important; }
+          /* The dark theme's --foreground/--muted-foreground resolve to
+             near-white text, which nothing here forces back to a readable
+             color for print — every amount was rendering white-on-white,
+             invisible on paper. Negative amounts already use "(...)"
+             parentheses (standard accounting convention), so plain black
+             throughout is both safe and correct here, not just a fallback. */
+          #pl-printable, #pl-printable * {
+            color: #000 !important;
+            background-color: transparent !important;
+            border-color: #999 !important;
+          }
+          #pl-printable {
+            /* fixed (not absolute) so it anchors to the page itself instead
+               of whatever relatively-positioned ancestor it happens to sit
+               inside — absolute was positioning/sizing it relative to that
+               ancestor's box, not the physical page, which is why it landed
+               off-center with the wrong width instead of flush top-left. */
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
           .no-print { display: none !important; }
         }
       `}</style>

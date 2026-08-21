@@ -145,6 +145,7 @@ function isLocalRequest(req) {
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 const ALL_ROUTES = [
+  { path: "/api/amendments", file: "./routes/amendmentLog" },
   { path: "/api/roles", file: "./routes/roles" },
   { path: "/api/user-rights", file: "./routes/userRights" },
   { path: "/api/user-widget-rights", file: "./routes/userWidgetRights" },
@@ -173,7 +174,6 @@ const ALL_ROUTES = [
   { path: "/api/entry-type", file: "./routes/entryType" },
   { path: "/api/expense-booking", file: "./routes/expenseBooking" },
   { path: "/api/material-chain", file: "./routes/materialChain" },
-  { path: "/api/amendments", file: "./routes/amendments" },
   { path: "/api/new-payment", file: "./routes/newPayment" },
   { path: "/api/on-account", file: "./routes/onAccount" },
   { path: "/api/received-payment", file: "./routes/receivedPayment" },
@@ -224,6 +224,8 @@ const ALL_ROUTES = [
   { path: "/api/dependency-activity-assignment", file: "./routes/dependencyActivityAssignment" },
   { path: "/api/depreciation-setup", file: "./routes/depreciationSetup" },
   { path: "/api/fixed-assets",       file: "./routes/fixedAssets" },
+  { path: "/api/fixed-asset-tagging", file: "./routes/fixedAssetTagging" },
+  { path: "/api/asset-transfer", file: "./routes/assetTransfer" },
   { path: "/api/work-progress", file: "./routes/workProgress" },
   { path: "/api/contractor-allocation", file: "./routes/contractorAllocation" },
   { path: "/api/daily-labour", file: "./routes/dailyLabour" },
@@ -251,9 +253,11 @@ const ALL_ROUTES = [
   { path: "/api/extra-charge-master", file: "./routes/extraChargeMaster" },
   { path: "/api/department-master", file: "./routes/departmentMaster" },
   { path: "/api/tag-master", file: "./routes/tagMaster" },
+  { path: "/api/cancel-template-master", file: "./routes/cancelTemplateMaster" },
   { path: "/api/task-master", file: "./routes/taskMaster" },
   { path: "/api/task-transfer", file: "./routes/taskTransfer" },
   { path: "/api/task-performance-report", file: "./routes/taskPerformanceReport" },
+  { path: "/api/entry-type-doc-followup-report", file: "./routes/entryTypeDocFollowUpReport" },
   { path: "/api/unit-matrix", file: "./routes/unitMatrix" },
   { path: "/api/parking-matrix", file: "./routes/parkingMatrix" },
   { path: "/api/business", file: "./routes/businessRoutes" },

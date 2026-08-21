@@ -13,7 +13,7 @@ export const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"];
 
 export const MODULE_PAGES: Record<string, string[]> = {
   finance: ["finance-dashboard", "new-payment", "on-account-adjustment", "received-payment", "brs", "transactions"],
-  material: ["material-dashboard", "purchase-orders", "grn-master", "material-request", "material-issues", "material-issue-return", "short-close", "l1-chart", "stock-ledger", "stock-transfers", "debit-note", "amendments", "fixed-asset-record", "vehicle-in-out"],
+  material: ["material-dashboard", "purchase-orders", "grn-master", "material-request", "material-issues", "material-issue-return", "short-close", "l1-chart", "stock-ledger", "stock-transfers", "debit-note", "fixed-asset-record", "vehicle-in-out"],
   followup: ["followup-dashboard", "followup-applications", "followup-bookings", "followup-agreements", "followup-demands"],
   engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
   ticket: ["ticket-dashboard", "tickets"],

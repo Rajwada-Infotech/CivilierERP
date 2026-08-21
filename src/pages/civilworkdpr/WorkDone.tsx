@@ -209,7 +209,7 @@ export default function WorkDone() {
     return unitsForTower.filter((u: any) => String(u.FloorNo) === form.FloorNo);
   }, [unitsForTower, form.FloorNo]);
 
-  // Dependency link — appears once a Room is selected. Work Reporting's
+  // Dependency link — appears once a Room is selected. Work Allocation's
   // "Room" is a synthetic per-category instance (RoomCompositionBuilder's
   // category+quantity model, no real dbo.RoomMaster row behind it — see
   // RoomInstance's {key,label} shape), while a Dependency Master's own scope
@@ -299,11 +299,11 @@ export default function WorkDone() {
       <Breadcrumbs
         items={[
           { label: "Civil Work DPR", path: "/civilworkdpr" },
-          { label: "Work Reporting" },
+          { label: "Work Allocation" },
         ]}
       />
       <CivilWorkDprShell
-        title="Work Reporting"
+        title="Work Allocation"
         subtitle="Tag a work-done entry to the exact Project / Tower / Floor / Unit"
         icon={Hammer}
       >
@@ -567,7 +567,7 @@ export default function WorkDone() {
 
         {/* Link Dependency — appears once a Room is picked above. Scoped to
             Project/Tower/Floor/Unit (see the note by matchingDependencies)
-            rather than an exact Room match, since Work Reporting's Room is
+            rather than an exact Room match, since Work Allocation's Room is
             synthetic and Dependency Master's isn't. */}
         {rights.canView && form.RoomId && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">

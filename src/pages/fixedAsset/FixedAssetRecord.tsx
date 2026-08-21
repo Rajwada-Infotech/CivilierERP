@@ -8,11 +8,11 @@ import {
   FileText, MapPin, Hash, Cpu, Check, X,
   Boxes, Wallet, PackageCheck, Circle, CheckCircle2, PlayCircle,
 } from "lucide-react";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { GlassShell, GlassCard } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
+import { useTheme } from "@/contexts/ThemeContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getSuppliers } from "@/api/grnApi";
 import { getActiveDepreciationSetups, type DepreciationSetup } from "@/api/depreciationApi";
@@ -20,6 +20,7 @@ import {
   getFixedAssets, getFixedAsset, createFixedAsset, updateFixedAsset, deleteFixedAsset,
   type FixedAssetListItem, type FixedAssetDetail,
 } from "@/api/fixedAssetApi";
+import { getTransferUsers } from "@/api/assetTransferApi";
 import { ASSET_CATEGORIES, CATEGORY_ICONS, CATEGORY_COLORS } from "./assetCategories";
 
 // ── constants ─────────────────────────────────────────────────────────────────
@@ -91,7 +92,7 @@ interface FormState {
   quantity: string;
   location: string;
   department: string;
-  custodian: string;
+  custodianUserId: string;
   depreciationSetupId: string;
   depreciationType: string;
   depreciationRate: string;
@@ -122,7 +123,7 @@ const emptyForm = (finYear = ""): FormState => ({
   quantity:           "1",
   location:           "",
   department:         "",
-  custodian:          "",
+  custodianUserId:    "",
   depreciationSetupId:"",
   depreciationType:   "",
   depreciationRate:   "",
@@ -140,12 +141,15 @@ type ViewMode = "list" | "form" | "detail";
 // ── small presentational helpers ──────────────────────────────────────────────
 const inputCls    = "w-full h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow";
 const labelCls    = "flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1";
-const sectionCls  = "bg-card border border-border rounded-xl p-5 space-y-4";
+// Layout only — the glass background/border/blur comes from the
+// `glassSection` style object (computed per-theme inside the component) so
+// every section shares the same glass-panel look the list view uses.
+const sectionCls  = "rounded-2xl p-5 space-y-4";
 
 function SectionHeader({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2.5">
-      <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+      <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 shrink-0">
         <Icon size={14} />
       </span>
       <p className="text-sm font-semibold text-foreground">{children}</p>
@@ -181,7 +185,7 @@ function DepreciationBar({ bookValue, cost }: { bookValue: number; cost: number 
   return (
     <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
       <div
-        className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all"
+        className="h-full rounded-full bg-gradient-to-r from-yellow-500 to-yellow-400 transition-all"
         style={{ width: `${pct}%` }}
       />
     </div>
@@ -198,7 +202,7 @@ function CategoryBadge({ category }: { category: string }) {
   );
 }
 
-function LivePreviewCard({ form, saving }: { form: FormState; saving: boolean }) {
+function LivePreviewCard({ form, saving, custodianName, glassStyle }: { form: FormState; saving: boolean; custodianName: string; glassStyle: React.CSSProperties }) {
   const Icon = CATEGORY_ICONS[form.assetCategory] || FileText;
   const fields = [
     { label: "Asset Name",     value: form.assetName || "—", done: !!form.assetName },
@@ -209,14 +213,14 @@ function LivePreviewCard({ form, saving }: { form: FormState; saving: boolean })
     { label: "Purchase Date",  value: form.purchaseDate ? fmtDate(form.purchaseDate) : "—", done: !!form.purchaseDate },
     { label: "Activation Date",value: form.activationDate ? fmtDate(form.activationDate) : "—", done: !!form.activationDate },
     { label: "Location",       value: form.location || "—", done: !!form.location },
-    { label: "Custodian",      value: form.custodian || "—", done: !!form.custodian },
+    { label: "Custodian",      value: custodianName || "—", done: !!custodianName },
   ];
   const doneCount = fields.filter((f) => f.done).length;
   const pct = Math.round((doneCount / fields.length) * 100);
 
   return (
-    <div className="relative bg-card border border-border rounded-xl overflow-hidden h-fit shadow-lg shadow-black/5 dark:shadow-black/20">
-      <div className="bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 p-4 text-white">
+    <div className="relative rounded-2xl overflow-hidden h-fit" style={glassStyle}>
+      <div className="bg-gradient-to-br from-yellow-500 via-amber-500 to-yellow-700 p-4 text-white">
         <p className="text-[10px] uppercase tracking-wide text-white/70 mb-1.5">Draft Document</p>
         <div className="flex items-center gap-2.5">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 shrink-0">
@@ -230,7 +234,7 @@ function LivePreviewCard({ form, saving }: { form: FormState; saving: boolean })
         {fields.map((f) => (
           <div key={f.label} className="flex items-center justify-between gap-2 text-xs">
             <span className="flex items-center gap-1.5 text-muted-foreground shrink-0">
-              {f.done ? <CheckCircle2 size={12} className="text-emerald-500 transition-colors" /> : <Circle size={12} className="text-muted-foreground/30" />}
+              {f.done ? <CheckCircle2 size={12} className="text-yellow-500 transition-colors" /> : <Circle size={12} className="text-muted-foreground/30" />}
               {f.label}
             </span>
             <span className={`font-medium text-right truncate transition-colors ${f.done ? "text-foreground" : "text-muted-foreground/50"}`}>
@@ -242,14 +246,14 @@ function LivePreviewCard({ form, saving }: { form: FormState; saving: boolean })
 
       <div className="px-4 pb-4">
         <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-          <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-500 ease-out" style={{ width: `${pct}%` }} />
+          <div className="h-full rounded-full bg-gradient-to-r from-yellow-500 to-amber-500 transition-all duration-500 ease-out" style={{ width: `${pct}%` }} />
         </div>
         <p className="text-[11px] text-muted-foreground mt-1.5">{pct}% filled</p>
       </div>
 
       {saving && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-card/95 backdrop-blur-sm">
-          <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 animate-pulse">
+          <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 animate-pulse">
             <FileText size={20} />
           </span>
           <p className="text-xs font-medium text-muted-foreground">Creating record…</p>
@@ -264,6 +268,18 @@ export default function FixedAssetRecord() {
   const qc     = useQueryClient();
   const { finYears } = useFinYear();
   const activeFinYear = finYears.find((f) => f.status === "Active")?.year || "";
+  const { theme } = useTheme();
+  const isDark = theme !== "light";
+  // Same glass-panel treatment GlassShell/GlassCard use elsewhere in the
+  // Fixed Asset module, tinted to this module's own accent (#eab308) —
+  // keeps every section visually consistent instead of a one-off flat look.
+  const glassSection = {
+    background: isDark ? "rgba(15,17,26,0.45)" : "rgba(255,255,255,0.72)",
+    border: `1px solid ${isDark ? "rgba(234,179,8,0.15)" : "rgba(234,179,8,0.2)"}`,
+    backdropFilter: "blur(16px) saturate(160%)",
+    WebkitBackdropFilter: "blur(16px) saturate(160%)",
+    boxShadow: isDark ? "0 4px 24px rgba(0,0,0,0.25)" : "0 4px 24px rgba(234,179,8,0.07)",
+  } as const;
 
   const [viewMode,   setViewMode]   = useState<ViewMode>("list");
   const [editingId,  setEditingId]  = useState<number | null>(null);
@@ -304,6 +320,10 @@ export default function FixedAssetRecord() {
   const { data: depSetups = [] } = useQuery({
     queryKey: ["depreciation-setups-active"],
     queryFn:  getActiveDepreciationSetups,
+  });
+  const { data: users = [] } = useQuery({
+    queryKey: ["asset-transfer-users"],
+    queryFn:  getTransferUsers,
   });
 
   // ── detail query for view/edit ────────────────────────────────────────────
@@ -464,7 +484,7 @@ export default function FixedAssetRecord() {
         quantity:            String(d.Quantity || "1"),
         location:            d.Location || "",
         department:          d.Department || "",
-        custodian:           d.Custodian || "",
+        custodianUserId:     String(d.CustodianUserId || ""),
         depreciationSetupId: String(d.DepreciationSetupId || ""),
         depreciationType:    d.DepreciationType || "",
         depreciationRate:    String(d.DepreciationRate || ""),
@@ -525,7 +545,7 @@ export default function FixedAssetRecord() {
       quantity:            parseFloat(form.quantity) || 1,
       location:            form.location || undefined,
       department:          form.department || undefined,
-      custodian:           form.custodian || undefined,
+      custodianUserId:     form.custodianUserId ? Number(form.custodianUserId) : undefined,
       depreciationSetupId: form.depreciationSetupId ? Number(form.depreciationSetupId) : undefined,
       depreciationType:    form.depreciationType || undefined,
       depreciationRate:    form.depreciationRate ? parseFloat(form.depreciationRate) : undefined,
@@ -573,10 +593,11 @@ export default function FixedAssetRecord() {
       : null;
 
     return (
-      <MaterialShell
+      <GlassShell
         title={d.DocNo || "Fixed Asset"}
         subtitle={`${d.AssetCategory} · ${d.AssetCode || ""}`}
         icon={Cpu}
+        accentColor="#eab308"
         action={
           <div className="flex gap-2">
             <button onClick={() => { resetForm(); setViewMode("list"); }}
@@ -585,7 +606,7 @@ export default function FixedAssetRecord() {
             </button>
             {rights.canEdit && (
               <button onClick={() => goToEdit(d as unknown as FixedAssetListItem)}
-                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all">
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
                 <Pencil size={13} /> Edit
               </button>
             )}
@@ -594,7 +615,7 @@ export default function FixedAssetRecord() {
       >
         <div className="space-y-5 max-w-6xl">
           {/* hero header */}
-          <div className="relative overflow-hidden bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 rounded-2xl p-5 text-white">
+          <div className="relative overflow-hidden bg-gradient-to-br from-yellow-500 via-amber-500 to-yellow-700 rounded-2xl p-5 text-white">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="flex items-center gap-3 min-w-0">
                 <span className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-white/15 shrink-0">
@@ -639,11 +660,11 @@ export default function FixedAssetRecord() {
             <SummaryCard label="Purchase Cost"       value={fmtCur(d.PurchaseCost)} icon={Wallet} />
             <SummaryCard label="Annual Depreciation" value={dc ? fmtCur(dc.annualDep) : "—"} icon={TrendingDown} />
             <SummaryCard label="Total Depreciation"  value={dc ? fmtCur(dc.totalDep) : "—"} color="text-amber-600 dark:text-amber-400" icon={TrendingDown} />
-            <SummaryCard label="Current Book Value"  value={dc ? fmtCur(dc.bookValue) : "—"} color="text-emerald-600 dark:text-emerald-400" icon={PackageCheck} />
+            <SummaryCard label="Current Book Value"  value={dc ? fmtCur(dc.bookValue) : "—"} color="text-yellow-600 dark:text-yellow-400" icon={PackageCheck} />
           </div>
 
           {/* details grid */}
-          <div className={sectionCls}>
+          <div className={sectionCls} style={glassSection}>
             <SectionHeader icon={Package}>Asset Details</SectionHeader>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
               {[
@@ -673,7 +694,7 @@ export default function FixedAssetRecord() {
 
           {/* depreciation */}
           {dc && (
-            <div className={sectionCls}>
+            <div className={sectionCls} style={glassSection}>
               <SectionHeader icon={TrendingDown}>Depreciation Details</SectionHeader>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                 {[
@@ -695,7 +716,7 @@ export default function FixedAssetRecord() {
 
           {/* sale info */}
           {d.AssetStatus === "Sold" && (
-            <div className={sectionCls}>
+            <div className={sectionCls} style={glassSection}>
               <SectionHeader icon={IndianRupee}>Sale Information</SectionHeader>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
                 {[
@@ -722,13 +743,13 @@ export default function FixedAssetRecord() {
           )}
 
           {d.Remarks && (
-            <div className={sectionCls}>
+            <div className={sectionCls} style={glassSection}>
               <SectionHeader icon={FileText}>Remarks</SectionHeader>
               <p className="text-sm text-muted-foreground">{d.Remarks}</p>
             </div>
           )}
         </div>
-      </MaterialShell>
+      </GlassShell>
     );
   }
 
@@ -737,10 +758,11 @@ export default function FixedAssetRecord() {
   // ═══════════════════════════════════════════════════════════════════════════
   if (viewMode === "form") {
     return (
-      <MaterialShell
+      <GlassShell
         title={editingId ? "Edit Fixed Asset" : "New Fixed Asset"}
         subtitle="Record a new fixed asset with depreciation details"
         icon={Cpu}
+        accentColor="#eab308"
         action={
           <div className="flex gap-2">
             <button onClick={() => { resetForm(); setViewMode("list"); }}
@@ -748,7 +770,7 @@ export default function FixedAssetRecord() {
               <ArrowLeft size={13} /> Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all disabled:opacity-50">
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
               <Check size={13} /> {saving ? "Saving…" : "Save Asset"}
             </button>
           </div>
@@ -757,7 +779,7 @@ export default function FixedAssetRecord() {
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-5 xl:gap-8 items-start w-full max-w-[1600px]">
         <div className="space-y-5 min-w-0">
           {/* ── Header Info ── */}
-          <div className={sectionCls}>
+          <div className={sectionCls} style={glassSection}>
             <SectionHeader icon={FileText}>Header Information</SectionHeader>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
               <div>
@@ -795,7 +817,7 @@ export default function FixedAssetRecord() {
           </div>
 
           {/* ── Asset Details ── */}
-          <div className={`${sectionCls} space-y-5`}>
+          <div className={`${sectionCls} space-y-5`} style={glassSection}>
             <SectionHeader icon={Package}>Asset Details</SectionHeader>
 
             <SubGroup label="Identity">
@@ -856,7 +878,7 @@ export default function FixedAssetRecord() {
               <div className="relative">
                 <label className={labelCls}><IndianRupee size={11} /> Purchase Cost *</label>
                 <input type="number" min="0" step="0.01" value={form.purchaseCost} onChange={(e) => setField("purchaseCost", e.target.value)} placeholder="0.00"
-                  className={`${inputCls} font-semibold border-emerald-500/30 focus:ring-emerald-500/30 bg-emerald-500/[0.03]`} />
+                  className={`${inputCls} font-semibold border-yellow-500/30 focus:ring-yellow-500/30 bg-yellow-500/[0.03]`} />
               </div>
               <div>
                 <label className={labelCls}>Quantity</label>
@@ -882,13 +904,16 @@ export default function FixedAssetRecord() {
               </div>
               <div>
                 <label className={labelCls}><User size={11} /> Custodian / Assigned To</label>
-                <input type="text" value={form.custodian} onChange={(e) => setField("custodian", e.target.value)} placeholder="Employee name…" className={inputCls} />
+                <select value={form.custodianUserId} onChange={(e) => setField("custodianUserId", e.target.value)} className={inputCls}>
+                  <option value="">Unassigned…</option>
+                  {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
               </div>
             </SubGroup>
           </div>
 
           {/* ── Depreciation Details ── */}
-          <div className={sectionCls}>
+          <div className={sectionCls} style={glassSection}>
             <SectionHeader icon={TrendingDown}>Depreciation Details</SectionHeader>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
               <div>
@@ -914,7 +939,7 @@ export default function FixedAssetRecord() {
                   <SummaryCard label="Purchase Cost"       value={fmtCur(parseFloat(form.purchaseCost))} icon={Wallet} />
                   <SummaryCard label="Annual Depreciation" value={fmtCur(depCalc.annualDep)} icon={TrendingDown} />
                   <SummaryCard label="Total Depreciation"  value={fmtCur(depCalc.totalDep)} color="text-amber-600 dark:text-amber-400" icon={TrendingDown} />
-                  <SummaryCard label="Current Book Value"  value={fmtCur(depCalc.bookValue)} color="text-emerald-600 dark:text-emerald-400" icon={PackageCheck} />
+                  <SummaryCard label="Current Book Value"  value={fmtCur(depCalc.bookValue)} color="text-yellow-600 dark:text-yellow-400" icon={PackageCheck} />
                 </div>
                 <div>
                   <DepreciationBar bookValue={depCalc.bookValue} cost={parseFloat(form.purchaseCost)} />
@@ -933,7 +958,7 @@ export default function FixedAssetRecord() {
 
           {/* ── Sale Section ── */}
           {(form.assetStatus === "Sold" || form.sellingPrice) && (
-            <div className={sectionCls}>
+            <div className={sectionCls} style={glassSection}>
               <SectionHeader icon={IndianRupee}>Asset Sale</SectionHeader>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
                 <div>
@@ -980,9 +1005,14 @@ export default function FixedAssetRecord() {
           )}
         </div>
 
-        <LivePreviewCard form={form} saving={saving} />
+        <LivePreviewCard
+          form={form}
+          saving={saving}
+          custodianName={users.find((u) => String(u.id) === form.custodianUserId)?.name || ""}
+          glassStyle={glassSection}
+        />
         </div>
-      </MaterialShell>
+      </GlassShell>
     );
   }
 
@@ -991,104 +1021,123 @@ export default function FixedAssetRecord() {
   // ═══════════════════════════════════════════════════════════════════════════
   return (
     <>
-    <Breadcrumbs items={["Dashboard", "Material", "Fixed Asset Record"]} />
-    <MaterialShell
+    <Breadcrumbs items={["Dashboard", "Fixed Asset", "Fixed Asset Record"]} />
+    <GlassShell
       title="Fixed Asset Record"
       subtitle="Track and manage all fixed assets with depreciation"
       icon={Cpu}
+      accentColor="#eab308"
       action={
         rights.canCreate && (
           <button onClick={goToCreate}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all">
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
             <Plus size={13} /> New Asset
           </button>
         )
       }
     >
-      {/* ── Portfolio summary — value hero + book-value-by-category chart,
-          styled the same as PO/GRN's Card-based summary sections ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-4 mb-5">
-        <Card className="border-border shadow-sm overflow-hidden">
-          <div className="bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 px-5 py-4 text-white">
-            <p className="text-[10px] uppercase tracking-widest text-white/70">
-              Total Book Value
-            </p>
-            <p className="text-3xl font-bold tabular-nums mt-1">
-              {fmtCur(portfolioStats.totalBookValue)}
-            </p>
-            <p className="text-xs text-white/70 mt-1">
-              of {fmtCur(portfolioStats.totalCost)} original purchase value
-            </p>
-          </div>
-          <CardContent className="p-4">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <SummaryCard label="Total Assets" value={fmt(portfolioStats.count)} icon={Boxes} />
-              {portfolioStats.pendingCount > 0 && (
-                <SummaryCard label="Pending" value={fmt(portfolioStats.pendingCount)} color="text-violet-600 dark:text-violet-400" icon={AlertCircle} />
-              )}
-              <SummaryCard label="Active" value={fmt(portfolioStats.activeCount)} color="text-emerald-600 dark:text-emerald-400" icon={PlayCircle} />
-              <SummaryCard label="Sold" value={fmt(portfolioStats.soldCount)} color="text-amber-600 dark:text-amber-400" icon={IndianRupee} />
-            </div>
-          </CardContent>
-        </Card>
+      {/* ── KPI strip — same GlassCard language as the rest of the Fixed
+          Asset module (see FixedAssetDashboard). ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <GlassCard
+          label="Total Book Value"
+          value={fmtCur(portfolioStats.totalBookValue)}
+          sub={`of ${fmtCur(portfolioStats.totalCost)} original`}
+          icon={Wallet}
+          accentColor="#eab308"
+        />
+        <GlassCard
+          label="Total Assets"
+          value={fmt(portfolioStats.count)}
+          sub={portfolioStats.pendingCount > 0 ? `${fmt(portfolioStats.pendingCount)} pending` : undefined}
+          icon={Boxes}
+          accentColor="#3b82f6"
+        />
+        <GlassCard
+          label="Active"
+          value={fmt(portfolioStats.activeCount)}
+          icon={PlayCircle}
+          accentColor="#22c55e"
+        />
+        <GlassCard
+          label="Sold"
+          value={fmt(portfolioStats.soldCount)}
+          icon={IndianRupee}
+          accentColor="#f59e0b"
+        />
+      </div>
 
-        <Card className="border-border shadow-sm">
-          <CardHeader className="pb-3 border-b border-border">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <TrendingUp size={14} className="text-emerald-600 dark:text-emerald-400" />
-              Book Value by Category
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-4">
-            {categoryBreakdown.entries.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-9">
-                No assets yet
-              </p>
-            ) : (
-              <div className="flex items-end justify-between gap-2.5 h-[148px]">
-                {categoryBreakdown.entries.map(([cat, value], i) => {
-                  const Icon = CATEGORY_ICONS[cat] || Package;
-                  const barColor = BAR_PALETTE[i % BAR_PALETTE.length];
-                  const pct =
-                    categoryBreakdown.max > 0
-                      ? Math.max(8, (value / categoryBreakdown.max) * 100)
-                      : 0;
-                  return (
-                    <div
-                      key={cat}
-                      className="flex-1 flex flex-col items-center gap-1.5 min-w-0 h-full"
-                    >
-                      <span
-                        className="text-[9px] font-mono text-muted-foreground truncate w-full text-center"
-                        title={fmtCurCompact(value)}
-                      >
-                        {fmtCurCompact(value)}
-                      </span>
-                      <div className="flex-1 w-full flex items-end justify-center">
+      {/* ── Book Value by Category ── */}
+      <div className="rounded-2xl overflow-hidden mb-4" style={glassSection}>
+        <div className="px-5 py-3.5 border-b border-amber-500/15 flex items-center gap-2">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
+            <TrendingUp size={14} />
+          </span>
+          <p className="text-sm font-semibold text-foreground">Book Value by Category</p>
+        </div>
+        <div className="p-5">
+          {categoryBreakdown.entries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-9 text-muted-foreground">
+              <Boxes size={20} className="opacity-40" />
+              <p className="text-xs">No assets yet</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3.5">
+              {categoryBreakdown.entries.map(([cat, value], i) => {
+                const Icon = CATEGORY_ICONS[cat] || Package;
+                const barColor = BAR_PALETTE[i % BAR_PALETTE.length];
+                const pct =
+                  categoryBreakdown.max > 0
+                    ? Math.max(4, (value / categoryBreakdown.max) * 100)
+                    : 0;
+                return (
+                  <div key={cat} className="flex items-center gap-3">
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground shrink-0">
+                      <Icon size={13} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline justify-between gap-2 mb-1">
+                        <span className="text-xs font-medium text-foreground truncate" title={cat}>
+                          {cat}
+                        </span>
+                        <span className="text-xs font-mono tabular-nums text-muted-foreground shrink-0">
+                          {fmtCurCompact(value)}
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
                         <div
-                          className={`w-6 rounded-t-md ${barColor} transition-all`}
-                          style={{ height: `${pct}%` }}
+                          className={`h-full rounded-full ${barColor} transition-all`}
+                          style={{ width: `${pct}%` }}
                         />
                       </div>
-                      <Icon size={11} className="text-muted-foreground shrink-0" />
-                      <span
-                        className="text-[9px] text-muted-foreground truncate w-full text-center"
-                        title={cat}
-                      >
-                        {cat}
-                      </span>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── filters ── */}
-      <Card className="border-border shadow-sm mb-5">
-        <CardContent className="p-4 space-y-3">
+      <div className="rounded-2xl overflow-hidden mb-4" style={glassSection}>
+        <div className="px-5 py-3.5 border-b border-amber-500/15 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
+              <Search size={14} />
+            </span>
+            <p className="text-sm font-semibold text-foreground">Filters</p>
+          </div>
+          {(filterCategory || filterStatus || filterFinYear || search) && (
+            <button
+              onClick={() => { setFilterCategory(""); setFilterStatus(""); setFilterFinYear(""); setSearch(""); }}
+              className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 shrink-0"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+        <div className="p-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div className="lg:col-span-2">
               <label className={labelCls}>Search</label>
@@ -1126,34 +1175,17 @@ export default function FixedAssetRecord() {
               </select>
             </div>
           </div>
+        </div>
+      </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
-            <div className="flex items-center gap-3">
-              {(filterCategory || filterStatus || filterFinYear || search) && (
-                <button
-                  onClick={() => { setFilterCategory(""); setFilterStatus(""); setFilterFinYear(""); setSearch(""); }}
-                  className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 shrink-0"
-                >
-                  Clear filters
-                </button>
-              )}
-              <span className="text-xs text-muted-foreground shrink-0">
-                {filtered.length} of {portfolioStats.count} assets
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── register — same Card wrapper GRN.tsx uses for its register ── */}
-      <Card className="border-border shadow-sm">
-        <CardHeader className="pb-3 border-b border-border">
-          <CardTitle className="text-base font-semibold">Asset Register</CardTitle>
+      {/* ── register ── */}
+      <div className="rounded-2xl overflow-hidden" style={glassSection}>
+        <div className="px-5 py-3.5 border-b border-amber-500/15">
+          <p className="text-sm font-semibold text-foreground">Asset Register</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {filtered.length} of {portfolioStats.count} asset{portfolioStats.count !== 1 ? "s" : ""}
           </p>
-        </CardHeader>
-        <CardContent className="p-0">
+        </div>
       {isLoading ? (
         <div className="text-center py-20 text-muted-foreground text-sm">Loading…</div>
       ) : filtered.length === 0 ? (
@@ -1164,7 +1196,7 @@ export default function FixedAssetRecord() {
           <p className="text-sm">No fixed assets found</p>
           {rights.canCreate && (
             <button onClick={goToCreate}
-              className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all">
+              className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
               <Plus size={13} /> Add First Asset
             </button>
           )}
@@ -1173,7 +1205,7 @@ export default function FixedAssetRecord() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[900px]">
             <thead>
-              <tr className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
+              <tr className="bg-amber-500/5 text-muted-foreground text-xs uppercase tracking-wide">
                 <th className="px-4 py-3 text-left">Asset</th>
                 <th className="px-4 py-3 text-left">Category</th>
                 <th className="px-4 py-3 text-left">Company / Project</th>
@@ -1184,14 +1216,14 @@ export default function FixedAssetRecord() {
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody className="divide-y divide-border/60">
               {filtered.map((a) => {
                 const dc = a.PurchaseDate && a.DepreciationRate
                   ? calcDepreciation(a.PurchaseCost, a.DepreciationRate, a.PurchaseDate)
                   : null;
                 const bookValue = dc ? dc.bookValue : a.PurchaseCost;
                 return (
-                  <tr key={a.AssetId} className="hover:bg-muted/30 transition-colors cursor-pointer"
+                  <tr key={a.AssetId} className="hover:bg-amber-500/[0.04] transition-colors cursor-pointer"
                     onClick={() => goToView(a)}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
@@ -1209,7 +1241,7 @@ export default function FixedAssetRecord() {
                     <td className="px-4 py-3 text-muted-foreground">{fmtDate(a.PurchaseDate)}</td>
                     <td className="px-4 py-3 text-right font-mono tabular-nums">{fmtCur(a.PurchaseCost)}</td>
                     <td className="px-4 py-3 min-w-[130px]">
-                      <p className="font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{fmtCur(bookValue)}</p>
+                      <p className="font-mono tabular-nums text-yellow-600 dark:text-yellow-400">{fmtCur(bookValue)}</p>
                       {dc && <div className="mt-1"><DepreciationBar bookValue={dc.bookValue} cost={a.PurchaseCost} /></div>}
                     </td>
                     <td className="px-4 py-3">
@@ -1244,8 +1276,7 @@ export default function FixedAssetRecord() {
           </table>
         </div>
       )}
-        </CardContent>
-      </Card>
+      </div>
 
       {/* ── delete confirm ── */}
       {deleteId && createPortal(
@@ -1272,7 +1303,7 @@ export default function FixedAssetRecord() {
         </div>,
         document.body
       )}
-    </MaterialShell>
+    </GlassShell>
     </>
   );
 }

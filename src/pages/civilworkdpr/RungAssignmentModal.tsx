@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Flag, Trash2, Check } from "lucide-react";
+import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Flag, Trash2, Check, Timer } from "lucide-react";
 import type { LadderActivity, DependencyMasterListRow } from "@/api/dependencyMasterApi";
 import {
   getEngineers,
   getProjectContractors,
   getRungAssignment,
   saveRungAssignment,
+  getBlueprintAnnotation,
   SOURCE_META,
   type AssignmentMaterial,
   type AssignmentCheckpoint,
@@ -15,8 +16,10 @@ import {
   type Engineer,
 } from "@/api/dependencyActivityAssignmentApi";
 import { getActivityCheckpoints } from "@/api/activityCheckpointApi";
+import { getRoomBlueprint } from "@/api/roomMasterApi";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
+import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
 
 const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -71,6 +74,76 @@ function EngineerMultiSelect({
   );
 }
 
+// Shows the room's blueprint (annotated thumbnail if this rung already has
+// markup on it, the raw blueprint otherwise) and opens the Konva editor on
+// click. Two activities in the same chain can mark up the same room's
+// blueprint independently — see migration 345.
+function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number; rungId: number; roomLabel: string }) {
+  const [editorOpen, setEditorOpen] = useState(false);
+  const { data: blueprint, isLoading: blueprintLoading } = useQuery({
+    queryKey: ["room-blueprint", roomId],
+    queryFn: () => getRoomBlueprint(roomId),
+  });
+  const { data: annotation } = useQuery({
+    queryKey: ["blueprint-annotation", rungId, roomId, "allocation"],
+    queryFn: () => getBlueprintAnnotation(rungId, roomId, "allocation"),
+  });
+
+  const thumbnailSrc = annotation?.thumbnailBase64
+    ? `data:image/png;base64,${annotation.thumbnailBase64}`
+    : blueprint && blueprint.mimeType !== "application/pdf"
+      ? `data:${blueprint.mimeType};base64,${blueprint.dataBase64}`
+      : null;
+
+  return (
+    <div>
+      <label className={labelCls}>
+        <FileText size={11} /> Reference Blueprint
+      </label>
+      {blueprintLoading ? (
+        <div className="rounded-lg border border-border bg-muted/30 h-24 flex items-center justify-center">
+          <Loader2 size={16} className="animate-spin text-muted-foreground" />
+        </div>
+      ) : !blueprint ? (
+        <p className="text-xs text-muted-foreground italic py-1.5">
+          No blueprint uploaded for this room yet — upload one from Setup &gt; Room Master.
+        </p>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditorOpen(true)}
+          className="relative w-full max-w-[240px] rounded-lg border border-border overflow-hidden hover:border-primary/40 transition-colors group"
+        >
+          {thumbnailSrc ? (
+            <img src={thumbnailSrc} alt="Blueprint" className="w-full h-32 object-cover bg-white" />
+          ) : (
+            <div className="w-full h-32 flex items-center justify-center bg-muted/40">
+              <FileText size={22} className="text-muted-foreground" />
+            </div>
+          )}
+          {annotation && (
+            <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-500/90 text-white">
+              Marked
+            </span>
+          )}
+          <span className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[10px] px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            Click to mark up
+          </span>
+        </button>
+      )}
+      {editorOpen && (
+        <BlueprintAnnotationEditor
+          rungId={rungId}
+          roomId={roomId}
+          roomLabel={roomLabel}
+          editableContext="allocation"
+          onClose={() => setEditorOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 interface Props {
   rung: LadderActivity;
   chain: DependencyMasterListRow;
@@ -108,7 +181,7 @@ function givenByValue(source: SourceType | "", contractorId: number | null): str
   return "";
 }
 
-// Centered modal opened by clicking an activity chip in Work Reporting's
+// Centered modal opened by clicking an activity chip in Work Allocation's
 // linked Dependency chain preview — lets the user assign one or more
 // engineers, a start date + duration (auto-fills the end date), who's
 // supplying labour/material (Developer or a project-allocated contractor),
@@ -195,7 +268,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
         const existingNames = new Set(prev.map((c) => c.fieldName.toLowerCase()));
         const additions = template
           .filter((t) => !existingIds.has(t.id) && !existingNames.has(t.fieldName.toLowerCase()))
-          .map((t): AssignmentCheckpoint => ({ checkpointId: t.id, fieldName: t.fieldName, isChecked: false }));
+          .map((t): AssignmentCheckpoint => ({ checkpointId: t.id, fieldName: t.fieldName, isChecked: false, minWaitDays: t.minWaitDays }));
         if (!additions.length) {
           toast("All of this activity's checkpoints are already on the list.");
           return prev;
@@ -209,10 +282,44 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     }
   };
 
-  const toggleCheckpoint = (index: number) =>
+  // Checking OFF is always allowed; checking ON is blocked until
+  // minWaitDays have passed since Start Date — the same rule the server
+  // enforces on save (see dependencyActivityAssignment.js POST /:rungId),
+  // caught here first so the user gets an immediate, specific reason
+  // instead of a save-time rejection.
+  const toggleCheckpoint = (index: number) => {
+    const cp = checkpoints[index];
+    if (!cp.isChecked && cp.minWaitDays != null && cp.minWaitDays > 0) {
+      if (!startDate) {
+        toast.error(`"${cp.fieldName}" needs a Start Date set before it can be checked off.`);
+        return;
+      }
+      const eligibleDate = addDays(startDate, cp.minWaitDays);
+      const todayStr = new Date().toISOString().slice(0, 10);
+      if (todayStr < eligibleDate) {
+        const daysLeft = diffDays(todayStr, eligibleDate);
+        toast.error(
+          `"${cp.fieldName}" needs ${cp.minWaitDays} day(s) after the start date — ${daysLeft ?? cp.minWaitDays} day(s) left.`,
+        );
+        return;
+      }
+    }
     setCheckpoints((prev) => prev.map((c, i) => (i === index ? { ...c, isChecked: !c.isChecked } : c)));
+  };
   const removeCheckpoint = (index: number) =>
     setCheckpoints((prev) => prev.filter((_, i) => i !== index));
+
+  // Same rule toggleCheckpoint enforces, exposed here so the row can show
+  // *why* a checkpoint can't be checked yet instead of just silently
+  // refusing the click.
+  const checkpointGate = (cp: AssignmentCheckpoint): { locked: boolean; daysLeft: number | null } => {
+    if (cp.isChecked || cp.minWaitDays == null || cp.minWaitDays <= 0) return { locked: false, daysLeft: null };
+    if (!startDate) return { locked: true, daysLeft: null };
+    const eligibleDate = addDays(startDate, cp.minWaitDays);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (todayStr >= eligibleDate) return { locked: false, daysLeft: null };
+    return { locked: true, daysLeft: diffDays(todayStr, eligibleDate) };
+  };
 
   // Days drives End Date whenever Start Date is known; editing End Date
   // directly recomputes Days the other way — whichever field the user last
@@ -258,7 +365,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     onSuccess: () => {
       toast.success("Assignment saved.");
       queryClient.invalidateQueries({ queryKey: ["dependency-activity-assignment", rungId] });
-      // Prefix match — refreshes Work Reporting's "Saved Flow" list for
+      // Prefix match — refreshes Work Allocation's "Saved Flow" list for
       // whichever chain is currently open there, without this modal needing
       // to know that page's exact query key/params.
       queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
@@ -420,6 +527,15 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
               )}
             </div>
 
+            {/* Reference blueprint — click to open the markup editor */}
+            {rung.rungId != null && chain.roomId != null && (
+              <BlueprintPreviewSection
+                roomId={chain.roomId}
+                rungId={rung.rungId}
+                roomLabel={chain.scopePath}
+              />
+            )}
+
             {/* Material */}
             <div>
               <label className={labelCls}>
@@ -483,7 +599,9 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                 </p>
               ) : (
                 <div className="space-y-0">
-                  {checkpoints.map((cp, i) => (
+                  {checkpoints.map((cp, i) => {
+                    const gate = checkpointGate(cp);
+                    return (
                     <div key={`${cp.checkpointId ?? "custom"}-${i}`} className="flex items-start gap-3">
                       {/* Milestone rail — filled circle + connecting line */}
                       <div className="flex flex-col items-center shrink-0">
@@ -493,9 +611,11 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                           className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
                             cp.isChecked
                               ? "bg-emerald-500 border-emerald-500 text-white"
-                              : "bg-background border-border text-transparent hover:border-cyan-500/50"
+                              : gate.locked
+                                ? "bg-background border-amber-500/40 text-transparent"
+                                : "bg-background border-border text-transparent hover:border-cyan-500/50"
                           }`}
-                          title={cp.isChecked ? "Mark incomplete" : "Mark complete"}
+                          title={cp.isChecked ? "Mark incomplete" : gate.locked ? "Not eligible yet" : "Mark complete"}
                         >
                           <Check size={11} strokeWidth={3} />
                         </button>
@@ -504,8 +624,13 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         )}
                       </div>
                       <div className="flex-1 flex items-center justify-between gap-2 pb-3 pt-0.5">
-                        <span className={`text-sm ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
+                        <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
                           {cp.fieldName}
+                          {gate.locked && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                              <Timer size={9} /> {gate.daysLeft != null ? `${gate.daysLeft}d left` : `${cp.minWaitDays}d wait`}
+                            </span>
+                          )}
                         </span>
                         <button
                           type="button"
@@ -517,7 +642,8 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         </button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

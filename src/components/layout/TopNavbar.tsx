@@ -30,7 +30,6 @@ import {
   Activity,
   ChevronDown,
   ClipboardList,
-  Cpu,
   Ruler,
   SlidersHorizontal,
   DoorOpen,
@@ -48,6 +47,7 @@ import {
   Percent,
   GitBranch,
   ClipboardCheck,
+  XCircle,
 } from "lucide-react";
 import {
   Crown,
@@ -321,13 +321,6 @@ const materialSetupItems = [
     color: "text-sky-400",
     pageKey: "inventory-master",
   },
-  {
-    icon: Cpu,
-    label: "Depreciation",
-    path: "/material/setup/depreciation",
-    color: "text-violet-500",
-    pageKey: "depreciation-setup",
-  },
 ];
 
 const followupSetupItems = [
@@ -351,6 +344,13 @@ const followupSetupItems = [
     path: "/followup/setup/tag-master",
     color: "text-pink-500",
     pageKey: "followup-tag-master",
+  },
+  {
+    icon: XCircle,
+    label: "Cancel Template",
+    path: "/followup/setup/cancel-template",
+    color: "text-red-500",
+    pageKey: "followup-cancel-template-master",
   },
 ];
 

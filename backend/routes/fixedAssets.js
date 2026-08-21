@@ -17,6 +17,17 @@ function requireUser(req, res) {
   return email;
 }
 
+// Custodian is stored two ways: CustodianUserId (FK, drives Asset Transfer
+// eligibility) and Custodian (free-text display name). Resolving the name
+// here whenever a user id is supplied keeps the two from drifting apart.
+async function resolveCustodianName(pool, custodianUserId) {
+  if (!custodianUserId) return null;
+  const result = await pool.request()
+    .input("Id", sql.Int, custodianUserId)
+    .query(`SELECT name FROM dbo.users WHERE id = @Id AND ISNULL(discontinue, 0) = 0`);
+  return result.recordset[0]?.name || null;
+}
+
 // Generate AssetCode from category prefix + sequence, e.g. LAP-0001
 const CATEGORY_PREFIX = {
   "Laptop":       "LAP",
@@ -47,7 +58,6 @@ router.get("/", async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
-    if (!req.query.companyId) return res.status(400).json({ error: "companyId is required." });
     let where = [];
 
     if (req.query.companyId)  { request.input("CompanyId",  sql.Int,          parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }
@@ -66,7 +76,7 @@ router.get("/", async (req, res) => {
         fa.AssetName, fa.AssetCategory, fa.AssetCode,
         fa.Brand, fa.Model, fa.SerialNumber,
         fa.PurchaseDate, fa.ActivationDate, fa.PurchaseCost, fa.Quantity,
-        fa.Location, fa.Department, fa.Custodian,
+        fa.Location, fa.Department, fa.Custodian, fa.CustodianUserId,
         fa.DepreciationSetupId, fa.DepreciationType, fa.DepreciationRate, fa.UsefulLife,
         fa.AssetStatus, fa.SellingPrice, fa.SaleDate, fa.BuyerName,
         fa.Status, fa.CreatedBy, fa.CreatedAt,
@@ -122,7 +132,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       docDate, companyId, projectId, finYear,
       assetName, assetCategory, brand, model, serialNumber,
       purchaseDate, activationDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity,
-      location, department, custodian,
+      location, department, custodianUserId,
       depreciationSetupId, depreciationType, depreciationRate, usefulLife,
       remarks,
     } = req.body;
@@ -135,6 +145,8 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       docTypeId, finYear, tableName: "FixedAssetRecord", issuedBy: email,
     });
     const assetCode = await generateAssetCode(pool, assetCategory);
+    const custodianUserIdVal = custodianUserId ? parseInt(custodianUserId, 10) : null;
+    const custodianName = await resolveCustodianName(pool, custodianUserIdVal);
 
     const insert = await pool.request()
       .input("DocNo",               sql.NVarChar(100), docNo)
@@ -156,7 +168,8 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       .input("Quantity",            sql.Decimal(18,3), quantity    ? parseFloat(quantity)      : 1)
       .input("Location",            sql.NVarChar(200), location || null)
       .input("Department",          sql.NVarChar(100), department || null)
-      .input("Custodian",           sql.NVarChar(200), custodian || null)
+      .input("Custodian",           sql.NVarChar(200), custodianName)
+      .input("CustodianUserId",     sql.Int,           custodianUserIdVal)
       .input("DepreciationSetupId", sql.Int,           depreciationSetupId ? parseInt(depreciationSetupId, 10) : null)
       .input("DepreciationType",    sql.NVarChar(50),  depreciationType || null)
       .input("DepreciationRate",    sql.Decimal(5,2),  depreciationRate != null ? parseFloat(depreciationRate) : null)
@@ -168,14 +181,14 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
           (DocNo, DocDate, CompanyId, ProjectId, FinYear,
            AssetName, AssetCategory, AssetCode, Brand, Model, SerialNumber,
            PurchaseDate, ActivationDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, Quantity,
-           Location, Department, Custodian,
+           Location, Department, Custodian, CustodianUserId,
            DepreciationSetupId, DepreciationType, DepreciationRate, UsefulLife,
            AssetStatus, Status, Remarks, CreatedBy, CreatedAt)
         VALUES
           (@DocNo, @DocDate, @CompanyId, @ProjectId, @FinYear,
            @AssetName, @AssetCategory, @AssetCode, @Brand, @Model, @SerialNumber,
            @PurchaseDate, @ActivationDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @Quantity,
-           @Location, @Department, @Custodian,
+           @Location, @Department, @Custodian, @CustodianUserId,
            @DepreciationSetupId, @DepreciationType, @DepreciationRate, @UsefulLife,
            'Active', 'Draft', @Remarks, @CreatedBy, SYSDATETIME());
         SELECT SCOPE_IDENTITY() AS AssetId;
@@ -203,11 +216,14 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
       docDate, companyId, projectId, finYear,
       assetName, assetCategory, brand, model, serialNumber,
       purchaseDate, activationDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity,
-      location, department, custodian,
+      location, department, custodianUserId,
       depreciationSetupId, depreciationType, depreciationRate, usefulLife,
       assetStatus, sellingPrice, saleDate, buyerName, saleRemarks,
       remarks, status,
     } = req.body;
+
+    const custodianUserIdVal = custodianUserId ? parseInt(custodianUserId, 10) : null;
+    const custodianName = await resolveCustodianName(pool, custodianUserIdVal);
 
     await pool.request()
       .input("AssetId",            sql.Int,           id)
@@ -228,7 +244,8 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
       .input("Quantity",           sql.Decimal(18,3), quantity    != null ? parseFloat(quantity)      : null)
       .input("Location",           sql.NVarChar(200), location || null)
       .input("Department",         sql.NVarChar(100), department || null)
-      .input("Custodian",          sql.NVarChar(200), custodian || null)
+      .input("Custodian",          sql.NVarChar(200), custodianName)
+      .input("CustodianUserId",    sql.Int,           custodianUserIdVal)
       .input("DepreciationSetupId",sql.Int,           depreciationSetupId ? parseInt(depreciationSetupId, 10) : null)
       .input("DepreciationType",   sql.NVarChar(50),  depreciationType || null)
       .input("DepreciationRate",   sql.Decimal(5,2),  depreciationRate != null ? parseFloat(depreciationRate) : null)
@@ -261,6 +278,7 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
           Location           = @Location,
           Department         = @Department,
           Custodian          = @Custodian,
+          CustodianUserId    = @CustodianUserId,
           DepreciationSetupId= @DepreciationSetupId,
           DepreciationType   = @DepreciationType,
           DepreciationRate   = @DepreciationRate,

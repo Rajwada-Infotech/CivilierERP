@@ -28,7 +28,6 @@ import { toast } from "sonner";
 import { formatINR } from "@/utils/formatCurrency";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { EditOrAmendButton } from "@/components/EditOrAmendButton";
 import {
   Banknote,
   CheckCircle2,
@@ -1008,11 +1007,19 @@ const Payment: React.FC = () => {
   const [loanLumpSumAmount, setLoanLumpSumAmount] = useState("");
   const [loanLateFee, setLoanLateFee] = useState("");
   const [loanPaymentNotes, setLoanPaymentNotes] = useState("");
-  const selectedCompanyIdNum = companyOptions.find((c) => c.label === form.company)?.id;
+  // Loan EMIs are only "payable" from the company that's actually the
+  // lender or borrower on that loan. At the point the user is browsing the
+  // Loan EMIs tab, form.company is still empty — the whole point of picking
+  // an EMI here is to auto-fill it — so the only company context that
+  // actually exists yet is the FilterBar's own Company filter above the
+  // picker. Once a booking has been linked (form.company set), prefer that.
+  const loanEmiCompanyId =
+    companyOptions.find((c) => c.label === form.company)?.id ??
+    companyOptions.find((c) => c.label === bookingFilters.company)?.id;
   const { data: loanEmiOptions = [], isLoading: loanEmisLoading } = useQuery<PayableEmi[]>({
-    queryKey: ["payment-loan-emis", selectedCompanyIdNum],
-    queryFn: () => selectedCompanyIdNum ? getPayableEmis(selectedCompanyIdNum) : Promise.resolve([]),
-    enabled: !!selectedCompanyIdNum,
+    queryKey: ["payment-loan-emis", loanEmiCompanyId],
+    queryFn: () => getPayableEmis(loanEmiCompanyId!),
+    enabled: !!loanEmiCompanyId,
     staleTime: 60_000,
   });
   // Every other pending EMI on the same loan — lets the modal offer "pay
@@ -2360,6 +2367,7 @@ const Payment: React.FC = () => {
                           onContractClear={clearContractLink}
                           loanEmis={loanEmiOptions}
                           loanEmisLoading={loanEmisLoading}
+                          loanEmisNoCompany={!loanEmiCompanyId}
                           selectedLoanEmi={selectedLoanEmi}
                           onLoanEmiSelect={handleLoanEmiSelect}
                           onLoanEmiClear={clearLoanEmiLink}
@@ -3092,6 +3100,14 @@ const Payment: React.FC = () => {
                       className="w-full appearance-none px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     >
                       <option value="">— Select reason —</option>
+                      {/* An existing payment's purpose can be free text that predates
+                          the reasons master, or a reason since renamed/removed there —
+                          without this, re-saving such a record would silently swap it
+                          for whatever option the browser falls back to selecting. */}
+                      {form.paymentName &&
+                        !paymentReasons.some((r) => r.name === form.paymentName) && (
+                          <option value={form.paymentName}>{form.paymentName}</option>
+                        )}
                       {paymentReasons.map((r) => (
                         <option key={r.id} value={r.name}>
                           {r.name}
@@ -4589,19 +4605,15 @@ const Payment: React.FC = () => {
                           >
                             <Eye size={12} />
                           </button>
-                          <EditOrAmendButton
-                            refDocType="Payment"
-                            refDocId={rec.id}
-                            docStatus={rec.status}
-                            docNo={rec.docNo}
-                            projectName={rec.project}
-                            companyName={rec.company}
-                            totalAmount={rec.amount}
-                            amendTab="PAYMENT"
-                            amendMenuPath="/material/amendment-menu"
-                            canEdit={rights.canEdit}
-                            onEdit={() => openEdit(rec)}
-                          />
+                          {rights.canEdit && (
+                            <button
+                              onClick={() => openEdit(rec)}
+                              title="Edit"
+                              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                            >
+                              <Edit size={12} />
+                            </button>
+                          )}
                           {rights.canDelete && (
                             <button
                               onClick={() => setDeleteId(rec.id)}
@@ -4776,19 +4788,15 @@ const Payment: React.FC = () => {
                               >
                                 <Eye size={12} />
                               </button>
-                              <EditOrAmendButton
-                                refDocType="Payment"
-                                refDocId={rec.id}
-                                docStatus={rec.status}
-                                docNo={rec.docNo}
-                                projectName={rec.project}
-                                companyName={rec.company}
-                                totalAmount={rec.amount}
-                                amendTab="PAYMENT"
-                                amendMenuPath="/material/amendment-menu"
-                                canEdit={rights.canEdit}
-                                onEdit={() => openEdit(rec)}
-                              />
+                              {rights.canEdit && (
+                                <button
+                                  onClick={() => openEdit(rec)}
+                                  title="Edit"
+                                  className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                >
+                                  <Edit size={12} />
+                                </button>
+                              )}
                               {rights.canDelete && (
                                 <button
                                   onClick={() => setDeleteId(rec.id)}
@@ -5663,24 +5671,19 @@ const Payment: React.FC = () => {
                   <Printer size={12} /> Print / PDF
                 </button>
               )}
-              <EditOrAmendButton
-                refDocType="Payment"
-                refDocId={viewingRec.id}
-                docStatus={viewingRec.status}
-                docNo={viewingRec.docNo}
-                projectName={viewingRec.project}
-                companyName={viewingRec.company}
-                totalAmount={viewingRec.amount}
-                amendTab="PAYMENT"
-                amendMenuPath="/material/amendment-menu"
-                canEdit={rights.canEdit}
-                size="sm"
-                onEdit={() => {
-                  setViewingRec(null);
-                  setViewingChain(null);
-                  openEdit(viewingRec);
-                }}
-              />
+              {rights.canEdit && (
+                <button
+                  onClick={() => {
+                    setViewingRec(null);
+                    setViewingChain(null);
+                    openEdit(viewingRec);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 text-primary text-xs font-medium hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
+                >
+                  <Edit size={12} />
+                  Edit
+                </button>
+              )}
               <button
                 onClick={() => {
                   setViewingRec(null);

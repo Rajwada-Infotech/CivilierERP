@@ -52,7 +52,7 @@ const UNIFIED_CHEQUES_CTE = `
       np.PPaymentID              AS SourceID,
       'PAYMENT'                  AS SourceType,
       'Payable'                  AS Direction,
-      np.PCompanyId               AS CompanyId,
+      TRY_CAST(np.PCompany AS INT) AS CompanyId,
       np.PPartyId                AS PartyID,
       np.PPaymentName            AS PartyName,
       np.PBankID                 AS BankID,

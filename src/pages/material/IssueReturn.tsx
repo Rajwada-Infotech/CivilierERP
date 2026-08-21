@@ -242,7 +242,7 @@ export default function IssueReturn() {
       cell: ({ row: { original: r } }) => (
         <div className="flex items-center justify-end gap-1">
           <button className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors" title="View" onClick={() => openDetail(r)}><Eye size={14} /></button>
-          {r.Status === "Draft" && rights.canEdit && <button className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-500/10 transition-colors" title="Edit" onClick={() => openEdit(r)}><Edit3 size={14} /></button>}
+          {(r.Status === "Draft" || r.Status === "Approved") && rights.canEdit && <button className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-500/10 transition-colors" title="Edit" onClick={() => openEdit(r)}><Edit3 size={14} /></button>}
           {r.Status === "Draft" && rights.canEdit && (
             <button className="p-1.5 rounded-lg text-emerald-400 hover:bg-emerald-500/10 transition-colors" title="Submit for approval" onClick={() => submitMut.mutate(r.ReturnId)}>
               <CheckCircle2 size={14} />
@@ -572,7 +572,7 @@ export default function IssueReturn() {
                   <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Issue Return</p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {detailRecord.Status === "Draft" && rights.canEdit && (
+                  {(detailRecord.Status === "Draft" || detailRecord.Status === "Approved") && rights.canEdit && (
                     <button
                       onClick={() => { setDetailRecord(null); openEdit(detailRecord); }}
                       className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm"

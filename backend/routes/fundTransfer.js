@@ -103,12 +103,13 @@ router.get("/", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const { status, transferType, companyId, dateFrom, dateTo } = req.query;
-    if (!companyId) return res.status(400).json({ error: "companyId is required." });
     const request = pool.request();
     const conditions = [];
 
-    conditions.push("(ft.SourceCompanyId = @companyId OR ft.DestinationCompanyId = @companyId)");
-    request.input("companyId", sql.Int, parseInt(companyId, 10));
+    if (companyId) {
+      conditions.push("(ft.SourceCompanyId = @companyId OR ft.DestinationCompanyId = @companyId)");
+      request.input("companyId", sql.Int, parseInt(companyId, 10));
+    }
 
     if (status) {
       conditions.push("ft.Status = @status");

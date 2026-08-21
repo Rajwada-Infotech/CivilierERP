@@ -46,6 +46,15 @@ const STATUS_CONFIG: Record<
     classes:
       "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
   },
+  // A payment whose cheque was cancelled (see routes/chequeCancellation.js) —
+  // distinct from "Rejected" (never approved) since this one was Approved
+  // and posted to GL before being cancelled/reversed.
+  Cancelled: {
+    label: "Cancelled",
+    icon: XCircle,
+    classes:
+      "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
+  },
   // Expense booking domain statuses
   Booked: {
     label: "Booked",

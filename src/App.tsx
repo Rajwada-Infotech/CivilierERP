@@ -138,9 +138,6 @@ const WorkCheckpointMaster = lazy(
 const DependencyTracker = lazy(
   () => import("./pages/civilworkdpr/DependencyTracker"),
 );
-const ContractorRegister = lazy(
-  () => import("./pages/civilworkdpr/ContractorRegister"),
-);
 const WorkerAttendance = lazy(
   () => import("./pages/civilworkdpr/WorkerAttendance"),
 );
@@ -151,6 +148,7 @@ const ProfitAndLoss = lazy(() => import("./pages/finance/ProfitAndLoss"));
 const YearEndClose = lazy(() => import("./pages/finance/YearEndClose"));
 const BalanceEnquiry = lazy(() => import("./pages/finance/BalanceEnquiry"));
 const JournalVoucher = lazy(() => import("./pages/finance/JournalVoucher"));
+const FinanceAmendment = lazy(() => import("./pages/finance/FinanceAmendment"));
 const FundTransfer = lazy(() => import("./pages/finance/FundTransfer"));
 const FinanceContract = lazy(() => import("./pages/finance/Contract"));
 const OnAccountReport = lazy(() => import("./pages/finance/OnAccountReport"));
@@ -181,6 +179,9 @@ const ExtraChargeMaster = lazy(
 const TagMaster = lazy(
   () => import("./pages/admin/masters/TagMaster"),
 );
+const CancelTemplateMaster = lazy(
+  () => import("./pages/admin/masters/CancelTemplateMaster"),
+);
 const DepartmentMaster = lazy(
   () => import("./pages/admin/masters/DepartmentMaster"),
 );
@@ -198,9 +199,12 @@ const FinancialYearMaster = lazy(
 );
 const ChequeMaster = lazy(() => import("./pages/masters/ChequeMaster"));
 const GRN = lazy(() => import("./pages/material/GRN"));
-const FixedAssetRecord = lazy(() => import("./pages/material/FixedAssetRecord"));
+const FixedAssetDashboard = lazy(() => import("./pages/fixedAsset/FixedAssetDashboard"));
+const FixedAssetRecord = lazy(() => import("./pages/fixedAsset/FixedAssetRecord"));
+const FixedAssetTagging = lazy(() => import("./pages/fixedAsset/FixedAssetTagging"));
+const AssetTransfer = lazy(() => import("./pages/fixedAsset/AssetTransfer"));
 const ShortClose = lazy(() => import("./pages/material/ShortClose"));
-const DepreciationSetup = lazy(() => import("./pages/material/DepreciationSetup"));
+const DepreciationSetup = lazy(() => import("./pages/fixedAsset/DepreciationSetup"));
 const VehicleInOut = lazy(() => import("./pages/material/VehicleInOut"));
 const MaterialDashboard = lazy(
   () => import("./pages/material/MaterialDashboard"),
@@ -342,10 +346,12 @@ const ControlPanel = lazy(() => import("./pages/dba/ControlPanel"));
 const AdsManager = lazy(() => import("./pages/dba/AdsManager"));
 const FollowUp = lazy(() => import("./pages/followup/FollowUp"));
 const ClosedTasks = lazy(() => import("./pages/followup/ClosedTasks"));
+const CancelledTasks = lazy(() => import("./pages/followup/CancelledTasks"));
 const TaskTransfer = lazy(() => import("./pages/followup/TaskTransfer"));
 const TaskPerformanceReport = lazy(() => import("./pages/followup/TaskPerformanceReport"));
 const TaskDashboard = lazy(() => import("./pages/followup/TaskDashboard"));
 const TagPerformanceReport = lazy(() => import("./pages/followup/TagPerformanceReport"));
+const EntryTypeDocFollowUpReport = lazy(() => import("./pages/followup/EntryTypeDocFollowUpReport"));
 const FollowupReminders = lazy(
   () => import("./pages/admin/masters/Reminders"),
 );
@@ -422,13 +428,12 @@ const PortalConstruction   = lazy(() => import("./pages/CrmCustomerPortal/Portal
 const PortalTickets        = lazy(() => import("./pages/CrmCustomerPortal/PortalTickets"));
 const PortalActivity       = lazy(() => import("./pages/CrmCustomerPortal/PortalActivity"));
 const PortalProfile        = lazy(() => import("./pages/CrmCustomerPortal/PortalProfile"));
-const AmendmentMenu = lazy(() => import("./pages/material/AmendmentMenu"));
-const Amendments = lazy(() => import("./pages/material/Amendments"));
 const Issues = lazy(() => import("./pages/material/Issues"));
 const IssueReturn = lazy(() => import("./pages/material/IssueReturn"));
 const MaterialRequestPage = lazy(
   () => import("./pages/material/MaterialRequest"),
 );
+const MaterialAmendment = lazy(() => import("./pages/material/MaterialAmendment"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
@@ -438,9 +443,7 @@ const EngineeringDashboard = lazy(
   () => import("./pages/engineering/EngineeringDashboard"),
 );
 const WorkDone = lazy(() => import("./pages/engineering/WorkDone"));
-const EngineeringAmendmentMenu = lazy(
-  () => import("./pages/engineering/EngineeringAmendmentMenu"),
-);
+const EngineeringAmendment = lazy(() => import("./pages/engineering/EngineeringAmendment"));
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -797,6 +800,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/finance-amendment"
+        element={
+          <ProtectedRoute pageKey="finance-amendment">
+            <FinanceAmendment />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/fund-transfer"
         element={
           <ProtectedRoute pageKey="fund-transfer">
@@ -861,7 +872,7 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/civilworkdpr/work-reporting"
+        path="/civilworkdpr/work-allocation"
         element={
           <ProtectedRoute pageKey="civilworkdpr-work-done">
             <CivilWorkDprWorkDone />
@@ -909,14 +920,6 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/civilworkdpr/contractor-register"
-        element={
-          <ProtectedRoute pageKey="civilworkdpr-contractor-register">
-            <ContractorRegister />
-          </ProtectedRoute>
-        }
-      />
-      <Route
         path="/civilworkdpr/worker-attendance"
         element={
           <ProtectedRoute pageKey="civilworkdpr-worker-attendance">
@@ -937,6 +940,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="followup-close-tasks">
             <ClosedTasks />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/cancelled-tasks"
+        element={
+          <ProtectedRoute pageKey="followup-cancelled-tasks">
+            <CancelledTasks />
           </ProtectedRoute>
         }
       />
@@ -969,6 +980,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="task-performance-report">
             <TagPerformanceReport />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/entry-type-doc-followup-report"
+        element={
+          <ProtectedRoute pageKey="entry-type-doc-followup-report">
+            <EntryTypeDocFollowUpReport />
           </ProtectedRoute>
         }
       />
@@ -1079,14 +1098,6 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/material/fixed-asset-record"
-        element={
-          <ProtectedRoute pageKey="fixed-asset-record">
-            <FixedAssetRecord />
-          </ProtectedRoute>
-        }
-      />
-      <Route
         path="/material/short-close"
         element={
           <ProtectedRoute pageKey="short-close">
@@ -1095,7 +1106,39 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/material/setup/depreciation"
+        path="/fixed-asset"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-dashboard">
+            <FixedAssetDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/record"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-record">
+            <FixedAssetRecord />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/tagging"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-tagging">
+            <FixedAssetTagging />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/transfer"
+        element={
+          <ProtectedRoute pageKey="asset-transfer">
+            <AssetTransfer />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/depreciation-setup"
         element={
           <ProtectedRoute pageKey="depreciation-setup">
             <DepreciationSetup />
@@ -1140,26 +1183,18 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/material/amendments"
-        element={
-          <ProtectedRoute pageKey="amendments">
-            <Amendments />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/material/amendment-menu"
-        element={
-          <ProtectedRoute pageKey="amendments">
-            <AmendmentMenu />
-          </ProtectedRoute>
-        }
-      />
-      <Route
         path="/material/material-request"
         element={
           <ProtectedRoute pageKey="material-request">
             <MaterialRequestPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/amendment"
+        element={
+          <ProtectedRoute pageKey="material-amendment">
+            <MaterialAmendment />
           </ProtectedRoute>
         }
       />
@@ -1357,10 +1392,10 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/engineering/amendment-menu"
+        path="/engineering/amendment"
         element={
-          <ProtectedRoute pageKey="engineering-amendment-menu">
-            <EngineeringAmendmentMenu />
+          <ProtectedRoute pageKey="engineering-amendment">
+            <EngineeringAmendment />
           </ProtectedRoute>
         }
       />
@@ -2085,6 +2120,7 @@ function AppRoutes() {
       <Route path="/crm/setup/extra-charge-master" element={<ProtectedRoute pageKey="followup-extra-charge-master"><ExtraChargeMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/department-master" element={<ProtectedRoute pageKey="followup-department-master"><DepartmentMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/tag-master" element={<ProtectedRoute pageKey="followup-tag-master"><TagMaster /></ProtectedRoute>} />
+      <Route path="/followup/setup/cancel-template" element={<ProtectedRoute pageKey="followup-cancel-template-master"><CancelTemplateMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/task-master" element={<ProtectedRoute pageKey="task-master"><TaskMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/pending-tasks"       element={<ProtectedRoute pageKey="followup-pending-tasks"><PendingTasksPage /></ProtectedRoute>} />
       <Route path="/crm/setup/reminders"           element={<ProtectedRoute pageKey="followup-reminders"><FollowupReminders /></ProtectedRoute>} />

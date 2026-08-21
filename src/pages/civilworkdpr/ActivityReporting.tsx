@@ -7,20 +7,50 @@ import {
   ASSIGNMENT_STATUSES,
   ASSIGNMENT_STATUS_META as STATUS_META,
   getReportedAssignments,
+  getActivityPhotos,
   type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
-import { ClipboardList, UserRound, CalendarDays, Package, Loader2, ChevronDown, ChevronRight, GitBranch } from "lucide-react";
+import { ClipboardList, UserRound, CalendarDays, Package, Loader2, ChevronDown, ChevronRight, GitBranch, Camera } from "lucide-react";
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
+import ActivityDetailModal from "./ActivityDetailModal";
 
 const FILTER_OPTIONS: Array<{ value: AssignmentStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "All" },
   ...ASSIGNMENT_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label })),
 ];
 
+// Purely informational — clicking anywhere on the row (including this
+// badge) opens the Activity Detail modal; clicking the badge specifically
+// jumps straight to its Photos tab instead of landing on Overview.
+function ActivityPhotosBadge({ rungId }: { rungId: number }) {
+  const { data: photos } = useQuery({
+    queryKey: ["activity-photos", rungId],
+    queryFn: () => getActivityPhotos(rungId),
+  });
+  const count = (photos?.before.length ?? 0) + (photos?.after.length ?? 0);
+
+  return (
+    <span
+      className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium ${
+        count > 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+      }`}
+    >
+      <Camera size={12} />
+      {count > 0 ? `${count} photo${count === 1 ? "" : "s"}` : "Add photos"}
+    </span>
+  );
+}
+
 export default function ActivityReporting() {
   const rights = usePageRights("civilworkdpr-activity-reporting");
   const [statusFilter, setStatusFilter] = useState<AssignmentStatus | "ALL">("ALL");
+  const [detailRow, setDetailRow] = useState<ReportedAssignment | null>(null);
+  const [detailTab, setDetailTab] = useState<"overview" | "blueprint" | "photos">("overview");
+  const openDetail = (row: ReportedAssignment, tab: "overview" | "blueprint" | "photos" = "overview") => {
+    setDetailRow(row);
+    setDetailTab(tab);
+  };
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["civilworkdpr-activity-reporting"],
@@ -71,7 +101,7 @@ export default function ActivityReporting() {
       />
       <CivilWorkDprShell
         title="Reporting"
-        subtitle="Every activity assigned an engineer or material from Work Reporting, tracked through to completion"
+        subtitle="Every activity assigned an engineer or material from Work Allocation, tracked through to completion"
         icon={ClipboardList}
       >
         {!rights.canView ? (
@@ -107,7 +137,7 @@ export default function ActivityReporting() {
             ) : filteredRows.length === 0 ? (
               <div className="p-8 text-center text-sm text-muted-foreground">
                 {rows.length === 0
-                  ? "No activities have been assigned yet — click an activity chip in Work Reporting's Link Dependency chain to assign one."
+                  ? "No activities have been assigned yet — click an activity chip in Work Allocation's Link Dependency chain to assign one."
                   : "No activities match this status."}
               </div>
             ) : (
@@ -155,12 +185,17 @@ export default function ActivityReporting() {
                               <th className="px-3 py-2">Engineer</th>
                               <th className="px-3 py-2">Start Date</th>
                               <th className="px-3 py-2">Material</th>
+                              <th className="px-3 py-2">Photos</th>
                               <th className="px-5 py-2">Status</th>
                             </tr>
                           </thead>
                           <tbody>
                             {group.rows.map((row) => (
-                              <tr key={row.assignmentId} className="border-b border-border last:border-0 hover:bg-muted/20">
+                              <tr
+                                key={row.assignmentId}
+                                onClick={() => openDetail(row, "overview")}
+                                className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer"
+                              >
                                 <td className="px-5 py-3">
                                   <span className="text-xs font-medium text-foreground">
                                     {row.sequenceNo}. {row.activityName}
@@ -196,7 +231,16 @@ export default function ActivityReporting() {
                                     </div>
                                   )}
                                 </td>
-                                <td className="px-5 py-3">
+                                <td
+                                  className="px-3 py-3"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openDetail(row, "photos");
+                                  }}
+                                >
+                                  <ActivityPhotosBadge rungId={row.rungId} />
+                                </td>
+                                <td className="px-5 py-3" onClick={(e) => e.stopPropagation()}>
                                   <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
                                 </td>
                               </tr>
@@ -212,6 +256,9 @@ export default function ActivityReporting() {
           </div>
         )}
       </CivilWorkDprShell>
+      {detailRow && (
+        <ActivityDetailModal row={detailRow} initialTab={detailTab} onClose={() => setDetailRow(null)} />
+      )}
     </>
   );
 }

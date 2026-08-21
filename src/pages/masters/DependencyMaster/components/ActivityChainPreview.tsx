@@ -3,7 +3,7 @@ import type { LadderActivity } from "@/api/dependencyMasterApi";
 
 interface Props {
   rungs: LadderActivity[];
-  /** When given, each rung becomes clickable (e.g. Work Reporting opens an
+  /** When given, each rung becomes clickable (e.g. Work Allocation opens an
    * engineer/material assignment form for that specific rung) — omit to
    * keep the plain read-only rendering used elsewhere (the Dependency
    * Master list's own inline expand). */

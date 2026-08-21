@@ -6,6 +6,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
@@ -802,6 +803,18 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // All new payments auto-submit to Pending for approval — no manual submit step.
     const initialStatus = "Pending";
 
+    // Cash-mode payments never carry a PBankID (Payment.tsx disables the
+    // Bank field for Cash — "Not applicable for cash payments") but
+    // PBankName is a NOT NULL column, so an unset value fails the insert.
+    // Stamp it with the same "Cash-in-Hand A/c" label GL posting already
+    // resolves to for cash payments (see postPaymentApproval, line ~2212)
+    // — PBankID itself stays null, matching that code's documented
+    // assumption that cash payments never carry one.
+    let resolvedPBankName = req.body.PBankName || PBankName || null;
+    if (PMode === "Cash" && !resolvedPBankName) {
+      resolvedPBankName = "Cash-in-Hand A/c";
+    }
+
     const insertResult = await pool
       .request()
       .input("PPaymentName", sql.VarChar, PPaymentName || "")
@@ -811,7 +824,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("PDocType", sql.VarChar, PDocType || "N/A")
       .input("PDate", sql.Date, PDate || null)
       .input("PBankID", sql.Int, normalizeBankId(req.body.PBankID ?? PBankID))
-      .input("PBankName", sql.VarChar, req.body.PBankName || PBankName || null)
+      .input("PBankName", sql.VarChar, resolvedPBankName)
       .input("PProject", sql.VarChar, PProject || "")
       .input("PCompany", sql.VarChar, PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
@@ -915,6 +928,13 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     }
 
     await bumpCacheVersion("new-payment");
+    // Cheque-mode payments (Post-Dated Cheque especially) feed the PDC
+    // report/reminder bell — without this a freshly-created PDC wouldn't
+    // show there for up to the report's own 60s cache TTL.
+    if (PMode === "Cheque" || PMode === "Post-Dated Cheque") {
+      await bumpCacheVersion("pdc-report");
+      await bumpCacheVersion("pdc-due-count");
+    }
     res.status(201).json({
       message: "Payment added successfully",
       PPaymentID: newId,
@@ -979,6 +999,17 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     if (!userEmail) return;
 
     const pool = getPool();
+    const beforeSnapshot = await snapshotRow(pool, "dbo.NewPayment", "PPaymentID", id);
+    const wasApproved = beforeSnapshot?.Status === "Approved";
+
+    // A cancelled payment's GL posting was already reversed and the invoice
+    // recomputed on that assumption (see routes/chequeCancellation.js) —
+    // editing it back to life (e.g. changing PAmount) would silently
+    // desync both without redoing either, so it's a hard stop, not just a
+    // hidden Edit button on the frontend.
+    if (beforeSnapshot?.Status === "Cancelled") {
+      return res.status(400).json({ error: "This payment's cheque was cancelled and cannot be edited." });
+    }
 
     const expenseHeadAllocationsPut = normalizeAllocations(EExpenseHeadAllocations);
     if (expenseHeadAllocationsPut.length > 0) {
@@ -1023,44 +1054,24 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       }
     }
 
-    // TDS (migration 304) — see matching comment on POST /. ContractId/
-    // PPartyId aren't part of this PUT's own payload (never re-editable
-    // after creation, see the UPDATE below), so they're read from the
-    // existing row rather than the request body.
+    // TDS (migration 304) — see matching comment on POST /. Resolved and
+    // validated once, at creation time, then preserved as-is on every
+    // subsequent edit — it used to be re-derived
+    // from the linked invoice's *current* state on every PUT, which meant an
+    // edit as small as adding a NEFT UTR reference would hard-fail if the
+    // invoice's own TDS selection had since been cleared, blocking routine
+    // post-transaction edits on an already-approved payment for a reason
+    // that has nothing to do with the fields actually being changed.
     const existingLinkRes = await pool.request().input("id", sql.Int, id)
-      .query("SELECT ContractId, PPartyId FROM dbo.NewPayment WHERE PPaymentID = @id");
+      .query("SELECT TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount FROM dbo.NewPayment WHERE PPaymentID = @id");
     const existingLink = existingLinkRes.recordset[0] || {};
-    const isInvoiceLinkedForTdsPut = !!PExpenseRef && !existingLink.ContractId;
-    const companyIdForTdsPut = parseInt(PCompany, 10) || null;
-    const finYearIdForTdsPut = await resolveFinYearId(pool, PDate);
-    let tdsSnapshotPut;
-    try {
-      const { resolveInvoiceLinkedTds, resolveTds } = require("../services/tds");
-      if (isInvoiceLinkedForTdsPut) {
-        tdsSnapshotPut = await resolveInvoiceLinkedTds(pool, sql, {
-          expenseRef: PExpenseRef,
-          companyId: companyIdForTdsPut,
-          finYearId: finYearIdForTdsPut,
-        });
-      } else {
-        const { resolvePaymentSupplierHeadId } = require("../services/generalLedger");
-        const directPartyIdPut = await resolvePaymentSupplierHeadId(pool, { ContractId: existingLink.ContractId, PExpenseRef: null, PPartyId: existingLink.PPartyId });
-        const tdsFlagResPut = directPartyIdPut
-          ? await pool.request().input("Id", sql.Int, directPartyIdPut).query("SELECT IsTdsApplicable, ISNULL(TdsLimitApplicable, 1) AS TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @Id")
-          : null;
-        tdsSnapshotPut = await resolveTds(pool, sql, {
-          partyHeadId: directPartyIdPut,
-          tdsApplicableFlag: !!tdsFlagResPut?.recordset[0]?.IsTdsApplicable,
-          tdsLimitApplicable: !!tdsFlagResPut?.recordset[0]?.TdsLimitApplicable,
-          billAmount: PAmount,
-          companyId: companyIdForTdsPut,
-          finYearId: finYearIdForTdsPut,
-          selectedTdsId: req.body.TDSId,
-        });
-      }
-    } catch (tdsErr) {
-      return res.status(tdsErr.status || 400).json({ error: tdsErr.message });
-    }
+    const tdsSnapshotPut = {
+      tdsId: existingLink.TDSId ?? null,
+      tdsNature: existingLink.TDSNature ?? null,
+      tdsName: existingLink.TDSName ?? null,
+      tdsPercentage: existingLink.TDSPercentage ?? null,
+      tdsAmount: existingLink.TDSAmount ?? null,
+    };
 
     // Re-resolve the Financial Year whenever the payment date is edited — it
     // always tracks the payment's own PDate, same as on create.
@@ -1077,7 +1088,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PDate", sql.Date, PDate || null)
       .input("PFinYearId", sql.Int, pFinYearIdUpdate)
       .input("PBankID", sql.Int, normalizeBankId(PBankID))
-      .input("PBankName", sql.VarChar, PBankName || null)
+      .input("PBankName", sql.VarChar, PBankName || (PMode === "Cash" ? "Cash-in-Hand A/c" : null))
       .input("PProject", sql.VarChar, PProject || "")
       .input("PCompany", sql.VarChar, PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
@@ -1150,6 +1161,29 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       await _syncBillStatus(pool,updatedRef.recordset[0].PExpenseRef);
     }
     await bumpCacheVersion("new-payment");
+    if (PMode === "Cheque" || PMode === "Post-Dated Cheque") {
+      await bumpCacheVersion("pdc-report");
+      await bumpCacheVersion("pdc-due-count");
+    }
+
+    if (wasApproved && beforeSnapshot) {
+      try {
+        const afterSnapshot = await snapshotRow(pool, "dbo.NewPayment", "PPaymentID", id);
+        await recordAmendment({
+          refDocType: "payment",
+          refDocId: parseInt(id, 10),
+          refDocNo: afterSnapshot?.DocNo || beforeSnapshot.DocNo,
+          projectName: afterSnapshot?.PProject || beforeSnapshot.PProject,
+          companyName: afterSnapshot?.PCompany || beforeSnapshot.PCompany,
+          changedBy: userEmail,
+          before: beforeSnapshot,
+          after: afterSnapshot,
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (payment):", logErr.message);
+      }
+    }
+
     res.json({ message: "Payment updated successfully" });
   } catch (err) {
     if (

@@ -14,7 +14,6 @@ import {
   Landmark,
   TrendingUp,
   ClipboardList,
-  Cpu,
   Grip,
   Home,
   Settings,
@@ -44,6 +43,7 @@ import {
   CalendarClock,
   Wand2,
   GitBranch,
+  XCircle,
 } from "lucide-react";
 import {
   Bank,
@@ -374,12 +374,6 @@ const materialSetupItems: SetupItem[] = [
     path: "/material/inventory-master",
     color: "text-teal-400",
   },
-  {
-    icon: Cpu,
-    label: "Depreciation",
-    path: "/material/setup/depreciation",
-    color: "text-violet-500",
-  },
 ];
 
 const followupSetupItems: SetupItem[] = [
@@ -403,6 +397,13 @@ const followupSetupItems: SetupItem[] = [
     path: "/followup/setup/tag-master",
     color: "text-pink-500",
     pageKey: "followup-tag-master",
+  },
+  {
+    icon: XCircle,
+    label: "Cancel Template",
+    path: "/followup/setup/cancel-template",
+    color: "text-red-500",
+    pageKey: "followup-cancel-template-master",
   },
 ];
 

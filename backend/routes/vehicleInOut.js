@@ -35,6 +35,7 @@ const { getPool, sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition } = require("../services/approvalService");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   resolveDocTypeId,
@@ -805,6 +806,8 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
 
   try {
     const pool = getPool();
+    const beforeSnapshot = await snapshotRow(pool, "dbo.VehicleInOut", "VehicleInOutID", id);
+    const wasApproved = beforeSnapshot?.Status === "Approved";
 
     // Validate before writing anything — excludeVehicleInOutId=id so this
     // record's own previously-saved quantities don't count against its
@@ -855,6 +858,25 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     await saveVehicleInOutItems(pool, id, validatedItems);
 
     await bumpCacheVersion(CACHE_KEY);
+
+    if (wasApproved && beforeSnapshot) {
+      try {
+        const afterSnapshot = await snapshotRow(pool, "dbo.VehicleInOut", "VehicleInOutID", id);
+        await recordAmendment({
+          refDocType: "vehicle-in-out",
+          refDocId: id,
+          refDocNo: afterSnapshot?.ChallanNo || beforeSnapshot.ChallanNo,
+          projectName: null,
+          companyName: null,
+          changedBy: email,
+          before: beforeSnapshot,
+          after: afterSnapshot,
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (vehicle-in-out):", logErr.message);
+      }
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });

@@ -206,20 +206,21 @@ const ClosedTasks: React.FC = () => {
     });
   }, [tasks, search]);
 
-  const handleStatusChange = async (id: string, status: string) => {
+  const handleStatusChange = async (id: string, status: string, cancelReasonId?: string) => {
     const res = await fetchWithAuth(`${API}/${id}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ Status: status }),
+      body: JSON.stringify({ Status: status, CancelReasonId: cancelReasonId }),
     });
     if (!res.ok) {
       toast.error((await res.json().catch(() => ({}))).error || "Failed to update status");
       return;
     }
-    toast.success(`Task marked ${status}`);
+    toast.success(status === "Cancel" ? "Task cancelled" : `Task marked ${status}`);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["closed-board"] }),
       queryClient.invalidateQueries({ queryKey: ["followup-task", id] }),
+      queryClient.invalidateQueries({ queryKey: ["cancelled-board-count"] }),
     ]);
   };
 

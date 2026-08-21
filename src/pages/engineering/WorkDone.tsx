@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
@@ -8,8 +7,6 @@ import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { AmendedBadge } from "@/components/AmendedBadge";
-import { useAmendmentStatus } from "@/hooks/useAmendmentStatus";
 import { useFinYear } from "@/contexts/FinYearContext";
 import {
   fetchCompanies,
@@ -24,7 +21,6 @@ import {
   Plus,
   RefreshCw,
   PenSquare,
-  FilePenLine,
   Building2,
   Layers,
   Calendar,
@@ -1004,8 +1000,7 @@ function WorkDoneForm({
   );
 }
 
-// ─── Row actions — a real component (not an inline cell function) so it can
-// call useAmendmentStatus per row without violating the rules of hooks. ────────
+// ─── Row actions — a real component (not an inline cell function) ─────────────
 const WorkDoneRowActions: React.FC<{
   record: WorkDoneEntry;
   canEdit: boolean;
@@ -1015,9 +1010,6 @@ const WorkDoneRowActions: React.FC<{
   onEdit: () => void;
   onRefresh: () => void;
 }> = ({ record, canEdit, canPrint, onView, onPrint, onEdit, onRefresh }) => {
-  const navigate = useNavigate();
-  const amendmentStatus = useAmendmentStatus("WorkDone", record.ID, record.Status);
-
   return (
     <div className="flex items-center gap-1">
       <button
@@ -1037,7 +1029,7 @@ const WorkDoneRowActions: React.FC<{
         </button>
       )}
 
-      {canEdit && !amendmentStatus.isApproved && (
+      {canEdit && (
         <button
           onClick={onEdit}
           className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
@@ -1045,28 +1037,6 @@ const WorkDoneRowActions: React.FC<{
           <PenSquare size={11} /> Edit
         </button>
       )}
-      {canEdit && amendmentStatus.isApproved && (
-        <button
-          onClick={() =>
-            navigate("/engineering/amendment-menu", {
-              state: {
-                prefill: {
-                  tab: "WORK_DONE",
-                  docId: record.ID,
-                  docNo: record.DocNo,
-                  projectName: record.ProjectName,
-                  companyName: record.CompanyName,
-                  totalAmount: record.CertifiedAmount,
-                },
-              },
-            })
-          }
-          className="text-[10px] text-violet-600 dark:text-violet-400 hover:text-violet-700 flex items-center gap-1 px-2 py-1 rounded hover:bg-violet-500/10 transition-colors"
-        >
-          <FilePenLine size={11} /> Amend
-        </button>
-      )}
-      {amendmentStatus.isAmended && <AmendedBadge />}
       <ApprovalActions
         status={record.Status}
         recordId={record.ID}
@@ -1087,7 +1057,6 @@ export default function WorkDone() {
   const [viewRecord, setViewRecord] = useState<WorkDoneEntry | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [filterCompanyId, setFilterCompanyId] = useState<number | null>(null);
-  const viewRecordAmendmentStatus = useAmendmentStatus("WorkDone", viewRecord?.ID, viewRecord?.Status);
 
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year ?? "";
@@ -1602,7 +1571,6 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">Status</span>
                   <div className="flex items-center gap-2">
-                    {viewRecordAmendmentStatus.isAmended && <AmendedBadge />}
                     <span
                       className={`px-3 py-1 rounded-full text-xs font-bold border ${
                         viewRecord.Status === "Approved"

@@ -1,10 +1,11 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PauseCircle, PlayCircle, XCircle, Download, Upload, ListPlus, CornerDownRight, ChevronRight, ChevronDown, AlarmClock, ChevronsUpDown, Check, Loader2 } from "lucide-react";
+import { PauseCircle, PlayCircle, XCircle, Download, Upload, ListPlus, CornerDownRight, ChevronRight, ChevronDown, AlarmClock, ChevronsUpDown, Check, Loader2, Lock } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { FollowupShell } from "@/components/followup/FollowupShell";
+import { CancelReasonDialog } from "@/components/followup/CancelReasonDialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   MasterPage,
@@ -302,6 +303,26 @@ interface DocOption {
   projectId: number | null;
   company: string | null;
   project: string | null;
+  finYearId: number | null;
+  finYearName: string | null;
+}
+
+// MasterPage.tsx persists the whole `form` object to localStorage as JSON on
+// every change (its own draft-save/restore feature) and restores it on
+// mount. JSON.stringify(new Map()) is "{}" — Maps don't survive that round
+// trip — so form.__docCacheRef can transiently be a plain `{ current: {} }`
+// object instead of a real ref-to-Map right after a draft restores, until
+// externalFormPatch re-injects the live ref. These two helpers make every
+// read/write of it tolerate that instead of crashing (`.get`/`.set is not a
+// function`) — the cache just behaves as empty until the real ref lands.
+function getCachedDoc(ref: React.MutableRefObject<Map<string, DocOption>> | undefined, key: string): DocOption | undefined {
+  return ref?.current instanceof Map ? ref.current.get(key) : undefined;
+}
+function setCachedDoc(ref: React.MutableRefObject<Map<string, DocOption>> | undefined, key: string, value: DocOption): void {
+  if (ref?.current instanceof Map) ref.current.set(key, value);
+}
+function hasCachedDoc(ref: React.MutableRefObject<Map<string, DocOption>> | undefined, key: string): boolean {
+  return ref?.current instanceof Map ? ref.current.has(key) : false;
 }
 
 // Generic async search-as-you-type combobox — Popover + Command (cmdk),
@@ -440,12 +461,36 @@ const DocSelectorField: React.FC<{
   });
 
   // Feed the parent's onFieldChange (entryTypeId/linkedTypeOfDocId/linkedDocId
-  // handling in the main component) enough info to auto-fill Company/Project
-  // once a document is picked, without a second round trip.
+  // handling in the main component) enough info to auto-fill Company/Project/
+  // Financial Year once a document is picked, without a second round trip.
   React.useEffect(() => {
-    if (!docCacheRef) return;
-    for (const o of options) docCacheRef.current.set(String(o.id), o);
+    for (const o of options) setCachedDoc(docCacheRef, String(o.id), o);
   }, [options, docCacheRef]);
+
+  // Editing an existing task: its already-saved linkedDocId won't generally
+  // be in the default (unsearched, top-50) result set above, so the combobox
+  // would otherwise show blank even though a document IS linked. Resolve it
+  // by exact id — this also seeds docCacheRef so Company/Project/FinYear
+  // display correctly locked, not just the label.
+  const selectedId = (value as string) || "";
+  const alreadyResolved = !!selectedId && (options.some((o) => String(o.id) === selectedId) || hasCachedDoc(docCacheRef, selectedId));
+  const { data: resolvedOption } = useQuery({
+    queryKey: ["doc-selector-by-id", moduleKey, selectedId],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`/api/doc-selector?module=${encodeURIComponent(moduleKey!)}&id=${selectedId}`);
+      if (!res.ok) return null;
+      const rows = (await res.json().catch(() => [])) as DocOption[];
+      return rows[0] ?? null;
+    },
+    enabled: !!moduleKey && !!selectedId && !alreadyResolved,
+    staleTime: 60 * 1000,
+  });
+  React.useEffect(() => {
+    if (resolvedOption) setCachedDoc(docCacheRef, String(resolvedOption.id), resolvedOption);
+  }, [resolvedOption, docCacheRef]);
+  const displayOptions = resolvedOption && !options.some((o) => o.id === resolvedOption.id)
+    ? [resolvedOption, ...options]
+    : options;
 
   if (!linkedTypeOfDocId) {
     return (
@@ -466,7 +511,7 @@ const DocSelectorField: React.FC<{
     <SearchCombobox
       value={(value as string) || ""}
       onSelect={(v) => onChange(v)}
-      options={options}
+      options={displayOptions}
       search={search}
       onSearchChange={setSearch}
       placeholder={`Select a ${moduleKey}…`}
@@ -476,6 +521,142 @@ const DocSelectorField: React.FC<{
           : `No ${moduleKey}s found.`
       }
       loading={isFetching}
+    />
+  );
+};
+
+// Read-only display once a Linked Document is picked (locked=true) — shows
+// the resolved label as plain text with a lock icon, no dropdown at all, so
+// there's no way to hand-edit Company/Project/FinYear out of sync with the
+// document actually linked. Falls back to a normal editable <select> when
+// nothing is linked yet. Same visual weight (inputBase) as MasterPage's own
+// select fields for consistency.
+const inputBase =
+  "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
+
+const LockableSelect: React.FC<{
+  value: unknown;
+  onChange: (v: unknown) => void;
+  options: { value: string; label: string }[];
+  loading?: boolean;
+  locked: boolean;
+  lockedLabel: string | null;
+  placeholder?: string;
+}> = ({ value, onChange, options, loading, locked, lockedLabel, placeholder = "Select..." }) => {
+  if (locked) {
+    return (
+      <div className={`${inputBase} flex items-center gap-1.5 opacity-80 cursor-not-allowed`}>
+        <Lock size={12} className="text-muted-foreground shrink-0" />
+        <span className="truncate">{lockedLabel || "—"}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="relative">
+      <select
+        value={(value as string) || ""}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={loading}
+        className={`${inputBase} appearance-none pr-9 ${loading ? "opacity-50 cursor-not-allowed" : ""}`}
+      >
+        <option value="">{loading ? "Loading…" : placeholder}</option>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+    </div>
+  );
+};
+
+// Resolves lock state + the read-only label from whichever DocOption is
+// cached for the current linkedDocId — shared by all three lockable fields
+// below so "locked" always means the exact same thing everywhere.
+function useLinkedDocLock(formData: Record<string, unknown>) {
+  const linkedDocId = (formData.linkedDocId as string) || "";
+  const docCacheRef = formData.__docCacheRef as React.MutableRefObject<Map<string, DocOption>> | undefined;
+  const picked = linkedDocId ? getCachedDoc(docCacheRef, linkedDocId) : undefined;
+  return { locked: !!linkedDocId, picked };
+}
+
+const CompanyField: React.FC<{ value: unknown; onChange: (v: unknown) => void; formData: Record<string, unknown> }> = ({
+  value,
+  onChange,
+  formData,
+}) => {
+  const { locked, picked } = useLinkedDocLock(formData);
+  const { data: options = [], isFetching } = useQuery({
+    queryKey: ["task-master-companies"],
+    queryFn: fetchCompanyOptions,
+    enabled: !locked,
+    staleTime: 5 * 60 * 1000,
+  });
+  return (
+    <LockableSelect
+      value={value}
+      onChange={onChange}
+      options={options}
+      loading={isFetching}
+      locked={locked}
+      lockedLabel={picked?.company ?? null}
+      placeholder="Select..."
+    />
+  );
+};
+
+const ProjectField: React.FC<{ value: unknown; onChange: (v: unknown) => void; formData: Record<string, unknown> }> = ({
+  value,
+  onChange,
+  formData,
+}) => {
+  const { locked, picked } = useLinkedDocLock(formData);
+  const projects: { Id: number; Name: string; CompanyId: number | null }[] = (formData.__projects as any) ?? [];
+  const selectedCompany = (formData.caseCompanyId as string) || "";
+  const options = projects
+    .filter((p) => (selectedCompany ? String(p.CompanyId) === selectedCompany : true))
+    .map((p) => ({ value: String(p.Id), label: p.Name }));
+  return (
+    <LockableSelect
+      value={value}
+      onChange={onChange}
+      options={options}
+      locked={locked}
+      lockedLabel={picked?.project ?? null}
+      placeholder="Select..."
+    />
+  );
+};
+
+const FinYearField: React.FC<{ value: unknown; onChange: (v: unknown) => void; formData: Record<string, unknown> }> = ({
+  value,
+  onChange,
+  formData,
+}) => {
+  const { locked, picked } = useLinkedDocLock(formData);
+  const { data: options = [], isFetching } = useQuery({
+    queryKey: ["task-master-finyears"],
+    queryFn: fetchFinYearOptions,
+    enabled: !locked,
+    staleTime: 5 * 60 * 1000,
+  });
+  // Seed the newest FY once options arrive for a genuinely blank field (new
+  // task, nothing picked yet) — same "default to first option" convenience
+  // the plain <select> version of this field used to have via MasterPage.
+  React.useEffect(() => {
+    if (!locked && !value && options.length) onChange(options[0].value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locked, options]);
+  return (
+    <LockableSelect
+      value={value}
+      onChange={onChange}
+      options={options}
+      loading={isFetching}
+      locked={locked}
+      lockedLabel={picked?.finYearName ?? null}
+      placeholder="Select..."
     />
   );
 };
@@ -530,30 +711,27 @@ const fields: FieldDef[] = [
     render: (props) => <DocSelectorField {...props} />,
   },
   {
+    // Once a Linked Document is picked, Company/Project/FinYear all lock to
+    // that document's own values (read-only, no dropdown) so they can never
+    // drift out of sync with what was actually linked — see LockableSelect /
+    // useLinkedDocLock above. Unlocked (normal editable select) whenever no
+    // document is linked yet.
     name: "caseCompanyId",
     label: "Company",
-    type: "select",
-    asyncOptions: fetchCompanyOptions,
+    type: "custom",
+    render: (props) => <CompanyField {...props} />,
   },
   {
     name: "caseProjectId",
     label: "Project",
-    type: "select",
-    optionsProvider: (_data, _currentId, form) => {
-      const projects: { Id: number; Name: string; CompanyId: number | null }[] =
-        (form?.__projects as any) ?? [];
-      const selectedCompany = form?.caseCompanyId as string | undefined;
-      return projects
-        .filter((p) => (selectedCompany ? String(p.CompanyId) === selectedCompany : true))
-        .map((p) => ({ value: String(p.Id), label: p.Name }));
-    },
+    type: "custom",
+    render: (props) => <ProjectField {...props} />,
   },
   {
     name: "caseFinYearId",
     label: "Financial Year",
-    type: "select",
-    asyncOptions: fetchFinYearOptions,
-    defaultToFirstOption: true,
+    type: "custom",
+    render: (props) => <FinYearField {...props} />,
   },
 
   { name: "section-task", label: "Task Details", type: "section" },
@@ -851,19 +1029,21 @@ const TaskMaster: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ["task-master"] });
   };
 
-  const updateStatus = async (id: string, status: string) => {
+  const updateStatus = async (id: string, status: string, cancelReasonId?: string) => {
     const res = await fetchWithAuth(`${API}/${id}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ Status: status }),
+      body: JSON.stringify({ Status: status, CancelReasonId: cancelReasonId }),
     });
     if (!res.ok) {
       toast.error((await res.json().catch(() => ({}))).error || "Failed to update status");
       return;
     }
-    toast.success(`Task marked ${status}`);
+    toast.success(status === "Cancel" ? "Task cancelled" : `Task marked ${status}`);
     await queryClient.invalidateQueries({ queryKey: ["task-master"] });
   };
+
+  const [cancelTargetId, setCancelTargetId] = React.useState<string | null>(null);
 
   // Quick "+ Subtask" — a lightweight dialog off the grid row, separate from
   // the main Add/Edit form. Inherits Company/Project/Case Number/Department
@@ -1120,11 +1300,7 @@ const TaskMaster: React.FC = () => {
                 {lifecycleActionsDisabled ? null : (
                   <button
                     type="button"
-                    onClick={() => {
-                      if (window.confirm("Cancel this task? It will be kept for audit but cannot be processed further.")) {
-                        updateStatus(row._id, "Cancel");
-                      }
-                    }}
+                    onClick={() => setCancelTargetId(row._id)}
                     className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                     title="Cancel task"
                   >
@@ -1153,13 +1329,20 @@ const TaskMaster: React.FC = () => {
               return { ...form, linkedDocId: "", linkedDocNo: "" };
             }
             if (fieldName === "linkedDocId") {
+              // Authoritative, not a soft merge — whatever the picked
+              // document's own Company/Project/FinYear are (even null, for
+              // a module that doesn't carry one) is what these three fields
+              // become. Picking a *different* linked document always
+              // refreshes all three; clearing it unlocks them but leaves
+              // whatever values were already there for the user to edit.
               const picked = form.linkedDocId ? docCacheRef.current.get(String(form.linkedDocId)) : null;
               if (!picked) return { ...form, linkedDocNo: "" };
               return {
                 ...form,
                 linkedDocNo: picked.label,
-                caseCompanyId: picked.companyId ? String(picked.companyId) : form.caseCompanyId,
-                caseProjectId: picked.projectId ? String(picked.projectId) : form.caseProjectId,
+                caseCompanyId: picked.companyId != null ? String(picked.companyId) : "",
+                caseProjectId: picked.projectId != null ? String(picked.projectId) : "",
+                caseFinYearId: picked.finYearId != null ? String(picked.finYearId) : "",
               };
             }
             return form;
@@ -1271,6 +1454,15 @@ const TaskMaster: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CancelReasonDialog
+        open={!!cancelTargetId}
+        onOpenChange={(open) => !open && setCancelTargetId(null)}
+        onConfirm={(reasonId) => {
+          if (cancelTargetId) updateStatus(cancelTargetId, "Cancel", reasonId);
+          setCancelTargetId(null);
+        }}
+      />
     </>
   );
 };

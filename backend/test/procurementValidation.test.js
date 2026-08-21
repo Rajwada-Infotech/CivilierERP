@@ -190,7 +190,7 @@ describe("Purchase Orders: PODate and SupplierID are required (not silently null
   });
 });
 
-describe("Expense Booking: EProjectName, EDocumentType, EDocDate, ECompanyId are required", () => {
+describe("Expense Booking: EDocumentType, EDocDate, ECompanyId are required", () => {
   const validBase = {
     EName: "test", EAmount: 100, ENetAmount: 118,
     EProjectName: "3", EDocumentType: "Invoice",
@@ -198,7 +198,6 @@ describe("Expense Booking: EProjectName, EDocumentType, EDocDate, ECompanyId are
   };
 
   test.each([
-    ["EProjectName", "EProjectName"],
     ["EDocumentType", "EDocumentType"],
     ["EDocDate", "EDocDate"],
     ["ECompanyId", "ECompanyId"],
@@ -217,8 +216,25 @@ describe("Expense Booking: EProjectName, EDocumentType, EDocDate, ECompanyId are
     expect(res.body.error).toMatch(new RegExp(`${field} is required`, "i"));
   });
 
+  // EProjectName is intentionally NOT required — Project is optional on
+  // the Invoice (Expense Booking) page (migration 347: EProjectName was
+  // widened to a nullable column; a project isn't always known/applicable
+  // at booking time).
+  test("POST /api/expense-booking without EProjectName -> 201, not 400 (Project is optional)", async () => {
+    const { createApp } = require("../server");
+    const app = await createApp();
+    const body = { ...validBase };
+    delete body.EProjectName;
+
+    const res = await request(app)
+      .post("/api/expense-booking")
+      .set("Authorization", `Bearer ${superAdminToken()}`)
+      .send(body);
+
+    expect(res.status).not.toBe(400);
+  });
+
   test.each([
-    ["EProjectName", "EProjectName"],
     ["EDocumentType", "EDocumentType"],
     ["EDocDate", "EDocDate"],
     ["ECompanyId", "ECompanyId"],
