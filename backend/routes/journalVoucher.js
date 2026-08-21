@@ -116,10 +116,17 @@ router.get("/", authenticateToken, async (req, res) => {
 router.get("/ledger-options", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
+    // LHeadType = 'LN' (Loan) heads are excluded — those are exclusively
+    // maintained by the loan module's own posting (postVoucher with
+    // sourceType LoanPosting/LoanRepayment, see loanSanction.js), which
+    // keeps them in lockstep with dbo.LoanSanction's own balance tracking.
+    // A manual JV debiting/crediting one directly would desync that
+    // tracking from Trial Balance with no way for the loan module to
+    // notice or reconcile it.
     const result = await pool.request().query(`
       SELECT LHeadId AS id, ISNULL(DisplayName, LHeadName) AS label, LHeadCode AS code, LHeadType AS type
       FROM dbo.AccountHeadMaster
-      WHERE Status = 'Approved' AND ISNULL(LHeadStatus, 1) = 1
+      WHERE Status = 'Approved' AND ISNULL(LHeadStatus, 1) = 1 AND LHeadType <> 'LN'
       ORDER BY LHeadType, LHeadName
     `);
     res.json(result.recordset);

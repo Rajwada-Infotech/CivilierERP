@@ -45,6 +45,8 @@ export interface LoanSanction {
   CreatedAt?: string | null;
   TotalEMIs?: number;
   PaidEMIs?: number;
+  TotalScheduledAmount?: number;
+  TotalPaidAmount?: number;
   LenderLHeadCode?: string | null;
   LenderGroupName?: string | null;
   LenderParentGroupName?: string | null;

@@ -233,7 +233,13 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
         ls.CreatedBy, ls.CreatedAt, ls.UpdatedBy, ls.UpdatedAt,
         ls.ClosedAt, ls.NOCAttachmentId, noc.FileName AS NOCFileName,
         (SELECT COUNT(*) FROM dbo.LoanEMISchedule e WHERE e.LoanId = ls.LoanId) AS TotalEMIs,
-        (SELECT COUNT(*) FROM dbo.LoanEMISchedule e WHERE e.LoanId = ls.LoanId AND e.IsPaid = 1) AS PaidEMIs
+        (SELECT COUNT(*) FROM dbo.LoanEMISchedule e WHERE e.LoanId = ls.LoanId AND e.IsPaid = 1) AS PaidEMIs,
+        -- Real amounts, not just installment counts — a linear "count paid
+        -- / count total" ratio is wrong for amortized loans (front-loaded
+        -- interest under CI) and for any lump-sum payment, which doesn't
+        -- move PaidEMIs at all. See LoanDashboard.tsx's outstanding total.
+        (SELECT ISNULL(SUM(EMIAmount), 0) FROM dbo.LoanEMISchedule e WHERE e.LoanId = ls.LoanId) AS TotalScheduledAmount,
+        (SELECT ISNULL(SUM(PrincipalInterestAmount), 0) FROM dbo.LoanPayment lp WHERE lp.LoanId = ls.LoanId AND lp.IsReversed = 0) AS TotalPaidAmount
       FROM dbo.LoanSanction ls
       LEFT JOIN dbo.enterprise lc ON lc.id = ls.LenderCompanyId AND lc.business_type = 'C'
       LEFT JOIN dbo.AccountHeadMaster lb ON lb.LHeadId = ls.LenderBankId
@@ -577,6 +583,18 @@ async function createLoanSanctionInternal(payload, createdBy) {
   if (!loanDate) throw Object.assign(new Error("Loan date is required"), { status: 400 });
   const amt = parseFloat(amount);
   if (!amt || amt <= 0) throw Object.assign(new Error("Amount must be greater than 0"), { status: 400 });
+  // The UI's number inputs strip the minus sign (can't type a negative
+  // through them), but nothing stopped a negative/absurd value from a raw
+  // API call — buildEmiSchedule's own guards (Math.max(1, ...) for tenure,
+  // a <=0 rate falling to the flat/no-interest branch) keep a bad value
+  // from corrupting the EMI schedule it generates, but the raw value still
+  // gets persisted to LoanSanction.InterestRate/TenureMonths either way.
+  if (interestRate != null && interestRate !== "" && parseFloat(interestRate) < 0) {
+    throw Object.assign(new Error("Interest rate cannot be negative"), { status: 400 });
+  }
+  if (tenureMonths != null && tenureMonths !== "" && parseInt(tenureMonths, 10) <= 0) {
+    throw Object.assign(new Error("Tenure must be at least 1 month"), { status: 400 });
+  }
 
   const pool = getPool();
   const tx = new sql.Transaction(pool);
@@ -864,6 +882,12 @@ router.put("/:id", requirePageRight("loan-sanction", "edit"), async (req, res) =
       const iType = INTEREST_TYPES.includes(interestType) ? interestType : "CI";
       const newAmt = parseFloat(amount);
       if (!newAmt || newAmt <= 0) throw Object.assign(new Error("Amount must be greater than 0"), { status: 400 });
+      if (interestRate != null && interestRate !== "" && parseFloat(interestRate) < 0) {
+        throw Object.assign(new Error("Interest rate cannot be negative"), { status: 400 });
+      }
+      if (tenureMonths != null && tenureMonths !== "" && parseInt(tenureMonths, 10) <= 0) {
+        throw Object.assign(new Error("Tenure must be at least 1 month"), { status: 400 });
+      }
       const newLoanDate = loanDate || loan.LoanDate;
       const effectiveRate = useInterest && interestRate != null && interestRate !== "" ? parseFloat(interestRate) : null;
       const newTenure = tenureMonths != null && tenureMonths !== "" ? parseInt(tenureMonths, 10) : null;
@@ -1898,6 +1922,12 @@ router.delete("/:id", requirePageRight("loan-sanction", "delete"), async (req, r
     await new sql.Request(tx)
       .input("LoanId", sql.Int, loanId)
       .query("DELETE FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId");
+
+    // Previously skipped — left orphaned blob rows behind for every deleted
+    // loan's attached agreement/sanction-letter documents.
+    await new sql.Request(tx)
+      .input("LoanId", sql.Int, loanId)
+      .query("DELETE FROM dbo.LoanDocumentAttachments WHERE LoanId = @LoanId");
 
     await new sql.Request(tx)
       .input("RefId", sql.Int, loanId)
