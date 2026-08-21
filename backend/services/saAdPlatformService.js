@@ -1,5 +1,6 @@
 const GOOGLE_ADS_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v24";
 const META_GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v20.0";
+const { normalizeSaLeadContactFields } = require("../validation/saLeadValidation");
 
 const PROVIDER_CONFIG = {
   facebook: { label: "Meta Ads", family: "meta" },
@@ -464,21 +465,30 @@ function normalizeMetaLead(lead) {
 }
 
 async function normalizeImportedLeads(ad, platform, importedLeads = []) {
-  return importedLeads.map((lead, index) => ({
-    ExternalLeadId: lead.ExternalLeadId || lead.externalLeadId || lead.id || `${providerLabel(platform.PlatformType)}-${ad.Id}-${Date.now()}-${index}`,
-    CustomerName: lead.CustomerName || lead.name || lead.full_name || lead.Customer || null,
-    Mobile: lead.Mobile || lead.phone || lead.phone_number || lead.mobile || null,
-    Email: lead.Email || lead.email || null,
-    SourceType: "Ad",
-    PlatformId: platform.Id,
-    CampaignId: ad.CampaignId,
-    AdId: ad.Id,
-    LeadFormName: lead.LeadFormName || lead.form_name || lead.form_id || null,
-    SourceCampaignName: lead.SourceCampaignName || lead.campaign_name || null,
-    SourceAdName: lead.SourceAdName || lead.ad_name || null,
-    CapturedAt: lead.CapturedAt || lead.created_time || new Date().toISOString(),
-    SourcePayload: lead.SourcePayload || lead,
-  }));
+  return importedLeads.map((lead, index) => {
+    const normalized = normalizeSaLeadContactFields({
+      CustomerName: lead.CustomerName || lead.name || lead.full_name || lead.Customer || null,
+      Mobile: lead.Mobile || lead.phone || lead.phone_number || lead.mobile || null,
+      Email: lead.Email || lead.email || null,
+    });
+
+    return {
+      ExternalLeadId: lead.ExternalLeadId || lead.externalLeadId || lead.id || `${providerLabel(platform.PlatformType)}-${ad.Id}-${Date.now()}-${index}`,
+      CustomerName: normalized.value.CustomerName,
+      Mobile: normalized.value.Mobile,
+      Email: normalized.value.Email,
+      ValidationErrors: normalized.errors,
+      SourceType: "Ad",
+      PlatformId: platform.Id,
+      CampaignId: ad.CampaignId,
+      AdId: ad.Id,
+      LeadFormName: lead.LeadFormName || lead.form_name || lead.form_id || null,
+      SourceCampaignName: lead.SourceCampaignName || lead.campaign_name || null,
+      SourceAdName: lead.SourceAdName || lead.ad_name || null,
+      CapturedAt: lead.CapturedAt || lead.created_time || new Date().toISOString(),
+      SourcePayload: lead.SourcePayload || lead,
+    };
+  });
 }
 
 module.exports = {

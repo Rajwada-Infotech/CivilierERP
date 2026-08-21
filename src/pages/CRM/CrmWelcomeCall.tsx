@@ -2303,6 +2303,7 @@ const CrmWelcomeCall: React.FC = () => {
         <EditCallDialog call={editingCall} onClose={() => setEditingCall(null)} onSaved={() => refetchHistory()} />
       )}
     </CrmShell>
+    </>
   );
 };
 

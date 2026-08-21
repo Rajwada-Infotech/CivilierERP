@@ -8,6 +8,7 @@ const { convertLead } = require("../services/saHandoff");
 const { applyLeadScope, actorId, isSaAdmin } = require("../services/saAccess");
 const { getIo } = require("../socket");
 const crypto = require("crypto");
+const { normalizeSaLeadContactFields } = require("../validation/saLeadValidation");
 
 // Insert notification row and emit to the user's personal socket room.
 async function emitNotification(pool, userId, type, title, body, refId) {
@@ -142,7 +143,14 @@ router.get("/users", requirePageRight("sa-leads", "view"), async (req, res) => {
 router.post("/", requirePageRight("sa-leads", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const b = req.body;
+    const normalizedContact = normalizeSaLeadContactFields(req.body);
+    if (normalizedContact.errors.length) {
+      return res.status(400).json({ error: normalizedContact.errors.join("; ") });
+    }
+    const b = normalizedContact.value;
+    if (!b.Mobile) {
+      return res.status(400).json({ error: "Mobile is required" });
+    }
     const uid = genUid();
     const sourceError = await validateSourceChain(pool, b);
     if (sourceError) return res.status(400).json({ error: sourceError });
@@ -218,6 +226,9 @@ router.post("/", requirePageRight("sa-leads", "create"), async (req, res) => {
     res.status(201).json({ success: true, LeadUid: uid });
   } catch (e) {
     console.error("[sa-leads] POST error:", e.message);
+    if (e.number === 2601 || e.number === 2627) {
+      return res.status(409).json({ error: "A lead with this mobile number already exists." });
+    }
     res.status(500).json({ error: e.message });
   }
 });

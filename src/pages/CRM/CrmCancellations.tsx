@@ -377,6 +377,7 @@ const CrmCancellations: React.FC = () => {
         </DialogContent>
       </Dialog>
     </CrmShell>
+    </>
   );
 };
 

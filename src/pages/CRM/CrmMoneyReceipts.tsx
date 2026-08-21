@@ -215,6 +215,7 @@ const CrmMoneyReceipts: React.FC = () => {
 
       {previewReceipt && <ReceiptPdfDialog receipt={previewReceipt} onClose={() => setPreviewReceipt(null)} />}
     </CrmShell>
+    </>
   );
 };
 

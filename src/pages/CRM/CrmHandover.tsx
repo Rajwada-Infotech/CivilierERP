@@ -536,6 +536,7 @@ const CrmHandover: React.FC = () => {
         </DialogContent>
       </Dialog>
     </CrmShell>
+    </>
   );
 };
 

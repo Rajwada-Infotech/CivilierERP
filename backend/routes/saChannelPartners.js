@@ -6,6 +6,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
+const { ensureBrokerForChannelPartner } = require("../services/channelPartnerBrokerBridge");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -17,15 +18,19 @@ router.get("/", requirePageRight("sa-channel-partners", "view"), async (req, res
     const result = await pool.request().query(`
       SELECT
         cp.Id, cp.PartnerCode, cp.Name, cp.Mobile, cp.Email,
-        cp.FirmName, cp.Region, cp.CommissionRate, cp.Notes, cp.IsActive,
+        cp.FirmName, cp.Region, cp.CommissionRate, cp.CrmBrokerLHeadId,
+        br.LHeadName AS CrmBrokerName,
+        cp.Notes, cp.IsActive,
         cp.CreatedAt, cp.UpdatedAt,
         COUNT(l.Id) AS TotalLeads,
         SUM(CASE WHEN l.Status = 'Booked' THEN 1 ELSE 0 END) AS TotalBookings
       FROM dbo.SaChannelPartner cp
+      LEFT JOIN dbo.AccountHeadMaster br ON br.LHeadId = cp.CrmBrokerLHeadId
       LEFT JOIN dbo.SaLead l ON l.ChannelPartnerId = cp.Id AND l.IsActive = 1
       WHERE cp.IsActive = 1
       GROUP BY cp.Id, cp.PartnerCode, cp.Name, cp.Mobile, cp.Email,
-               cp.FirmName, cp.Region, cp.CommissionRate, cp.Notes, cp.IsActive,
+               cp.FirmName, cp.Region, cp.CommissionRate, cp.CrmBrokerLHeadId, br.LHeadName,
+               cp.Notes, cp.IsActive,
                cp.CreatedAt, cp.UpdatedAt
       ORDER BY cp.Name
     `);
@@ -69,7 +74,7 @@ router.post("/", requirePageRight("sa-channel-partners", "create"), async (req, 
     // System-assigned unique partner code if not supplied
     const code = b.PartnerCode?.trim() || await getNextDocNumber(pool, "CP", "CP");
 
-    await pool.request()
+    const inserted = await pool.request()
       .input("code",  sql.NVarChar(20),  code)
       .input("name",  sql.NVarChar(200), b.Name || null)
       .input("mob",   sql.NVarChar(20),  b.Mobile || null)
@@ -83,9 +88,11 @@ router.post("/", requirePageRight("sa-channel-partners", "create"), async (req, 
       .query(`
         INSERT INTO dbo.SaChannelPartner
           (PartnerCode, Name, Mobile, Email, FirmName, Region, CommissionRate, BankDetails, Notes, IsActive, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
         VALUES (@code, @name, @mob, @em, @firm, @reg, @rate, @bank, @notes, 1, @cb, SYSDATETIME())
       `);
-    res.status(201).json({ success: true });
+    const bridge = await ensureBrokerForChannelPartner(pool, inserted.recordset[0].Id, actorId(req));
+    res.status(201).json({ success: true, brokerId: bridge?.brokerId || null });
   } catch (e) {
     if (e.message?.includes("UQ_SaChannelPartner_Code"))
       return res.status(409).json({ error: "Partner code already exists" });
@@ -118,7 +125,8 @@ router.put("/:id", requirePageRight("sa-channel-partners", "edit"), async (req, 
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id AND IsActive = 1
       `);
-    res.json({ success: true });
+    const bridge = await ensureBrokerForChannelPartner(pool, id, actorId(req));
+    res.json({ success: true, brokerId: bridge?.brokerId || null });
   } catch (e) {
     console.error("[sa-channel-partners] PUT error:", e.message);
     res.status(500).json({ error: e.message });

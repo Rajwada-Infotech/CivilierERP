@@ -985,6 +985,7 @@ const CrmBooking: React.FC = () => {
         </Dialog>
       )}
     </CrmShell>
+    </>
   );
 };
 

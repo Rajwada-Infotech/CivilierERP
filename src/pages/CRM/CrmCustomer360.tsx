@@ -427,6 +427,7 @@ const CrmCustomer360: React.FC = () => {
         </>
       )}
     </CrmShell>
+    </>
   );
 };
 

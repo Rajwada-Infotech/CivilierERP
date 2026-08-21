@@ -643,6 +643,7 @@ const CrmCustomers: React.FC = () => {
         />
       )}
     </CrmShell>
+    </>
   );
 };
 

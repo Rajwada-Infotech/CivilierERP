@@ -372,6 +372,7 @@ const CrmLegalMilestones: React.FC = () => {
         </DialogContent>
       </Dialog>
     </CrmShell>
+    </>
   );
 };
 

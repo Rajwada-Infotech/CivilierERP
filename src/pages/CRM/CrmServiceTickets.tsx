@@ -442,6 +442,7 @@ const CrmServiceTickets: React.FC = () => {
         </DialogContent>
       </Dialog>
     </CrmShell>
+    </>
   );
 };
 

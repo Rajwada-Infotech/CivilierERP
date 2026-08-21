@@ -873,6 +873,7 @@ const CrmInvoices: React.FC = () => {
         <GenerateInvoiceDialog initialBookingId={genBookingId} onClose={() => setGenBookingId(undefined)} onGenerated={handleGenerated} />
       )}
     </CrmShell>
+    </>
   );
 };
 

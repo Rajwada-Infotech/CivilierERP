@@ -820,6 +820,7 @@ const CrmPaymentMilestones: React.FC = () => {
         </DialogContent>
       </Dialog>
     </CrmShell>
+    </>
   );
 };
 

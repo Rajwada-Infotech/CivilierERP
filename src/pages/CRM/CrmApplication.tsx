@@ -2390,6 +2390,7 @@ const CrmApplication: React.FC = () => {
         </DialogContent>
       </Dialog>
     </CrmShell>
+    </>
   );
 };
 
