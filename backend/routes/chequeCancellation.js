@@ -575,3 +575,7 @@ router.get("/", requirePageRight("cheque-cancellation", "view"), async (req, res
 });
 
 module.exports = router;
+// Exposed for one-off backfill/repair scripts (e.g.
+// scripts/cancelDuplicatePayment.js) that need to run the exact same
+// cancellation logic the API route uses, rather than reimplementing it.
+module.exports.cancelPaymentCheque = cancelPaymentCheque;

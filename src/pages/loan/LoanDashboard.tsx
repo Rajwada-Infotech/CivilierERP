@@ -380,7 +380,7 @@ export default function LoanDashboard() {
                       <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
                         <div
                           className="h-full rounded-full"
-                          style={{ width: `${pct}%`, background: closed ? "#9ca3af" : "#22c55e" }}
+                          style={{ width: `${pct}%`, background: "#22c55e" }}
                         />
                       </div>
                       <span className="text-[10px] text-muted-foreground">
@@ -391,11 +391,7 @@ export default function LoanDashboard() {
 
                   <div className="text-right shrink-0 w-28">
                     <p className="text-sm font-mono font-semibold text-foreground">{fmt(Number(l.Amount))}</p>
-                    <span
-                      className={`inline-flex items-center gap-1 text-[11px] font-medium ${
-                        closed ? "text-muted-foreground" : "text-emerald-600 dark:text-emerald-400"
-                      }`}
-                    >
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
                       {closed && <CheckCircle2 size={10} />}
                       {l.Status}
                     </span>
