@@ -2004,3 +2004,5 @@ router.delete("/:id", requirePageRight("loan-sanction", "delete"), async (req, r
 module.exports = router;
 module.exports.createLoanSanctionInternal = createLoanSanctionInternal;
 module.exports.postLoanToGLInternal = postLoanToGLInternal;
+module.exports.postCustomerLoanRepayment = postCustomerLoanRepayment;
+module.exports.postBankLoanRepayment = postBankLoanRepayment;

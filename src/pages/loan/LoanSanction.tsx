@@ -851,12 +851,26 @@ export default function LoanSanctionPage() {
       header: "Status",
       cell: ({ row }) => {
         const closed = row.original.Status === "Closed";
+        // Same three real states as the detail modal's header pill
+        // (Closed / Paid / Sanctioned) — this cell used to show the
+        // literal text "Sanctioned" specifically when Status==="Closed",
+        // inverted from what it should say (row.original.Status IS
+        // already "Sanctioned" or "Closed", so that ternary was both
+        // redundant and backwards).
+        const fullyPaid = (row.original.TotalEMIs ?? 0) > 0 && row.original.PaidEMIs === row.original.TotalEMIs;
+        const label = closed ? "Closed" : fullyPaid ? "Paid" : "Sanctioned";
+        const dotColor = closed ? "bg-slate-400" : fullyPaid ? "bg-emerald-500" : "bg-blue-500";
+        const textColor = closed
+          ? "text-slate-600 dark:text-slate-400"
+          : fullyPaid
+            ? "text-emerald-600 dark:text-emerald-400"
+            : "text-blue-600 dark:text-blue-400";
         const instrument = sanctionInstrumentLabel(row.original);
         return (
           <div className="flex flex-col gap-0.5">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-              <span className="w-1.5 h-1.5 rounded-full inline-block bg-emerald-500" />
-              {closed ? "Sanctioned" : row.original.Status}
+            <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${textColor}`}>
+              <span className={`w-1.5 h-1.5 rounded-full inline-block ${dotColor}`} />
+              {label}
             </span>
             {instrument && (
               <span className="text-[11px] text-muted-foreground pl-3">{instrument}</span>
@@ -1512,7 +1526,7 @@ export default function LoanSanctionPage() {
                             label="Next Due"
                             value={
                               viewingLoan?.Status === "Closed"
-                                ? "Loan Sanctioned ✓"
+                                ? "Closed ✓"
                                 : nextDue
                                   ? `${fmt(nextDue.EMIAmount)} on ${fmtDate(nextDue.DueDate)}`
                                   : totalEmis > 0
