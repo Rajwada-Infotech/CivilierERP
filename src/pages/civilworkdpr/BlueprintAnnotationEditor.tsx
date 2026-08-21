@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Stage, Layer, Image as KonvaImage, Line, Rect, Ellipse, Arrow, Text } from "react-konva";
+import { Stage, Layer, Image as KonvaImage, Line, Rect, Ellipse, Arrow, Text, Circle as KonvaCircle } from "react-konva";
 import type Konva from "konva";
 import {
-  X, Pencil, Square, MoveUpRight, Circle, Type, Undo2, Redo2, Trash2, Save, Loader2, FileText, PenSquare,
+  X, Pencil, Square, MoveUpRight, Circle, Type, MapPin, Undo2, Redo2, Trash2, Save, Loader2, FileText, PenSquare,
 } from "lucide-react";
 import { getRoomBlueprint } from "@/api/roomMasterApi";
 import {
@@ -29,9 +29,12 @@ interface RectShapeT extends ShapeBase { type: "rect"; x: number; y: number; wid
 interface ArrowShapeT extends ShapeBase { type: "arrow"; points: number[]; }
 interface EllipseShapeT extends ShapeBase { type: "ellipse"; x: number; y: number; radiusX: number; radiusY: number; }
 interface TextShapeT extends ShapeBase { type: "text"; x: number; y: number; text: string; fontSize: number; }
-type Shape = PenShape | RectShapeT | ArrowShapeT | EllipseShapeT | TextShapeT;
+// A single click, not a drag — x/y is the exact point being marked (the
+// pin's tip), same one-click-to-place pattern as the Text tool.
+interface PinShapeT extends ShapeBase { type: "pin"; x: number; y: number; }
+type Shape = PenShape | RectShapeT | ArrowShapeT | EllipseShapeT | TextShapeT | PinShapeT;
 
-type Tool = "pen" | "rect" | "arrow" | "ellipse" | "text";
+type Tool = "pen" | "rect" | "arrow" | "ellipse" | "text" | "pin";
 
 const TOOLS: { id: Tool; icon: React.ElementType; label: string }[] = [
   { id: "pen", icon: Pencil, label: "Freehand" },
@@ -39,6 +42,7 @@ const TOOLS: { id: Tool; icon: React.ElementType; label: string }[] = [
   { id: "arrow", icon: MoveUpRight, label: "Arrow" },
   { id: "ellipse", icon: Circle, label: "Ellipse" },
   { id: "text", icon: Type, label: "Text" },
+  { id: "pin", icon: MapPin, label: "Location Pin" },
 ];
 
 const COLORS = ["#ef4444", "#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "#ffffff", "#000000"];
@@ -82,6 +86,27 @@ function scaleShapes(shapes: Shape[], sx: number, sy: number): Shape[] {
     if (s.type === "ellipse") return { ...s, x: s.x * sx, y: s.y * sy, radiusX: s.radiusX * sx, radiusY: s.radiusY * sy };
     return { ...s, x: s.x * sx, y: s.y * sy };
   });
+}
+
+// A drop-pin glyph built from plain shapes (circle head + triangular tip)
+// rather than SVG path data — x/y is the exact point marked, landing at
+// the tip's point, not the head's center.
+function PinGlyph({ s, colorOverride }: { s: PinShapeT; colorOverride?: string }) {
+  const color = colorOverride ?? s.stroke;
+  const r = 5 + s.strokeWidth;
+  const headY = s.y - r * 1.8;
+  return (
+    <>
+      <Line
+        points={[s.x - r * 0.5, headY + r * 0.4, s.x, s.y, s.x + r * 0.5, headY + r * 0.4]}
+        closed
+        fill={color}
+        stroke={color}
+      />
+      <KonvaCircle x={s.x} y={headY} radius={r} fill={color} stroke={color} />
+      <KonvaCircle x={s.x} y={headY} radius={r * 0.4} fill="#ffffff" />
+    </>
+  );
 }
 
 export default function BlueprintAnnotationEditor({
@@ -248,6 +273,11 @@ export default function BlueprintAnnotationEditor({
       const text = window.prompt("Text to place on the blueprint:");
       if (!text || !text.trim()) return;
       commitShapes([...shapes, { id: uid(), type: "text", x: pos.x, y: pos.y, text: text.trim(), fontSize: 16, stroke: color, strokeWidth }]);
+      return;
+    }
+
+    if (tool === "pin") {
+      commitShapes([...shapes, { id: uid(), type: "pin", x: pos.x, y: pos.y, stroke: color, strokeWidth }]);
       return;
     }
 
@@ -458,6 +488,7 @@ export default function BlueprintAnnotationEditor({
                         if (s.type === "rect") return <Rect key={s.id} x={s.x} y={s.y} width={s.width} height={s.height} stroke={REFERENCE_COLOR} strokeWidth={s.strokeWidth} />;
                         if (s.type === "arrow") return <Arrow key={s.id} points={s.points} stroke={REFERENCE_COLOR} fill={REFERENCE_COLOR} strokeWidth={s.strokeWidth} />;
                         if (s.type === "ellipse") return <Ellipse key={s.id} x={s.x} y={s.y} radiusX={s.radiusX} radiusY={s.radiusY} stroke={REFERENCE_COLOR} strokeWidth={s.strokeWidth} />;
+                        if (s.type === "pin") return <PinGlyph key={s.id} s={s} colorOverride={REFERENCE_COLOR} />;
                         return <Text key={s.id} x={s.x} y={s.y} text={s.text} fontSize={s.fontSize} fill={REFERENCE_COLOR} />;
                       })}
                     </Layer>
@@ -468,6 +499,7 @@ export default function BlueprintAnnotationEditor({
                       if (s.type === "rect") return <Rect key={s.id} x={s.x} y={s.y} width={s.width} height={s.height} stroke={s.stroke} strokeWidth={s.strokeWidth} />;
                       if (s.type === "arrow") return <Arrow key={s.id} points={s.points} stroke={s.stroke} fill={s.stroke} strokeWidth={s.strokeWidth} />;
                       if (s.type === "ellipse") return <Ellipse key={s.id} x={s.x} y={s.y} radiusX={s.radiusX} radiusY={s.radiusY} stroke={s.stroke} strokeWidth={s.strokeWidth} />;
+                      if (s.type === "pin") return <PinGlyph key={s.id} s={s} />;
                       return <Text key={s.id} x={s.x} y={s.y} text={s.text} fontSize={s.fontSize} fill={s.stroke} />;
                     })}
                   </Layer>

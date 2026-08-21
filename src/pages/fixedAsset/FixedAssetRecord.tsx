@@ -8,8 +8,7 @@ import {
   FileText, MapPin, Hash, Cpu, Check, X,
   Boxes, Wallet, PackageCheck, Circle, CheckCircle2, PlayCircle,
 } from "lucide-react";
-import { GlassShell } from "@/components/dashboard/GlassShell";
-import { MaterialGlassCard } from "@/components/material/MaterialShell";
+import { GlassShell, GlassCard } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
@@ -271,12 +270,12 @@ export default function FixedAssetRecord() {
   const activeFinYear = finYears.find((f) => f.status === "Active")?.year || "";
   const { theme } = useTheme();
   const isDark = theme !== "light";
-  // Same glass-panel treatment the rest of the Material module uses (see
-  // MaterialGlassCard / IssueReturn.tsx) — keeps this page visually
-  // consistent with its siblings instead of a one-off flat-Card look.
+  // Same glass-panel treatment GlassShell/GlassCard use elsewhere in the
+  // Fixed Asset module, tinted to this module's own accent (#eab308) —
+  // keeps every section visually consistent instead of a one-off flat look.
   const glassSection = {
-    background: isDark ? "rgba(20,16,4,0.45)" : "rgba(255,255,255,0.72)",
-    border: `1px solid ${isDark ? "rgba(234,179,8,0.15)" : "rgba(234,179,8,0.18)"}`,
+    background: isDark ? "rgba(15,17,26,0.45)" : "rgba(255,255,255,0.72)",
+    border: `1px solid ${isDark ? "rgba(234,179,8,0.15)" : "rgba(234,179,8,0.2)"}`,
     backdropFilter: "blur(16px) saturate(160%)",
     WebkitBackdropFilter: "blur(16px) saturate(160%)",
     boxShadow: isDark ? "0 4px 24px rgba(0,0,0,0.25)" : "0 4px 24px rgba(234,179,8,0.07)",
@@ -1006,7 +1005,12 @@ export default function FixedAssetRecord() {
           )}
         </div>
 
-        <LivePreviewCard form={form} saving={saving} custodianName={users.find((u) => String(u.id) === form.custodianUserId)?.name || ""} glassStyle={glassSection} />
+        <LivePreviewCard
+          form={form}
+          saving={saving}
+          custodianName={users.find((u) => String(u.id) === form.custodianUserId)?.name || ""}
+          glassStyle={glassSection}
+        />
         </div>
       </GlassShell>
     );
@@ -1032,30 +1036,30 @@ export default function FixedAssetRecord() {
         )
       }
     >
-      {/* ── KPI strip — same MaterialGlassCard language as every other
-          Material-module list page (see IssueReturn.tsx). ── */}
+      {/* ── KPI strip — same GlassCard language as the rest of the Fixed
+          Asset module (see FixedAssetDashboard). ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-        <MaterialGlassCard
+        <GlassCard
           label="Total Book Value"
           value={fmtCur(portfolioStats.totalBookValue)}
           sub={`of ${fmtCur(portfolioStats.totalCost)} original`}
           icon={Wallet}
           accentColor="#eab308"
         />
-        <MaterialGlassCard
+        <GlassCard
           label="Total Assets"
           value={fmt(portfolioStats.count)}
           sub={portfolioStats.pendingCount > 0 ? `${fmt(portfolioStats.pendingCount)} pending` : undefined}
           icon={Boxes}
           accentColor="#3b82f6"
         />
-        <MaterialGlassCard
+        <GlassCard
           label="Active"
           value={fmt(portfolioStats.activeCount)}
           icon={PlayCircle}
           accentColor="#22c55e"
         />
-        <MaterialGlassCard
+        <GlassCard
           label="Sold"
           value={fmt(portfolioStats.soldCount)}
           icon={IndianRupee}

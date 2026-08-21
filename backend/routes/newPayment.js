@@ -803,6 +803,18 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // All new payments auto-submit to Pending for approval — no manual submit step.
     const initialStatus = "Pending";
 
+    // Cash-mode payments never carry a PBankID (Payment.tsx disables the
+    // Bank field for Cash — "Not applicable for cash payments") but
+    // PBankName is a NOT NULL column, so an unset value fails the insert.
+    // Stamp it with the same "Cash-in-Hand A/c" label GL posting already
+    // resolves to for cash payments (see postPaymentApproval, line ~2212)
+    // — PBankID itself stays null, matching that code's documented
+    // assumption that cash payments never carry one.
+    let resolvedPBankName = req.body.PBankName || PBankName || null;
+    if (PMode === "Cash" && !resolvedPBankName) {
+      resolvedPBankName = "Cash-in-Hand A/c";
+    }
+
     const insertResult = await pool
       .request()
       .input("PPaymentName", sql.VarChar, PPaymentName || "")
@@ -812,7 +824,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("PDocType", sql.VarChar, PDocType || "N/A")
       .input("PDate", sql.Date, PDate || null)
       .input("PBankID", sql.Int, normalizeBankId(req.body.PBankID ?? PBankID))
-      .input("PBankName", sql.VarChar, req.body.PBankName || PBankName || null)
+      .input("PBankName", sql.VarChar, resolvedPBankName)
       .input("PProject", sql.VarChar, PProject || "")
       .input("PCompany", sql.VarChar, PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
@@ -1076,7 +1088,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PDate", sql.Date, PDate || null)
       .input("PFinYearId", sql.Int, pFinYearIdUpdate)
       .input("PBankID", sql.Int, normalizeBankId(PBankID))
-      .input("PBankName", sql.VarChar, PBankName || null)
+      .input("PBankName", sql.VarChar, PBankName || (PMode === "Cash" ? "Cash-in-Hand A/c" : null))
       .input("PProject", sql.VarChar, PProject || "")
       .input("PCompany", sql.VarChar, PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)

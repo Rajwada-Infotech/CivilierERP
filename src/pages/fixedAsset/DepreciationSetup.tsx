@@ -7,8 +7,7 @@ import {
   Package,
   Boxes, CheckCircle2, Layers,
 } from "lucide-react";
-import { GlassShell } from "@/components/dashboard/GlassShell";
-import { MaterialGlassCard } from "@/components/material/MaterialShell";
+import { GlassShell, GlassCard } from "@/components/dashboard/GlassShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -157,36 +156,36 @@ export default function DepreciationSetupPage() {
         )
       }
     >
-      {/* ── stat strip — same MaterialGlassCard language as the rest of the
-          Material module (see Fixed Asset Record, IssueReturn). ── */}
+      {/* ── stat strip — same GlassCard language as the rest of the Fixed
+          Asset module (see FixedAssetDashboard, FixedAssetRecord). ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        <MaterialGlassCard
+        <GlassCard
           label="Configured Rates"
           value={stats.total}
           sub={`${stats.categoriesCovered} of ${ASSET_CATEGORIES.length} categories`}
           icon={Boxes}
           accentColor="#8b5cf6"
         />
-        <MaterialGlassCard
+        <GlassCard
           label="Active Rates"
           value={stats.active}
           sub={`${stats.total - stats.active} inactive`}
           icon={CheckCircle2}
           accentColor="#22c55e"
         />
-        <MaterialGlassCard
+        <GlassCard
           label="Average Rate"
           value={`${stats.avgRate.toFixed(1)}%`}
           sub="across active rates"
           icon={Percent}
           accentColor="#3b82f6"
         />
-        <MaterialGlassCard
+        <GlassCard
           label="Categories Covered"
           value={stats.categoriesCovered}
           sub={`of ${ASSET_CATEGORIES.length} total`}
           icon={Layers}
-          accentColor="#f59e0b"
+          accentColor="#eab308"
         />
       </div>
 

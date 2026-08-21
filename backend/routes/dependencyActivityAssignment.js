@@ -9,7 +9,7 @@ const { requirePageRight, requireAnyPageRight } = require("../middleware/require
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const PHOTO_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"]);
-const PHOTO_PHASES = new Set(["before", "after"]);
+const PHOTO_PHASES = new Set(["before", "after", "progress"]);
 
 const STATUS_VALUES = new Set(["PENDING", "IN_PROGRESS", "HOLD", "CANCELLED", "APPROVED", "REWORK", "COMPLETED"]);
 const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
@@ -95,10 +95,12 @@ router.get(
   }
 });
 
-// PATCH /:rungId/status — move a rung between report statuses. No
-// order/workflow is enforced between statuses (any -> any) — that's a
-// policy call left for later, not something the schema or this endpoint
-// dictates.
+// PATCH /:rungId/status — move a rung between report statuses, and/or
+// update its Remarks (the Activity Detail modal's Remarks textarea saves
+// on blur independently of the status dropdown, so both fields are
+// optional here — at least one must be present). No order/workflow is
+// enforced between statuses (any -> any) — that's a policy call left for
+// later, not something the schema or this endpoint dictates.
 router.patch(
   "/:rungId/status",
   authMiddleware,
@@ -107,28 +109,40 @@ router.patch(
   const rungId = parseInt(req.params.rungId, 10);
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
 
-  const status = String(req.body?.status || "").toUpperCase();
-  if (!STATUS_VALUES.has(status)) {
+  const hasStatus = req.body?.status !== undefined;
+  const hasRemarks = req.body?.remarks !== undefined;
+  if (!hasStatus && !hasRemarks) {
+    return res.status(400).json({ error: "status or remarks is required" });
+  }
+
+  const status = hasStatus ? String(req.body.status).toUpperCase() : null;
+  if (hasStatus && !STATUS_VALUES.has(status)) {
     return res.status(400).json({ error: `status must be one of: ${[...STATUS_VALUES].join(", ")}` });
   }
+  const remarks = hasRemarks ? String(req.body.remarks || "").slice(0, 1000) : null;
 
   const actor = req.user?.email || req.user?.name || "system";
 
   try {
     const pool = await getPool();
-    const result = await pool.request()
+    const setClauses = [];
+    if (hasStatus) setClauses.push("Status = @status");
+    if (hasRemarks) setClauses.push("Remarks = @remarks");
+    const request = pool.request()
       .input("rungId", sql.Int, rungId)
-      .input("status", sql.NVarChar(20), status)
-      .input("updatedBy", sql.NVarChar(200), actor)
-      .query(`
-        UPDATE dbo.DependencyActivityAssignment
-        SET Status = @status, UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
-        WHERE DependencyMasterActivityId = @rungId
-      `);
+      .input("updatedBy", sql.NVarChar(200), actor);
+    if (hasStatus) request.input("status", sql.NVarChar(20), status);
+    if (hasRemarks) request.input("remarks", sql.NVarChar(1000), remarks);
+
+    const result = await request.query(`
+      UPDATE dbo.DependencyActivityAssignment
+      SET ${setClauses.join(", ")}, UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
+      WHERE DependencyMasterActivityId = @rungId
+    `);
     if (!result.rowsAffected[0]) {
       return res.status(404).json({ error: "No assignment found for this rung" });
     }
-    res.json({ success: true, status });
+    res.json({ success: true, status, remarks });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
     res.status(500).json({ error: err.message });
@@ -491,6 +505,19 @@ router.put("/:rungId/blueprint-annotation", authMiddleware, async (req, res) => 
     }
 
     if (current) {
+      // Archive what's about to be overwritten (migration 353) — the
+      // Activity Detail modal's revision scrubber pages back through these
+      // rows, since dbo.ActivityBlueprintAnnotation itself only ever holds
+      // the current state.
+      await pool.request()
+        .input("AnnotationId", sql.Int, current.Id)
+        .query(`
+          INSERT INTO dbo.ActivityBlueprintAnnotationHistory
+            (AnnotationId, Version, ShapesJson, ThumbnailBase64, UpdatedBy, UpdatedAt)
+          SELECT Id, Version, ShapesJson, ThumbnailBase64, UpdatedBy, UpdatedAt
+          FROM dbo.ActivityBlueprintAnnotation WHERE Id = @AnnotationId
+        `);
+
       await pool.request()
         .input("Id", sql.Int, current.Id)
         .input("ShapesJson", sql.NVarChar(sql.MAX), shapesJson)
@@ -523,6 +550,42 @@ router.put("/:rungId/blueprint-annotation", authMiddleware, async (req, res) => 
   }
 });
 
+// GET /:rungId/blueprint-annotation/history?roomId=&context= — every past
+// revision (migration 353) plus the current one, oldest first, thumbnail
+// only (no ShapesJson — the scrubber just displays each revision's
+// pre-rendered PNG rather than re-driving a Konva stage per step).
+router.get("/:rungId/blueprint-annotation/history", authMiddleware, async (req, res) => {
+  const rungId = parseInt(req.params.rungId, 10);
+  const roomId = parseInt(req.query.roomId, 10);
+  const context = ANNOTATION_CONTEXTS.has(req.query.context) ? req.query.context : "allocation";
+  if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+  if (!Number.isFinite(roomId)) return res.status(400).json({ error: "roomId is required" });
+
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input("rungId", sql.Int, rungId)
+      .input("roomId", sql.Int, roomId)
+      .input("context", sql.NVarChar(20), context).query(`
+        SELECT h.Version AS version, h.ThumbnailBase64 AS thumbnailBase64,
+               h.UpdatedBy AS updatedBy, h.UpdatedAt AS updatedAt
+        FROM dbo.ActivityBlueprintAnnotation a
+        JOIN dbo.ActivityBlueprintAnnotationHistory h ON h.AnnotationId = a.Id
+        WHERE a.DependencyMasterActivityId = @rungId AND a.RoomId = @roomId AND a.Context = @context
+        UNION ALL
+        SELECT a.Version AS version, a.ThumbnailBase64 AS thumbnailBase64,
+               a.UpdatedBy AS updatedBy, a.UpdatedAt AS updatedAt
+        FROM dbo.ActivityBlueprintAnnotation a
+        WHERE a.DependencyMasterActivityId = @rungId AND a.RoomId = @roomId AND a.Context = @context
+        ORDER BY version ASC
+      `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[dependency-activity-assignment] GET /:rungId/blueprint-annotation/history error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Before/After Photo Capture (Part C) ─────────────────────────────────────
 // Replaces the reporting-context blueprint markup as how a field engineer
 // actually updates a work report — a handful of camera photos per phase,
@@ -544,7 +607,8 @@ router.get("/:rungId/photos", authMiddleware, async (req, res) => {
     `);
     const before = result.recordset.filter((p) => p.phase === "before");
     const after = result.recordset.filter((p) => p.phase === "after");
-    res.json({ before, after });
+    const progress = result.recordset.filter((p) => p.phase === "progress");
+    res.json({ before, after, progress });
   } catch (err) {
     console.error("[dependency-activity-assignment] GET /:rungId/photos error:", err.message);
     res.status(500).json({ error: err.message });
