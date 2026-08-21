@@ -232,6 +232,11 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
         ls.LenderLHeadId, ls.BorrowerLHeadId,
         ls.CreatedBy, ls.CreatedAt, ls.UpdatedBy, ls.UpdatedAt,
         ls.ClosedAt, ls.NOCAttachmentId, noc.FileName AS NOCFileName,
+        -- sanctionInstrumentLabel() on the frontend needs these to show
+        -- the cheque/mode line under the Status column — never selected
+        -- here before, only on the detail route, so it always rendered
+        -- nothing on the list.
+        ls.PaymentMode, ls.ChequeNo, ls.ChequeDate, ls.DigitalRefNumber,
         (SELECT COUNT(*) FROM dbo.LoanEMISchedule e WHERE e.LoanId = ls.LoanId) AS TotalEMIs,
         (SELECT COUNT(*) FROM dbo.LoanEMISchedule e WHERE e.LoanId = ls.LoanId AND e.IsPaid = 1) AS PaidEMIs,
         -- Real amounts, not just installment counts — a linear "count paid
