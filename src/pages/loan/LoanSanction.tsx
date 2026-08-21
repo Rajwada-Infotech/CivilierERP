@@ -691,11 +691,17 @@ export default function LoanSanctionPage() {
       header: "Status",
       cell: ({ row }) => {
         const closed = row.original.Status === "Closed";
+        const instrument = sanctionInstrumentLabel(row.original);
         return (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-            <span className="w-1.5 h-1.5 rounded-full inline-block bg-emerald-500" />
-            {closed ? "Sanctioned" : row.original.Status}
-          </span>
+          <div className="flex flex-col gap-0.5">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              <span className="w-1.5 h-1.5 rounded-full inline-block bg-emerald-500" />
+              {closed ? "Sanctioned" : row.original.Status}
+            </span>
+            {instrument && (
+              <span className="text-[11px] text-muted-foreground pl-3">{instrument}</span>
+            )}
+          </div>
         );
       },
     },
