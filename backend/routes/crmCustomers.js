@@ -89,6 +89,73 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
   }
 });
 
+// GET /suggest — lightweight duplicate-detection endpoint called by the New
+// Customer form in real time (on Mobile/PAN/Name blur) and on explicit
+// submit, so staff see potential duplicates BEFORE they create a new record.
+// Returns up to 5 candidates ranked by match strength:
+//   1. Exact mobile match  (highest confidence — almost certainly the same person)
+//   2. Exact PAN match     (legally unique per person — definitely the same person)
+//   3. Exact email match   (high confidence)
+//   4. Name LIKE % match   (lower confidence — catches "Rahul Sharma" vs "Rahul K Sharma")
+// Route placed BEFORE /:id so Express doesn't mistake "suggest" for a numeric ID.
+router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { mobile, pan, email, name, excludeId } = req.query;
+    const excl = excludeId ? "AND c.Id <> @excl" : "";
+    const req0 = pool.request();
+    if (excludeId) req0.input("excl", sql.Int, parseInt(excludeId));
+
+    const conds = ["c.IsActive = 1", excl];
+    const orClauses = [];
+
+    if (mobile?.toString().trim()) {
+      req0.input("mob", sql.NVarChar(20), mobile.toString().trim());
+      orClauses.push("c.Mobile = @mob");
+    }
+    if (pan?.toString().trim()) {
+      req0.input("pan", sql.NVarChar(20), pan.toString().trim().toUpperCase());
+      orClauses.push("UPPER(c.PanNo) = @pan");
+    }
+    if (email?.toString().trim()) {
+      req0.input("email", sql.NVarChar(200), email.toString().trim().toLowerCase());
+      orClauses.push("LOWER(c.Email) = @email");
+    }
+    if (name?.toString().trim()) {
+      req0.input("name", sql.NVarChar(200), `%${name.toString().trim()}%`);
+      orClauses.push("c.CustomerName LIKE @name");
+    }
+
+    if (!orClauses.length) return res.json([]);
+
+    conds.push(`(${orClauses.join(" OR ")})`);
+
+    // Score each candidate so exact-mobile and exact-PAN matches float to the
+    // top of the list — those are near-certainties, name matches are hints.
+    const scoreExpr = [
+      mobile?.toString().trim() ? "CASE WHEN c.Mobile = @mob THEN 40 ELSE 0 END" : "0",
+      pan?.toString().trim()    ? "CASE WHEN UPPER(c.PanNo) = @pan THEN 40 ELSE 0 END" : "0",
+      email?.toString().trim()  ? "CASE WHEN LOWER(c.Email) = @email THEN 20 ELSE 0 END" : "0",
+      name?.toString().trim()   ? "CASE WHEN c.CustomerName LIKE @name THEN 10 ELSE 0 END" : "0",
+    ].join(" + ");
+
+    const result = await req0.query(`
+      SELECT TOP 5
+        c.Id, c.CustomerNo, c.CustomerName, c.Mobile, c.AltMobile, c.Email, c.PanNo,
+        c.Address AS PermanentAddress, c.City AS PermanentCity,
+        (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id) AS ApplicationCount,
+        (${scoreExpr}) AS MatchScore
+      FROM dbo.CrmCustomer c
+      WHERE ${conds.join(" AND ")}
+      ORDER BY (${scoreExpr}) DESC, c.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-customers] GET /suggest error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /:id — single customer plus every application filed under them, so
 // staff can see their full history in one place (not just the latest one).
 // Also aggregates outstanding payment across EVERY booking this customer
