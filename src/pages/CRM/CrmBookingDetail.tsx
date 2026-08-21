@@ -1462,7 +1462,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             {isOverdue && <div className="text-[10px] text-red-600 font-medium flex items-center gap-0.5"><AlertTriangle size={9} /> Overdue since {new Date(m.DueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</div>}
                           </td>
                           <td className="px-2.5 py-1.5 text-right text-xs text-muted-foreground">{m.Percent != null ? `${m.Percent}%` : "—"}</td>
-                          <td className="px-2.5 py-1.5 text-right font-medium">{fmt(due)}</td>
+                          <td className="px-2.5 py-1.5 text-right font-medium">
+                            {fmt(due)}
+                            {due > 0 && (
+                              <div className="text-[10px] text-muted-foreground font-normal leading-tight mt-0.5">
+                                Prin {fmt(due / (1 + (m.ExtraChargeId ? 18 : Number(booking?.UnitParkingGstRate || 0)) / 100))}<br/>
+                                GST {fmt(due - (due / (1 + (m.ExtraChargeId ? 18 : Number(booking?.UnitParkingGstRate || 0)) / 100)))}
+                              </div>
+                            )}
+                          </td>
                           <td className="px-2.5 py-1.5 text-right text-emerald-700">
                             {fmt(paid)}
                             {mrForThis > 0 && (
