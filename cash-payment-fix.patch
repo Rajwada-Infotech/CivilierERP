@@ -1,0 +1,62 @@
+From 71023c8925cbac93728f8c2c208aedd7cf020253 Mon Sep 17 00:00:00 2001
+From: grenxnja <prith.tiu13@gmail.com>
+Date: Thu, 20 Aug 2026 18:56:11 +0530
+Subject: [PATCH] fix: Cash-mode payment save failing on NOT NULL PBankName
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Payment.tsx disables the Bank field for Cash mode, so PBankName arrived
+null on both create and edit, which the DB column doesn't allow. Default
+it to "Cash-in-Hand A/c" for Cash payments, matching the label GL
+posting already resolves to for cash — PBankID stays null as before.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ backend/routes/newPayment.js | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/backend/routes/newPayment.js b/backend/routes/newPayment.js
+index fcaf4c37..0c70d56a 100644
+--- a/backend/routes/newPayment.js
++++ b/backend/routes/newPayment.js
+@@ -803,6 +803,18 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
+     // All new payments auto-submit to Pending for approval — no manual submit step.
+     const initialStatus = "Pending";
+ 
++    // Cash-mode payments never carry a PBankID (Payment.tsx disables the
++    // Bank field for Cash — "Not applicable for cash payments") but
++    // PBankName is a NOT NULL column, so an unset value fails the insert.
++    // Stamp it with the same "Cash-in-Hand A/c" label GL posting already
++    // resolves to for cash payments (see postPaymentApproval, line ~2212)
++    // — PBankID itself stays null, matching that code's documented
++    // assumption that cash payments never carry one.
++    let resolvedPBankName = req.body.PBankName || PBankName || null;
++    if (PMode === "Cash" && !resolvedPBankName) {
++      resolvedPBankName = "Cash-in-Hand A/c";
++    }
++
+     const insertResult = await pool
+       .request()
+       .input("PPaymentName", sql.VarChar, PPaymentName || "")
+@@ -812,7 +824,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
+       .input("PDocType", sql.VarChar, PDocType || "N/A")
+       .input("PDate", sql.Date, PDate || null)
+       .input("PBankID", sql.Int, normalizeBankId(req.body.PBankID ?? PBankID))
+-      .input("PBankName", sql.VarChar, req.body.PBankName || PBankName || null)
++      .input("PBankName", sql.VarChar, resolvedPBankName)
+       .input("PProject", sql.VarChar, PProject || "")
+       .input("PCompany", sql.VarChar, PCompany || "")
+       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
+@@ -1076,7 +1088,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
+       .input("PDate", sql.Date, PDate || null)
+       .input("PFinYearId", sql.Int, pFinYearIdUpdate)
+       .input("PBankID", sql.Int, normalizeBankId(PBankID))
+-      .input("PBankName", sql.VarChar, PBankName || null)
++      .input("PBankName", sql.VarChar, PBankName || (PMode === "Cash" ? "Cash-in-Hand A/c" : null))
+       .input("PProject", sql.VarChar, PProject || "")
+       .input("PCompany", sql.VarChar, PCompany || "")
+       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
+-- 
+2.55.0.windows.4
+
