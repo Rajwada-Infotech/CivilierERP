@@ -1889,19 +1889,26 @@ export default function LoanSanctionPage() {
                       </div>
                     </div>
 
+                    {(() => {
+                      const isChequeMode = form.paymentMode === "Cheque" || form.paymentMode === "Post-Dated Cheque";
+                      // Bank Loan: the lender IS the bank. Otherwise: the
+                      // lender company's own tagged bank A/C (which bank the
+                      // funds actually left from) — cheque lots are scoped
+                      // to that specific bank, not shown at all until it's
+                      // picked.
+                      const chequeLotBankId = isBankLoan
+                        ? (form.lenderBankId ? Number(form.lenderBankId) : null)
+                        : (form.lenderBankAccountId ? Number(form.lenderBankAccountId) : null);
+                      // Nothing to show for Cash, and nothing to show for
+                      // Cheque mode until a bank is actually picked (the
+                      // picker itself renders null until then) — skip the
+                      // grid entirely rather than leaving an empty gap.
+                      if (form.paymentMode === "Cash" || (isChequeMode && !chequeLotBankId)) return null;
+                      return (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      {(form.paymentMode === "Cheque" || form.paymentMode === "Post-Dated Cheque") && (
+                      {isChequeMode && (
                         <LoanChequePicker
-                          // Bank Loan: the lender IS the bank. Otherwise: the
-                          // lender company's own tagged bank A/C (which bank
-                          // the funds actually left from) — cheque lots are
-                          // scoped to that specific bank, not shown at all
-                          // until it's picked.
-                          bankId={
-                            isBankLoan
-                              ? (form.lenderBankId ? Number(form.lenderBankId) : null)
-                              : (form.lenderBankAccountId ? Number(form.lenderBankAccountId) : null)
-                          }
+                          bankId={chequeLotBankId}
                           chequeLotId={form.chequeLotId}
                           chequeNo={form.chequeNo}
                           chequeDate={form.chequeDate}
@@ -1916,7 +1923,7 @@ export default function LoanSanctionPage() {
                         />
                       )}
 
-                      {!["Cash", "Cheque", "Post-Dated Cheque"].includes(form.paymentMode) && (
+                      {!isChequeMode && (
                         <div className="space-y-2">
                           <label className={labelCls}>Reference Number</label>
                           <input
@@ -1928,6 +1935,8 @@ export default function LoanSanctionPage() {
                         </div>
                       )}
                     </div>
+                      );
+                    })()}
                     <div className="grid grid-cols-2 gap-5 mt-5">
                       <div className="space-y-2">
                         <label className={labelCls}>Purpose</label>
