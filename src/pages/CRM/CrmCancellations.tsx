@@ -2,6 +2,8 @@ import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -193,9 +195,13 @@ const CrmCancellations: React.FC = () => {
       } },
   ];
 
+  usePageRights("crm-cancellations");
+
   return (
-    <CrmShell
-      title="CRM — Cancellations & Refunds"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Cancellations"]} />
+      <CrmShell
+        title="CRM — Cancellations & Refunds"
       subtitle="Booking cancellation requests with auto-calculated refund"
       action={
           <div className="flex items-center gap-3">

@@ -12,6 +12,7 @@ import {
 } from "@/api/accountHeadApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   DataTable,
   type ColumnDef,

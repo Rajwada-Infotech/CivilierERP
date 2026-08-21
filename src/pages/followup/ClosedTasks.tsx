@@ -10,6 +10,8 @@ import { ExportMenu } from "@/components/ExportMenu";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import type { ExportColumn } from "@/lib/export";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/task-master";
 const PRIORITIES = ["Very Important", "Important", "Normal"] as const;
@@ -172,6 +174,7 @@ const ClosedTaskCard: React.FC<{ task: ClosedTask; index: number; onClick: () =>
 
 const ClosedTasks: React.FC = () => {
   const queryClient = useQueryClient();
+  usePageRights("followup-close-tasks");
   const { glassCard } = useGlass();
   const [search, setSearch] = React.useState("");
   const [selectedTaskId, setSelectedTaskId] = React.useState<string | null>(null);
@@ -233,8 +236,10 @@ const ClosedTasks: React.FC = () => {
   ];
 
   return (
-    <FollowupShell
-      title="Close Task"
+    <>
+      <Breadcrumbs items={["Dashboard", "Follow-Up", "Closed Tasks"]} />
+      <FollowupShell
+        title="Close Task"
       subtitle="All tasks that have been closed"
       icon={CheckCircle2}
       action={
@@ -309,7 +314,8 @@ const ClosedTasks: React.FC = () => {
         onClose={() => setSelectedTaskId(null)}
         onStatusChange={handleStatusChange}
       />
-    </FollowupShell>
+      </FollowupShell>
+    </>
   );
 };
 

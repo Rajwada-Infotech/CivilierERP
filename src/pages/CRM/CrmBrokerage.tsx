@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/crm/brokerage";
 const BKG_API = "/api/crm/bookings";
@@ -36,6 +38,7 @@ async function fetchBrokers(): Promise<any[]> {
 const CrmBrokerage: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  usePageRights("crm-brokerage");
   const [searchParams, setSearchParams] = useSearchParams();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -187,8 +190,10 @@ const CrmBrokerage: React.FC = () => {
   ];
 
   return (
-    <CrmShell
-      title="CRM — Brokerage"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Brokerage"]} />
+      <CrmShell
+        title="CRM — Brokerage"
       subtitle="Per-booking broker assignment — internal only, never shown to the customer"
       action={
           <div className="flex items-center gap-3">
@@ -297,7 +302,8 @@ const CrmBrokerage: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </CrmShell>
+      </CrmShell>
+    </>
   );
 };
 

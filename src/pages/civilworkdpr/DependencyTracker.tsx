@@ -6,11 +6,13 @@ import { GitBranch, Loader2 } from "lucide-react";
 import { getDependencyMasters } from "@/api/dependencyMasterApi";
 import { useDependencyMasterList } from "@/pages/masters/DependencyMaster/hooks/useDependencyMasterList";
 import { DependencyMasterListItem } from "@/pages/masters/DependencyMaster/components/DependencyMasterListItem";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // Just the dependency chains defined in Engineering's Dependency Master
 // (/masters/dependency) — nothing else. Reuses that page's own list-row +
 // expand-to-chain components read-only rather than re-implementing them.
 const DependencyTracker: React.FC = () => {
+  usePageRights("civilworkdpr-dependency");
   const { data: dependencyMasters = [], isLoading } = useQuery({
     queryKey: ["dependencyMastersForCivilDpr"],
     queryFn: getDependencyMasters,

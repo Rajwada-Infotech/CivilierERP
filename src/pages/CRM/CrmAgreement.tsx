@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, FolderClock, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -788,9 +790,13 @@ const CrmAgreement: React.FC = () => {
     }
   };
 
+  usePageRights("crm-agreements");
+
   return (
-    <CrmShell
-      title="CRM — Agreements"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Agreements"]} />
+      <CrmShell
+        title="CRM — Agreements"
       subtitle="Sale agreements and legal documents"
       action={
           <div className="flex items-center gap-3">

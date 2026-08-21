@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { promptNextStep } from "@/lib/workflowNav";
 import { translateError } from "@/lib/translateError";
@@ -250,9 +252,13 @@ const CrmHandover: React.FC = () => {
   const currentStatus = detail?.handover?.Status ?? "";
   const allowedNextStatuses = ALLOWED_TRANSITIONS[currentStatus] ?? [];
 
+  usePageRights("crm-handover");
+
   return (
-    <CrmShell
-      title="CRM — Possession & Handover"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Handover"]} />
+      <CrmShell
+        title="CRM — Possession & Handover"
       subtitle="Snag inspection and key handover workflow"
       action={
           <div className="flex items-center gap-3">

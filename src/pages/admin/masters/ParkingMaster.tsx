@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { safeHtml } from "@/utils/escapeHtml";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import {
@@ -117,6 +118,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const ParkingMaster: React.FC = () => {
+  usePageRights("parking-master");
   const queryClient = useQueryClient();
 
   const { data: rates, isLoading, error } = useQuery({

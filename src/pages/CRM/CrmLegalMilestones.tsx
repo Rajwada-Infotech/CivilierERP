@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, CheckCircle2, Circle, ArrowRight, ExternalLink, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -171,9 +173,13 @@ const CrmLegalMilestones: React.FC = () => {
   const agreementDone = selected?.FinalExecutionStatus === "Completed";
   const postStages = selected ? buildPostAgreementStages(selected) : [];
 
+  usePageRights("crm-legal-milestones");
+
   return (
-    <CrmShell
-      title="CRM — Legal Milestones"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Legal Milestones"]} />
+      <CrmShell
+        title="CRM — Legal Milestones"
       subtitle="Agreement through registration: the full post-booking legal journey in one place"
       action={
           <div className="flex items-center gap-3">

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { SalesShell } from "@/components/sales/SalesShell";
 import {
   IndianRupee,
@@ -500,6 +501,7 @@ function PaymentHistoryTable({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Payment() {
+  usePageRights("sales-payment");
   const qc = useQueryClient();
   const { finYears } = useFinYear();
 

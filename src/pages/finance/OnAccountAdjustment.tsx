@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { preventEnterSubmit } from "@/hooks/useDraftForm";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   ArrowRight, RefreshCw, Wallet, Loader2, TrendingUp, Users, X, CheckCircle2, ChevronDown,
   BadgeDollarSign, ArrowUpCircle, ArrowDownCircle,
@@ -403,6 +404,7 @@ function AdjustDialog({
 // ── Main Page ────────────────────────────────────────────────────────────────
 export default function OnAccountAdjustment() {
   const queryClient = useQueryClient();
+  usePageRights("on-account-adjustment");
   const [selectedPartyId, setSelectedPartyId] = useState<string>("all");
   const [adjustingEntry, setAdjustingEntry] = useState<CreditEntry | null>(null);
   // Live balance override after adjustment (partyId → new balance)

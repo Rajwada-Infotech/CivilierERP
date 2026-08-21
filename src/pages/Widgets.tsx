@@ -6,6 +6,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { usePageRights } from "@/hooks/usePageRights";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
   getWidgetCatalog,
@@ -1464,6 +1465,7 @@ const widgetComponents: Record<string, React.ComponentType> = {
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 const Widgets = () => {
+  usePageRights("widgets");
   const [searchParams] = useSearchParams();
   const [selected, setSelected] = useState<string | null>(
     searchParams.get("w"),

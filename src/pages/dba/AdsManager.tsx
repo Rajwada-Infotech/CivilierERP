@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { DbaShell } from "@/components/dba/DbaShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -117,6 +118,7 @@ const CREATIVE_STATUS_CONFIG = {
 };
 
 export default function AdsManager() {
+  usePageRights("dba-ads");
   const queryClient = useQueryClient();
 
   const { data: serverAds = [] } = useQuery<Ad[]>({

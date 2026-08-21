@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
@@ -283,6 +284,7 @@ const timeAgo = (iso: string) => {
 
 // ─── Dashboard component ──────────────────────────────────────────────────────
 export default function CivilWorkDprDashboard() {
+  usePageRights("civilworkdpr-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
   const isDark = theme !== "light";

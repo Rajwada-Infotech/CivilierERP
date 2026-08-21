@@ -42,6 +42,8 @@ import {
 } from "@/components/ui/dialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const REPORT_API = "/api/task-performance-report";
 const ACCENT = "#0d9488";
@@ -332,6 +334,7 @@ const DETAIL_FILTER_LABELS: Record<DetailFilterKey, string> = {
 
 const TagPerformanceReport: React.FC = () => {
   const { isDark, cardStyle } = useGlass();
+  usePageRights("task-performance-report");
   const queryClient = useQueryClient();
   const [filters, setFilters] = React.useState<Filters>(EMPTY_FILTERS);
   const [dateError, setDateError] = React.useState<string | null>(null);
@@ -610,8 +613,10 @@ const TagPerformanceReport: React.FC = () => {
   };
 
   return (
-    <FollowupShell
-      title="Tag Performance Report"
+    <>
+      <Breadcrumbs items={["Dashboard", "Follow-Up", "Tag Performance"]} />
+      <FollowupShell
+        title="Tag Performance Report"
       subtitle="Task volume and completion, broken down by tag"
       icon={TagsIcon}
       action={
@@ -804,7 +809,8 @@ const TagPerformanceReport: React.FC = () => {
         onClose={() => setSelectedTaskId(null)}
         onStatusChange={handleTaskStatusChange}
       />
-    </FollowupShell>
+      </FollowupShell>
+    </>
   );
 };
 

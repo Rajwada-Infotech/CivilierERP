@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -349,6 +350,7 @@ function UserCard({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function PasswordReset() {
+  usePageRights("password-reset");
   const { allUsers: contextUsers } = useAuth();
   const [localUsers, setLocalUsers] = useState<typeof contextUsers | null>(null);
   const [refreshing, setRefreshing]  = useState(false);

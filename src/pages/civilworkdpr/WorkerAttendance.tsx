@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import {
@@ -119,6 +120,7 @@ function WorkerCard({ worker, onClick }: { worker: WorkerSummary; onClick: () =>
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 const WorkerAttendance: React.FC = () => {
+  usePageRights("civilworkdpr-worker-attendance");
   const [companyId, setCompanyId] = useState<number | "">("");
   const [projectId, setProjectId] = useState<number | "">("");
   const [activityId, setActivityId] = useState<number | "">("");

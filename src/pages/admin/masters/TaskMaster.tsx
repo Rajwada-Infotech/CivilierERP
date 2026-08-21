@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { PauseCircle, PlayCircle, XCircle, Download, Upload, ListPlus, CornerDownRight, ChevronRight, ChevronDown, AlarmClock, ChevronsUpDown, Check, Loader2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -635,6 +636,7 @@ const IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
 ];
 
 const TaskMaster: React.FC = () => {
+  usePageRights("task-master");
   const queryClient = useQueryClient();
 
   // Which parent tasks currently have their subtasks expanded — collapsed

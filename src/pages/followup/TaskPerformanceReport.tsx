@@ -26,6 +26,8 @@ import { FollowupShell } from "@/components/followup/FollowupShell";
 import { DataTable, type ColumnDef, type ExportColumn } from "@/components/ui/DataTable";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const REPORT_API = "/api/task-performance-report";
 const ACCENT = "#0d9488";
@@ -264,6 +266,7 @@ function FilterField({
 
 const TaskPerformanceReport: React.FC = () => {
   const { glassCard } = useGlass();
+  usePageRights("task-performance-report");
   const [filters, setFilters] = React.useState<Filters>(EMPTY_FILTERS);
   const [dateError, setDateError] = React.useState<string | null>(null);
 
@@ -472,8 +475,10 @@ const TaskPerformanceReport: React.FC = () => {
   };
 
   return (
-    <FollowupShell
-      title="Task Performance Report"
+    <>
+      <Breadcrumbs items={["Dashboard", "Follow-Up", "Task Performance"]} />
+      <FollowupShell
+        title="Task Performance Report"
       subtitle="Completion time, delays and follow-up activity across all tasks"
       icon={Chart2}
       action={
@@ -639,7 +644,8 @@ const TaskPerformanceReport: React.FC = () => {
           />
         </div>
       </div>
-    </FollowupShell>
+      </FollowupShell>
+    </>
   );
 };
 

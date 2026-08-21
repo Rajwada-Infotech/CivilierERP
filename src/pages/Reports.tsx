@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   Dialog,
   DialogContent,
@@ -2331,6 +2332,7 @@ const ReportTile: React.FC<{
 const MARKETING_HEAD_SECTION_IDS = new Set(["sales-automation", "crm"]);
 
 const Reports: React.FC = () => {
+  usePageRights("reports");
   const { currentUser } = useAuth();
   const visibleSections =
     currentUser?.role === "marketing_head"

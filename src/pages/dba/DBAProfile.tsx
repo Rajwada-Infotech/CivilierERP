@@ -1,6 +1,7 @@
 import React from "react";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getUserProfile,
@@ -115,6 +116,7 @@ const ACTIVITY_COLUMNS = [
 ];
 
 export default function DBAProfile() {
+  usePageRights("dba-profile");
   const {
     currentUser,
     updateCurrentUserName,
