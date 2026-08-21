@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
@@ -137,6 +137,18 @@ export default function WorkCheckpointMaster() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["activity-checkpoints", activityId] });
 
+  // Overview of every activity's checkpoints at once — the picker below
+  // only ever shows one activity at a time, which makes it easy to forget
+  // what's already been defined elsewhere. One query per activity (there
+  // are only a handful of internal activities), all run in parallel.
+  const allCheckpointQueries = useQueries({
+    queries: activities.map((a) => ({
+      queryKey: ["activity-checkpoints", String(a.id)],
+      queryFn: () => getActivityCheckpoints(a.id),
+      staleTime: 30_000,
+    })),
+  });
+
   const handleAdd = async () => {
     const trimmed = newField.trim();
     if (!trimmed || !activityId) return;
@@ -192,6 +204,51 @@ export default function WorkCheckpointMaster() {
                     </select>
                   </div>
                 )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
+                <ListChecks size={14} className="text-cyan-600 dark:text-cyan-400" />
+                <span className="text-sm font-heading font-semibold text-foreground">All Checkpoints</span>
+              </div>
+              <div className="p-5 grid gap-4 sm:grid-cols-2">
+                {activities.map((a, i) => {
+                  const q = allCheckpointQueries[i];
+                  const cps = q?.data ?? [];
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => setActivityId(String(a.id))}
+                      className={`text-left rounded-lg border px-3.5 py-3 transition-colors ${
+                        String(a.id) === activityId
+                          ? "border-cyan-500/50 bg-cyan-500/5"
+                          : "border-border hover:border-cyan-500/30 hover:bg-muted/20"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="text-sm font-heading font-semibold text-foreground">{a.activity_name}</span>
+                        <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full shrink-0">
+                          {q?.isLoading ? "…" : cps.length}
+                        </span>
+                      </div>
+                      {q?.isLoading ? (
+                        <div className="h-4 w-2/3 rounded bg-muted/40 animate-pulse" />
+                      ) : cps.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic">No checkpoints yet</p>
+                      ) : (
+                        <ul className="space-y-0.5">
+                          {cps.map((cp) => (
+                            <li key={cp.id} className="text-xs text-muted-foreground truncate">
+                              · {cp.fieldName}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
