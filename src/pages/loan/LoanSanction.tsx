@@ -238,6 +238,13 @@ function LoanChequePicker({
   const [validating, setValidating] = useState(false);
 
   useEffect(() => {
+    // No bank picked yet — don't fetch at all, let alone show every active
+    // lot across every bank. The picker stays hidden until there's an
+    // actual bank to scope it to (see the bankId == null render guard).
+    if (!bankId) {
+      setLots([]);
+      return;
+    }
     setLoadingLots(true);
     fetchChequeLots(bankId)
       .then((fetched) => {
@@ -279,6 +286,11 @@ function LoanChequePicker({
       setValidating(false);
     }
   };
+
+  // Nothing to scope a cheque lot to yet — stay out of the way entirely
+  // rather than showing every lot across every bank, or an explanatory
+  // "select a bank first" placeholder.
+  if (!bankId) return null;
 
   return (
     <>
@@ -1074,9 +1086,26 @@ export default function LoanSanctionPage() {
                     <TrendingDown size={9} /> Loan Received
                   </span>
                 )}
+                {/* Lifecycle badge — three real states, not just Sanctioned
+                    vs Closed: a loan can be Sanctioned (still repaying),
+                    fully repaid but not yet formally closed ("Paid" — see
+                    the matching "Fully repaid" text on the Repayment
+                    History tab), or Closed (NOC issued). This used to show
+                    a "Sanctioned" label specifically when Status==="Closed",
+                    inverted from what it should say. */}
                 {viewingLoan && viewingLoan.Status === "Closed" && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-slate-500/15 text-slate-600 dark:text-slate-400">
+                    <FileCheck2 size={10} /> Closed
+                  </span>
+                )}
+                {viewingLoan && viewingLoan.Status !== "Closed" && totalEmis > 0 && paidEmis === totalEmis && (
                   <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 size={10} /> Sanctioned
+                    <CheckCircle2 size={10} /> Paid
+                  </span>
+                )}
+                {viewingLoan && viewingLoan.Status !== "Closed" && !(totalEmis > 0 && paidEmis === totalEmis) && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                    <MoneyRecive size={10} /> Sanctioned
                   </span>
                 )}
                 {viewingLoan && viewingLoan.Status !== "Closed" && nextDue && (
@@ -1593,7 +1622,7 @@ export default function LoanSanctionPage() {
                   </>
                 ) : (
                   <>
-                    <div className="grid grid-cols-2 gap-5">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                       <div className="space-y-2">
                         <label className={labelCls}>
                           Lender {isBankLoan ? "Bank" : "Company"} <span className="text-red-500">*</span>
@@ -1661,67 +1690,49 @@ export default function LoanSanctionPage() {
                           </select>
                         )}
                       </div>
-                    </div>
 
-                    {(isInterCompanyType || isCustomerLoan) && (
-                      <div className="grid grid-cols-2 gap-5">
-                        <div className="space-y-2">
-                          <label className={labelCls}>Lender Bank A/C</label>
-                          <select
-                            className={inputCls}
-                            value={form.lenderBankAccountId}
-                            onChange={(e) => set("lenderBankAccountId", e.target.value)}
-                            disabled={!form.lenderCompanyId}
-                          >
-                            <option value="">
-                              {form.lenderCompanyId ? "— No bank A/C tag —" : "— Select lender company first —"}
-                            </option>
-                            {banksForCompany(companyName(form.lenderCompanyId)).map((b: BankRecord) => (
-                              <option key={b.BId} value={b.BId}>
-                                {b.BName}
-                              </option>
-                            ))}
-                          </select>
-                          <p className="text-[11px] text-muted-foreground">
-                            {isCustomerLoan
-                              ? "Which of the lender's bank accounts repayments actually land in."
-                              : "Which of the lender's bank accounts the funds actually left from."}
-                            {form.lenderCompanyId && banksForCompany(companyName(form.lenderCompanyId)).length === 0 &&
-                              " No banks tagged to this company in Bank Master."}
-                          </p>
-                        </div>
-                        {/* Borrower Bank A/C only applies to Inter-Company —
-                            a Customer Loan's borrower is external and has no
-                            bank account of ours to tag. */}
-                        {isInterCompanyType && (
+                      {(isInterCompanyType || isCustomerLoan) && (
+                        <>
                           <div className="space-y-2">
-                            <label className={labelCls}>Borrower Bank A/C</label>
+                            <label className={labelCls}>Lender Bank A/C</label>
                             <select
                               className={inputCls}
-                              value={form.borrowerBankAccountId}
-                              onChange={(e) => set("borrowerBankAccountId", e.target.value)}
-                              disabled={!form.borrowerCompanyId}
+                              value={form.lenderBankAccountId}
+                              onChange={(e) => set("lenderBankAccountId", e.target.value)}
+                              disabled={!form.lenderCompanyId}
                             >
-                              <option value="">
-                                {form.borrowerCompanyId ? "— No bank A/C tag —" : "— Select borrower company first —"}
-                              </option>
-                              {banksForCompany(companyName(form.borrowerCompanyId)).map((b: BankRecord) => (
+                              <option value="">— Select —</option>
+                              {banksForCompany(companyName(form.lenderCompanyId)).map((b: BankRecord) => (
                                 <option key={b.BId} value={b.BId}>
                                   {b.BName}
                                 </option>
                               ))}
                             </select>
-                            <p className="text-[11px] text-muted-foreground">
-                              Which of the borrower's bank accounts the funds landed in.
-                              {form.borrowerCompanyId && banksForCompany(companyName(form.borrowerCompanyId)).length === 0 &&
-                                " No banks tagged to this company in Bank Master."}
-                            </p>
                           </div>
-                        )}
-                      </div>
-                    )}
+                          {/* Borrower Bank A/C only applies to Inter-Company —
+                              a Customer Loan's borrower is external and has no
+                              bank account of ours to tag. */}
+                          {isInterCompanyType && (
+                            <div className="space-y-2">
+                              <label className={labelCls}>Borrower Bank A/C</label>
+                              <select
+                                className={inputCls}
+                                value={form.borrowerBankAccountId}
+                                onChange={(e) => set("borrowerBankAccountId", e.target.value)}
+                                disabled={!form.borrowerCompanyId}
+                              >
+                                <option value="">— Select —</option>
+                                {banksForCompany(companyName(form.borrowerCompanyId)).map((b: BankRecord) => (
+                                  <option key={b.BId} value={b.BId}>
+                                    {b.BName}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </>
+                      )}
 
-                    <div className="grid grid-cols-2 gap-5">
                       <div className="space-y-2">
                         <label className={labelCls}>Loan Date <span className="text-red-500">*</span></label>
                         <input
@@ -1785,7 +1796,7 @@ export default function LoanSanctionPage() {
                     )}
 
                     {(!isInterCompanyType || form.hasInterest) && (
-                      <div className="grid grid-cols-2 gap-5">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                         {form.hasInterest && (
                           <div className="space-y-2">
                             <label className={labelCls}>Interest Rate (% p.a.)</label>
@@ -1840,7 +1851,7 @@ export default function LoanSanctionPage() {
                         </p>
                       </div>
                     )}
-                    <div className="grid grid-cols-2 gap-5">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                       <div className="space-y-2">
                         <label className={labelCls}>Payment Mode</label>
                         <select
@@ -1869,7 +1880,16 @@ export default function LoanSanctionPage() {
 
                       {(form.paymentMode === "Cheque" || form.paymentMode === "Post-Dated Cheque") && (
                         <LoanChequePicker
-                          bankId={isBankLoan && form.lenderBankId ? Number(form.lenderBankId) : null}
+                          // Bank Loan: the lender IS the bank. Otherwise: the
+                          // lender company's own tagged bank A/C (which bank
+                          // the funds actually left from) — cheque lots are
+                          // scoped to that specific bank, not shown at all
+                          // until it's picked.
+                          bankId={
+                            isBankLoan
+                              ? (form.lenderBankId ? Number(form.lenderBankId) : null)
+                              : (form.lenderBankAccountId ? Number(form.lenderBankAccountId) : null)
+                          }
                           chequeLotId={form.chequeLotId}
                           chequeNo={form.chequeNo}
                           chequeDate={form.chequeDate}
