@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Mail, Save, Loader2, CheckCircle2, AlertCircle, Info, Lock } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { cn } from "@/lib/utils";
 
 interface EmailConfig {
@@ -61,11 +62,13 @@ export default function EmailSetup() {
   const isConfigured = !!(form.smtpHost && form.smtpPort && form.smtpUser && form.smtpPassword && form.fromEmail);
 
   return (
-    <AdminShell
-      title="Email Configuration"
-      subtitle="SMTP settings for system-wide email notifications"
-      icon={Mail}
-    >
+    <>
+      <Breadcrumbs items={["Dashboard", "Admin", "Communicator", "Email"]} />
+      <AdminShell
+        title="Email Configuration"
+        subtitle="SMTP settings for system-wide email notifications"
+        icon={Mail}
+      >
       <div className="flex gap-6 items-start">
 
         {/* LEFT — form */}
@@ -205,5 +208,6 @@ export default function EmailSetup() {
         </div>
       </div>
     </AdminShell>
+    </>
   );
 }

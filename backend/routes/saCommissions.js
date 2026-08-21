@@ -7,6 +7,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { postSaCommissionToGL } = require("../services/saLedger");
 const { recordGLPosting } = require("../services/approvalService");
+const { assertNoChannelPartnerBrokerageConflict } = require("../services/saCommissionGuards");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -35,6 +36,10 @@ function toNullableNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const parsed = parseFloat(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasChannelPartnerPayout(channelPartnerId, cpRate, cpAmount) {
+  return !!channelPartnerId || Number(cpRate || 0) > 0 || Number(cpAmount || 0) > 0;
 }
 
 // GET / — all commissions (admin) or own commissions (SP/TL)
@@ -76,13 +81,20 @@ router.post("/", requirePageRight("sa-commissions", "create"), async (req, res) 
     const spAmount = spRate != null && bv != null ? Math.round(bv * spRate) / 100 : null;
     const tlAmount = tlRate != null && bv != null ? Math.round(bv * tlRate) / 100 : null;
     const cpAmount = cpRate != null && bv != null ? Math.round(bv * cpRate) / 100 : null;
+    const bookingId = b.BookingId ? parseInt(b.BookingId) : null;
+    const channelPartnerId = b.ChannelPartnerId ? parseInt(b.ChannelPartnerId) : null;
+
+    if (hasChannelPartnerPayout(channelPartnerId, cpRate, cpAmount)) {
+      return res.status(400).json({ error: "Channel partner payouts must be handled through CRM Brokerage, not SA Commissions." });
+    }
+    await assertNoChannelPartnerBrokerageConflict(pool, bookingId, channelPartnerId, cpAmount);
 
     const result = await pool.request()
       .input("lid",   sql.Int,           b.LeadId   ? parseInt(b.LeadId)   : null)
-      .input("bid",   sql.Int,           b.BookingId? parseInt(b.BookingId): null)
+      .input("bid",   sql.Int,           bookingId)
       .input("spid",  sql.Int,           b.SalespersonId ? parseInt(b.SalespersonId) : null)
       .input("tlid",  sql.Int,           b.TeamLeadId    ? parseInt(b.TeamLeadId)    : null)
-      .input("cpid",  sql.Int,           b.ChannelPartnerId ? parseInt(b.ChannelPartnerId) : null)
+      .input("cpid",  sql.Int,           channelPartnerId)
       .input("bv",    sql.Decimal(18,2), bv)
       .input("spRate",sql.Decimal(5,2),  spRate)
       .input("spAmt", sql.Decimal(18,2), spAmount)
@@ -102,7 +114,7 @@ router.post("/", requirePageRight("sa-commissions", "create"), async (req, res) 
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
     console.error("[sa-commissions] POST error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.statusCode || 500).json({ error: e.message, conflict: e.conflict });
   }
 });
 
@@ -121,6 +133,21 @@ router.put("/:id", requirePageRight("sa-commissions", "edit"), async (req, res) 
     const spAmount = spRate != null && bv != null ? Math.round(bv * spRate) / 100 : null;
     const tlAmount = tlRate != null && bv != null ? Math.round(bv * tlRate) / 100 : null;
     const cpAmount = cpRate != null && bv != null ? Math.round(bv * cpRate) / 100 : null;
+
+    const current = await pool.request()
+      .input("id", sql.Int, id)
+      .query("SELECT BookingId, ChannelPartnerId, CpAmount FROM dbo.SaCommission WHERE Id = @id");
+    if (!current.recordset.length) return res.status(404).json({ error: "Commission not found" });
+    const cur = current.recordset[0];
+    if (hasChannelPartnerPayout(cur.ChannelPartnerId, cpRate, cpAmount != null ? cpAmount : cur.CpAmount)) {
+      return res.status(400).json({ error: "Channel partner payouts must be handled through CRM Brokerage, not SA Commissions." });
+    }
+    await assertNoChannelPartnerBrokerageConflict(
+      pool,
+      cur.BookingId,
+      cur.ChannelPartnerId,
+      cpAmount != null ? cpAmount : cur.CpAmount,
+    );
 
     const approveClause = b.Status === "Approved"
       ? ", ApprovedBy = @actor, ApprovedAt = SYSDATETIME()"
@@ -174,7 +201,7 @@ router.put("/:id", requirePageRight("sa-commissions", "edit"), async (req, res) 
     res.json({ success: true });
   } catch (e) {
     console.error("[sa-commissions] PUT error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.statusCode || 500).json({ error: e.message, conflict: e.conflict });
   }
 });
 

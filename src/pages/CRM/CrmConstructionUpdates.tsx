@@ -7,6 +7,8 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, HardHat } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/crm/construction-updates";
 const UNIT_API = "/api/unit-master";
@@ -23,6 +25,7 @@ async function fetchProjects(): Promise<any[]> {
 
 const CrmConstructionUpdates: React.FC = () => {
   const qc = useQueryClient();
+  usePageRights("crm-construction-updates");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
@@ -52,8 +55,10 @@ const CrmConstructionUpdates: React.FC = () => {
   };
 
   return (
-    <CrmShell
-      title="CRM — Construction Updates"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Construction Updates"]} />
+      <CrmShell
+        title="CRM — Construction Updates"
       subtitle="Progress logs shared with buyers"
       action={
           <div className="flex items-center gap-3">
@@ -134,7 +139,8 @@ const CrmConstructionUpdates: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </CrmShell>
+      </CrmShell>
+    </>
   );
 };
 

@@ -2,6 +2,8 @@ import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, Star, UserCheck } from "lucide-react";
 import { translateError } from "@/lib/translateError";
@@ -291,9 +293,13 @@ const CrmServiceTickets: React.FC = () => {
       } },
   ];
 
+  usePageRights("crm-service-tickets");
+
   return (
-    <CrmShell
-      title="CRM — Service Tickets"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Service Tickets"]} />
+      <CrmShell
+        title="CRM — Service Tickets"
       subtitle="After-sales warranty, complaints & service requests"
       action={
           <div className="flex items-center gap-3">
@@ -436,6 +442,7 @@ const CrmServiceTickets: React.FC = () => {
         </DialogContent>
       </Dialog>
     </CrmShell>
+    </>
   );
 };
 

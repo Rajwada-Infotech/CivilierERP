@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -372,9 +374,13 @@ const CrmDemands: React.FC = () => {
   const activeConfig = TAB_CONFIG[activeTab];
   const activeGroups = tabbed[activeTab].groups;
 
+  usePageRights("crm-payments");
+
   return (
-    <CrmShell
-      title="CRM — Payment Demands"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Demands"]} />
+      <CrmShell
+        title="CRM — Payment Demands"
       subtitle="Raise and track formal payment demands across all bookings"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
     >
@@ -557,6 +563,7 @@ const CrmDemands: React.FC = () => {
         </AlertDialogContent>
       </AlertDialog>
     </CrmShell>
+    </>
   );
 };
 

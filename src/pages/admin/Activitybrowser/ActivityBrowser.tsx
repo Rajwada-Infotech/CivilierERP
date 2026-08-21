@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
 import type { ActivityActionType } from "@/api/userActivityApi";
@@ -456,6 +457,7 @@ const ActionRow: React.FC<{ event: SessionEvent; index: number }> = ({
 // ─── Main Component ────────────────────────────────────────────────────────
 
 const ActivityBrowser: React.FC = () => {
+  usePageRights("activity-browser");
   const {
     groupedSessions,
     rawSessions,

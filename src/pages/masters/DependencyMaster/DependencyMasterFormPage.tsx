@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, GitBranch, Loader2, CheckCircle2, Circle } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { Button } from "@/components/ui/button";
 import { getDependencyMaster } from "@/api/dependencyMasterApi";
@@ -26,6 +27,7 @@ export default function DependencyMasterFormPage() {
   const editingId = id ? Number(id) : null;
   const navigate = useNavigate();
   const qc = useQueryClient();
+  usePageRights("dependency-master");
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const { data: editing, isLoading: loadingEditing } = useQuery({

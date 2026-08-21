@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Search, Phone, FileText, Home, MessageSquare, Wrench, ArrowLeft,
@@ -113,8 +115,12 @@ const CrmCustomer360: React.FC = () => {
   const openCustomer = (mobile: string) => { setSelectedMobile(mobile); setExpandedBookingId(null); };
   const backToList = () => setSelectedMobile(null);
 
+  usePageRights("crm-customer-360");
+
   return (
-    <CrmShell title="CRM — Applicant Ledger" subtitle="Full customer journey and centralized financial ledger — lead to after-sales, in one view">
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Customer 360"]} />
+      <CrmShell title="CRM — Applicant Ledger" subtitle="Full customer journey and centralized financial ledger — lead to after-sales, in one view">
       {!selectedMobile ? (
         <>
           <div className="flex gap-2 max-w-md">
@@ -421,6 +427,7 @@ const CrmCustomer360: React.FC = () => {
         </>
       )}
     </CrmShell>
+    </>
   );
 };
 

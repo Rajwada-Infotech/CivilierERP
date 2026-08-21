@@ -109,11 +109,15 @@ router.get(
       const customerId = req.query.customerId
         ? parseInt(req.query.customerId, 10)
         : null;
+      const companyId = req.query.companyId
+        ? parseInt(req.query.companyId, 10) || null
+        : null;
 
       const where = [];
       if (paymentStatus) where.push("si.PaymentStatus = @paymentStatus");
       if (saleOrderId) where.push("si.SaleOrderID = @saleOrderId");
       if (customerId) where.push("si.CustomerID = @customerId");
+      if (companyId) where.push("si.CompanyId = @companyId");
       const extraWhere = where.length ? `AND ${where.join(" AND ")}` : "";
 
       const result = await pool
@@ -122,7 +126,8 @@ router.get(
         .input("limit", sql.Int, limit)
         .input("paymentStatus", sql.NVarChar(50), paymentStatus)
         .input("saleOrderId", sql.Int, saleOrderId)
-        .input("customerId", sql.Int, customerId).query(`
+        .input("customerId", sql.Int, customerId)
+        .input("companyId", sql.Int, companyId).query(`
           SELECT *, COUNT(*) OVER() AS _total FROM (
             ${SI_SELECT}
             ${extraWhere}

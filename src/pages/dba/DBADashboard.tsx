@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { DbaShell } from "@/components/dba/DbaShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -135,6 +136,7 @@ function QueryCellValue({ value }: { value: unknown }) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function DBADashboard() {
+  usePageRights("dba-dashboard");
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<
     "overview" | "tables" | "query" | "history"

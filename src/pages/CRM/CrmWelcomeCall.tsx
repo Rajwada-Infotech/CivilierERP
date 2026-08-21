@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car, AlertTriangle, Download, ShieldCheck, ShieldAlert, RotateCcw, ClipboardList, Send, Unlock, MapPin } from "lucide-react";
@@ -2166,9 +2168,13 @@ const CrmWelcomeCall: React.FC = () => {
   };
   const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
 
+  usePageRights("crm-welcome-calls");
+
   return (
-    <CrmShell
-      title="CRM — Welcome Calls"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Welcome Calls"]} />
+      <CrmShell
+        title="CRM — Welcome Calls"
       subtitle="Work the call queue, verify documents, co-applicant, and bank/nominee details"
     >
       {overdueCount > 0 && (
@@ -2297,6 +2303,7 @@ const CrmWelcomeCall: React.FC = () => {
         <EditCallDialog call={editingCall} onClose={() => setEditingCall(null)} onSaved={() => refetchHistory()} />
       )}
     </CrmShell>
+    </>
   );
 };
 

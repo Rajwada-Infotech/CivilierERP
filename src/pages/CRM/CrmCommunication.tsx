@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/crm/communication";
 const BKG_API = "/api/crm/bookings";
@@ -435,6 +437,7 @@ function MessageBubble({ log, onClick }: { log: any; onClick: () => void }) {
 
 const CrmCommunication: React.FC = () => {
   const qc = useQueryClient();
+  usePageRights("crm-communication");
   const [sp, setSp] = useSearchParams();
   const bkgFilter = sp.get("bookingId") || "";
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -628,8 +631,10 @@ const CrmCommunication: React.FC = () => {
   }, [activeConvo]);
 
   return (
-    <CrmShell
-      title="CRM — Communication Log"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Communication"]} />
+      <CrmShell
+        title="CRM — Communication Log"
       subtitle={filterBooking ? `Showing only ${filterBooking.BookingNo} — ${filterBooking.ApplicantName}` : "Every touchpoint with a buyer, in one place"}
       action={
         <button onClick={() => setDialogOpen(true)}
@@ -848,7 +853,8 @@ const CrmCommunication: React.FC = () => {
           onSaved={() => qc.invalidateQueries({ queryKey: ["crm-communication"] })}
         />
       )}
-    </CrmShell>
+      </CrmShell>
+    </>
   );
 };
 

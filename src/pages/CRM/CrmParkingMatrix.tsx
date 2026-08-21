@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Car, Clock, User, FileText, IndianRupee, CalendarClock, CheckCircle2 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CrmShell } from "@/components/crm/CrmShell";
 import {
@@ -489,6 +490,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
 
 export function ParkingMatrixPage() {
   const navigate = useNavigate();
+  usePageRights("crm-parking-matrix");
   const [projectId, setProjectId] = useState("");
   const [blockId, setBlockId] = useState("");
   const [choiceSlot, setChoiceSlot] = useState<MatrixSlot | null>(null);

@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { safeHtml } from "@/utils/escapeHtml";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -125,6 +126,7 @@ function computeStatus(item: {
 }
 
 const ParkingSlotMaster: React.FC = () => {
+  usePageRights("parking-slot-master");
   const queryClient = useQueryClient();
 
   const { data: slots, isLoading, error } = useQuery({

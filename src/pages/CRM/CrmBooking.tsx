@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -628,9 +630,13 @@ const CrmBooking: React.FC = () => {
   };
   const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
 
+  usePageRights("crm-bookings");
+
   return (
-    <CrmShell
-      title="CRM — Applications and Bookings"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Bookings"]} />
+      <CrmShell
+        title="CRM — Applications and Bookings"
       subtitle="Applications become pending bookings, then move through review, Marketing Head approval, and Director approval"
       action={
         <div className="flex items-center gap-3">
@@ -979,6 +985,7 @@ const CrmBooking: React.FC = () => {
         </Dialog>
       )}
     </CrmShell>
+    </>
   );
 };
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { RecordsShell } from "@/components/records/RecordsShell";
 import {
   FinanceGlassCard,
@@ -1160,6 +1161,7 @@ function NewFolderDialog({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Records() {
+  usePageRights("records");
   const { records, loading, error, refreshRecords } = useRecords();
   const [moduleFilter, setModuleFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");

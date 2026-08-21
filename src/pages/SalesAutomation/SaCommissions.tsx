@@ -30,12 +30,6 @@ async function fetchUsers(): Promise<any[]> {
   return res.json().catch(() => []);
 }
 
-async function fetchPartners(): Promise<any[]> {
-  const res = await fetchWithAuth("/api/sa/channel-partners");
-  if (!res.ok) return [];
-  return res.json().catch(() => []);
-}
-
 function money(value: any) {
   const n = Number(value || 0);
   return n ? n.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "-";
@@ -52,16 +46,13 @@ const SaCommissions: React.FC = () => {
     BookingValue: "",
     SalespersonId: "",
     TeamLeadId: "",
-    ChannelPartnerId: "",
     SpRate: "",
     TlRate: "",
-    CpRate: "",
     Notes: "",
   });
   const { data: commissions = [], isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-commissions"], queryFn: fetchCommissions, staleTime: 30_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-options"], queryFn: fetchLeads, staleTime: 60_000 });
   const { data: users = [] } = useQuery({ queryKey: ["sa-users-options"], queryFn: fetchUsers, staleTime: 60_000 });
-  const { data: partners = [] } = useQuery({ queryKey: ["sa-channel-partners"], queryFn: fetchPartners, staleTime: 60_000 });
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -82,7 +73,7 @@ const SaCommissions: React.FC = () => {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "Failed to create commission");
       toast.success("Commission created");
-      setForm({ LeadId: "", BookingId: "", BookingValue: "", SalespersonId: "", TeamLeadId: "", ChannelPartnerId: "", SpRate: "", TlRate: "", CpRate: "", Notes: "" });
+      setForm({ LeadId: "", BookingId: "", BookingValue: "", SalespersonId: "", TeamLeadId: "", SpRate: "", TlRate: "", Notes: "" });
       await queryClient.invalidateQueries({ queryKey: ["sa-commissions"] });
     } catch (err: any) {
       toast.error(err.message || "Failed to create commission");
@@ -115,17 +106,26 @@ const SaCommissions: React.FC = () => {
       cell: (i) => <span className="whitespace-nowrap">Rs {money(i.row.original.BookingValue)}</span> },
     { accessorKey: "SalespersonName", header: "Salesperson", size: 120, cell: (i) => <span>{i.row.original.SalespersonName || "-"}</span> },
     { accessorKey: "TeamLeadName", header: "Team Lead", size: 120, cell: (i) => <span>{i.row.original.TeamLeadName || "-"}</span> },
-    { accessorKey: "ChannelPartnerName", header: "Channel Partner", size: 130, cell: (i) => <span>{i.row.original.ChannelPartnerName || "-"}</span> },
-    { id: "amounts", header: "Amounts", size: 200, enableSorting: false,
+    { id: "amounts", header: "Amounts", size: 190, enableSorting: false,
       cell: (i) => {
         const c = i.row.original;
-        return <span className="text-xs text-muted-foreground">SP Rs {money(c.SpAmount)} | TL Rs {money(c.TlAmount)} | CP Rs {money(c.CpAmount)}</span>;
+        return <span className="text-xs text-muted-foreground">SP Rs {money(c.SpAmount)} | TL Rs {money(c.TlAmount)}</span>;
+      } },
+    { id: "externalPayout", header: "External Payout", size: 150, enableSorting: false,
+      cell: (i) => {
+        const c = i.row.original;
+        if (!c.ChannelPartnerName && !Number(c.CpAmount || 0)) return <span className="text-muted-foreground">CRM Brokerage</span>;
+        return <span className="text-xs text-amber-600">Legacy CP Rs {money(c.CpAmount)} - use CRM Brokerage</span>;
       } },
     { accessorKey: "Status", header: "Status", size: 100,
       cell: (i) => <span className="inline-flex items-center gap-1.5"><IndianRupee size={13} />{i.row.original.Status}</span> },
     { id: "actions", header: "Actions", size: 130, enableSorting: false,
       cell: (i) => {
         const c = i.row.original;
+        const hasLegacyChannelPartnerPayout = !!c.ChannelPartnerId || Number(c.CpAmount || 0) > 0;
+        if (hasLegacyChannelPartnerPayout) {
+          return <span className="text-xs text-muted-foreground">Use CRM Brokerage</span>;
+        }
         return (
           <>
             {canDoAction("sa-commissions", "edit") && c.Status === "Pending" && (
@@ -144,12 +144,12 @@ const SaCommissions: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell title="Commission Tracking" subtitle="Track sales, team lead and channel partner payouts from bookings"
+    <SalesAutoShell title="Commission Tracking" subtitle="Track internal sales and team-lead commissions from bookings"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       <Breadcrumbs items={["Sales Automation", "Commissions"]} />
       <div className="space-y-5">
         {canDoAction("sa-commissions", "create") && (
-          <form onSubmit={createCommission} className="grid grid-cols-1 md:grid-cols-6 gap-3 rounded-lg border border-border p-4 bg-background">
+          <form onSubmit={createCommission} className="grid grid-cols-1 md:grid-cols-5 gap-3 rounded-lg border border-border p-4 bg-background">
             <select value={form.LeadId} onChange={(e) => setForm({ ...form, LeadId: e.target.value })} className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm">
               <option value="">Lead optional</option>
               {leads.map((l: any) => <option key={l.Id} value={l.Id}>{l.LeadUid} - {l.CustomerName}</option>)}
@@ -164,13 +164,8 @@ const SaCommissions: React.FC = () => {
               <option value="">Team lead</option>
               {users.filter((u: any) => u.role === "sales_team_lead").map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
             </select>
-            <select value={form.ChannelPartnerId} onChange={(e) => setForm({ ...form, ChannelPartnerId: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
-              <option value="">Channel partner</option>
-              {partners.map((p: any) => <option key={p.Id} value={p.Id}>{p.Name}</option>)}
-            </select>
             <input type="number" value={form.SpRate} onChange={(e) => setForm({ ...form, SpRate: e.target.value })} placeholder="SP %" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <input type="number" value={form.TlRate} onChange={(e) => setForm({ ...form, TlRate: e.target.value })} placeholder="TL %" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <input type="number" value={form.CpRate} onChange={(e) => setForm({ ...form, CpRate: e.target.value })} placeholder="CP %" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <input value={form.Notes} onChange={(e) => setForm({ ...form, Notes: e.target.value })} placeholder="Notes" className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <button className="inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium">
               <Plus size={15} /> Add
