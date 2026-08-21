@@ -290,14 +290,25 @@ router.get("/emi-reminders", requirePageRight("loan-sanction", "view"), async (r
   }
 });
 
-// ── GET /emi-payable — all unpaid EMIs across every loan type ─────────────
-// Feeds the Payment page's "Loan EMIs" picker (multi-select or lump sum).
+// ── GET /emi-payable — unpaid EMIs, split by which direction money
+//    actually moves for that loan type ──────────────────────────────────
+// direction=outgoing (default) — Inter-Company/Bank Loan repayments: this
+//   company pays OUT. Feeds Finance > Payment's "Loan EMIs" picker.
+// direction=incoming — Customer Loan repayments only: a customer pays this
+//   company (the lender) BACK. Feeds Received Payment's "Loan EMIs"
+//   picker (migration 356) — a customer repayment is cash coming IN, the
+//   same direction every other Received Payment flow already models, so
+//   it never belonged on the outgoing Payment page to begin with.
 // Registered before "/:id" so it isn't swallowed by the param route.
 router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req, res) => {
   const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+  const direction = req.query.direction === "incoming" ? "incoming" : "outgoing";
   if (!companyId) return res.status(400).json({ error: "companyId is required" });
   try {
     const pool = getPool();
+    const companyScope = direction === "incoming"
+      ? "ls.LoanType = 'Customer Loan' AND ls.LenderCompanyId = @CompanyId"
+      : "ls.LoanType <> 'Customer Loan' AND (ls.LenderCompanyId = @CompanyId OR ls.BorrowerCompanyId = @CompanyId)";
     const result = await pool.request().input("CompanyId", sql.Int, companyId).query(`
       SELECT
         e.EMIId, e.LoanId, e.InstallmentNo, e.DueDate, e.EMIAmount,
@@ -326,7 +337,7 @@ router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
       LEFT JOIN dbo.enterprise lc ON lc.id = ls.LenderCompanyId AND lc.business_type = 'C'
       WHERE e.IsPaid = 0 AND ls.Status <> 'Closed'
-        AND (ls.LenderCompanyId = @CompanyId OR ls.BorrowerCompanyId = @CompanyId)
+        AND ${companyScope}
       ORDER BY e.DueDate ASC
     `);
     res.json(result.recordset);
@@ -490,22 +501,27 @@ router.get("/:id/payments", requirePageRight("loan-sanction", "view"), async (re
         p.ClosedLoan, p.Notes, p.CreatedBy, p.CreatedAt,
         p.IsReversed, p.ReversedAt, p.ReversedReason,
         (SELECT COUNT(*) FROM dbo.LoanEMISchedule e WHERE e.PaymentId = p.PaymentId) AS EmisCovered,
-        -- The actual payment instrument used (see migration 340) — settling
-        -- a Loan EMI always goes through Finance > Payment first, which is
-        -- where mode/cheque/bank/reference are genuinely captured; this
-        -- table itself never stored them until the NewPaymentId link.
+        -- The actual payment instrument used (see migration 340) — a Loan
+        -- EMI settles through either Finance > Payment (money going OUT —
+        -- Inter-Company/Bank Loan) or Received Payment (money coming IN —
+        -- a Customer Loan repayment, migration 356), never both; whichever
+        -- one this row is linked to is where mode/cheque/bank/reference
+        -- were genuinely captured, so every field below is COALESCEd
+        -- across the two possible sources.
         np.PPaymentID AS NewPaymentId,
-        np.PMode AS PaymentMode,
-        np.PChequeNo AS ChequeNo,
-        np.PChequeDate AS ChequeDate,
-        np.PBankName AS BankName,
-        np.PNeftNumber AS NeftNumber,
+        rp.RPPaymentID AS ReceivedPaymentId,
+        COALESCE(np.PMode, rp.RPMode) AS PaymentMode,
+        COALESCE(np.PChequeNo, rp.RPCheckNumber) AS ChequeNo,
+        COALESCE(np.PChequeDate, rp.RPChequeDate) AS ChequeDate,
+        COALESCE(np.PBankName, rp.RPDepositBankName, rp.RPBankName) AS BankName,
+        COALESCE(np.PNeftNumber, rp.RPTransactionId) AS NeftNumber,
         np.PUpiTransactionId AS UpiTransactionId,
         np.PRtgsReference AS RtgsReference,
         np.PImpsReference AS ImpsReference,
-        np.DocNo AS PaymentDocNo
+        COALESCE(np.DocNo, rp.RPDocNo) AS PaymentDocNo
       FROM dbo.LoanPayment p
       LEFT JOIN dbo.NewPayment np ON np.PPaymentID = p.NewPaymentId
+      LEFT JOIN dbo.ReceivedPayment rp ON rp.RPPaymentID = p.ReceivedPaymentId
       WHERE p.LoanId = @id
       ORDER BY p.PaymentDate ASC, p.PaymentId ASC
     `);
@@ -1321,17 +1337,20 @@ async function postBankLoanRepayment(pool, { loan, paymentId, paymentRef, paymen
 // total — it's an additional charge, not principal/interest.
 router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, res) => {
   const loanId = parseInt(req.params.id, 10);
-  const { emiIds, lumpSumAmount, lateFee, paymentDate, notes, newPaymentId } = req.body;
+  const { emiIds, lumpSumAmount, lateFee, paymentDate, notes, newPaymentId, receivedPaymentId } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
   if (!Number.isFinite(loanId)) return res.status(400).json({ error: "Invalid id" });
 
-  // The dbo.NewPayment row Payment.tsx just created for this settlement
-  // (see migration 340) — links this LoanPayment back to the record that
-  // actually carries payment mode/cheque no./bank/reference, so the loan's
-  // own Repayment History isn't blind to how it was paid. Optional: some
-  // callers (e.g. a future manual settle-from-Loan-Sanction path) may not
-  // have one yet.
+  // Exactly one of these is expected — the dbo.NewPayment row Finance >
+  // Payment just created (money going OUT, see migration 340) or the
+  // dbo.ReceivedPayment row Received Payment just created (money coming
+  // IN — a Customer Loan repayment, migration 356). Links this LoanPayment
+  // back to whichever one actually carries payment mode/cheque no./bank/
+  // reference, so the loan's own Repayment History isn't blind to how it
+  // was paid. Both optional: some callers (e.g. a future manual
+  // settle-from-Loan-Sanction path) may not have either yet.
   const resolvedNewPaymentId = Number.isFinite(parseInt(newPaymentId, 10)) ? parseInt(newPaymentId, 10) : null;
+  const resolvedReceivedPaymentId = Number.isFinite(parseInt(receivedPaymentId, 10)) ? parseInt(receivedPaymentId, 10) : null;
 
   const fee = lateFee != null && lateFee !== "" ? parseFloat(lateFee) : 0;
   const isLumpSum = lumpSumAmount != null && lumpSumAmount !== "";
@@ -1453,12 +1472,13 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
       .input("ClosedLoan", sql.Bit, willClose ? 1 : 0)
       .input("Notes", sql.NVarChar(500), notes || null)
       .input("NewPaymentId", sql.Int, resolvedNewPaymentId)
+      .input("ReceivedPaymentId", sql.Int, resolvedReceivedPaymentId)
       .input("CreatedBy", sql.NVarChar(150), actor).query(`
         INSERT INTO dbo.LoanPayment
-          (LoanId, PaymentRef, PaymentDate, PaymentType, PrincipalInterestAmount, LateFee, TotalAmount, ExcessCredited, ClosedLoan, Notes, NewPaymentId, CreatedBy)
+          (LoanId, PaymentRef, PaymentDate, PaymentType, PrincipalInterestAmount, LateFee, TotalAmount, ExcessCredited, ClosedLoan, Notes, NewPaymentId, ReceivedPaymentId, CreatedBy)
         OUTPUT INSERTED.PaymentId
         VALUES
-          (@LoanId, @PaymentRef, @PaymentDate, @PaymentType, @PrincipalInterestAmount, @LateFee, @TotalAmount, @ExcessCredited, @ClosedLoan, @Notes, @NewPaymentId, @CreatedBy)
+          (@LoanId, @PaymentRef, @PaymentDate, @PaymentType, @PrincipalInterestAmount, @LateFee, @TotalAmount, @ExcessCredited, @ClosedLoan, @Notes, @NewPaymentId, @ReceivedPaymentId, @CreatedBy)
       `);
     const paymentId = paymentInsert.recordset[0].PaymentId;
 

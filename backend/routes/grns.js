@@ -571,6 +571,12 @@ router.get("/", cache("grns", 300), async (req, res) => {
         td.Description AS DocTypeDescription,
         grn.SourceTransferID,
         grn.SourceTransferDocNo,
+        grn.VehicleInOutID,
+        grn.DirectEntryReason,
+        -- Derived, not stored — see migration 357's own comment on why a
+        -- separate EntryMode column would just be one more thing to drift
+        -- out of sync with the FK it describes.
+        CASE WHEN grn.VehicleInOutID IS NULL THEN 'DIRECT' ELSE 'GATE' END AS EntryMode,
         COUNT(*) OVER() AS _total
       FROM GoodsReceiptNotes grn
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
@@ -673,6 +679,8 @@ router.get("/:id", async (req, res) => {
           grn.SupplierID,
           grn.POID,
           grn.VehicleInOutID,
+          grn.DirectEntryReason,
+          CASE WHEN grn.VehicleInOutID IS NULL THEN 'DIRECT' ELSE 'GATE' END AS EntryMode,
           grn.GRNItems,
           grn.Status,
           grn.Remarks,
@@ -733,6 +741,12 @@ async function createGRNInternal(pool, body, userEmail) {
       supplierId,
       poId,
       vehicleInOutId = null,
+      // Only meaningful when vehicleInOutId is null — why the vehicle gate
+      // was skipped for this GRN (Local Supplier, Emergency Procurement,
+      // etc.), for audit trail. Silently ignored otherwise rather than
+      // erroring, since a client could legitimately send a stale value
+      // left over from toggling the form back to Gate mode.
+      directEntryReason = null,
       grnItems,
       status,
       remarks,
@@ -880,6 +894,11 @@ async function createGRNInternal(pool, body, userEmail) {
           vehicleInOutId ? parseInt(vehicleInOutId, 10) : null,
         )
         .input(
+          "DirectEntryReason",
+          sql.NVarChar(200),
+          !vehicleInOutId && directEntryReason ? String(directEntryReason).slice(0, 200) : null,
+        )
+        .input(
           "GRNItems",
           sql.NVarChar(sql.MAX),
           JSON.stringify(grnItems || []),
@@ -896,12 +915,12 @@ async function createGRNInternal(pool, body, userEmail) {
         .input("GodownID", sql.Int, resolvedGodownId)
         .input("CreatedDate", sql.DateTime2, new Date()).query(`
         INSERT INTO GoodsReceiptNotes
-          (GRNNo, GRNDate, DocDate, SupplierID, POID, VehicleInOutID, GRNItems, Status, Remarks,
+          (GRNNo, GRNDate, DocDate, SupplierID, POID, VehicleInOutID, DirectEntryReason, GRNItems, Status, Remarks,
            DocTypeId, DocNo, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
            TotalAmount, GodownID, CreatedDate)
         OUTPUT INSERTED.GRNID
         VALUES
-          (@GRNNo, @GRNDate, @DocDate, @SupplierID, @POID, @VehicleInOutID, @GRNItems, @Status, @Remarks,
+          (@GRNNo, @GRNDate, @DocDate, @SupplierID, @POID, @VehicleInOutID, @DirectEntryReason, @GRNItems, @Status, @Remarks,
            @DocTypeId, @DocNo, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
            @TotalAmount, @GodownID, @CreatedDate)
       `);

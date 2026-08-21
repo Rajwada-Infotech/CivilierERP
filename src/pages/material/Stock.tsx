@@ -15,6 +15,7 @@ import {
   Layers,
   MapPin,
   Info,
+  Search,
 } from "lucide-react";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getInventoryMaster } from "@/api/inventoryMasterApi";
@@ -225,7 +226,19 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
     staleTime: 60_000,
   });
 
-  const rows = data?.data ?? [];
+  const [itemSearch, setItemSearch] = useState("");
+  const [appliedItemSearch, setAppliedItemSearch] = useState("");
+
+  const allRows = data?.data ?? [];
+  const q = appliedItemSearch.trim().toLowerCase();
+  const rows = q
+    ? allRows.filter(
+        (r) =>
+          r.ItemName?.toLowerCase().includes(q) ||
+          r.ItemGroupName?.toLowerCase().includes(q) ||
+          String(r.ItemID ?? "").includes(q),
+      )
+    : allRows;
   const totals = rows.reduce(
     (acc, r) => ({
       opening: acc.opening + r.OpeningStock,
@@ -250,14 +263,46 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
 
       {/* Table */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+        <div className="px-5 py-3 border-b border-border flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-heading font-semibold text-foreground">
               Stock Details{projectName ? ` — ${projectName}` : ""}
             </p>
             <p className="text-xs text-muted-foreground">
               {dateFrom ? `${dateFrom} to ` : "As of "}{queryDate} · {rows.length} item{rows.length !== 1 ? "s" : ""}
+              {appliedItemSearch && ` matching "${appliedItemSearch}"`}
             </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={itemSearch}
+              onChange={(e) => setItemSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") setAppliedItemSearch(itemSearch);
+              }}
+              placeholder="Search item name, group, or ID…"
+              className="w-56 px-3 py-1.5 rounded-lg border border-border bg-background text-xs text-foreground outline-none focus:ring-2 focus:ring-emerald-500/30"
+            />
+            <button
+              type="button"
+              onClick={() => setAppliedItemSearch(itemSearch)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium transition-colors"
+            >
+              <Search size={12} /> Search
+            </button>
+            {appliedItemSearch && (
+              <button
+                type="button"
+                onClick={() => {
+                  setItemSearch("");
+                  setAppliedItemSearch("");
+                }}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Clear
+              </button>
+            )}
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -313,7 +358,9 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                     colSpan={10}
                     className="px-4 py-12 text-center text-muted-foreground"
                   >
-                    No stock data found for this godown.
+                    {appliedItemSearch
+                      ? `No items match "${appliedItemSearch}".`
+                      : "No stock data found for this godown."}
                   </td>
                 </tr>
               ) : (
@@ -474,6 +521,20 @@ export default function Stock() {
   });
   const projects = Array.isArray(projectsData) ? projectsData : [];
 
+  // Hierarchical Company → Project: only projects belonging to the
+  // selected company show up at all (mirrors Quotation.tsx's own
+  // company_id/enterprise_id fallback for legacy rows with no company
+  // link). "All Companies" (no selection) shows every project, same as
+  // before.
+  const filteredProjects = useMemo(() => {
+    if (!selectedCompany) return projects;
+    return projects.filter(
+      (p: any) =>
+        String(p.company_id ?? p.enterprise_id) === String(selectedCompany) ||
+        !(p.company_id ?? p.enterprise_id),
+    );
+  }, [projects, selectedCompany]);
+
   // Filter godowns: exclude Main Godown, then apply company/project filters
   const filteredGodowns = useMemo(() => {
     return godowns.filter((g) => {
@@ -503,7 +564,17 @@ export default function Stock() {
 
   const handleCompanyChange = (v: number | null) => {
     setSelectedCompany(v);
-    // Do NOT clear project — both filters are independent
+    // Hierarchical now — a project that doesn't belong to the newly
+    // selected company can't stay selected (it wouldn't appear in the
+    // now-scoped Project dropdown options anyway).
+    if (v && selectedProject) {
+      const stillValid = projects.some(
+        (p: any) =>
+          p.id === selectedProject &&
+          (String(p.company_id ?? p.enterprise_id) === String(v) || !(p.company_id ?? p.enterprise_id)),
+      );
+      if (!stillValid) setSelectedProject(null);
+    }
   };
 
   const handleProjectChange = (v: number | null) => {
@@ -545,7 +616,7 @@ export default function Stock() {
               label="Project"
               value={selectedProject}
               onChange={(v) => handleProjectChange(v as number | null)}
-              options={projects.map((p: any) => ({
+              options={filteredProjects.map((p: any) => ({
                 value: p.id,
                 label: p.label,
               }))}
