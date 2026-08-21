@@ -235,6 +235,54 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [previewReceipt, setPreviewReceipt] = useState<any | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "", MilestoneId: "", OnAccountPaymentId: "" });
   const [parkingForm, setParkingForm] = useState({ Quantity: "1" });
+  const [discountForm, setDiscountForm] = useState({ Amount: "", Note: "" });
+
+  const handleDownloadReceiptPdf = async (receipt: any) => {
+    try {
+      const toastId = toast.loading("Generating PDF...");
+      const res = await fetchWithAuth(`/api/crm/money-receipts/${receipt.Id}/pdf`);
+      if (!res.ok) {
+        toast.dismiss(toastId);
+        throw new Error("Failed to load PDF");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${receipt.ReceiptNo}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.dismiss(toastId);
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    }
+  };
+
+  const handleDownloadInvoicePdf = async (invoice: any) => {
+    try {
+      const toastId = toast.loading("Generating PDF...");
+      const res = await fetchWithAuth(`/api/crm/invoices/${invoice.Id}/pdf`);
+      if (!res.ok) {
+        toast.dismiss(toastId);
+        throw new Error("Failed to load PDF");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${invoice.InvoiceNo}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.dismiss(toastId);
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    }
+  };
+
   // No GstRate field here anymore — Extra Charges are always taxed at the
   // fixed 18% HSN Master rate (backend ignores any client-supplied rate),
   // so there's nothing left to pick.
@@ -1703,6 +1751,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline">
                                   <Eye size={12} /> View
                                 </button>
+                                <button onClick={() => handleDownloadInvoicePdf(inv)}
+                                  className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline">
+                                  <Download size={12} /> Download
+                                </button>
                               </div>
                             ) : (
                               <div className="flex items-center gap-2 shrink-0">
@@ -2369,6 +2421,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 <button onClick={() => setPreviewReceipt(mr)}
                                   className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border rounded-lg hover:bg-muted font-medium">
                                   <Eye size={11} /> View
+                                </button>
+                                <button onClick={() => handleDownloadReceiptPdf(mr)}
+                                  className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border rounded-lg hover:bg-muted font-medium">
+                                  <Download size={11} /> Download PDF
                                 </button>
                               </div>
                             </div>
