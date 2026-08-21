@@ -264,17 +264,15 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     const rateType = b.RateType === "Amount" ? "Amount" : "Percentage";
     const rateValue = parseFloat(b.RateValue);
     if (!rateValue || rateValue <= 0) return res.status(400).json({ error: "RateValue must be greater than 0" });
-    try {
-      assertSanePercentRate(rateType, rateValue);
-    } catch (e) {
-      return res.status(400).json({ error: e.message });
-    }
-
-    // Same deal-value base the auto-engine uses (maybeAutoCreateBrokerage in
-    // crmWorkflowGuards.js) — unit price + parking + extras, GST excluded.
     const bk = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
       .query("SELECT TotalValue, ParkingTotal FROM dbo.CrmBooking WHERE Id = @bid");
     const dealValue = Number(bk.recordset[0]?.TotalValue || 0) + Number(bk.recordset[0]?.ParkingTotal || 0);
+
+    try {
+      assertSanePercentRate(rateType, rateValue, dealValue);
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
     const computedAmount = rateType === "Percentage" ? Math.round(dealValue * rateValue) / 100 : rateValue;
 
     const result = await pool.request()
@@ -327,20 +325,12 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
     const rateType = b.RateType === "Amount" ? "Amount" : (b.RateType === "Percentage" ? "Percentage" : row.RateType);
     const rateValue = b.RateValue != null && b.RateValue !== "" ? Number(b.RateValue) : Number(row.RateValue);
     if (!Number.isFinite(rateValue) || rateValue <= 0) return res.status(400).json({ error: "RateValue must be greater than 0" });
+    const baseAmount = Number(row.TotalValue || 0) + Number(row.ParkingTotal || 0);
     try {
-      assertSanePercentRate(rateType, rateValue);
+      assertSanePercentRate(rateType, rateValue, baseAmount);
     } catch (e) {
       return res.status(400).json({ error: e.message });
     }
-    // Same base the auto-engine uses (maybeAutoCreateBrokerage in
-    // crmWorkflowGuards.js) — unit price + parking + extras, GST excluded
-    // since it's a statutory pass-through, not deal revenue. This used to
-    // read row.MilestoneId ? row.AmountDue : row.TotalValue, but
-    // MilestoneId is never populated under the current tranche-plan design
-    // (see buildBrokerageTranches), so that branch always fell through to
-    // TotalValue alone — silently under-basing a customized amount on any
-    // booking with parking or extra charges.
-    const baseAmount = Number(row.TotalValue || 0) + Number(row.ParkingTotal || 0);
     const computedAmount = b.ComputedAmount != null && b.ComputedAmount !== ""
       ? Math.round(Number(b.ComputedAmount) * 100) / 100
       : computeBrokerageAmount(rateType, rateValue, baseAmount);
