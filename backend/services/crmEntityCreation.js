@@ -370,7 +370,7 @@ const DEFAULT_MILESTONES = [
 // a plan (or the 7-stage default, when none is selected) into real
 // CrmPaymentMilestone rows, so a plan switch produces an identical shape
 // to what creation would have produced.
-async function generateMilestonesForBooking(pool, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId, bookingAmount = 0) {
+async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId, bookingAmount = 0) {
   if (!totalValue || totalValue <= 0) return;
   let milestones;
   // Booking Amount is now set on the Payment Plan itself (at plan-creation
@@ -381,12 +381,12 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
   // bookings with no tagged plan (DEFAULT_MILESTONES) or a legacy plan saved
   // before this field existed (BookingAmount IS NULL).
   if (paymentPlanId) {
-    const planRes = await pool.request().input("pid", sql.Int, parseInt(paymentPlanId))
+    const planRes = await poolOrTx.request().input("pid", sql.Int, parseInt(paymentPlanId))
       .query("SELECT BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
     const planBookingAmount = planRes.recordset[0]?.BookingAmount;
     if (planBookingAmount != null) bookingAmount = Number(planBookingAmount);
 
-    const planItems = await pool.request().input("pid", sql.Int, parseInt(paymentPlanId))
+    const planItems = await poolOrTx.request().input("pid", sql.Int, parseInt(paymentPlanId))
       .query("SELECT MilestoneNo, MilestoneName, [Percent] FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @pid ORDER BY MilestoneNo");
     milestones = planItems.recordset.map((r) => ({ no: r.MilestoneNo, name: r.MilestoneName, pct: r.Percent }));
   }
@@ -442,7 +442,7 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
     const amt = bookingAmt > 0 ? (isFirst ? bookingAmt : Math.round(totalValue * m.pct) / 100) : 0;
     const pct = bookingAmt > 0 ? (isFirst ? Math.round((bookingAmt / totalValue) * 10000) / 100 : m.pct) : 0;
 
-    const ins = await pool.request()
+    const ins = await poolOrTx.request()
       .input("bid",  sql.Int,           bookingId)
       .input("mno",  sql.Int,           m.no)
       .input("mname",sql.NVarChar(200), m.name)
@@ -461,9 +461,10 @@ async function generateMilestonesForBooking(pool, bookingId, totalValue, payment
   }
 
   if (bookingAmt > 0 && milestone1Id && milestones.length > 1) {
-    await recalculateRemainingMilestones(pool, bookingId, { fixedMilestoneId: milestone1Id });
+    await recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilestoneId: milestone1Id });
   }
 }
+
 
 // Which plans "apply" to a given Unit is a 4-tier cascade, stopping at the
 // first non-empty tier: the Unit's own tags (dbo.CrmUnitPaymentPlan) -> its
@@ -592,10 +593,6 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   if (!unit.recordset.length) throw new CrmCreationError("Selected unit does not exist or is inactive");
   const unitRow = unit.recordset[0];
 
-  const taken = await pool.request().input("uid", sql.Int, parseInt(b.UnitId))
-    .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
-  if (taken.recordset.length) throw new CrmCreationError("This unit is already booked", 409);
-
   // A customer can't actually get their Booking approved/paid against an
   // unapproved Application, so the real "confirm within N days" clock only
   // makes sense starting now — a fresh 3 days from Booking creation, not
@@ -618,6 +615,11 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     ? b.BrokeragePaymentPlan
     : (["OneTime", "TwoPart", "AgreementOnly"].includes(application.BrokeragePaymentPlan) ? application.BrokeragePaymentPlan : "OneTime");
 
+  // guardAndConvertHold is advisory — it converts any pre-existing hold on
+  // this unit for this application. Kept outside the transaction because it
+  // uses its own internal locking and has partial-failure tolerance; the real
+  // double-booking prevention is the UPDLOCK re-check inside the transaction
+  // below.
   await guardAndConvertHold(pool, "Unit", parseInt(b.UnitId), parseInt(b.ApplicationId));
 
   // The Application already went through the mandatory-plan-selection gate
@@ -658,52 +660,128 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   }
   const bookingAmount = Number(planRow.BookingAmount);
 
+  // getNextDocNumber uses its own internal sp_getapplock transaction and must
+  // always run on pool (not on tx) — see crmPayments.js comment at line ~121.
   const bookingNo = await getNextDocNumber(pool, "BKG", "BKG");
-  const result = await pool.request()
-    .input("no",    sql.NVarChar(30),  bookingNo)
-    .input("appId", sql.Int,           parseInt(b.ApplicationId))
-    .input("uid",   sql.Int,           parseInt(b.UnitId))
-    .input("pid",   sql.Int,           unitRow.ProjectId || null)
-    .input("pname", sql.NVarChar(200), unitRow.ProjectName || b.ProjectName || null)
-    .input("cid",   sql.Int,           unitRow.CompanyId || null)
-    .input("unit",  sql.NVarChar(100), unitRow.UnitName)
-    .input("blk",   sql.NVarChar(100), unitRow.BlockName || b.BlockName || null)
-    .input("flr",   sql.NVarChar(100), b.FloorName   || null)
-    .input("utype", sql.NVarChar(100), unitRow.UnitType || b.UnitType || null)
-    .input("area",  sql.Decimal(18,2), area)
-    .input("rate",  sql.Decimal(18,2), rate)
-    .input("tot",   sql.Decimal(18,2), total)
-    .input("bamt",  sql.Decimal(18,2), bookingAmount)
-    .input("ttype", sql.NVarChar(20),  tokenType)
-    .input("tval",  sql.Decimal(18,2), tokenValue)
-    .input("ppid",  sql.Int,           effectivePaymentPlanId)
-    .input("bdate", sql.Date,          b.BookingDate || null)
-    .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
-    .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
-    .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
-    .input("cb",    sql.Int,           actorUserId)
-    .input("brkid", sql.Int,           bookingBrokerId)
-    .input("brkpct", sql.Decimal(5,2), bookingBrokerageRatePercent)
-    .input("brkplan", sql.NVarChar(20), bookingBrokeragePaymentPlan)
-    .input("cdl",   sql.DateTime2(3),  confirmDeadline)
-    .query(`
-      INSERT INTO dbo.CrmBooking
-        (BookingNo, ApplicationId, UnitId, ProjectId, ProjectName, CompanyId, UnitNo, BlockName, FloorName, UnitType,
-         AreaSqFt, RatePerSqFt, TotalValue, BookingAmount, TokenType, TokenValue, PaymentPlanId,
-         BookingDate, PaymentMode, AssignedTo, Status, Notes, IsActive,
-         ParkingTotal, ExtraChargesTotal, GrandTotal, CreatedBy, CreatedAt,
-         BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ConfirmDeadline)
-      OUTPUT INSERTED.Id
-      VALUES
-        (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @flr, @utype,
-         @area, @rate, @tot, @bamt, @ttype, @tval, @ppid,
-         ISNULL(@bdate, CAST(SYSDATETIME() AS DATE)), @pmode,
-         @asgn, 'Pending', @note, 1,
-         0, 0, ISNULL(@tot, 0), @cb, SYSDATETIME(),
-         @brkid, @brkpct, @brkplan, @cdl)
-    `);
 
-  const bookingId = result.recordset[0].Id;
+  // ── BEGIN ATOMIC SECTION ────────────────────────────────────────────────────
+  // Everything from here through generateMilestonesForBooking runs inside a
+  // single SERIALIZABLE transaction.
+  //
+  // The unit availability re-check uses WITH (UPDLOCK, ROWLOCK) so the first
+  // request that reaches this point acquires an exclusive lock on whatever
+  // CrmBooking rows match for this unit. A concurrent second request for the
+  // same unit blocks here until the first commits, then re-reads — at that
+  // point taken.recordset.length > 0 and it correctly rejects with 409.
+  // Without this lock the window between "checked available" and "inserted
+  // booking" is open for a race that results in two confirmed bookings for
+  // the same unit.
+  const tx = pool.transaction();
+  await tx.begin();
+  let bookingId;
+  try {
+    const taken = await tx.request()
+      .input("uid", sql.Int, parseInt(b.UnitId))
+      .query("SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, ROWLOCK) WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
+    if (taken.recordset.length) throw new CrmCreationError("This unit is already booked", 409);
+
+    const result = await tx.request()
+      .input("no",    sql.NVarChar(30),  bookingNo)
+      .input("appId", sql.Int,           parseInt(b.ApplicationId))
+      .input("uid",   sql.Int,           parseInt(b.UnitId))
+      .input("pid",   sql.Int,           unitRow.ProjectId || null)
+      .input("pname", sql.NVarChar(200), unitRow.ProjectName || b.ProjectName || null)
+      .input("cid",   sql.Int,           unitRow.CompanyId || null)
+      .input("unit",  sql.NVarChar(100), unitRow.UnitName)
+      .input("blk",   sql.NVarChar(100), unitRow.BlockName || b.BlockName || null)
+      .input("flr",   sql.NVarChar(100), b.FloorName   || null)
+      .input("utype", sql.NVarChar(100), unitRow.UnitType || b.UnitType || null)
+      .input("area",  sql.Decimal(18,2), area)
+      .input("rate",  sql.Decimal(18,2), rate)
+      .input("tot",   sql.Decimal(18,2), total)
+      .input("bamt",  sql.Decimal(18,2), bookingAmount)
+      .input("ttype", sql.NVarChar(20),  tokenType)
+      .input("tval",  sql.Decimal(18,2), tokenValue)
+      .input("ppid",  sql.Int,           effectivePaymentPlanId)
+      .input("bdate", sql.Date,          b.BookingDate || null)
+      .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
+      .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
+      .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("cb",    sql.Int,           actorUserId)
+      .input("brkid", sql.Int,           bookingBrokerId)
+      .input("brkpct", sql.Decimal(5,2), bookingBrokerageRatePercent)
+      .input("brkplan", sql.NVarChar(20), bookingBrokeragePaymentPlan)
+      .input("cdl",   sql.DateTime2(3),  confirmDeadline)
+      .query(`
+        INSERT INTO dbo.CrmBooking
+          (BookingNo, ApplicationId, UnitId, ProjectId, ProjectName, CompanyId, UnitNo, BlockName, FloorName, UnitType,
+           AreaSqFt, RatePerSqFt, TotalValue, BookingAmount, TokenType, TokenValue, PaymentPlanId,
+           BookingDate, PaymentMode, AssignedTo, Status, Notes, IsActive,
+           ParkingTotal, ExtraChargesTotal, GrandTotal, CreatedBy, CreatedAt,
+           BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ConfirmDeadline)
+        OUTPUT INSERTED.Id
+        VALUES
+          (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @flr, @utype,
+           @area, @rate, @tot, @bamt, @ttype, @tval, @ppid,
+           ISNULL(@bdate, CAST(SYSDATETIME() AS DATE)), @pmode,
+           @asgn, 'Pending', @note, 1,
+           0, 0, ISNULL(@tot, 0), @cb, SYSDATETIME(),
+           @brkid, @brkpct, @brkplan, @cdl)
+      `);
+
+    bookingId = result.recordset[0].Id;
+
+    // The Application-stage capture (bank/KYC, documents, parking) was saved
+    // keyed by ApplicationId with BookingId left NULL, since no Booking existed
+    // yet at that point (see crmCustomerBankDetails.js/crmBookingDocuments.js/
+    // crmParking.js's ApplicationId-keyed routes). Backfill BookingId onto those
+    // rows now so the Booking review page — which reads by BookingId — actually
+    // shows the customer's data instead of appearing empty right after approval.
+    await tx.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+      .query("UPDATE dbo.CrmCustomerBankDetail SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL");
+    await tx.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+      .query("UPDATE dbo.CrmBookingDocument SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL");
+    await tx.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+      .query("UPDATE dbo.CrmParkingAllotment SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
+    // Co-Applicant is captured on the Application wizard's own tab (ApplicationId
+    // set, BookingId NULL) -- backfill BookingId now the same way the three
+    // backfills above just did, so Welcome Call/Booking Details (which read
+    // CrmCoApplicant by BookingId) actually find it.
+    await tx.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+      .query("UPDATE dbo.CrmCoApplicant SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
+    // Extra Work captured on the Application wizard's own tab (ApplicationId
+    // set, BookingId NULL, no hold/conversion needed — unlike Parking, there's
+    // no scarce slot to reserve) — same backfill as Parking above, so
+    // rollupBookingTotals below picks it up into ExtraChargesTotal/GrandTotal
+    // and the Booking tab's Parking & Extra Work list actually shows it.
+    await tx.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
+      .query("UPDATE dbo.CrmExtraCharge SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
+
+    // The real % payment schedule must exist BEFORE any parking allotment is
+    // converted below. applyAddParking numbers its own milestone via
+    // `MAX(MilestoneNo)+1` against whatever already exists for the booking —
+    // called on a booking with zero milestones yet (as it used to be here),
+    // that resolves to 1 and collides with the schedule's own Milestone #1
+    // ("Booking"), leaving two distinct rows both claiming MilestoneNo=1. Any
+    // code that looks up "the first milestone" by number (e.g.
+    // CrmBookingDetail.tsx's Record Payment section) then nondeterministically
+    // picks whichever row the query happens to return first — sometimes the
+    // real, already-paid Booking Amount, sometimes the unrelated, unpaid
+    // parking charge — making an already-settled Booking Amount look
+    // outstanding again. generateMilestonesForBooking's own `total` parameter
+    // is the unit price alone (parking is always bolted on as its own fixed
+    // line item, never part of the % base), so moving this earlier changes
+    // nothing about the actual amounts — it only guarantees parking's
+    // MAX(MilestoneNo)+1 resolves against the real schedule instead of an
+    // empty table.
+    await generateMilestonesForBooking(tx, bookingId, total, effectivePaymentPlanId, b.BookingDate, actorUserId, bookingAmount);
+
+    await tx.commit();
+  } catch (e) {
+    await tx.rollback().catch(() => {});
+    throw e;
+  }
+  // ── END ATOMIC SECTION ──────────────────────────────────────────────────────
 
   // Unconditional, not just via guardAndConvertHold's own bump above — a
   // CrmBooking row now exists against this unit regardless of whether a hold
@@ -711,51 +789,6 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // unit-master's GET / joins CrmBooking directly, so this is the one place
   // that's guaranteed to run whenever that join's answer actually changes.
   bumpCacheVersion("unit-master").catch(() => {});
-
-  // The Application-stage capture (bank/KYC, documents, parking) was saved
-  // keyed by ApplicationId with BookingId left NULL, since no Booking existed
-  // yet at that point (see crmCustomerBankDetails.js/crmBookingDocuments.js/
-  // crmParking.js's ApplicationId-keyed routes). Backfill BookingId onto those
-  // rows now so the Booking review page — which reads by BookingId — actually
-  // shows the customer's data instead of appearing empty right after approval.
-  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
-    .query("UPDATE dbo.CrmCustomerBankDetail SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL");
-  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
-    .query("UPDATE dbo.CrmBookingDocument SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL");
-  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
-    .query("UPDATE dbo.CrmParkingAllotment SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
-  // Co-Applicant is captured on the Application wizard's own tab (ApplicationId
-  // set, BookingId NULL) -- backfill BookingId now the same way the three
-  // backfills above just did, so Welcome Call/Booking Details (which read
-  // CrmCoApplicant by BookingId) actually find it.
-  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
-    .query("UPDATE dbo.CrmCoApplicant SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
-  // Extra Work captured on the Application wizard's own tab (ApplicationId
-  // set, BookingId NULL, no hold/conversion needed — unlike Parking, there's
-  // no scarce slot to reserve) — same backfill as Parking above, so
-  // rollupBookingTotals below picks it up into ExtraChargesTotal/GrandTotal
-  // and the Booking tab's Parking & Extra Work list actually shows it.
-  await pool.request().input("bid", sql.Int, bookingId).input("aid", sql.Int, parseInt(b.ApplicationId))
-    .query("UPDATE dbo.CrmExtraCharge SET BookingId = @bid WHERE ApplicationId = @aid AND BookingId IS NULL AND IsActive = 1");
-
-  // The real % payment schedule must exist BEFORE any parking allotment is
-  // converted below. applyAddParking numbers its own milestone via
-  // `MAX(MilestoneNo)+1` against whatever already exists for the booking —
-  // called on a booking with zero milestones yet (as it used to be here),
-  // that resolves to 1 and collides with the schedule's own Milestone #1
-  // ("Booking"), leaving two distinct rows both claiming MilestoneNo=1. Any
-  // code that looks up "the first milestone" by number (e.g.
-  // CrmBookingDetail.tsx's Record Payment section) then nondeterministically
-  // picks whichever row the query happens to return first — sometimes the
-  // real, already-paid Booking Amount, sometimes the unrelated, unpaid
-  // parking charge — making an already-settled Booking Amount look
-  // outstanding again. generateMilestonesForBooking's own `total` parameter
-  // is the unit price alone (parking is always bolted on as its own fixed
-  // line item, never part of the % base), so moving this earlier changes
-  // nothing about the actual amounts — it only guarantees parking's
-  // MAX(MilestoneNo)+1 resolves against the real schedule instead of an
-  // empty table.
-  await generateMilestonesForBooking(pool, bookingId, total, effectivePaymentPlanId, b.BookingDate, actorUserId, bookingAmount);
 
   // Application-stage slot picks are now only a temporary hold, not a real
   // allotment (see crmParking.js POST /standalone) — convert each one into a
@@ -800,7 +833,11 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // selections to this Booking.
   await rollupBookingTotals(pool, bookingId);
 
-  // Booking Amount payment is no longer auto-submitted here. Data Review`r`n  // completion creates the independent Money Receipt, and Money Receipt`r`n  // approval creates the pending Finance ReceivedPayment row.`r`n`r`n  // No status force-advance here anymore — the Application was already
+  // Booking Amount payment is no longer auto-submitted here. Data Review
+  // completion creates the independent Money Receipt, and Money Receipt
+  // approval creates the pending Finance ReceivedPayment row.
+
+  // No status force-advance here anymore — the Application was already
   // Approved (registered) before this function would even let it through
   // the gate above. Booking creation is now a downstream consequence of
   // that approval, not the thing that causes it.
