@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -89,17 +90,17 @@ async function fetchDemands(search: string): Promise<{ demands: DemandRow[] }> {
 // applied per-milestone instead of per-booking, so a booking with a mix of
 // statuses no longer dumps its whole balance into a single section.
 function classify(m: DemandRow): TabKey | null {
-  if (m.DemandStatus === "Paid") return "paid";
+  if (m.DemandStatus === CrmStatus.PAID) return "paid";
   if (m.IsOverdue) return "overdue";
-  if (m.DemandStatus === "Demanded") return "demanded";
-  if (m.DemandStatus === "Pending") return "pending";
+  if (m.DemandStatus === CrmStatus.DEMANDED) return "demanded";
+  if (m.DemandStatus === CrmStatus.PENDING) return "pending";
   return null;
 }
 
 function MilestoneStatusBadge({ status }: { status: DemandStatus }) {
-  if (status === "Paid")
+  if (status === CrmStatus.PAID)
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"><CheckCircle2 className="w-3 h-3" /> Cleared</span>;
-  if (status === "Demanded")
+  if (status === CrmStatus.DEMANDED)
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400"><Send className="w-3 h-3" /> Demanded</span>;
   return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400"><Clock className="w-3 h-3" /> Not Raised</span>;
 }
@@ -124,7 +125,7 @@ function MilestoneRow({
   showBooking?: boolean;
 }) {
   const balance = Math.max(0, Number(m.AmountDue || 0) - Number(m.AmountPaid || 0));
-  const isOverdue = !!m.IsOverdue && m.DemandStatus !== "Paid";
+  const isOverdue = !!m.IsOverdue && m.DemandStatus !== CrmStatus.PAID;
   return (
     <div className={`flex items-center gap-3 px-4 py-2.5 text-sm ${isOverdue ? "bg-red-50/50 dark:bg-red-950/10" : ""}`}>
       {showBooking && (
@@ -167,14 +168,14 @@ function MilestoneRow({
       </div>
 
       <div className="shrink-0 w-20">
-        {!canEdit ? null : m.DemandStatus === "Pending" && balance > 0 ? (
+        {!canEdit ? null : m.DemandStatus === CrmStatus.PENDING && balance > 0 ? (
           <button
             onClick={(e) => { e.stopPropagation(); onRaise(m); }}
             className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 font-semibold w-full justify-center"
           >
             <Send className="w-3 h-3" /> Raise
           </button>
-        ) : m.DemandStatus === "Demanded" ? (
+        ) : m.DemandStatus === CrmStatus.DEMANDED ? (
           <button
             onClick={(e) => { e.stopPropagation(); onUndo(m); }}
             className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] border border-border rounded-lg hover:bg-muted text-foreground/70 hover:text-foreground w-full justify-center"

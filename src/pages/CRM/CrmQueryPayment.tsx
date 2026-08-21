@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -172,7 +173,7 @@ const CrmQueryPayment: React.FC = () => {
   // (paperwork's already out). Only runs once per opened tracker so staff
   // can still freely move between tabs afterward.
   useEffect(() => {
-    if (detail) setStep(detail.Status === "Pending" ? 1 : 2);
+    if (detail) setStep(detail.Status === CrmStatus.PENDING ? 1 : 2);
     setPendingInfoFiles([]);
     setProofFile(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -503,7 +504,7 @@ const CrmQueryPayment: React.FC = () => {
                           onClick={() => setConfirmSendOpen(true)}
                           disabled={!pendingInfoFiles.length}
                           className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 disabled:pointer-events-none transition-colors">
-                          <Send size={12} /> {detail.Status === "Pending" ? "Send Info & Paperwork to Customer" : "Send Additional Documents"}
+                          <Send size={12} /> {detail.Status === CrmStatus.PENDING ? "Send Info & Paperwork to Customer" : "Send Additional Documents"}
                         </button>
                         {!pendingInfoFiles.length && (
                           <p className="text-[11px] text-muted-foreground text-center">Attach at least one file before sending.</p>

@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -48,7 +49,7 @@ router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, r
     if (!deed.recordset.length) {
       return res.status(400).json({ error: "Pre-possession check requires the sales deed to be created first" });
     }
-    if (deed.recordset[0].CustomerApprovalStatus !== "Approved") {
+    if (deed.recordset[0].CustomerApprovalStatus !== CrmStatus.APPROVED) {
       return res.status(400).json({ error: "Pre-possession check requires the customer to approve the sales deed first" });
     }
 
@@ -89,7 +90,7 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
           .query(`
             SELECT COUNT(*) AS OutstandingCount
             FROM dbo.CrmPaymentDemand
-            WHERE BookingId = @bid AND Status NOT IN ('Paid', 'Waived', 'Cancelled')
+            WHERE BookingId = @bid AND Status NOT IN ('${CrmStatus.PAID}', 'Waived', '${CrmStatus.CANCELLED}')
           `);
         if (demands.recordset[0].OutstandingCount > 0) {
           return res.status(400).json({

@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
 const { getPool, sql } = require("../db");
@@ -94,10 +95,10 @@ const BOOKING_SELECT = `
     ) THEN 1 ELSE 0 END AS BIT) AS BankDetailsComplete,
     ag.Id AS AgreementId, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus,
     ag.AgreementDate, ag.DateApprovalStatus, ag.Status AS AgreementStatus,
-    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.Status = 'Pending') AS PendingMilestoneCount,
+    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.Status = '${CrmStatus.PENDING}') AS PendingMilestoneCount,
     (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalCleared,
     (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS ApprovedOnAccount,
-    (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmMoneyReceipt WHERE BookingId = b.Id AND Status IN ('Pending','Approved')) AS MRReceivedTotal
+    (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmMoneyReceipt WHERE BookingId = b.Id AND Status IN ('${CrmStatus.PENDING}','${CrmStatus.APPROVED}')) AS MRReceivedTotal
   FROM dbo.CrmBooking b
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
@@ -152,7 +153,7 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
       pool.request().input("id", sql.Int, id).query(`
         SELECT m.*,
                (SELECT ISNULL(SUM(rp.RPAmount), 0) FROM dbo.ReceivedPayment rp
-                WHERE rp.CrmMilestoneId = m.Id AND rp.RPStatus = 'Pending') AS PendingVerificationAmount
+                WHERE rp.CrmMilestoneId = m.Id AND rp.RPStatus = '${CrmStatus.PENDING}') AS PendingVerificationAmount
         FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = @id ORDER BY m.MilestoneNo
       `),
       pool.request().input("id", sql.Int, id).query(
@@ -273,7 +274,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       }
       const paid = await pool.request().input("bid", sql.Int, id).query(`
         SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone
-        WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))
+        WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('${CrmStatus.PAID}', 'Waived'))
       `);
       if (paid.recordset[0]?.Cnt > 0) {
         return res.status(400).json({ error: "Cannot change payment plan — payments have already been recorded against the existing schedule" });
@@ -398,7 +399,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     const actor = actorId(req);
     const paid = await pool.request().input("bid", sql.Int, id).query(`
       SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))
+      WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('${CrmStatus.PAID}', 'Waived'))
     `);
     const canRegenerateSchedule = paid.recordset[0]?.Cnt === 0;
     let newPlanId = null;
@@ -510,7 +511,7 @@ router.put("/:id/submit", requirePageRight("crm-bookings", "edit"), async (req, 
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-bookings", id, "Pending", userEmail, req.user?.role);
+    const result = await approvalTransition("crm-bookings", id, CrmStatus.PENDING, userEmail, req.user?.role);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-bookings] submit error:", e.message);
@@ -747,7 +748,7 @@ router.put("/:id/checklist/:itemKey/flag", requirePageRight("crm-bookings", "edi
     const item = await flagItem(pool, bk.ApplicationId, itemKey, { actor, remarks: remark, level: 1 });
 
     const itemDef = CHECKLIST_ITEMS.find((c) => c.key === itemKey);
-    await logStatusChange(pool, bk.ApplicationId, "Pending", "Pending", "DataReviewRecheck", `${itemDef?.label || itemKey}: ${remark}`, actor);
+    await logStatusChange(pool, bk.ApplicationId, CrmStatus.PENDING, CrmStatus.PENDING, "DataReviewRecheck", `${itemDef?.label || itemKey}: ${remark}`, actor);
 
     res.json({ success: true, item });
   } catch (e) {
@@ -775,7 +776,7 @@ router.put("/:id/checklist/:itemKey/resubmit", requirePageRight("crm-bookings", 
     const item = await resubmitItem(pool, bk.ApplicationId, itemKey, { actor, level: 1 });
 
     const itemDef = CHECKLIST_ITEMS.find((c) => c.key === itemKey);
-    await logStatusChange(pool, bk.ApplicationId, "Pending", "Pending", "DataReviewRevised", `${itemDef?.label || itemKey}: marked as revised, awaiting recheck`, actor);
+    await logStatusChange(pool, bk.ApplicationId, CrmStatus.PENDING, CrmStatus.PENDING, "DataReviewRevised", `${itemDef?.label || itemKey}: marked as revised, awaiting recheck`, actor);
 
     res.json({ success: true, item });
   } catch (e) {
@@ -830,7 +831,7 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
     const pool = getPool();
     const stageRow = await getStageState(pool, id);
     const result = await rejectStageRequest(pool, id, stageRow?.WorkflowStage, userEmail, req.user?.role, actorId(req), req.body?.note || req.body?.remarks);
-    res.json({ success: true, status: "Pending", ...result });
+    res.json({ success: true, status: CrmStatus.PENDING, ...result });
   } catch (e) {
     console.error("[crm-bookings] reject error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
@@ -1013,11 +1014,11 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       `);
       const mRow = m.recordset[0];
       if (!mRow) return res.status(404).json({ error: "Milestone not found on this booking" });
-      if (mRow.Status !== "Paid") return res.status(400).json({ error: `"${mRow.MilestoneName}" is not fully paid yet — an invoice can only be generated once it is` });
+      if (mRow.Status !== CrmStatus.PAID) return res.status(400).json({ error: `"${mRow.MilestoneName}" is not fully paid yet — an invoice can only be generated once it is` });
       // No auto-generation anywhere now — every invoice is manual, gated on
       // the milestone's Demand actually having been raised first (not just
       // "Pending"), per "proper gate, after completion of the steps".
-      if (mRow.DemandStatus === "Pending") {
+      if (mRow.DemandStatus === CrmStatus.PENDING) {
         return res.status(400).json({ error: `A demand must be raised for "${mRow.MilestoneName}" (from the Demands page) before its invoice can be generated` });
       }
       const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid AND Status <> 'Void'");
@@ -1254,7 +1255,7 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
         UPDATE dbo.CrmPaymentMilestone SET
           AmountDue = @amt,
           [Percent] = @pct,
-          -- Bug fixed here: previously "WHEN Status = 'Paid' THEN Status"
+          -- Bug fixed here: previously "WHEN Status = '${CrmStatus.PAID}' THEN Status"
           -- kept a milestone frozen as Paid forever once it first reached
           -- that status, even after resync raised AmountDue past what was
           -- actually collected (e.g. a stale schedule undercounted the real
@@ -1262,7 +1263,7 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
           -- the wrong number" no longer means fully paid). Re-evaluate
           -- honestly against the just-updated amount every time instead —
           -- never silently mask a real shortfall.
-          Status = CASE WHEN AmountPaid >= @amt THEN 'Paid' ELSE 'Pending' END,
+          Status = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
@@ -1306,7 +1307,7 @@ router.post("/:id/attachments", requirePageRight("crm-bookings", "edit"), upload
     if (!files.length) return res.status(400).json({ error: "No files uploaded" });
 
     const statusCheck = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
-    if (["Cancelled","Rejected"].includes(statusCheck.recordset[0]?.Status)) return res.status(400).json({ error: "Attachments cannot be added to a cancelled or rejected booking." });
+    if ([CrmStatus.CANCELLED,CrmStatus.REJECTED].includes(statusCheck.recordset[0]?.Status)) return res.status(400).json({ error: "Attachments cannot be added to a cancelled or rejected booking." });
 
     const inserted = [];
     for (const file of files) {
@@ -1358,7 +1359,7 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
     const bookingId = parseInt(req.params.id);
     const attId = parseInt(req.params.attId);
     const statusCheck = await pool.request().input("id", sql.Int, bookingId).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
-    if (["Cancelled","Rejected"].includes(statusCheck.recordset[0]?.Status)) return res.status(400).json({ error: "Attachments cannot be removed from a cancelled or rejected booking." });
+    if ([CrmStatus.CANCELLED,CrmStatus.REJECTED].includes(statusCheck.recordset[0]?.Status)) return res.status(400).json({ error: "Attachments cannot be removed from a cancelled or rejected booking." });
 
     const result = await pool.request().input("id", sql.Int, attId).input("bid", sql.Int, bookingId)
       .query("SELECT Id FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
@@ -1585,8 +1586,8 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
     const pn  = pnRes.recordset[0];
     const ho  = hoRes.recordset[0];
 
-    const agDone  = ag  && ["Executed","Registered"].includes(ag.Status);
-    const sdDone  = sd  && sd.CustomerApprovalStatus === "Approved";
+    const agDone  = ag  && [CrmStatus.EXECUTED,CrmStatus.REGISTERED].includes(ag.Status);
+    const sdDone  = sd  && sd.CustomerApprovalStatus === CrmStatus.APPROVED;
     const qpDone  = qp  && qp.Status === "Confirmed";
     const ppDone  = pp  && pp.Status === "Ready";
     const pnDone  = pn  && pn.Status === "Acknowledged";

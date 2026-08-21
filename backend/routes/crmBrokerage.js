@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -22,7 +23,7 @@ const BROKERAGE_SELECT = `
          ahm.LHeadName AS BrokerMasterName, ahm.LHeadPhone AS BrokerMasterPhone,
          m.MilestoneName,
          ISNULL((SELECT SUM(Amount) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id), 0) AS TotalPaid,
-         ISNULL((SELECT SUM(PAmount) FROM dbo.NewPayment WHERE SourceCrmBrokerageId = br.Id AND Status IN ('Draft','Pending','Approved')), 0) AS TotalSubmitted,
+         ISNULL((SELECT SUM(PAmount) FROM dbo.NewPayment WHERE SourceCrmBrokerageId = br.Id AND Status IN ('${CrmStatus.DRAFT}','${CrmStatus.PENDING}','${CrmStatus.APPROVED}')), 0) AS TotalSubmitted,
          fp.PPaymentID AS FinancePaymentId,
          fp.DocNo AS FinancePaymentDocNo,
          fp.Status AS FinancePaymentStatus
@@ -34,7 +35,7 @@ const BROKERAGE_SELECT = `
   OUTER APPLY (
     SELECT TOP 1 np.PPaymentID, np.DocNo, np.Status
     FROM dbo.NewPayment np
-    WHERE np.SourceCrmBrokerageId = br.Id AND np.Status NOT IN ('Rejected','Deleted')
+    WHERE np.SourceCrmBrokerageId = br.Id AND np.Status NOT IN ('${CrmStatus.REJECTED}','Deleted')
     ORDER BY np.PPaymentID DESC
   ) fp
 `;
@@ -90,7 +91,7 @@ router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, r
       JOIN dbo.CrmBrokerageMaster br ON br.Id = np.SourceCrmBrokerageId
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE np.Status IN ('Draft','Pending','Approved') ${status ? "AND br.Status = @st" : ""}
+      WHERE np.Status IN ('${CrmStatus.DRAFT}','${CrmStatus.PENDING}','${CrmStatus.APPROVED}') ${status ? "AND br.Status = @st" : ""}
       ORDER BY PaidDate DESC, CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -121,7 +122,7 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
   const existing = await pool.request().input("id", sql.Int, brokerageId).query(`
     SELECT TOP 1 PPaymentID, DocNo, Status
     FROM dbo.NewPayment
-    WHERE SourceCrmBrokerageId = @id AND Status NOT IN ('Rejected','Deleted')
+    WHERE SourceCrmBrokerageId = @id AND Status NOT IN ('${CrmStatus.REJECTED}','Deleted')
     ORDER BY PPaymentID DESC
   `);
   if (existing.recordset.length) return { existing: true, ...existing.recordset[0] };
@@ -135,7 +136,7 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
   `);
   const row = br.recordset[0];
   if (!row) throw new Error("Brokerage record not found");
-  if (row.Status !== "Approved") throw new Error(`Brokerage must be Approved before finance handoff (currently ${row.Status})`);
+  if (row.Status !== CrmStatus.APPROVED) throw new Error(`Brokerage must be Approved before finance handoff (currently ${row.Status})`);
   if (!row.BrokerId) throw new Error("Brokerage has no broker ledger head");
 
   const amount = Number(row.ComputedAmount) || 0;
@@ -197,7 +198,7 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
 
   const newPaymentId = result.recordset[0].PPaymentID;
   await backPatchRecordId(pool, sql, finalDocNo, "NewPayment", newPaymentId);
-  return { existing: false, PPaymentID: newPaymentId, DocNo: finalDocNo, Status: "Pending" };
+  return { existing: false, PPaymentID: newPaymentId, DocNo: finalDocNo, Status: CrmStatus.PENDING };
 }
 
 router.get("/:id", requirePageRight("crm-brokerage", "view"), async (req, res) => {
@@ -252,7 +253,7 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
 
     const agr = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
       .query("SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
-    if (!agr.recordset.length || !["Executed", "Registered"].includes(agr.recordset[0].Status)) {
+    if (!agr.recordset.length || ![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.recordset[0].Status)) {
       return res.status(400).json({ error: "Brokerage requires the agreement to be Executed first" });
     }
 
@@ -319,7 +320,7 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
     `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Brokerage record not found" });
     const row = cur.recordset[0];
-    if (row.Status === "Approved" || row.Status === "Paid") {
+    if (row.Status === CrmStatus.APPROVED || row.Status === CrmStatus.PAID) {
       return res.status(400).json({ error: "Brokerage can only be customized before approval" });
     }
 
@@ -382,7 +383,7 @@ router.put("/:id/submit", requirePageRight("crm-brokerage", "edit"), async (req,
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-brokerage", id, "Pending", userEmail, req.user?.role);
+    const result = await approvalTransition("crm-brokerage", id, CrmStatus.PENDING, userEmail, req.user?.role);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-brokerage] submit error:", e.message);
@@ -409,7 +410,7 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
       return res.status(400).json({ error: msg });
     }
 
-    const result = await approvalTransition("crm-brokerage", id, "Approved", userEmail, req.user?.role);
+    const result = await approvalTransition("crm-brokerage", id, CrmStatus.APPROVED, userEmail, req.user?.role);
     // approvalTransition() manages its own internal transaction and commits
     // before returning, so by this point the Approved status is already
     // permanent — it can't be rolled back if the Finance handoff below
@@ -419,7 +420,7 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
     // not a generic 400 that reads as "the approval failed" when it didn't —
     // and let PUT /:id/retry-finance-handoff pick up exactly this case.
     let financePayment = null;
-    if (result.newStatus === "Approved") {
+    if (result.newStatus === CrmStatus.APPROVED) {
       try {
         financePayment = await createFinancePaymentForBrokerage(pool, id, req);
         await Promise.all([bumpCacheVersion("crm-brokerage"), bumpCacheVersion("new-payment")]);
@@ -462,7 +463,7 @@ router.put("/:id/reject", requirePageRight("crm-brokerage", "edit"), async (req,
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-brokerage", id, "Rejected", userEmail, req.user?.role, req.body?.note || null);
+    const result = await approvalTransition("crm-brokerage", id, CrmStatus.REJECTED, userEmail, req.user?.role, req.body?.note || null);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-brokerage] reject error:", e.message);

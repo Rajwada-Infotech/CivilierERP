@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -195,7 +196,7 @@ async function applyEditParking(pool, id, b) {
     .query("SELECT BookingId, PaymentStatus, RateSnapshot, GstRateSnapshot FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
   if (!row.recordset.length) throw parkingError("Allotment not found", 404);
   const { BookingId, PaymentStatus, RateSnapshot, GstRateSnapshot } = row.recordset[0];
-  if (PaymentStatus === "Paid") throw parkingError("This parking sale has already been paid and cannot be edited", 409);
+  if (PaymentStatus === CrmStatus.PAID) throw parkingError("This parking sale has already been paid and cannot be edited", 409);
   if (BookingId) {
     const activeErr = await requireActiveBooking(pool, BookingId);
     if (activeErr) throw parkingError(activeErr);
@@ -205,7 +206,7 @@ async function applyEditParking(pool, id, b) {
     ? await pool.request().input("paid", sql.Int, id)
         .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid ORDER BY Id DESC")
     : { recordset: [] };
-  if (milestone.recordset.length && milestone.recordset[0].Status === "Paid") {
+  if (milestone.recordset.length && milestone.recordset[0].Status === CrmStatus.PAID) {
     throw parkingError("This parking charge has already been paid and cannot be edited", 409);
   }
 
@@ -251,14 +252,14 @@ async function applyReleaseParking(pool, id, actorUserId = null, reason = null) 
   const { BookingId, PaymentStatus } = row.recordset[0];
 
   if (!BookingId) {
-    if (PaymentStatus === "Paid") {
+    if (PaymentStatus === CrmStatus.PAID) {
       throw parkingError("This parking sale has already been paid and cannot be released", 409);
     }
     await pool.request().input("id", sql.Int, id)
       .query("UPDATE dbo.CrmParkingAllotment SET IsActive = 0 WHERE Id = @id");
     if (actorUserId) {
       await logCrmAudit(pool, "ParkingAllotment", id, actorUserId, [
-        { field: "Released", oldVal: "Active", newVal: reason ? `Released — ${reason}` : "Released" },
+        { field: "Released", oldVal: CrmStatus.ACTIVE, newVal: reason ? `Released — ${reason}` : "Released" },
       ]);
     }
     return {};
@@ -274,7 +275,7 @@ async function applyReleaseParking(pool, id, actorUserId = null, reason = null) 
   const milestone = await pool.request().input("paid", sql.Int, id)
     .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid ORDER BY Id DESC");
   if (milestone.recordset.length) {
-    if (milestone.recordset[0].Status === "Paid") {
+    if (milestone.recordset[0].Status === CrmStatus.PAID) {
       throw parkingError("This parking charge has already been paid and cannot be released", 409);
     }
   } else if (await isBookingFullySettled(pool, BookingId)) {
@@ -292,7 +293,7 @@ async function applyReleaseParking(pool, id, actorUserId = null, reason = null) 
   await syncParkingPaymentStatus(pool, BookingId);
   if (actorUserId) {
     await logCrmAudit(pool, "Booking", BookingId, actorUserId, [
-      { field: "ParkingAllotment", oldVal: "Active", newVal: reason ? `Released — ${reason}` : "Released" },
+      { field: "ParkingAllotment", oldVal: CrmStatus.ACTIVE, newVal: reason ? `Released — ${reason}` : "Released" },
     ]);
   }
   return {};
@@ -315,7 +316,7 @@ async function releaseAllParkingForBooking(pool, bookingId) {
       .query("UPDATE dbo.CrmParkingAllotment SET IsActive = 0 WHERE Id = @id");
     const milestone = await pool.request().input("paid", sql.Int, row.Id)
       .query("SELECT Id, Status FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid");
-    if (milestone.recordset.length && milestone.recordset[0].Status !== "Paid") {
+    if (milestone.recordset.length && milestone.recordset[0].Status !== CrmStatus.PAID) {
       await pool.request().input("mid", sql.Int, milestone.recordset[0].Id)
         .query("DELETE FROM dbo.CrmPaymentMilestone WHERE Id = @mid");
     }
@@ -408,7 +409,7 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
         AND s.Id NOT IN (
           SELECT ParkingSlotId FROM dbo.CrmParkingAllotment WHERE IsActive = 1 AND ParkingSlotId IS NOT NULL
           UNION
-          SELECT EntityId FROM dbo.CrmInventoryHold WHERE EntityType = 'Parking' AND Status = 'Active' AND HoldUntil >= SYSDATETIME()
+          SELECT EntityId FROM dbo.CrmInventoryHold WHERE EntityType = 'Parking' AND Status = '${CrmStatus.ACTIVE}' AND HoldUntil >= SYSDATETIME()
         )
         ORDER BY s.SlotNo
       `);
@@ -427,7 +428,7 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
         AND s.Id NOT IN (
           SELECT ParkingSlotId FROM dbo.CrmParkingAllotment WHERE IsActive = 1 AND ParkingSlotId IS NOT NULL
           UNION
-          SELECT EntityId FROM dbo.CrmInventoryHold WHERE EntityType = 'Parking' AND Status = 'Active' AND HoldUntil >= SYSDATETIME()
+          SELECT EntityId FROM dbo.CrmInventoryHold WHERE EntityType = 'Parking' AND Status = '${CrmStatus.ACTIVE}' AND HoldUntil >= SYSDATETIME()
         )
         GROUP BY s.ParkingType
       `);
@@ -496,7 +497,7 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
       SELECT h.Id, h.EntityId AS ParkingSlotId, h.HoldUntil, s.SlotNo, s.ParkingType, s.ProjectId, s.BlockId
       FROM dbo.CrmInventoryHold h
       JOIN dbo.ParkingSlot s ON s.Id = h.EntityId
-      WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+      WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
     `);
     const holds = [];
     for (const h of holdRows.recordset) {
@@ -557,7 +558,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const slotNo = slot.recordset[0].SlotNo;
 
     if (!b.Immediate) {
-      if (!["Draft", "Pending"].includes(application.recordset[0].Status)) {
+      if (![CrmStatus.DRAFT, CrmStatus.PENDING].includes(application.recordset[0].Status)) {
         return res.status(400).json({
           error: `Cannot change this application's parking selection once it is ${application.recordset[0].Status} — this is locked after approval.`,
         });
@@ -624,7 +625,7 @@ router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking
     if (row.recordset[0].ApplicationId) {
       const app = await pool.request().input("aid", sql.Int, row.recordset[0].ApplicationId)
         .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
-      if (app.recordset.length && !["Draft", "Pending"].includes(app.recordset[0].Status)) {
+      if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING].includes(app.recordset[0].Status)) {
         return res.status(400).json({
           error: `Cannot change this application's parking selection once it is ${app.recordset[0].Status} — this is locked after approval.`,
         });
@@ -720,7 +721,7 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
       .input("dt", sql.Date, b.ReceivedDate || null)
       .query(`
         UPDATE dbo.CrmParkingAllotment SET
-          PaymentStatus = 'Paid', ReceiptNo = @no, PaymentMode = @mode,
+          PaymentStatus = '${CrmStatus.PAID}', ReceiptNo = @no, PaymentMode = @mode,
           PaymentReceivedDate = ISNULL(@dt, CAST(SYSDATETIME() AS DATE))
         WHERE Id = @id
       `);
@@ -734,7 +735,7 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
       await recordGLPosting("crm-parking-payment", id, { failed: true, reason: glErr.message }, actorEmail);
     }
 
-    res.json({ success: true, status: "Paid", ReceiptNo: receiptNo });
+    res.json({ success: true, status: CrmStatus.PAID, ReceiptNo: receiptNo });
   } catch (e) {
     console.error("[crm-parking] mark-paid error:", e.message);
     res.status(500).json({ error: e.message });

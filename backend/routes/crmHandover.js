@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -21,7 +22,7 @@ const HANDOVER_SELECT = `
     b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.AssignedTo,
     a.ApplicantName, a.Mobile,
     kh.name AS KeyHandoverByName,
-    (SELECT COUNT(*) FROM dbo.CrmSnagItem s WHERE s.HandoverId = h.Id AND s.Status IN ('Open','InProgress')) AS OpenSnagCount
+    (SELECT COUNT(*) FROM dbo.CrmSnagItem s WHERE s.HandoverId = h.Id AND s.Status IN ('${CrmStatus.OPEN}','${CrmStatus.IN_PROGRESS}')) AS OpenSnagCount
   FROM dbo.CrmHandover h
   JOIN  dbo.CrmBooking b     ON b.Id = h.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -58,7 +59,7 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
       SELECT b.Id, b.BookingNo, b.UnitNo, a.ApplicantName
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected')
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id)
       ORDER BY b.BookingNo
     `);
@@ -69,14 +70,14 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
       // 1. Agreement must be Executed or Registered
       const agr = await pool.request().input("bid", sql.Int, bid)
         .query("SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
-      if (!agr.recordset.length || !["Executed", "Registered"].includes(agr.recordset[0].Status)) continue;
+      if (!agr.recordset.length || ![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.recordset[0].Status)) continue;
 
       // 2. Sales deed must exist, customer-approved, and director-approved
       const deed = await pool.request().input("bid", sql.Int, bid)
         .query("SELECT TOP 1 CustomerApprovalStatus, DirectorApprovalStatus FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC");
       if (!deed.recordset.length) continue;
-      if (deed.recordset[0].CustomerApprovalStatus !== "Approved") continue;
-      if (deed.recordset[0].DirectorApprovalStatus !== "Approved") continue;
+      if (deed.recordset[0].CustomerApprovalStatus !== CrmStatus.APPROVED) continue;
+      if (deed.recordset[0].DirectorApprovalStatus !== CrmStatus.APPROVED) continue;
 
       // 3. No NOC left in Pending or Approved (must be Issued or never requested)
       const openNoc = await pool.request().input("bid", sql.Int, bid)
@@ -130,7 +131,7 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     const agr = await pool.request()
       .input("bid", sql.Int, parseInt(b.BookingId))
       .query(`SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid`);
-    if (!agr.recordset.length || !["Executed", "Registered"].includes(agr.recordset[0].Status)) {
+    if (!agr.recordset.length || ![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.recordset[0].Status)) {
       return res.status(400).json({ error: "Handover requires an Executed or Registered agreement first" });
     }
 
@@ -146,10 +147,10 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     if (!deed.recordset.length) {
       return res.status(400).json({ error: "Handover requires the sales deed to be created first" });
     }
-    if (deed.recordset[0].CustomerApprovalStatus !== "Approved") {
+    if (deed.recordset[0].CustomerApprovalStatus !== CrmStatus.APPROVED) {
       return res.status(400).json({ error: "Handover requires the customer to approve the sales deed first" });
     }
-    if (deed.recordset[0].DirectorApprovalStatus !== "Approved") {
+    if (deed.recordset[0].DirectorApprovalStatus !== CrmStatus.APPROVED) {
       return res.status(400).json({ error: "Handover requires director approval of the sales deed first" });
     }
 
@@ -160,7 +161,7 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     // society clearance required) aren't blocked — this only fires when a
     // request exists and was left unfinished.
     const openNoc = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
-      .query(`SELECT TOP 1 NocType, Status FROM dbo.CrmNoc WHERE BookingId = @bid AND Status IN ('Pending', 'Approved')`);
+      .query(`SELECT TOP 1 NocType, Status FROM dbo.CrmNoc WHERE BookingId = @bid AND Status IN ('${CrmStatus.PENDING}', '${CrmStatus.APPROVED}')`);
     if (openNoc.recordset.length) {
       return res.status(400).json({ error: `Handover requires the ${openNoc.recordset[0].NocType} NOC to be issued first (currently ${openNoc.recordset[0].Status})` });
     }
@@ -217,9 +218,9 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
     // Enforce forward-only state machine transitions when a new Status is requested
     if (b.Status && b.Status !== currentStatus) {
       const ALLOWED_TRANSITIONS = {
-        Scheduled:      ["SnagInspection", "Cancelled"],
-        SnagInspection: ["SnagPending", "Cancelled"],
-        SnagPending:    ["Completed", "Cancelled"],
+        Scheduled:      ["SnagInspection", CrmStatus.CANCELLED],
+        SnagInspection: ["SnagPending", CrmStatus.CANCELLED],
+        SnagPending:    ["Completed", CrmStatus.CANCELLED],
         Completed:      [],   // terminal
         Cancelled:      [],   // terminal
       };
@@ -234,7 +235,7 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
     // Guard: cannot mark Completed while open snags remain
     if (b.Status === "Completed") {
       const openSnags = await pool.request().input("id", sql.Int, id)
-        .query(`SELECT COUNT(*) AS cnt FROM dbo.CrmSnagItem WHERE HandoverId = @id AND Status IN ('Open','InProgress')`);
+        .query(`SELECT COUNT(*) AS cnt FROM dbo.CrmSnagItem WHERE HandoverId = @id AND Status IN ('${CrmStatus.OPEN}','${CrmStatus.IN_PROGRESS}')`);
       if (openSnags.recordset[0].cnt > 0) {
         return res.status(400).json({ error: "Cannot complete handover — unresolved snag items remain" });
       }

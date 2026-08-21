@@ -5,6 +5,7 @@
 // -> Finance approves/bounces the Money Receipt -> ReceivedPayment lands in
 // Finance's queue Pending for bank/ledger confirmation.
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -53,7 +54,7 @@ router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res)
       req0.input("bid", sql.Int, parseInt(bookingId, 10));
       conds.push("mr.BookingId = @bid");
     }
-    if (status && ["Pending", "Approved", "Bounced"].includes(status)) {
+    if (status && [CrmStatus.PENDING, CrmStatus.APPROVED, "Bounced"].includes(status)) {
       req0.input("st", sql.NVarChar(20), status);
       conds.push("mr.Status = @st");
     }
@@ -75,7 +76,7 @@ router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res)
     res.json(result.recordset.map((r) => ({
       ...r,
       Status: deriveStatus(r.MoneyReceiptStatus, r.RPStatus),
-      BouncedReason: r.BouncedReason || (r.RPStatus === "Rejected" ? r.RPRejectionNote : null),
+      BouncedReason: r.BouncedReason || (r.RPStatus === CrmStatus.REJECTED ? r.RPRejectionNote : null),
     })));
   } catch (e) {
     handleError(res, e, "GET /");
@@ -112,7 +113,7 @@ router.get("/:id", requirePageRight("crm-money-receipts", "view"), async (req, r
     if (!result.recordset.length) return res.status(404).json({ error: "Money receipt not found" });
     const row = result.recordset[0];
     row.Status = deriveStatus(row.MoneyReceiptStatus, row.RPStatus);
-    row.BouncedReason = row.BouncedReason || (row.RPStatus === "Rejected" ? row.RPRejectionNote : null);
+    row.BouncedReason = row.BouncedReason || (row.RPStatus === CrmStatus.REJECTED ? row.RPRejectionNote : null);
     res.json(row);
   } catch (e) {
     handleError(res, e, "GET /:id");

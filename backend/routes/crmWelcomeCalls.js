@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -59,7 +60,7 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
         ) recent
         WHERE recent.Outcome IN ('NotReachable','Busy','SwitchedOff','VoiceMail')
       ) streak
-      WHERE b.Status = 'Approved' AND b.IsActive = 1
+      WHERE b.Status = '${CrmStatus.APPROVED}' AND b.IsActive = 1
         AND (
           last.Id IS NULL
           OR (last.Outcome <> 'Welcomed' AND (last.NextCallDate IS NULL OR last.NextCallDate <= CAST(SYSDATETIME() AS DATE)))

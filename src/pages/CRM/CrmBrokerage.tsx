@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -175,15 +176,15 @@ const CrmBrokerage: React.FC = () => {
               submitOnly
               onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-brokerage"] })}
             />
-            {r.Status === "Pending" && (
+            {r.Status === CrmStatus.PENDING && (
               <button onClick={() => openEdit(r)} className="text-xs text-primary hover:underline">Customize amount</button>
             )}
-            {r.Status === "Approved" && (
+            {r.Status === CrmStatus.APPROVED && (
               <button onClick={() => navigate(r.FinancePaymentId ? `/payments?id=${r.FinancePaymentId}` : "/payments")} className="text-xs text-primary hover:underline">
                 {r.FinancePaymentDocNo ? `Finance: ${r.FinancePaymentDocNo}` : "Sent to Finance"}
               </button>
             )}
-            {r.Status === "Paid" && <span className="text-xs text-muted-foreground">Fully paid</span>}
+            {r.Status === CrmStatus.PAID && <span className="text-xs text-muted-foreground">Fully paid</span>}
           </>
         );
       } },

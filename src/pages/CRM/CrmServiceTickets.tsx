@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -228,7 +229,7 @@ const CrmServiceTickets: React.FC = () => {
         return (
           <div className="flex items-center gap-2 flex-wrap">
             {/* Open: Assign dropdown */}
-            {t.Status === "Open" && (
+            {t.Status === CrmStatus.OPEN && (
               <select
                 defaultValue=""
                 onChange={(e) => handleAssign(t.Id, e.target.value)}
@@ -257,7 +258,7 @@ const CrmServiceTickets: React.FC = () => {
               </>
             )}
             {/* InProgress: Reassign available */}
-            {t.Status === "InProgress" && (
+            {t.Status === CrmStatus.IN_PROGRESS && (
               <select
                 defaultValue=""
                 onChange={(e) => handleAssign(t.Id, e.target.value)}
@@ -278,14 +279,14 @@ const CrmServiceTickets: React.FC = () => {
               <button onClick={() => handleMarkInProgress(t.Id)} className="text-xs text-purple-600 hover:underline">Start Work</button>
             )}
             {/* Resolved: Close or Reopen */}
-            {t.Status === "Resolved" && (
+            {t.Status === CrmStatus.RESOLVED && (
               <>
                 <button onClick={() => handleClose(t.Id)} className="text-xs text-primary hover:underline">Close</button>
                 <button onClick={() => openReopenDialog(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
               </>
             )}
             {/* Closed: Reopen only */}
-            {t.Status === "Closed" && (
+            {t.Status === CrmStatus.CLOSED && (
               <button onClick={() => openReopenDialog(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
             )}
           </div>

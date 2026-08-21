@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -66,7 +67,7 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
       OUTER APPLY (
         SELECT TOP 1 Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = b.Id ORDER BY CallDate DESC, CreatedAt DESC
       ) wc
-      WHERE b.IsActive = 1 AND b.Status = 'Approved'
+      WHERE b.IsActive = 1 AND b.Status = '${CrmStatus.APPROVED}'
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -95,7 +96,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
                SELECT 1 FROM dbo.ReceivedPayment rp
                JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
                WHERE m.BookingId = b.Id AND m.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
-                 AND rp.RPStatus = 'Pending'
+                 AND rp.RPStatus = '${CrmStatus.PENDING}'
              ) THEN 1 ELSE 0 END AS BIT) AS Milestone1PendingApproval
       FROM dbo.CrmBooking b WHERE b.Id = @bid
     `);
@@ -162,7 +163,7 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     const m1 = await pool.request().input("bid", sql.Int, bid).query(`
       SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
     `);
-    if (m1.recordset[0]?.Status !== "Paid") {
+    if (m1.recordset[0]?.Status !== CrmStatus.PAID) {
       return res.status(400).json({ error: "Booking Amount (Milestone 1) must be paid before Bank/KYC details can be saved" });
     }
 
@@ -192,7 +193,7 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     // do it) and never changes again afterward — locking KYC writes at that
     // same instant meant the write window for Bank/Nominee/PAN/Aadhaar never
     // actually existed: Welcome Call and KYC are only ever attempted post-
-    // approval, but a Status==='Approved' lock closes the door the moment
+    // approval, but a Status=== CrmStatus.APPROVED lock closes the door the moment
     // that happens. This was a real, unconditional deadlock, not a rare edge
     // case. FinancingType is saved above regardless either way.
     if (await isLegalWorkStarted(pool, bid)) {

@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -527,7 +528,7 @@ export function ParkingMatrixPage() {
     const total = slots.length;
     const available = slots.filter((s) => s.Status === "Available").length;
     const onHold = slots.filter((s) => s.Status === "OnHold").length;
-    const booked = slots.filter((s) => s.Status === "Booked").length;
+    const booked = slots.filter((s) => s.Status === CrmStatus.BOOKED).length;
     const blocked = slots.filter((s) => s.Status === "Blocked").length;
     return { total, available, onHold, booked, blocked };
   }, [slots]);
@@ -619,7 +620,7 @@ export function ParkingMatrixPage() {
                     key={s.Id}
                     onClick={() => {
                       if (s.Status === "Available") setChoiceSlot(s);
-                      else if (s.Status === "OnHold" || s.Status === "Booked") setInfoSlot(s);
+                      else if (s.Status === "OnHold" || s.Status === CrmStatus.BOOKED) setInfoSlot(s);
                     }}
                     disabled={s.Status === "Blocked"}
                     className={`text-left bg-card border border-border rounded-xl p-3.5 transition-colors ${
@@ -634,7 +635,7 @@ export function ParkingMatrixPage() {
                       </span>
                     </div>
                     <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
-                      {s.Status === "Booked" ? (s.ApplicantName || s.BookingNo || "—")
+                      {s.Status === CrmStatus.BOOKED ? (s.ApplicantName || s.BookingNo || "—")
                         : s.Status === "OnHold" ? (
                           <>
                             <Clock size={11} className="shrink-0" />

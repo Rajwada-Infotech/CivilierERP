@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -44,10 +45,10 @@ const CrmBrokerPayments: React.FC = () => {
     ), [payments, search]);
 
   const totalPaid = filtered
-    .filter((p: any) => p.FinancePaymentStatus === "Paid" || p.FinancePaymentStatus === undefined)
+    .filter((p: any) => p.FinancePaymentStatus === CrmStatus.PAID || p.FinancePaymentStatus === undefined)
     .reduce((s: number, p: any) => s + Number(p.Amount || 0), 0);
   const totalPending = filtered
-    .filter((p: any) => p.FinancePaymentStatus === "Draft" || p.FinancePaymentStatus === "Pending" || p.FinancePaymentStatus === "Approved")
+    .filter((p: any) => p.FinancePaymentStatus === CrmStatus.DRAFT || p.FinancePaymentStatus === CrmStatus.PENDING || p.FinancePaymentStatus === CrmStatus.APPROVED)
     .reduce((s: number, p: any) => s + Number(p.Amount || 0), 0);
 
   const columns: ColumnDef<any, unknown>[] = [
@@ -73,8 +74,8 @@ const CrmBrokerPayments: React.FC = () => {
       cell: (i) => {
         const r = i.row.original;
         const status = r.FinancePaymentStatus || "Paid";
-        const color = status === "Paid" ? "text-green-600 bg-green-50 border-green-200"
-          : status === "Approved" ? "text-blue-600 bg-blue-50 border-blue-200"
+        const color = status === CrmStatus.PAID ? "text-green-600 bg-green-50 border-green-200"
+          : status === CrmStatus.APPROVED ? "text-blue-600 bg-blue-50 border-blue-200"
           : "text-orange-600 bg-orange-50 border-orange-200";
         return (
           <button

@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -96,14 +97,14 @@ async function loadItems(pool, bookingId) {
       section,
       label: SECTION_LABELS[section],
       items: secItems,
-      complete: secItems.every((i) => i.IsChecked && i.RecheckStatus !== "Open"),
-      hasOpenRecheck: secItems.some((i) => i.RecheckStatus === "Open"),
+      complete: secItems.every((i) => i.IsChecked && i.RecheckStatus !== CrmStatus.OPEN),
+      hasOpenRecheck: secItems.some((i) => i.RecheckStatus === CrmStatus.OPEN),
     };
   });
 
   const totalCount = items.length;
-  const checkedCount = items.filter((i) => i.IsChecked && i.RecheckStatus !== "Open").length;
-  const openRecheckCount = items.filter((i) => i.RecheckStatus === "Open").length;
+  const checkedCount = items.filter((i) => i.IsChecked && i.RecheckStatus !== CrmStatus.OPEN).length;
+  const openRecheckCount = items.filter((i) => i.RecheckStatus === CrmStatus.OPEN).length;
 
   return { items, sections, totalCount, checkedCount, openRecheckCount, canSubmit: checkedCount === totalCount && openRecheckCount === 0 };
 }
@@ -145,7 +146,7 @@ router.put("/:bookingId/items/:itemKey", requirePageRight("crm-welcome-calls", "
 
     const existing = await pool.request().input("bid", sql.Int, bookingId).input("k", sql.NVarChar(80), itemKey)
       .query("SELECT RecheckStatus FROM dbo.CrmWelcomeChecklistItem WHERE BookingId = @bid AND ItemKey = @k");
-    if (existing.recordset[0]?.RecheckStatus === "Open" && req.body.IsChecked) {
+    if (existing.recordset[0]?.RecheckStatus === CrmStatus.OPEN && req.body.IsChecked) {
       return res.status(400).json({ error: "This item has an open recheck flag — resolve it before ticking it off." });
     }
 
@@ -207,7 +208,7 @@ router.post("/:bookingId/items/:itemKey/recheck", requirePageRight("crm-welcome-
         USING (SELECT @bid AS BookingId, @k AS ItemKey) AS src
           ON tgt.BookingId = src.BookingId AND tgt.ItemKey = src.ItemKey
         WHEN MATCHED THEN UPDATE SET
-          IsChecked = 0, RecheckStatus = 'Open', RecheckReason = @reason,
+          IsChecked = 0, RecheckStatus = '${CrmStatus.OPEN}', RecheckReason = @reason,
           RecheckRequestedBy = @by, RecheckRequestedAt = SYSDATETIME(),
           ResolvedBy = NULL, ResolvedAt = NULL, UpdatedAt = SYSDATETIME()
         WHEN NOT MATCHED THEN INSERT (BookingId, Section, ItemKey, IsChecked, RecheckStatus, RecheckReason, RecheckRequestedBy, RecheckRequestedAt, UpdatedAt)
@@ -254,8 +255,8 @@ router.post("/:bookingId/items/:itemKey/resolve", requirePageRight("crm-welcome-
       .input("bid", sql.Int, bookingId).input("k", sql.NVarChar(80), itemKey).input("by", sql.Int, actorId(req))
       .query(`
         UPDATE dbo.CrmWelcomeChecklistItem
-        SET RecheckStatus = 'Resolved', ResolvedBy = @by, ResolvedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
-        WHERE BookingId = @bid AND ItemKey = @k AND RecheckStatus = 'Open'
+        SET RecheckStatus = '${CrmStatus.RESOLVED}', ResolvedBy = @by, ResolvedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
+        WHERE BookingId = @bid AND ItemKey = @k AND RecheckStatus = '${CrmStatus.OPEN}'
       `);
     if (!result.rowsAffected[0]) return res.status(404).json({ error: "No open recheck found for this item" });
     res.json({ success: true });
@@ -346,7 +347,7 @@ router.get("/recheck/queue", requirePageRight("crm-welcome-calls", "view"), asyn
       FROM dbo.CrmWelcomeChecklistItem ci
       JOIN dbo.CrmBooking b ON b.Id = ci.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE ci.RecheckStatus = 'Open'
+      WHERE ci.RecheckStatus = '${CrmStatus.OPEN}'
       GROUP BY b.Id, b.BookingNo, b.UnitNo, b.ProjectName, a.ApplicantName, a.Mobile
       ORDER BY MIN(ci.RecheckRequestedAt)
     `);

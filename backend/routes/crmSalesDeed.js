@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -27,11 +28,11 @@ const DEED_SELECT = `
 // ExecutedBy present -> Executed; else the deed date having already passed
 // -> Overdue; else Draft. A cancelled booking always wins (Cancelled).
 function deriveDeedStatus({ bookingStatus, registrationNo, executedBy, deedDate }) {
-  if (bookingStatus === "Cancelled") return "Cancelled";
-  if (registrationNo) return "Registered";
-  if (executedBy) return "Executed";
+  if (bookingStatus === CrmStatus.CANCELLED) return CrmStatus.CANCELLED;
+  if (registrationNo) return CrmStatus.REGISTERED;
+  if (executedBy) return CrmStatus.EXECUTED;
   if (deedDate && new Date(deedDate) < new Date(new Date().toDateString())) return "Overdue";
-  return "Draft";
+  return CrmStatus.DRAFT;
 }
 
 router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
@@ -114,7 +115,7 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), async (req, res) 
       WHERE BookingId = @bid
       ORDER BY CreatedAt DESC
     `);
-    if (!agreement.recordset.length || agreement.recordset[0].Status !== "Executed") {
+    if (!agreement.recordset.length || agreement.recordset[0].Status !== CrmStatus.EXECUTED) {
       return res.status(400).json({ error: "Agreement must be executed before a sales deed can be prepared" });
     }
 
@@ -177,10 +178,10 @@ router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), 
     `);
     const activeErr = await requireActiveBooking(pool, bookingRow.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
-    if (deed.recordset[0].AgreementStatus !== "Executed") {
+    if (deed.recordset[0].AgreementStatus !== CrmStatus.EXECUTED) {
       return res.status(400).json({ error: "Agreement must be executed before sending the sales deed to the customer" });
     }
-    if (deed.recordset[0].Status === "Registered") {
+    if (deed.recordset[0].Status === CrmStatus.REGISTERED) {
       return res.status(400).json({ error: "Registered sales deed cannot be resent for customer approval" });
     }
 
@@ -190,7 +191,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), 
       .query(`
         UPDATE dbo.CrmSalesDeed SET
           SentToCustomerAt = SYSDATETIME(),
-          CustomerApprovalStatus = 'Pending',
+          CustomerApprovalStatus = '${CrmStatus.PENDING}',
           CustomerApprovedAt = NULL,
           CustomerRecheckRemarks = NULL,
           UpdatedBy = @ub,
@@ -228,15 +229,15 @@ router.put("/:id/director/approve", requirePageRight("crm-sales-deed", "edit"), 
     // considered done. Without this, a director could approve (and trigger
     // the handover-ready notification below) a deed the customer hasn't
     // approved yet -- or hasn't even been sent to.
-    if (deedBooking.recordset[0].CustomerApprovalStatus !== "Approved") {
+    if (deedBooking.recordset[0].CustomerApprovalStatus !== CrmStatus.APPROVED) {
       return res.status(400).json({ error: `Customer must approve the sales deed before director approval (current status: ${deedBooking.recordset[0].CustomerApprovalStatus || "not sent"})` });
     }
 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const remarks = req.body?.Remarks || null;
-    const result = await approvalTransition("crm-sales-deed-director", id, "Approved", userEmail, req.user?.role, remarks, actorId(req));
-    if (result.newStatus === "Approved") {
+    const result = await approvalTransition("crm-sales-deed-director", id, CrmStatus.APPROVED, userEmail, req.user?.role, remarks, actorId(req));
+    if (result.newStatus === CrmStatus.APPROVED) {
       const pool = getPool();
       await pool.request()
         .input("id", sql.Int, id)
@@ -290,7 +291,7 @@ router.put("/:id/director/reject", requirePageRight("crm-sales-deed", "edit"), a
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const remarks = req.body?.Remarks || null;
-    const result = await approvalTransition("crm-sales-deed-director", id, "Rejected", userEmail, req.user?.role, remarks);
+    const result = await approvalTransition("crm-sales-deed-director", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks);
     const pool = getPool();
     await pool.request()
       .input("id", sql.Int, id)
@@ -349,7 +350,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
       }
       const dirCheck = await pool.request().input("id", sql.Int, id)
         .query("SELECT DirectorApprovalStatus FROM dbo.CrmSalesDeed WHERE Id = @id");
-      if (dirCheck.recordset[0]?.DirectorApprovalStatus !== "Approved") {
+      if (dirCheck.recordset[0]?.DirectorApprovalStatus !== CrmStatus.APPROVED) {
         return res.status(400).json({ error: "Director must approve the sales deed before the registration number can be recorded" });
       }
     }
@@ -395,9 +396,9 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     // needed, same as the agreement's auto-send on senior approval.
     //
     // Keyed off "ExecutedBy was just set" (row.ExecutedBy was empty, b.ExecutedBy
-    // now provided) rather than `newStatus === "Executed"` — a request that
+    // now provided) rather than `newStatus === CrmStatus.EXECUTED` — a request that
     // sets ExecutedBy and RegistrationNo together jumps straight to
-    // newStatus === "Registered" and would never pass through "Executed",
+    // newStatus === CrmStatus.REGISTERED and would never pass through "Executed",
     // silently skipping the customer notification. That's exactly what
     // happened to a real record: ExecutedBy and Status were both set,
     // SentToCustomerAt stayed null forever, and everything downstream that
@@ -408,7 +409,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
       const sent = await pool.request().input("id", sql.Int, id).query("SELECT SentToCustomerAt FROM dbo.CrmSalesDeed WHERE Id = @id");
       if (!sent.recordset[0].SentToCustomerAt) {
         await pool.request().input("id", sql.Int, id).query(`
-          UPDATE dbo.CrmSalesDeed SET SentToCustomerAt = SYSDATETIME(), CustomerApprovalStatus = 'Pending', CustomerApprovedAt = NULL
+          UPDATE dbo.CrmSalesDeed SET SentToCustomerAt = SYSDATETIME(), CustomerApprovalStatus = '${CrmStatus.PENDING}', CustomerApprovedAt = NULL
           WHERE Id = @id
         `);
         await logCommunication(pool, {
@@ -425,7 +426,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     // paid the Sub-Registrar Office. Never blocks the update itself if GL
     // posting fails — same try/catch + recordGLPosting pattern used for
     // CRM payments/brokerage/cancellations.
-    if (newStatus === "Registered" && !row.RegistrationNo) {
+    if (newStatus === CrmStatus.REGISTERED && !row.RegistrationNo) {
       try {
         const outcome = await postCrmSalesDeedStatutoryToGL(pool, id, req.user?.name || req.user?.email || "system");
         await recordGLPosting("crm-sales-deed", id, outcome, req.user?.name || req.user?.email || "system");

@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -446,7 +447,7 @@ const CrmDashboard: React.FC = () => {
                   ? <p className="text-xs text-muted-foreground">No bookings yet</p>
                   : bkgsData.map((b: any) => (
                       <HBar key={b.Status} label={b.Status} value={b.Count} total={bkgsTotal}
-                        color={b.Status === "Approved" ? "bg-green-500" : b.Status === "Cancelled" ? "bg-red-400" : "bg-primary"} />
+                        color={b.Status === CrmStatus.APPROVED ? "bg-green-500" : b.Status === CrmStatus.CANCELLED ? "bg-red-400" : "bg-primary"} />
                     ))}
                 {bkgsData.length > 0 && (
                   <div className="text-[11px] text-muted-foreground mt-2 border-t border-border pt-2 font-medium">

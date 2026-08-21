@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -119,7 +120,7 @@ const CrmSalesDeed: React.FC = () => {
   const trackedBookingIds = new Set((deeds as any[]).map((d: any) => d.BookingId));
   const eligibleBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
 
-  const agreementExecuted = context?.agreement?.Status === "Executed";
+  const agreementExecuted = context?.agreement?.Status === CrmStatus.EXECUTED;
   // Loan Processing only exists as a gate at all for a booking explicitly
   // marked Loan-Financed � Self-Funded and undeclared bookings never had a
   // loan to process, so they clear immediately (see
@@ -138,7 +139,7 @@ const CrmSalesDeed: React.FC = () => {
   // also feed Query Payment's live-computed amount (see crmSalesDeed.js
   // PUT /:id for the matching server-side guard).
   const deedFieldsLocked = !!detail?.SentToCustomerAt;
-  const progressLocked = detail && (detail.Status === "Registered" || detail.Status === "Cancelled");
+  const progressLocked = detail && (detail.Status === CrmStatus.REGISTERED || detail.Status === CrmStatus.CANCELLED);
 
   // Deep-link from Legal Milestones: pre-fill New Deed with this booking if
   // it doesn't have one yet.
@@ -582,7 +583,7 @@ const CrmSalesDeed: React.FC = () => {
                 <div>
                   <SectionLabel>Approvals</SectionLabel>
                   <DetailRow label="Customer Approval" value={<StatusBadge status={detail.CustomerApprovalStatus || "NotSent"} cfg={APPROVAL_CFG} />} />
-                  {!detail.SentToCustomerAt && detail.Status !== "Registered" && (
+                  {!detail.SentToCustomerAt && detail.Status !== CrmStatus.REGISTERED && (
                     <div className="flex justify-end pb-2">
                       <button onClick={handleSendToCustomer} disabled={sendingToCustomer}
                         className="px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted disabled:opacity-40 transition-colors">
@@ -596,7 +597,7 @@ const CrmSalesDeed: React.FC = () => {
                       value={
                         <div className="flex items-center gap-2 justify-end">
                           <StatusBadge status={detail.DirectorApprovalStatus} cfg={APPROVAL_CFG} />
-                          {detail.DirectorApprovalStatus === "Pending" && (
+                          {detail.DirectorApprovalStatus === CrmStatus.PENDING && (
                             <ApprovalActions
                               status={detail.DirectorApprovalStatus}
                               recordId={detail.Id}

@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -25,7 +26,7 @@ async function warnIfBrokerUnpaid(pool, bookingId, actorUserId) {
   const br = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT TOP 1 Id, BrokerName, Status, CreatedBy
     FROM dbo.CrmBrokerageMaster
-    WHERE BookingId = @bid AND Status IN ('Pending', 'Approved')
+    WHERE BookingId = @bid AND Status IN ('${CrmStatus.PENDING}', '${CrmStatus.APPROVED}')
     ORDER BY CreatedAt DESC
   `);
   if (!br.recordset.length) return null;
@@ -80,7 +81,7 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
     .query(`
       SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('Paid', 'Waived')
+      WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
       ORDER BY MilestoneNo
     `);
   if (earlier.recordset.length) {
@@ -137,11 +138,11 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
       UPDATE dbo.CrmPaymentMilestone SET
         AmountPaid = (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id),
         Status = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id) >= AmountDue
-                       THEN 'Paid' ELSE Status END,
+                       THEN '${CrmStatus.PAID}' ELSE Status END,
         PaidDate = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id) >= AmountDue
                         THEN CAST(SYSDATETIME() AS DATE) ELSE PaidDate END,
         DemandStatus = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id) >= AmountDue
-                        THEN 'Paid' ELSE DemandStatus END,
+                        THEN '${CrmStatus.PAID}' ELSE DemandStatus END,
         UpdatedAt = SYSDATETIME()
       WHERE Id = @id
     `);
@@ -177,7 +178,7 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   }
 
   const finalCheck = await pool.request().input("id", sql.Int, milestoneId).query("SELECT Status FROM dbo.CrmPaymentMilestone WHERE Id = @id");
-  const becamePaid = finalCheck.recordset[0]?.Status === "Paid";
+  const becamePaid = finalCheck.recordset[0]?.Status === CrmStatus.PAID;
   let brokerWarning = null;
   if (becamePaid) {
     const outcome = await handleMilestoneBecamePaid(pool, {
@@ -213,7 +214,7 @@ async function autoApplyOnAccount(pool, bookingId, actorUserId, actorEmail) {
 
     const milestone = await pool.request().input("bid", sql.Int, bookingId).query(`
       SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND Status NOT IN ('Paid', 'Waived') AND AmountDue > ISNULL(AmountPaid, 0)
+      WHERE BookingId = @bid AND Status NOT IN ('${CrmStatus.PAID}', 'Waived') AND AmountDue > ISNULL(AmountPaid, 0)
       ORDER BY MilestoneNo ASC
     `);
     if (!milestone.recordset.length) break;
@@ -252,7 +253,7 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
     if (view !== "all") {
       conds.push("(m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0");
     }
-    if (status && ["Pending", "Demanded", "Paid"].includes(status)) {
+    if (status && [CrmStatus.PENDING, CrmStatus.DEMANDED, CrmStatus.PAID].includes(status)) {
       req0.input("st", sql.NVarChar(20), status);
       conds.push("m.DemandStatus = @st");
     }
@@ -268,7 +269,7 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
              b.GrandTotal AS BookingGrandTotal, b.TotalValue AS BookingTotalValue,
              a.ApplicantName, a.Mobile,
              u.name AS AssignedToName,
-             CASE WHEN m.DueDate < CAST(SYSDATETIME() AS DATE) AND m.Status = 'Pending' THEN 1 ELSE 0 END AS IsOverdue,
+             CASE WHEN m.DueDate < CAST(SYSDATETIME() AS DATE) AND m.Status = '${CrmStatus.PENDING}' THEN 1 ELSE 0 END AS IsOverdue,
              DATEDIFF(DAY, m.DueDate, CAST(SYSDATETIME() AS DATE)) AS DaysOverdue
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
@@ -287,10 +288,10 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
     };
     for (const r of rows) {
       const balance = Math.max(0, Number(r.AmountDue || 0) - Number(r.AmountPaid || 0));
-      if (r.DemandStatus === "Pending") { summary.pendingCount++; summary.pendingAmount += balance; }
-      else if (r.DemandStatus === "Demanded") { summary.demandedCount++; summary.demandedAmount += balance; }
-      else if (r.DemandStatus === "Paid") { summary.paidCount++; summary.paidAmount += balance; }
-      if (r.IsOverdue && r.DemandStatus !== "Paid") { summary.overdueCount++; summary.overdueAmount += balance; }
+      if (r.DemandStatus === CrmStatus.PENDING) { summary.pendingCount++; summary.pendingAmount += balance; }
+      else if (r.DemandStatus === CrmStatus.DEMANDED) { summary.demandedCount++; summary.demandedAmount += balance; }
+      else if (r.DemandStatus === CrmStatus.PAID) { summary.paidCount++; summary.paidAmount += balance; }
+      if (r.IsOverdue && r.DemandStatus !== CrmStatus.PAID) { summary.overdueCount++; summary.overdueAmount += balance; }
     }
     res.json({ demands: rows, summary });
   } catch (e) {
@@ -316,7 +317,7 @@ async function raiseDemandForMilestone(pool, milestoneId, notes) {
   `);
   if (!m.recordset.length) { const e = new Error("Milestone not found"); e.status = 404; throw e; }
   const row = m.recordset[0];
-  if (row.Status === "Paid" || row.Status === "Waived") {
+  if (row.Status === CrmStatus.PAID || row.Status === "Waived") {
     const e = new Error(`This milestone is already ${row.Status.toLowerCase()} — nothing to demand`);
     e.status = 400;
     throw e;
@@ -327,7 +328,7 @@ async function raiseDemandForMilestone(pool, milestoneId, notes) {
     e.status = 400;
     throw e;
   }
-  if (row.DemandStatus !== "Pending") {
+  if (row.DemandStatus !== CrmStatus.PENDING) {
     const e = new Error(`Cannot raise demand — current status is ${row.DemandStatus}`);
     e.status = 400;
     throw e;
@@ -344,7 +345,7 @@ async function raiseDemandForMilestone(pool, milestoneId, notes) {
     .input("notes", sql.NVarChar(500), cleanNotes)
     .query(`
       UPDATE dbo.CrmPaymentMilestone SET
-        DemandStatus = 'Demanded', DemandNo = @no, DemandRaisedOn = @dt,
+        DemandStatus = '${CrmStatus.DEMANDED}', DemandNo = @no, DemandRaisedOn = @dt,
         DemandNotes = ISNULL(@notes, DemandNotes),
         DemandRaisedAt = SYSDATETIME()
       WHERE Id = @id
@@ -382,11 +383,11 @@ async function handleMilestoneBecamePaid(pool, { bookingId, bookingNo, milestone
       .input("mno", sql.Int, milestoneNo)
       .query(`
         SELECT TOP 1 Id, DemandStatus, Status FROM dbo.CrmPaymentMilestone
-        WHERE BookingId = @bid AND MilestoneNo > @mno AND Status NOT IN ('Paid', 'Waived')
+        WHERE BookingId = @bid AND MilestoneNo > @mno AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
         ORDER BY MilestoneNo
       `);
     const nextRow = next.recordset[0];
-    if (nextRow && nextRow.DemandStatus === "Pending") {
+    if (nextRow && nextRow.DemandStatus === CrmStatus.PENDING) {
       await raiseDemandForMilestone(pool, nextRow.Id, `Auto-raised — milestone #${milestoneNo} payment settled for Booking ${bookingNo || bookingId}`);
     }
   } catch (demandErr) {
@@ -423,13 +424,13 @@ router.patch("/:id/demand/undo", requirePageRight("crm-payments", "edit"), async
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT DemandStatus FROM dbo.CrmPaymentMilestone WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Milestone not found" });
-    if (cur.recordset[0].DemandStatus === "Paid") {
+    if (cur.recordset[0].DemandStatus === CrmStatus.PAID) {
       return res.status(400).json({ error: "Cannot undo a demand that's already paid" });
     }
 
     await pool.request().input("id", sql.Int, id).query(`
       UPDATE dbo.CrmPaymentMilestone SET
-        DemandStatus = 'Pending', DemandNo = NULL, DemandRaisedOn = NULL,
+        DemandStatus = '${CrmStatus.PENDING}', DemandNo = NULL, DemandRaisedOn = NULL,
         DemandNotes = NULL, DemandRaisedAt = NULL
       WHERE Id = @id
     `);
@@ -523,7 +524,7 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
   const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
     .query(`
       SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('Paid', 'Waived')
+      WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
       ORDER BY MilestoneNo
     `);
   if (earlier.recordset.length) {
@@ -593,7 +594,7 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
   const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
     .query(`
       SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('Paid', 'Waived')
+      WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
       ORDER BY MilestoneNo
     `);
   if (earlier.recordset.length) {
@@ -660,16 +661,16 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
         UPDATE dbo.CrmPaymentMilestone SET
           AmountPaid = (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id),
           Status = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id) >= AmountDue
-                         THEN 'Paid' ELSE Status END,
+                         THEN '${CrmStatus.PAID}' ELSE Status END,
           PaidDate = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id) >= AmountDue
                           THEN CAST(SYSDATETIME() AS DATE) ELSE PaidDate END,
           DemandStatus = CASE WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @id) >= AmountDue
-                          THEN 'Paid' ELSE DemandStatus END,
+                          THEN '${CrmStatus.PAID}' ELSE DemandStatus END,
           UpdatedAt = SYSDATETIME()
         OUTPUT INSERTED.Status
         WHERE Id = @id
       `);
-      becamePaid = rollup.recordset[0]?.Status === "Paid";
+      becamePaid = rollup.recordset[0]?.Status === CrmStatus.PAID;
     }
 
     await tx.commit();
@@ -834,8 +835,8 @@ router.post("/escalate-overdue", requirePageRight("crm-payments", "edit"), async
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE m.Status = 'Pending' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
-        AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected')
+      WHERE m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
+        AND b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
     `);
 
     const { normalizeRole } = require("../middleware/role");
@@ -885,7 +886,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
       pool.request().input("bid", sql.Int, bid).query(`
         SELECT m.*, cu.name AS CreatedByName,
                (SELECT ISNULL(SUM(rp.RPAmount), 0) FROM dbo.ReceivedPayment rp
-                WHERE rp.CrmMilestoneId = m.Id AND rp.RPStatus = 'Pending') AS PendingVerificationAmount
+                WHERE rp.CrmMilestoneId = m.Id AND rp.RPStatus = '${CrmStatus.PENDING}') AS PendingVerificationAmount
         FROM dbo.CrmPaymentMilestone m
         LEFT JOIN dbo.Users cu ON cu.id = m.CreatedBy
         WHERE m.BookingId = @bid
@@ -906,7 +907,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
     const milestones = milRes.recordset;
     const totalDue  = milestones.reduce((s, m) => s + (m.AmountDue  || 0), 0);
     const totalPaid = milestones.reduce((s, m) => s + (m.AmountPaid || 0), 0);
-    const overdue   = milestones.filter((m) => m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date()).length;
+    const overdue   = milestones.filter((m) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date()).length;
 
     res.json({
       booking: bkRes.recordset[0],
@@ -1056,21 +1057,21 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
       // silently misrepresenting what was actually asked for.
       const selfRollup = await pool.request().input("id", sql.Int, id).query(`
         UPDATE dbo.CrmPaymentMilestone SET
-          Status = CASE WHEN ISNULL(AmountPaid,0) >= AmountDue THEN 'Paid' ELSE Status END,
+          Status = CASE WHEN ISNULL(AmountPaid,0) >= AmountDue THEN '${CrmStatus.PAID}' ELSE Status END,
           PaidDate = CASE WHEN ISNULL(AmountPaid,0) >= AmountDue AND PaidDate IS NULL THEN CAST(SYSDATETIME() AS DATE) ELSE PaidDate END,
           DemandStatus = CASE
-            WHEN ISNULL(AmountPaid,0) >= AmountDue THEN 'Paid'
-            WHEN DemandStatus = 'Demanded' THEN 'Pending'
+            WHEN ISNULL(AmountPaid,0) >= AmountDue THEN '${CrmStatus.PAID}'
+            WHEN DemandStatus = '${CrmStatus.DEMANDED}' THEN '${CrmStatus.PENDING}'
             ELSE DemandStatus END,
-          DemandNo = CASE WHEN ISNULL(AmountPaid,0) < AmountDue AND DemandStatus = 'Demanded' THEN NULL ELSE DemandNo END,
-          DemandRaisedOn = CASE WHEN ISNULL(AmountPaid,0) < AmountDue AND DemandStatus = 'Demanded' THEN NULL ELSE DemandRaisedOn END,
-          DemandNotes = CASE WHEN ISNULL(AmountPaid,0) < AmountDue AND DemandStatus = 'Demanded' THEN NULL ELSE DemandNotes END,
-          DemandRaisedAt = CASE WHEN ISNULL(AmountPaid,0) < AmountDue AND DemandStatus = 'Demanded' THEN NULL ELSE DemandRaisedAt END,
+          DemandNo = CASE WHEN ISNULL(AmountPaid,0) < AmountDue AND DemandStatus = '${CrmStatus.DEMANDED}' THEN NULL ELSE DemandNo END,
+          DemandRaisedOn = CASE WHEN ISNULL(AmountPaid,0) < AmountDue AND DemandStatus = '${CrmStatus.DEMANDED}' THEN NULL ELSE DemandRaisedOn END,
+          DemandNotes = CASE WHEN ISNULL(AmountPaid,0) < AmountDue AND DemandStatus = '${CrmStatus.DEMANDED}' THEN NULL ELSE DemandNotes END,
+          DemandRaisedAt = CASE WHEN ISNULL(AmountPaid,0) < AmountDue AND DemandStatus = '${CrmStatus.DEMANDED}' THEN NULL ELSE DemandRaisedAt END,
           UpdatedAt = SYSDATETIME()
         OUTPUT INSERTED.Status, INSERTED.MilestoneNo
         WHERE Id = @id
       `);
-      if (selfRollup.recordset[0]?.Status === "Paid") {
+      if (selfRollup.recordset[0]?.Status === CrmStatus.PAID) {
         await handleMilestoneBecamePaid(pool, {
           bookingId: updated.BookingId, milestoneNo: selfRollup.recordset[0].MilestoneNo, actorUserId: actorId(req),
         });
@@ -1086,11 +1087,11 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
       // assigned to re-raise it.
       const staleDemands = await pool.request().input("bid", sql.Int, updated.BookingId).input("fid", sql.Int, id).query(`
         UPDATE dbo.CrmPaymentMilestone SET
-          DemandStatus = 'Pending', DemandNo = NULL, DemandRaisedOn = NULL,
+          DemandStatus = '${CrmStatus.PENDING}', DemandNo = NULL, DemandRaisedOn = NULL,
           DemandNotes = NULL, DemandRaisedAt = NULL, UpdatedAt = SYSDATETIME()
         OUTPUT INSERTED.MilestoneName
         WHERE BookingId = @bid AND Id <> @fid AND MilestoneNo <> 1
-          AND Status NOT IN ('Paid','Waived') AND ISNULL(AmountPaid,0) = 0 AND DemandStatus = 'Demanded'
+          AND Status NOT IN ('${CrmStatus.PAID}','Waived') AND ISNULL(AmountPaid,0) = 0 AND DemandStatus = '${CrmStatus.DEMANDED}'
       `);
       if (staleDemands.recordset.length) {
         const bk = await pool.request().input("bid", sql.Int, updated.BookingId)
@@ -1129,7 +1130,7 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status FROM dbo.CrmPaymentMilestone WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Milestone not found" });
-    if (cur.recordset[0].Status === "Paid") {
+    if (cur.recordset[0].Status === CrmStatus.PAID) {
       return res.status(400).json({ error: "Cannot waive an already-paid milestone" });
     }
 

@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -152,7 +153,7 @@ router.post("/", requirePageRight("crm-cancellations", "create"), async (req, re
 
     const deed = await pool.request().input("bid", sql.Int, bookingId)
       .query(`SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
-    if (deed.recordset.length && deed.recordset[0].Status === "Registered") {
+    if (deed.recordset.length && deed.recordset[0].Status === CrmStatus.REGISTERED) {
       return res.status(400).json({ error: "This booking's sales deed is already Registered — a legal deed-cancellation process is required, not a standard cancellation request" });
     }
 
@@ -248,7 +249,7 @@ router.put("/:id", requirePageRight("crm-cancellations", "edit"), async (req, re
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmCancellation WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
-    if (cur.recordset[0].Status === "Refunded") {
+    if (cur.recordset[0].Status === CrmStatus.REFUNDED) {
       return res.status(400).json({ error: "This cancellation has already been refunded — notes can no longer be edited" });
     }
 
@@ -269,7 +270,7 @@ router.put("/:id/submit", requirePageRight("crm-cancellations", "edit"), async (
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-cancellations", id, "Pending", userEmail, req.user?.role);
+    const result = await approvalTransition("crm-cancellations", id, CrmStatus.PENDING, userEmail, req.user?.role);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-cancellations] submit error:", e.message);
@@ -334,7 +335,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
         `);
     }
 
-    const result = await approvalTransition("crm-cancellations", id, "Approved", userEmail, req.user?.role);
+    const result = await approvalTransition("crm-cancellations", id, CrmStatus.APPROVED, userEmail, req.user?.role);
 
     // The generic approvalTransition() engine only ever writes the Status
     // column — ApprovedBy/ApprovedAt exist on this table but were never
@@ -355,7 +356,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
     // outflow unilaterally. Operational side-effects (booking cancellation,
     // parking release, brokerage clawback) happen here at sales-approval time
     // since they are commercial decisions, not financial ones.
-    if (result.newStatus === "Approved") {
+    if (result.newStatus === CrmStatus.APPROVED) {
       await pool.request().input("id", sql.Int, id)
         .query("UPDATE dbo.CrmCancellation SET Status = 'FinancePending', UpdatedAt = SYSDATETIME() WHERE Id = @id");
     }
@@ -367,7 +368,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
     // Booking was created and nothing has touched it since — without this,
     // it would sit at 'Approved' forever with a Cancelled Booking
     // underneath, indistinguishable from a genuinely active sale.
-    await syncApplicationOnBookingTerminal(pool, bookingId, "Cancelled", "BookingCancelled",
+    await syncApplicationOnBookingTerminal(pool, bookingId, CrmStatus.CANCELLED, "BookingCancelled",
       "Application cancelled — its booking was cancelled", actorId(req));
 
     await releaseAllParkingForBooking(pool, bookingId);
@@ -376,12 +377,12 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
     // Void any pending brokerage tranches for this cancelled booking, and flag paid ones for clawback.
     await pool.request().input("bid", sql.Int, bookingId).query(`
       UPDATE dbo.CrmBrokerageMaster 
-      SET Status = 'Voided', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided due to booking cancellation.'
-      WHERE BookingId = @bid AND Status = 'Pending';
+      SET Status = '${CrmStatus.VOIDED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided due to booking cancellation.'
+      WHERE BookingId = @bid AND Status = '${CrmStatus.PENDING}';
       
       UPDATE dbo.CrmBrokerageMaster 
-      SET Status = 'Clawback Required', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Clawback required due to booking cancellation.'
-      WHERE BookingId = @bid AND Status = 'Paid';
+      SET Status = '${CrmStatus.CLAWBACK_REQUIRED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Clawback required due to booking cancellation.'
+      WHERE BookingId = @bid AND Status = '${CrmStatus.PAID}';
     `);
 
     // guardAndConvertHold() closes the Unit's hold to 'Converted' the moment
@@ -404,7 +405,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       await pool.request().input("id", sql.Int, amend.Id).input("rb", sql.Int, actorId(req))
         .query(`
           UPDATE dbo.CrmBookingAmendmentRequest SET
-            Status = 'Rejected', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(),
+            Status = '${CrmStatus.REJECTED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(),
             ReviewNotes = 'Auto-rejected — the booking was cancelled'
           WHERE Id = @id
         `);
@@ -416,7 +417,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       }
     }
 
-    res.json({ success: true, status: result.newStatus === "Approved" ? "FinancePending" : result.newStatus });
+    res.json({ success: true, status: result.newStatus === CrmStatus.APPROVED ? "FinancePending" : result.newStatus });
   } catch (e) {
     console.error("[crm-cancellations] approve error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
@@ -430,7 +431,7 @@ router.put("/:id/reject", requirePageRight("crm-cancellations", "edit"), async (
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-cancellations", id, "Rejected", userEmail, req.user?.role, req.body?.note || null);
+    const result = await approvalTransition("crm-cancellations", id, CrmStatus.REJECTED, userEmail, req.user?.role, req.body?.note || null);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-cancellations] reject error:", e.message);
@@ -459,7 +460,7 @@ router.put("/:id/finance-approve", requirePageRight("crm-cancellations", "edit")
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status, RequestedBy, RefundAmount, BookingId FROM dbo.CrmCancellation WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
-    if (cur.recordset[0].Status !== "FinancePending") {
+    if (cur.recordset[0].Status !== CrmStatus.FINANCE_PENDING) {
       return res.status(400).json({ error: `Cannot finance-approve — status must be FinancePending (currently '${cur.recordset[0].Status}')` });
     }
 
@@ -470,7 +471,7 @@ router.put("/:id/finance-approve", requirePageRight("crm-cancellations", "edit")
       await pool.request().input("id", sql.Int, id).input("ab", sql.Int, actor)
         .query(`
           UPDATE dbo.CrmCancellation SET
-            Status = 'Approved',
+            Status = '${CrmStatus.APPROVED}',
             FinanceClearedBy = @ab,
             FinanceClearedAt = SYSDATETIME(),
             UpdatedAt = SYSDATETIME()
@@ -492,7 +493,7 @@ router.put("/:id/finance-approve", requirePageRight("crm-cancellations", "edit")
         id, "crm_cancellation");
     }
 
-    res.json({ success: true, status: "Approved" });
+    res.json({ success: true, status: CrmStatus.APPROVED });
   } catch (e) {
     console.error("[crm-cancellations] finance-approve error:", e.message);
     res.status(500).json({ error: e.message });
@@ -514,7 +515,7 @@ router.put("/:id/finance-reject", requirePageRight("crm-cancellations", "edit"),
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status, RequestedBy, Notes FROM dbo.CrmCancellation WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
-    if (cur.recordset[0].Status !== "FinancePending") {
+    if (cur.recordset[0].Status !== CrmStatus.FINANCE_PENDING) {
       return res.status(400).json({ error: `Cannot finance-reject — status must be FinancePending (currently '${cur.recordset[0].Status}')` });
     }
     const appendedNotes = cur.recordset[0].Notes
@@ -530,7 +531,7 @@ router.put("/:id/finance-reject", requirePageRight("crm-cancellations", "edit"),
         `Your cancellation refund request was sent back by finance: ${note}`,
         id, "crm_cancellation");
     }
-    res.json({ success: true, status: "Pending" });
+    res.json({ success: true, status: CrmStatus.PENDING });
   } catch (e) {
     console.error("[crm-cancellations] finance-reject error:", e.message);
     res.status(500).json({ error: e.message });
@@ -553,7 +554,7 @@ router.put("/:id/mark-refunded", requirePageRight("crm-cancellations", "edit"), 
         WHERE c.Id = @id
       `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
-    if (cur.recordset[0].Status !== "Approved") {
+    if (cur.recordset[0].Status !== CrmStatus.APPROVED) {
       return res.status(400).json({ error: `Cannot mark refunded — cancellation must be Approved (currently '${cur.recordset[0].Status}')` });
     }
 
@@ -574,7 +575,7 @@ router.put("/:id/mark-refunded", requirePageRight("crm-cancellations", "edit"), 
       .input("rbank", sql.Int,           b.RefundBankId ? parseInt(b.RefundBankId) : null)
       .query(`
         UPDATE dbo.CrmCancellation SET
-          Status = 'Refunded',
+          Status = '${CrmStatus.REFUNDED}',
           RefundDate = ISNULL(@rdate, CAST(SYSDATETIME() AS DATE)),
           RefundMode = @rmode, RefundRef = @rref, RefundBankId = @rbank,
           UpdatedAt = SYSDATETIME()

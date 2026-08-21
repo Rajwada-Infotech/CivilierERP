@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -36,7 +37,7 @@ const APP_SELECT = `
     (
       SELECT TOP 1 CAST(Note AS NVARCHAR(MAX))
       FROM dbo.ApprovalAuditLog
-      WHERE TableName = 'CrmApplication' AND RecordId = a.Id AND ActionStatus = 'Rejected'
+      WHERE TableName = 'CrmApplication' AND RecordId = a.Id AND ActionStatus = '${CrmStatus.REJECTED}'
       ORDER BY ActionAt DESC
     ) AS RejectionNote,
     u.name  AS AssigneeName,
@@ -77,13 +78,13 @@ const APP_SELECT = `
     -- of the forBooking dropdown below (Stage alone was never the guard
     -- against a second booking; Status is). NOTE: this assumes that sync
     -- has always run — any pre-existing row where a booking died before
-    -- that cascade was wired in could still show Status='Approved' with a
+    -- that cascade was wired in could still show Status = '${CrmStatus.APPROVED}' with a
     -- dead booking, which this change would make eligible for forBooking
-    -- again. Worth a one-time check for Status='Approved' AND
-    -- BookingStatus IN ('Cancelled','Rejected') before relying on this.
+    -- again. Worth a one-time check for Status = '${CrmStatus.APPROVED}' AND
+    -- BookingStatus IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}') before relying on this.
     CASE
-      WHEN bk.Id IS NOT NULL AND bk.Status NOT IN ('Cancelled', 'Rejected') THEN 'Converted'
-      WHEN a.Status IN ('Rejected', 'Cancelled') THEN 'NotConverted'
+      WHEN bk.Id IS NOT NULL AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') THEN 'Converted'
+      WHEN a.Status IN ('${CrmStatus.REJECTED}', '${CrmStatus.CANCELLED}') THEN 'NotConverted'
       ELSE 'InProcess'
     END AS Stage,
     -- Distinguishes a bookable application that's actually bookable from one
@@ -100,9 +101,9 @@ const APP_SELECT = `
     -- exactly the "auto-create didn't happen, still needs retrying" case,
     -- whatever its Status happens to read.
     CASE
-      WHEN a.Status NOT IN ('Rejected', 'Cancelled', 'Expired') AND bk.Id IS NULL AND a.PreferredUnitId IS NOT NULL AND (
-        EXISTS (SELECT 1 FROM dbo.CrmBooking ob WHERE ob.UnitId = a.PreferredUnitId AND ob.IsActive = 1 AND ob.Status NOT IN ('Cancelled', 'Rejected') AND ob.ApplicationId <> a.Id)
-        OR EXISTS (SELECT 1 FROM dbo.CrmInventoryHold oh WHERE oh.EntityType = 'Unit' AND oh.EntityId = a.PreferredUnitId AND oh.Status = 'Active' AND oh.HoldUntil >= SYSDATETIME() AND oh.ApplicationId <> a.Id)
+      WHEN a.Status NOT IN ('${CrmStatus.REJECTED}', '${CrmStatus.CANCELLED}', 'Expired') AND bk.Id IS NULL AND a.PreferredUnitId IS NOT NULL AND (
+        EXISTS (SELECT 1 FROM dbo.CrmBooking ob WHERE ob.UnitId = a.PreferredUnitId AND ob.IsActive = 1 AND ob.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') AND ob.ApplicationId <> a.Id)
+        OR EXISTS (SELECT 1 FROM dbo.CrmInventoryHold oh WHERE oh.EntityType = 'Unit' AND oh.EntityId = a.PreferredUnitId AND oh.Status = '${CrmStatus.ACTIVE}' AND oh.HoldUntil >= SYSDATETIME() AND oh.ApplicationId <> a.Id)
       ) THEN 1 ELSE 0
     END AS UnitUnavailableForBooking
   FROM dbo.CrmApplication a
@@ -125,7 +126,7 @@ const APP_SELECT = `
     SELECT TOP 1 Id, BookingNo, Status, UnitNo, ProjectName, TotalValue, GrandTotal, BookingDate
     FROM dbo.CrmBooking
     WHERE ApplicationId = a.Id
-    ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected') THEN 0 ELSE 1 END, CreatedAt DESC
+    ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') THEN 0 ELSE 1 END, CreatedAt DESC
   ) bk
 `;
 
@@ -163,7 +164,7 @@ router.get("/", requirePageRight("crm-applications", "view"), async (req, res) =
     const result = await req0.query(`${APP_SELECT} ${where} ORDER BY a.CreatedAt DESC`);
     let rows = result.recordset;
     if (forBooking) {
-      rows = rows.filter((r) => !["Rejected", "Cancelled", "Expired"].includes(r.Status) && r.Stage !== "Converted");
+      rows = rows.filter((r) => ![CrmStatus.REJECTED, CrmStatus.CANCELLED, "Expired"].includes(r.Status) && r.Stage !== "Converted");
     } else if (stage) {
       rows = rows.filter((r) => r.Stage === stage);
     } else if (!status && !includeConverted) {
@@ -265,7 +266,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // the whole point of a revert is that the preparer can fix what the
     // verifier flagged — including the unit/plan selection itself — before
     // resubmitting. Locked again once Approved, same as before.
-    if (changingUnitSelection && !["Draft", "Pending", "Rejected"].includes(existingStatus)) {
+    if (changingUnitSelection && ![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(existingStatus)) {
       return res.status(400).json({
         error: `Cannot change the Company/Project/Unit/Payment Plan selection once the application is ${existingStatus} — this is locked after approval.`,
       });
@@ -502,9 +503,9 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
     const current = await getPool().request().input("id", sql.Int, id)
       .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @id");
     const currentStatus = current.recordset[0]?.Status;
-    const result = currentStatus === "Pending"
-      ? { newStatus: "Pending" }
-      : await approvalTransition("crm-applications", id, "Pending", userEmail, req.user?.role);
+    const result = currentStatus === CrmStatus.PENDING
+      ? { newStatus: CrmStatus.PENDING }
+      : await approvalTransition("crm-applications", id, CrmStatus.PENDING, userEmail, req.user?.role);
 
     // Auto-hold the picked Unit for 72h. createCrmApplicationRecord already
     // attempts this same hold at creation time (Step 1), but that attempt is
@@ -584,7 +585,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
           booking = { id: created.id, BookingNo: created.BookingNo };
           // Sync SA Lead to Booked now that a Booking exists
           await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id)
-            .query(`UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = 'Booked', UpdatedAt = SYSDATETIME()
+            .query(`UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${CrmStatus.BOOKED}', UpdatedAt = SYSDATETIME()
                     WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @aid)`);
         } catch (bkErr) {
           console.error("[crm-applications] auto-create-booking on submit failed:", bkErr.message);
@@ -646,7 +647,7 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
     // place a Booking gets created from, just moved here.
     await pool.request().input("bid", sql.Int, created.id).input("id", sql.Int, id)
       .query(`
-        UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = 'Booked', UpdatedAt = SYSDATETIME()
+        UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${CrmStatus.BOOKED}', UpdatedAt = SYSDATETIME()
         WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @id)
       `);
 

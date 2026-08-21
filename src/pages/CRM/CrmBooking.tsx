@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -141,20 +142,20 @@ const fmt = (n: number | null | undefined) =>
 // step a record hasn't reached yet.
 type NextStep = { label: string; color: string; path: string } | null;
 function getNextStep(b: any): NextStep {
-  if (b.Status !== "Approved") return null; // Pending/Rejected/Cancelled have no forward step
+  if (b.Status !== CrmStatus.APPROVED) return null; // Pending/Rejected/Cancelled have no forward step
   // HasWelcomeCall means Outcome = 'Welcomed' specifically (see crmBookings.js
   // BOOKING_SELECT) -- a logged call with any other outcome must NOT satisfy
   // this, since that's not what unblocks Agreement auto-creation either.
   if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-amber-500 border-amber-200 bg-amber-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
   if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-amber-600 border-amber-200 bg-amber-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
   // Agreement sub-stages: draft → senior approval → customer approval → date negotiation → date approval → executed
-  if (!b.AgreementId || b.SeniorApprovalStatus !== "Approved" || b.CustomerApprovalStatus !== "Approved") {
+  if (!b.AgreementId || b.SeniorApprovalStatus !== CrmStatus.APPROVED || b.CustomerApprovalStatus !== CrmStatus.APPROVED) {
     return { label: "Agreement", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
   if (!b.AgreementDate) {
     return { label: "Agreement Date", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
-  if (b.DateApprovalStatus !== "Approved") {
+  if (b.DateApprovalStatus !== CrmStatus.APPROVED) {
     return { label: "Date Approval", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
 if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
@@ -523,12 +524,12 @@ const CrmBooking: React.FC = () => {
         // step button — a stage is only reachable once every stage
         // before it is actually done, so "Jump to Stage" can't be used
         // to route around the gate the button itself respects.
-        const approved = b.Status === "Approved";
+        const approved = b.Status === CrmStatus.APPROVED;
         const welcomeCallReached = approved;
         const bankDetailsReached = approved && b.HasWelcomeCall;
         const agreementReached = bankDetailsReached && b.BankDetailsComplete;
         const paymentsReached = agreementReached && !!b.AgreementId
-          && b.SeniorApprovalStatus === "Approved" && b.CustomerApprovalStatus === "Approved";
+          && b.SeniorApprovalStatus === CrmStatus.APPROVED && b.CustomerApprovalStatus === CrmStatus.APPROVED;
         return (
           <div className="flex items-center gap-2 flex-wrap">
             {/* submitOnly: Approve/Reject only ever happen from the
@@ -540,7 +541,7 @@ const CrmBooking: React.FC = () => {
               submitOnly
               onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })}
             />
-            {b.Status === "Pending" && (
+            {b.Status === CrmStatus.PENDING && (
               b.WorkflowStage && b.WorkflowStage !== "Review" ? (
                 <span className="text-xs text-muted-foreground">Pending {workflowStageLabel[b.WorkflowStage] || "Approval"}</span>
               ) : b.ReadyForApprovalAt ? (
@@ -557,7 +558,7 @@ const CrmBooking: React.FC = () => {
                 className={`text-xs px-2 py-1 rounded-md border font-medium flex items-center gap-1 ${step.color}`}>
                 {step.label} <ChevronRight size={12} />
               </button>
-            ) : b.Status === "Approved" ? (
+            ) : b.Status === CrmStatus.APPROVED ? (
               <span className="text-xs px-2 py-1 rounded-md border text-emerald-600 border-emerald-200 bg-emerald-50 font-medium flex items-center gap-1">
                 <CheckCircle2 size={12} /> All Steps Complete
               </span>
@@ -604,7 +605,7 @@ const CrmBooking: React.FC = () => {
                 <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)} className="gap-2">
                   <MessageSquare size={14} className="text-amber-700 dark:text-amber-400" /> Communication
                 </DropdownMenuItem>
-                {b.Status !== "Cancelled" && canEdit && (
+                {b.Status !== CrmStatus.CANCELLED && canEdit && (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => { setUnitChangeBooking(b); setUnitChangeNewId(""); setUnitChangeReason(""); }} className="gap-2 text-rose-600 focus:text-rose-600">

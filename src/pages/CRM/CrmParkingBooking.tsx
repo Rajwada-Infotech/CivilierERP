@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -50,7 +51,7 @@ interface Allotment {
   GstRateSnapshot: number | null;
   GstAmount: number | null;
   TotalAmount: number;
-  PaymentStatus: "Pending" | "Paid";
+  PaymentStatus: CrmStatus.PENDING | "Paid";
   ReceiptNo: string | null;
   PaymentMode: string | null;
   PaymentReceivedDate: string | null;
@@ -140,8 +141,8 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                 Unit Booking
               </span>
             ) : (
-              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === "Paid" ? "text-green-700 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
-                {a.PaymentStatus === "Paid" ? "Paid" : "Payment Pending"}
+              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+                {a.PaymentStatus === CrmStatus.PAID ? "Paid" : "Payment Pending"}
               </span>
             )}
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1 rounded">
@@ -242,7 +243,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                 <span className="flex items-center gap-1.5"><CreditCard size={12} /> Payment</span>
               </h3>
               <div className="rounded-xl border border-border divide-y divide-border">
-                {a.PaymentStatus === "Paid" ? (
+                {a.PaymentStatus === CrmStatus.PAID ? (
                   <>
                     <div className="px-4 py-3 flex items-center gap-2">
                       <CheckCircle2 size={14} className="text-green-500 shrink-0" />
@@ -308,9 +309,9 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                 <p className="text-xs text-red-600 leading-relaxed">
                   Releasing this allotment will free the slot back to available inventory.
                   {isLinked && " The linked booking's grand total and payment milestones will be recalculated."}
-                  {a.PaymentStatus === "Paid" && " This allotment has already been paid — release is blocked."}
+                  {a.PaymentStatus === CrmStatus.PAID && " This allotment has already been paid — release is blocked."}
                 </p>
-                {a.PaymentStatus !== "Paid" && (
+                {a.PaymentStatus !== CrmStatus.PAID && (
                   <button
                     onClick={() => onRequestRelease(a)}
                     className="w-full px-4 py-2 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-100 transition-colors"
@@ -414,11 +415,11 @@ const CrmParkingBooking: React.FC = () => {
     }), [allotments, search, statusFilter, linkFilter]);
 
   const standalonePending = filtered
-    .filter((a) => !a.BookingId && a.PaymentStatus !== "Paid")
+    .filter((a) => !a.BookingId && a.PaymentStatus !== CrmStatus.PAID)
     .reduce((s, a) => s + Number(a.TotalAmount || 0), 0);
 
   const standalonePaid = filtered
-    .filter((a) => !a.BookingId && a.PaymentStatus === "Paid")
+    .filter((a) => !a.BookingId && a.PaymentStatus === CrmStatus.PAID)
     .reduce((s, a) => s + Number(a.TotalAmount || 0), 0);
 
   const resetForm = () => { setForm({ ...EMPTY_FORM }); setNewDialogOpen(false); };
@@ -564,8 +565,8 @@ const CrmParkingBooking: React.FC = () => {
           );
         }
         return (
-          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === "Paid" ? "text-green-700 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
-            {a.PaymentStatus === "Paid" ? "Paid" : "Pending"}
+          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+            {a.PaymentStatus === CrmStatus.PAID ? "Paid" : "Pending"}
           </span>
         );
       },

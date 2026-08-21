@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -113,7 +114,7 @@ const CrmCancellations: React.FC = () => {
   };
 
   const activeBookings = useMemo(() =>
-    (bookings as any[]).filter((b: any) => b.Status !== "Cancelled"), [bookings]);
+    (bookings as any[]).filter((b: any) => b.Status !== CrmStatus.CANCELLED), [bookings]);
 
   const handleRequest = async () => {
     if (!form.BookingId) { toast.error("Booking is required"); return; }
@@ -233,20 +234,20 @@ const CrmCancellations: React.FC = () => {
               submitOnly
               onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-cancellations"] })}
             />
-            {c.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
-            {c.Status === "Rejected" && c.Notes && (
+            {c.Status === CrmStatus.PENDING && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
+            {c.Status === CrmStatus.REJECTED && c.Notes && (
               <span className="text-xs text-red-600" title={c.Notes}>Rejected: {c.Notes.length > 40 ? c.Notes.slice(0, 40) + "…" : c.Notes}</span>
             )}
-            {c.Status === "FinancePending" && (
+            {c.Status === CrmStatus.FINANCE_PENDING && (
               <div className="flex items-center gap-2">
                 <button onClick={() => handleFinanceApprove(c.Id)} className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200">Clear Refund</button>
                 <button onClick={() => handleFinanceReject(c.Id)} className="text-xs px-2 py-1 text-red-600 hover:underline">Reject</button>
               </div>
             )}
-            {c.Status === "Approved" && (
+            {c.Status === CrmStatus.APPROVED && (
               <button onClick={() => openRefundDialog(c)} className="text-xs text-primary hover:underline">Record Refund</button>
             )}
-            {c.Status === "Refunded" && (
+            {c.Status === CrmStatus.REFUNDED && (
               <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 size={12} /> Refunded</span>
             )}
           </>

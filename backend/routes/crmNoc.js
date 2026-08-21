@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -203,7 +204,7 @@ router.put("/:id/submit", requirePageRight("crm-noc", "edit"), async (req, res) 
 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-noc", id, "Pending", userEmail, req.user?.role);
+    const result = await approvalTransition("crm-noc", id, CrmStatus.PENDING, userEmail, req.user?.role);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-noc] submit error:", e.message);
@@ -224,7 +225,7 @@ router.put("/:id/approve", requirePageRight("crm-noc", "edit"), async (req, res)
 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-noc", id, "Approved", userEmail, req.user?.role);
+    const result = await approvalTransition("crm-noc", id, CrmStatus.APPROVED, userEmail, req.user?.role);
     await getPool().request()
       .input("id", sql.Int, id)
       .query("UPDATE dbo.CrmNoc SET ApprovalDate = ISNULL(ApprovalDate, CAST(SYSDATETIME() AS DATE)) WHERE Id = @id");
@@ -247,7 +248,7 @@ router.put("/:id/reject", requirePageRight("crm-noc", "edit"), async (req, res) 
 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-noc", id, "Rejected", userEmail, req.user?.role, req.body?.note || null);
+    const result = await approvalTransition("crm-noc", id, CrmStatus.REJECTED, userEmail, req.user?.role, req.body?.note || null);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-noc] reject error:", e.message);
@@ -266,7 +267,7 @@ router.put("/:id/mark-issued", requirePageRight("crm-noc", "edit"), async (req, 
     if (!cur.recordset.length) return res.status(404).json({ error: "NOC not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
-    if (cur.recordset[0].Status !== "Approved") {
+    if (cur.recordset[0].Status !== CrmStatus.APPROVED) {
       return res.status(400).json({ error: `Cannot mark issued — NOC must be Approved (currently '${cur.recordset[0].Status}')` });
     }
 

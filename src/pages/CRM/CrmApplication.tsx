@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -44,7 +45,7 @@ const statusColor: Record<string, string> = {
   Draft:     "text-muted-foreground bg-muted/50 border-border",
   Pending:   "text-blue-600 bg-blue-50 border-blue-200",
   // "Booked" is not a real DB Status — it's a derived display label used
-  // when an Application has Status='Pending' but a live Booking already
+  // when an Application has Status={CrmStatus.PENDING} but a live Booking already
   // exists (Stage='Converted'). Showing "Pending" in that state misleads
   // staff into thinking the application still needs action; "Booked" makes
   // the conversion immediately obvious.
@@ -496,7 +497,7 @@ const CrmApplication: React.FC = () => {
         : activePaymentPlans;
 
   // Resume is only meaningful for a genuinely incomplete application. In
-  // practice that's Status='Pending' — POST / (createCrmApplicationRecord)
+  // practice that's Status={CrmStatus.PENDING} — POST / (createCrmApplicationRecord)
   // inserts new applications straight into 'Pending', not 'Draft', so the
   // Draft check below is kept only for backward compatibility (an older
   // record, or a future path that writes it) and doesn't fire in the normal
@@ -518,7 +519,7 @@ const CrmApplication: React.FC = () => {
   // button should never have been offered in the first place. Stage is
   // computed server-side from whether a live Booking exists (see APP_SELECT
   // in crmApplications.js) and is the actual source of truth here.
-  const isResumeEditable = (app: any) => !!app && app.Stage !== "Converted" && (app.Status === "Draft" || app.Status === "Pending");
+  const isResumeEditable = (app: any) => !!app && app.Stage !== "Converted" && (app.Status === CrmStatus.DRAFT || app.Status === CrmStatus.PENDING);
 
   // Same Draft/Pending gate as isResumeEditable, applied inside the open
   // wizard rather than at the Resume button: null status means a brand-new
@@ -531,7 +532,7 @@ const CrmApplication: React.FC = () => {
   // anymore; see the comment on APPLICATION_TRANSITIONS in
   // crmApplicationWorkflow.js for why Cancel-and-redo isn't the answer
   // either at that point.
-  const canEditUnitSelection = wizardAppStatus === null || wizardAppStatus === "Draft" || wizardAppStatus === "Pending";
+  const canEditUnitSelection = wizardAppStatus === null || wizardAppStatus === CrmStatus.DRAFT || wizardAppStatus === CrmStatus.PENDING;
 
   // Mirrors APPLICATION_TRANSITIONS in crmApplicationWorkflow.js: Cancel is a
   // business action any editor can take pre-approval — accidental filing or a
@@ -1292,7 +1293,7 @@ const CrmApplication: React.FC = () => {
                 inline with the buttons — that inline mixing (a link, a
                 sentence, another link, all wrapping unpredictably in a
                 210px cell) was what made this column look broken. */}
-            {activeStage === "InProcess" && a.Status === "Pending" && (
+            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && (
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                 <Clock size={10} /> Submitted — booking not yet created
               </span>

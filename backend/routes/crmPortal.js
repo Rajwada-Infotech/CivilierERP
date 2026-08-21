@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
 const bcrypt = require("bcrypt");
@@ -222,7 +223,7 @@ router.get("/timeline", async (req, res) => {
       FROM dbo.CrmInventoryHold h
       LEFT JOIN dbo.UnitMaster u ON h.EntityType = 'Unit' AND u.Id = h.EntityId
       LEFT JOIN dbo.ParkingSlot s ON h.EntityType = 'Parking' AND s.Id = h.EntityId
-      WHERE h.ApplicationId = @aid AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+      WHERE h.ApplicationId = @aid AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
       ORDER BY h.HoldUntil
     `);
 
@@ -251,7 +252,7 @@ router.get("/timeline", async (req, res) => {
         SELECT Id, AgreementNo, Status, SeniorApprovalStatus, CustomerApprovalStatus,
                ProposedDate, ProposedDateStatus, AgreementDate, DateApprovalStatus, LastRecheckRemarks, SentToCustomerAt,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id) AS DocumentCount,
-               (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id AND d.Status IN ('Requested','Rejected')) AS DocumentsNeedingAction
+               (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id AND d.Status IN ('Requested','${CrmStatus.REJECTED}')) AS DocumentsNeedingAction
         FROM dbo.CrmAgreement WHERE BookingId = @bid AND SentToCustomerAt IS NOT NULL
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
@@ -466,7 +467,7 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
         return res.status(404).json({ error: "Document not found" });
       }
       const doc = check.recordset[0];
-      if (!["Requested", "Rejected"].includes(doc.Status)) {
+      if (!["Requested", CrmStatus.REJECTED].includes(doc.Status)) {
         return res.status(400).json({ error: "This document isn't open for upload" });
       }
       // Same two gates every staff-side document route already enforces
@@ -562,10 +563,10 @@ router.post("/agreement/respond", async (req, res) => {
       WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "No agreement pending your response" });
-    if (ag.recordset[0].SeniorApprovalStatus !== "Approved") {
+    if (ag.recordset[0].SeniorApprovalStatus !== CrmStatus.APPROVED) {
       return res.status(400).json({ error: "Agreement is not ready for customer approval" });
     }
-    if (ag.recordset[0].CustomerApprovalStatus === "Approved") {
+    if (ag.recordset[0].CustomerApprovalStatus === CrmStatus.APPROVED) {
       return res.status(400).json({ error: "Agreement has already been approved" });
     }
     const agreementRow = ag.recordset[0];
@@ -576,7 +577,7 @@ router.post("/agreement/respond", async (req, res) => {
         .input("id", sql.Int, agreementId)
         .query(`
           UPDATE dbo.CrmAgreement SET
-            CustomerApprovalStatus = 'Approved', CustomerApprovedAt = SYSDATETIME()
+            CustomerApprovalStatus = '${CrmStatus.APPROVED}', CustomerApprovedAt = SYSDATETIME()
           WHERE Id = @id
         `);
       // proposedDate here is optional — the customer approving content and
@@ -671,7 +672,7 @@ router.post("/agreement/propose-date", async (req, res) => {
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "No agreement found" });
     const agreementRow = ag.recordset[0];
-    if (agreementRow.CustomerApprovalStatus !== "Approved") {
+    if (agreementRow.CustomerApprovalStatus !== CrmStatus.APPROVED) {
       return res.status(400).json({ error: "Approve the agreement's content before proposing a date" });
     }
     const agreementId = agreementRow.Id;
@@ -716,7 +717,7 @@ router.post("/agreement/date/accept", async (req, res) => {
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "No agreement found" });
     const agreementRow = ag.recordset[0];
-    if (agreementRow.CustomerApprovalStatus !== "Approved") {
+    if (agreementRow.CustomerApprovalStatus !== CrmStatus.APPROVED) {
       return res.status(400).json({ error: "Approve the agreement's content before responding to a proposed date" });
     }
     const agreementId = agreementRow.Id;
@@ -762,7 +763,7 @@ router.post("/sales-deed/respond", async (req, res) => {
       WHERE b.ApplicationId = @aid AND d.SentToCustomerAt IS NOT NULL
     `);
     if (!deed.recordset.length) return res.status(404).json({ error: "No sales deed pending your response" });
-    if (deed.recordset[0].CustomerApprovalStatus === "Approved") {
+    if (deed.recordset[0].CustomerApprovalStatus === CrmStatus.APPROVED) {
       return res.status(400).json({ error: "Sales deed has already been approved" });
     }
     const deedRow = deed.recordset[0];
@@ -772,10 +773,10 @@ router.post("/sales-deed/respond", async (req, res) => {
         .input("id", sql.Int, deedRow.Id)
         .query(`
           UPDATE dbo.CrmSalesDeed SET
-            CustomerApprovalStatus = 'Approved',
+            CustomerApprovalStatus = '${CrmStatus.APPROVED}',
             CustomerApprovedAt = SYSDATETIME(),
             CustomerRecheckRemarks = NULL,
-            DirectorApprovalStatus = 'Pending'
+            DirectorApprovalStatus = '${CrmStatus.PENDING}'
           WHERE Id = @id
         `);
     } else {
@@ -1097,7 +1098,7 @@ router.get("/activity", async (req, res) => {
         FROM dbo.CrmAgreementDocument d
         JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
         JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
-        WHERE b.ApplicationId = @aid AND d.Status IN ('Verified', 'Rejected', 'Submitted')
+        WHERE b.ApplicationId = @aid AND d.Status IN ('Verified', '${CrmStatus.REJECTED}', 'Submitted')
         ORDER BY EventAt DESC
       `),
       pool.request().input("aid", sql.Int, appId).query(`
@@ -1167,8 +1168,8 @@ router.get("/activity", async (req, res) => {
       const label = r.Label || r.DocumentType?.replace(/([A-Z])/g, " $1").trim();
       feed.push({
         type: "document",
-        title: r.Status === "Verified" ? `Document verified — ${label}` : r.Status === "Rejected" ? `Document returned — ${label}` : `Document submitted — ${label}`,
-        detail: r.Status === "Rejected" ? r.Remarks : null,
+        title: r.Status === "Verified" ? `Document verified — ${label}` : r.Status === CrmStatus.REJECTED ? `Document returned — ${label}` : `Document submitted — ${label}`,
+        detail: r.Status === CrmStatus.REJECTED ? r.Remarks : null,
         at: r.EventAt,
       });
     }
