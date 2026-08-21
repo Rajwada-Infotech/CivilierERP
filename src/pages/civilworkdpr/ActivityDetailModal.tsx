@@ -190,9 +190,36 @@ function PhotosTab({ rungId }: { rungId: number }) {
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["activity-photos", rungId] });
 
+  // A new "After" shot marks one work cycle done — the field engineer
+  // shouldn't have to separately re-photograph "Before" for the next
+  // cycle when it's just whatever the site looked like a moment ago,
+  // i.e. the After that was just superseded. So the first time a new
+  // After comes in since the last one was captured, clone that previous
+  // After into Before automatically. Guarded by comparing timestamps
+  // (not just "any before exists") so multiple After shots in a row each
+  // still carry forward exactly once, right when the next one lands.
+  const carryForwardBeforeIfNeeded = async () => {
+    if (activeTag !== "after") return;
+    try {
+      const current = await getActivityPhotos(rungId);
+      const lastAfter = current.after[0]; // ORDER BY CapturedAt DESC
+      if (!lastAfter) return;
+      const lastBefore = current.before[0];
+      const alreadyCarried = lastBefore && lastBefore.capturedAt >= lastAfter.capturedAt;
+      if (alreadyCarried) return;
+      const raw = await getActivityPhoto(rungId, lastAfter.id);
+      const blob = await (await fetch(`data:${raw.mimeType};base64,${raw.dataBase64}`)).blob();
+      const file = new File([blob], `before-carried-${Date.now()}.jpg`, { type: raw.mimeType });
+      await uploadActivityPhoto(rungId, "before", file, "Carried forward from previous After");
+    } catch {
+      // Best-effort — a failed carry-forward should never block the new capture.
+    }
+  };
+
   const addPhoto = async (blob: Blob) => {
     setUploading(true);
     try {
+      await carryForwardBeforeIfNeeded();
       const note = await getGeoTag();
       const file = new File([blob], `${activeTag}-${Date.now()}.jpg`, { type: blob.type || "image/jpeg" });
       await uploadActivityPhoto(rungId, activeTag, file, note || undefined);
@@ -211,6 +238,7 @@ function PhotosTab({ rungId }: { rungId: number }) {
 
   const handleFilePicked = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
+    await carryForwardBeforeIfNeeded();
     for (const file of Array.from(files)) {
       setUploading(true);
       try {
@@ -281,10 +309,10 @@ function PhotosTab({ rungId }: { rungId: number }) {
             <button
               type="button"
               onClick={openCamera}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-heading font-semibold text-white transition-transform hover:scale-105"
-              style={{ background: `linear-gradient(135deg, ${TAG_META[activeTag].color}, ${TAG_META[activeTag].color}cc)` }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold text-white transition-colors"
+              style={{ background: TAG_META[activeTag].color }}
             >
-              <CameraIcon size={16} /> Open camera
+              <CameraIcon size={13} /> Open camera
             </button>
             <button
               type="button"
