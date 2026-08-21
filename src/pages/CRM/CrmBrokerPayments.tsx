@@ -5,6 +5,8 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Search, IndianRupee, ExternalLink } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/crm/brokerage";
 
@@ -29,6 +31,7 @@ async function fetchPayments(): Promise<any[]> {
 // page now only reflects what Finance has already done or has pending.
 const CrmBrokerPayments: React.FC = () => {
   const navigate = useNavigate();
+  usePageRights("crm-brokerage");
   const [search, setSearch] = useState("");
 
   const { data: payments = [], isLoading, isError, error, refetch } = useQuery({ queryKey: ["crm-broker-payments"], queryFn: fetchPayments, staleTime: 30_000 });
@@ -87,8 +90,10 @@ const CrmBrokerPayments: React.FC = () => {
   ];
 
   return (
-    <CrmShell
-      title="CRM — Broker Payment"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Broker Payments"]} />
+      <CrmShell
+        title="CRM — Broker Payment"
       subtitle="Tracking only — payouts are recorded and approved in Finance, and reflect here automatically"
     >
       <div className="flex gap-3 flex-wrap items-center">
@@ -134,7 +139,8 @@ const CrmBrokerPayments: React.FC = () => {
           className="rounded-xl border border-border overflow-hidden bg-card"
         />
       )}
-    </CrmShell>
+      </CrmShell>
+    </>
   );
 };
 

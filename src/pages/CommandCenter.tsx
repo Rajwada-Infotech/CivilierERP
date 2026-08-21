@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "../components/Breadcrumbs";
+import { usePageRights } from "../hooks/usePageRights";
 import { getWidgetsDashboard, WidgetsDashboardData } from "../api/widgetsApi";
 import { LayoutDashboard, AlertTriangle, Info } from "lucide-react";
 
 const CommandCenter = () => {
+  usePageRights("command-center");
   const { data, isLoading, error } = useQuery<WidgetsDashboardData>({
     queryKey: ["widgets-dashboard"],
     queryFn: getWidgetsDashboard,

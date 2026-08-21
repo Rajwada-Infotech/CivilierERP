@@ -2,6 +2,8 @@ import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Search, UserPlus, ExternalLink, Users, CheckCircle2 } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";

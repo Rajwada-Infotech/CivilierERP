@@ -9,6 +9,8 @@ import { useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/crm/pre-possession";
 const BKG_API = "/api/crm/bookings";
@@ -37,6 +39,7 @@ async function fetchBookings(): Promise<any[]> {
 const CrmPrePossession: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  usePageRights("crm-pre-possession");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [bookingId, setBookingId] = useState("");
   const [saving, setSaving] = useState(false);
@@ -88,8 +91,10 @@ const CrmPrePossession: React.FC = () => {
   };
 
   return (
-    <CrmShell
-      title="CRM — Pre-Possession Check"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Pre-Possession"]} />
+      <CrmShell
+        title="CRM — Pre-Possession Check"
       subtitle="Dues, documentation, quality, and utility readiness before handover"
       action={
           <div className="flex items-center gap-3">
@@ -165,7 +170,8 @@ const CrmPrePossession: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </CrmShell>
+      </CrmShell>
+    </>
   );
 };
 

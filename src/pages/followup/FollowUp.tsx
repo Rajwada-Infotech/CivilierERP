@@ -11,6 +11,8 @@ import { ExportMenu } from "@/components/ExportMenu";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import type { ExportColumn } from "@/lib/export";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/task-master";
 const PRIORITIES = ["Very Important", "Important", "Normal"] as const;
@@ -316,6 +318,7 @@ const StatCard: React.FC<{
 const FollowUp: React.FC = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  usePageRights("followup-dashboard");
   const { glassCard } = useGlass();
   const [search, setSearch] = React.useState("");
   const [priorityFilter, setPriorityFilter] = React.useState<(typeof PRIORITIES)[number] | null>(null);
@@ -506,8 +509,10 @@ const FollowUp: React.FC = () => {
   ];
 
   return (
-    <FollowupShell
-      title="Follow-Up"
+    <>
+      <Breadcrumbs items={["Dashboard", "Follow-Up"]} />
+      <FollowupShell
+        title="Follow-Up"
       subtitle="Cases needing attention, sorted by urgency"
       action={
         <ExportMenu
@@ -690,7 +695,8 @@ const FollowUp: React.FC = () => {
         onClose={() => setSelectedTaskId(null)}
         onStatusChange={handleStatusChange}
       />
-    </FollowupShell>
+      </FollowupShell>
+    </>
   );
 };
 

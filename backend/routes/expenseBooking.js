@@ -826,7 +826,9 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const finYear = (req.query.finYear || "").toString().trim() || null;
     const dateFrom = (req.query.from || "").toString().trim() || null;
     const dateTo = (req.query.to || "").toString().trim() || null;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const companyId = req.query.companyId
+      ? parseInt(req.query.companyId, 10) || null
+      : null;
     const projectName = (req.query.projectName || "").toString().trim() || null;
     const docNo = (req.query.docNo || "").toString().trim() || null;
     const supplierId = req.query.supplierId ? parseInt(req.query.supplierId, 10) : null;

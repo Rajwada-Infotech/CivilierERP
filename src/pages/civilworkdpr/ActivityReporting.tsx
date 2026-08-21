@@ -13,19 +13,17 @@ import {
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
 import { ClipboardList, UserRound, CalendarDays, Package, Loader2, ChevronDown, ChevronRight, GitBranch, Camera } from "lucide-react";
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
-import ActivityPhotoSection from "./ActivityPhotoSection";
+import ActivityDetailModal from "./ActivityDetailModal";
 
 const FILTER_OPTIONS: Array<{ value: AssignmentStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "All" },
   ...ASSIGNMENT_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label })),
 ];
 
-// A field engineer updates a work report by uploading before/after site
-// photos, not by drawing on the blueprint — that's Work Allocation's job.
-// One button per row opens the photo section; it fills in once at least
-// one photo has been captured for this rung.
-function ActivityPhotoButton({ rungId, roomLabel }: { rungId: number; roomLabel: string }) {
-  const [open, setOpen] = useState(false);
+// Purely informational — clicking anywhere on the row (including this
+// badge) opens the Activity Detail modal; clicking the badge specifically
+// jumps straight to its Photos tab instead of landing on Overview.
+function ActivityPhotosBadge({ rungId }: { rungId: number }) {
   const { data: photos } = useQuery({
     queryKey: ["activity-photos", rungId],
     queryFn: () => getActivityPhotos(rungId),
@@ -33,30 +31,26 @@ function ActivityPhotoButton({ rungId, roomLabel }: { rungId: number; roomLabel:
   const count = (photos?.before.length ?? 0) + (photos?.after.length ?? 0);
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        title={count > 0 ? `${count} photo${count === 1 ? "" : "s"}` : "Add before/after photos"}
-        className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
-          count > 0
-            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
-            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-        }`}
-      >
-        <Camera size={12} />
-        {count > 0 ? `${count} photo${count === 1 ? "" : "s"}` : "Add photos"}
-      </button>
-      {open && (
-        <ActivityPhotoSection rungId={rungId} roomLabel={roomLabel} onClose={() => setOpen(false)} />
-      )}
-    </>
+    <span
+      className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium ${
+        count > 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+      }`}
+    >
+      <Camera size={12} />
+      {count > 0 ? `${count} photo${count === 1 ? "" : "s"}` : "Add photos"}
+    </span>
   );
 }
 
 export default function ActivityReporting() {
   const rights = usePageRights("civilworkdpr-activity-reporting");
   const [statusFilter, setStatusFilter] = useState<AssignmentStatus | "ALL">("ALL");
+  const [detailRow, setDetailRow] = useState<ReportedAssignment | null>(null);
+  const [detailTab, setDetailTab] = useState<"overview" | "blueprint" | "photos">("overview");
+  const openDetail = (row: ReportedAssignment, tab: "overview" | "blueprint" | "photos" = "overview") => {
+    setDetailRow(row);
+    setDetailTab(tab);
+  };
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["civilworkdpr-activity-reporting"],
@@ -197,7 +191,11 @@ export default function ActivityReporting() {
                           </thead>
                           <tbody>
                             {group.rows.map((row) => (
-                              <tr key={row.assignmentId} className="border-b border-border last:border-0 hover:bg-muted/20">
+                              <tr
+                                key={row.assignmentId}
+                                onClick={() => openDetail(row, "overview")}
+                                className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer"
+                              >
                                 <td className="px-5 py-3">
                                   <span className="text-xs font-medium text-foreground">
                                     {row.sequenceNo}. {row.activityName}
@@ -233,10 +231,16 @@ export default function ActivityReporting() {
                                     </div>
                                   )}
                                 </td>
-                                <td className="px-3 py-3">
-                                  <ActivityPhotoButton rungId={row.rungId} roomLabel={row.scopePath} />
+                                <td
+                                  className="px-3 py-3"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openDetail(row, "photos");
+                                  }}
+                                >
+                                  <ActivityPhotosBadge rungId={row.rungId} />
                                 </td>
-                                <td className="px-5 py-3">
+                                <td className="px-5 py-3" onClick={(e) => e.stopPropagation()}>
                                   <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
                                 </td>
                               </tr>
@@ -252,6 +256,9 @@ export default function ActivityReporting() {
           </div>
         )}
       </CivilWorkDprShell>
+      {detailRow && (
+        <ActivityDetailModal row={detailRow} initialTab={detailTab} onClose={() => setDetailRow(null)} />
+      )}
     </>
   );
 }

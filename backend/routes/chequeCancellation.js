@@ -271,7 +271,103 @@ async function cancelPaymentCheque(pool, { paymentId, chequeNo, reason, userEmai
     await syncBillStatus(pool, sql, payment.PExpenseRef);
   }
 
-  return { ok: true, expenseRef: payment.PExpenseRef || null };
+  // This payment may BE a loan repayment (Finance > Payment's Loan EMIs tab
+  // creates the NewPayment row first, then links it via
+  // LoanPayment.NewPaymentId — migration 340). If so, cancelling its cheque
+  // must undo the repayment's effect on the loan too: the EMI(s) it marked
+  // paid, the OnAccountLedger entries it posted, and its own GL voucher —
+  // otherwise a bounced/cancelled repayment cheque leaves the loan looking
+  // paid down when the money never actually arrived.
+  const loanReversal = await reverseLoanRepaymentIfLinked(pool, {
+    newPaymentId: payment.PPaymentID,
+    reason: `Cheque #${payment.PChequeNo} cancelled: ${reason || "no reason given"}`,
+  });
+
+  return { ok: true, expenseRef: payment.PExpenseRef || null, loanReversal };
+}
+
+// Undoes a LoanPayment's effect when the NewPayment backing it gets its
+// cheque cancelled. No-ops (returns null) if this NewPayment was never
+// linked to a loan repayment. Never deletes the LoanPayment row itself —
+// same "flag, don't delete" convention as GeneralLedgerEntry.IsReversed —
+// it stays as the historical record that this repayment was attempted and
+// later reversed.
+async function reverseLoanRepaymentIfLinked(pool, { newPaymentId, reason }) {
+  const lpRes = await pool
+    .request()
+    .input("NewPaymentId", sql.Int, newPaymentId)
+    .query(`
+      SELECT PaymentId, LoanId, PrincipalInterestAmount, ExcessCredited, IsReversed
+      FROM dbo.LoanPayment WHERE NewPaymentId = @NewPaymentId
+    `);
+  const loanPayment = lpRes.recordset[0];
+  if (!loanPayment || loanPayment.IsReversed) return null;
+
+  // Un-mark whichever EMIs this payment covered — they go back to unpaid,
+  // available to be paid again for real.
+  await pool
+    .request()
+    .input("PaymentId", sql.Int, loanPayment.PaymentId)
+    .query(`
+      UPDATE dbo.LoanEMISchedule
+      SET IsPaid = 0, PaidDate = NULL, PaidBy = NULL, PaymentId = NULL
+      WHERE PaymentId = @PaymentId
+    `);
+
+  // Compensating entries for whatever this repayment posted to
+  // OnAccountLedger (see loanSanction.js POST /:id/pay) — a DEBIT reducing
+  // the borrower's balance, and if there was an early-closure overpayment,
+  // a CREDIT to the lender's balance. Insert the opposite entry rather
+  // than deleting the original, so the ledger keeps a full audit trail of
+  // both the original posting and its reversal.
+  const oaRows = await pool
+    .request()
+    .input("RefId", sql.Int, loanPayment.PaymentId)
+    .query(`
+      SELECT LedgerId, PartyId, PartyType, TxnType, Amount, RefType, RefDocNo, CompanyId
+      FROM dbo.OnAccountLedger WHERE RefType IN ('LoanPayment', 'LoanOverpayment') AND RefId = @RefId
+    `);
+  for (const row of oaRows.recordset) {
+    const reversedTxnType = row.TxnType === "DEBIT" ? "CREDIT" : "DEBIT";
+    const balanceOp = reversedTxnType === "CREDIT" ? "+" : "-";
+    await pool
+      .request()
+      .input("PartyId", sql.Int, row.PartyId)
+      .input("PartyType", sql.NVarChar(20), row.PartyType)
+      .input("TxnType", sql.NVarChar(10), reversedTxnType)
+      .input("Amount", sql.Decimal(18, 2), row.Amount)
+      .input("RefType", sql.NVarChar(30), `${row.RefType}Reversal`)
+      .input("RefDocNo", sql.NVarChar(100), row.RefDocNo)
+      .input("RefId", sql.Int, loanPayment.PaymentId)
+      .input("CompanyId", sql.Int, row.CompanyId)
+      .input("Notes", sql.NVarChar(500), reason)
+      .input("CreatedBy", sql.NVarChar(150), "system").query(`
+        INSERT INTO dbo.OnAccountLedger
+          (PartyId, PartyType, TxnDate, TxnType, Amount, RefType, RefDocNo, RefId, CompanyId, Notes, CreatedBy)
+        VALUES
+          (@PartyId, @PartyType, SYSUTCDATETIME(), @TxnType, @Amount, @RefType, @RefDocNo, @RefId, @CompanyId, @Notes, @CreatedBy);
+        UPDATE dbo.AccountHeadMaster
+          SET OnAccountBalance = ISNULL(OnAccountBalance, 0) ${balanceOp} @Amount
+          WHERE LHeadId = @PartyId;
+      `);
+  }
+
+  // Reverse whatever GL voucher(s) this repayment posted — same SourceType
+  // (LoanRepayment) / SourceId (the LoanPayment's own PK) every repayment
+  // posting path in loanSanction.js uses.
+  await reversePostingBySource(pool, "LoanRepayment", loanPayment.PaymentId);
+
+  await pool
+    .request()
+    .input("PaymentId", sql.Int, loanPayment.PaymentId)
+    .input("Reason", sql.NVarChar(500), reason)
+    .query(`
+      UPDATE dbo.LoanPayment
+      SET IsReversed = 1, ReversedAt = SYSDATETIME(), ReversedReason = @Reason
+      WHERE PaymentId = @PaymentId
+    `);
+
+  return { loanId: loanPayment.LoanId, loanPaymentId: loanPayment.PaymentId };
 }
 
 // The new path — a cheque number that was never issued against any payment.
@@ -371,6 +467,7 @@ router.post("/", requirePageRight("cheque-cancellation", "create"), async (req, 
     await bumpCacheVersion("new-payment");
     await bumpCacheVersion("cheque-cancellation");
     if (result.expenseRef) await bumpCacheVersion("expense-booking");
+    if (result.loanReversal) await bumpCacheVersion("loan-sanction");
     res.json({ message: "Cheque cancelled successfully." });
   } catch (err) {
     console.error("CHEQUE CANCELLATION ERROR:", err.message);
@@ -392,6 +489,7 @@ router.post("/bulk", requirePageRight("cheque-cancellation", "create"), async (r
     const cancelled = [];
     const skipped = [];
     let anyExpenseRef = false;
+    let anyLoanReversal = false;
     for (const item of items) {
       const paymentId = item.paymentId ? parseInt(item.paymentId, 10) : null;
       const chequeLotId = item.chequeLotId ? parseInt(item.chequeLotId, 10) : null;
@@ -409,6 +507,7 @@ router.post("/bulk", requirePageRight("cheque-cancellation", "create"), async (r
       if (result.ok) {
         cancelled.push(item.chequeNo);
         if (result.expenseRef) anyExpenseRef = true;
+        if (result.loanReversal) anyLoanReversal = true;
       } else {
         skipped.push({ chequeNo: item.chequeNo, error: result.error });
       }
@@ -418,6 +517,7 @@ router.post("/bulk", requirePageRight("cheque-cancellation", "create"), async (r
       await bumpCacheVersion("new-payment");
       await bumpCacheVersion("cheque-cancellation");
       if (anyExpenseRef) await bumpCacheVersion("expense-booking");
+      if (anyLoanReversal) await bumpCacheVersion("loan-sanction");
     }
     res.json({ cancelled, skipped });
   } catch (err) {

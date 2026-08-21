@@ -2,6 +2,8 @@ import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -215,9 +217,13 @@ const CrmNoc: React.FC = () => {
       ) },
   ];
 
+  usePageRights("crm-noc");
+
   return (
-    <CrmShell
-      title="CRM — NOC (Organisation & Bank)"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "NOC"]} />
+      <CrmShell
+        title="CRM — NOC (Organisation & Bank)"
       subtitle="No-objection certificates and bank loan sanction/disbursement tracking"
       action={
           <div className="flex items-center gap-3">
@@ -396,6 +402,7 @@ const CrmNoc: React.FC = () => {
         </DialogContent>
       </Dialog>
     </CrmShell>
+    </>
   );
 };
 

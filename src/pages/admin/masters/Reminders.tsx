@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -354,6 +355,7 @@ function ReminderRow({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function FollowupReminders() {
+  usePageRights("reminders");
   const queryClient = useQueryClient();
   const { currentUser } = useAuth();
 

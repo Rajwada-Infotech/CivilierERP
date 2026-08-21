@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { FileText, Download, CheckCircle2, Clock, AlertTriangle, Search, RotateCcw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -183,9 +185,13 @@ const CrmMoneyReceipts: React.FC = () => {
       } },
   ];
 
+  usePageRights("crm-money-receipts");
+
   return (
-    <CrmShell
-      title="CRM — Money Receipts"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Money Receipts"]} />
+      <CrmShell
+        title="CRM — Money Receipts"
       subtitle="Created once Data Review is complete and the Booking has been submitted for approval — one receipt per Booking Amount"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
     >
@@ -209,6 +215,7 @@ const CrmMoneyReceipts: React.FC = () => {
 
       {previewReceipt && <ReceiptPdfDialog receipt={previewReceipt} onClose={() => setPreviewReceipt(null)} />}
     </CrmShell>
+    </>
   );
 };
 

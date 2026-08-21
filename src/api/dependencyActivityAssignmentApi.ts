@@ -61,6 +61,9 @@ export interface AssignmentCheckpoint {
   fieldName: string;
   sortOrder?: number;
   isChecked: boolean;
+  // Snapshotted off the master checkpoint (see migration 354) at the
+  // moment it's attached to this rung — null means checkable any time.
+  minWaitDays?: number | null;
 }
 
 export interface RungAssignmentDetail {
@@ -205,6 +208,21 @@ export const updateAssignmentStatus = async (
   return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
 };
 
+// Status and Remarks share one PATCH endpoint but are independent — the
+// Activity Detail modal's status dropdown and its Remarks textarea (saved
+// on blur) each call this with only the field that actually changed.
+export const updateAssignmentDetail = async (
+  rungId: number,
+  patch: { status?: AssignmentStatus; remarks?: string },
+): Promise<{ success: boolean; status: AssignmentStatus | null; remarks: string | null }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  return handleResponse<{ success: boolean; status: AssignmentStatus | null; remarks: string | null }>(res);
+};
+
 // ── Blueprint Annotation Workflow ───────────────────────────────────────────
 // Scoped per (rung, room, context) — see migration 345/346's own comments
 // for why: two activities in the same chain sharing a room's blueprint
@@ -248,6 +266,26 @@ export const saveBlueprintAnnotation = async (
     body: JSON.stringify(payload),
   });
   return handleResponse<{ success: boolean; version: number }>(res);
+};
+
+// Every past revision plus the current one (migration 353), oldest first —
+// thumbnail-only, since each is a pre-rendered PNG rather than shapes to
+// re-drive a live Konva stage with. Powers the Activity Detail modal's
+// Blueprint tab revision scrubber.
+export interface BlueprintAnnotationRevision {
+  version: number;
+  thumbnailBase64: string | null;
+  updatedBy: string | null;
+  updatedAt: string | null;
+}
+
+export const getBlueprintAnnotationHistory = async (
+  rungId: number,
+  roomId: number,
+  context: BlueprintAnnotationContext = "allocation",
+): Promise<BlueprintAnnotationRevision[]> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/blueprint-annotation/history?roomId=${roomId}&context=${context}`);
+  return handleResponse<BlueprintAnnotationRevision[]>(res);
 };
 
 // ── Before/After Photo Capture ──────────────────────────────────────────────

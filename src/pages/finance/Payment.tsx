@@ -1083,7 +1083,14 @@ const Payment: React.FC = () => {
       amount: Number(emi.EMIAmount),
       company: matchedCompany ? matchedCompany.label : prev.company,
       paidTo: payeeSourceName || prev.paidTo,
-      partyId: matchedParty ? matchedParty.id : prev.partyId,
+      // A loan counterparty almost never matches supplierOptions (expected
+      // — lenders/borrowers aren't suppliers), so this used to fall back to
+      // prev.partyId — whatever supplier happened to be selected from an
+      // earlier, unrelated payment in the same form session — silently
+      // posting the loan repayment's standalone NewPayment/GL entry against
+      // that unrelated supplier's ledger head. Clear it instead: no match
+      // means no party, not "reuse whatever was there before".
+      partyId: matchedParty ? matchedParty.id : null,
     }));
     // Late fee / loan-specific charges — and now multi-EMI / lump-sum
     // selection — are handled in a dedicated modal, not the regular

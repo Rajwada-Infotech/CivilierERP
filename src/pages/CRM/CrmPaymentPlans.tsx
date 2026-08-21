@@ -7,6 +7,8 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, Pencil, Layers, ListChecks, X, Calendar, Building2, Percent } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/crm/payment-plans";
 const MILESTONE_MASTER_API = "/api/crm/milestone-master";
@@ -76,6 +78,7 @@ const MilestoneBar: React.FC<{ milestones: MilestoneRow[]; height?: string }> = 
 
 const CrmPaymentPlans: React.FC = () => {
   const qc = useQueryClient();
+  usePageRights("crm-payment-plans");
 
   // Edit/Create form dialog — always editable while open (see previewPlan
   // below for the read-only view; there's no longer a "locked" mode here).
@@ -280,8 +283,10 @@ const CrmPaymentPlans: React.FC = () => {
   );
 
   return (
-    <CrmShell
-      title="CRM — Payment Plan Master"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Payment Plans"]} />
+      <CrmShell
+        title="CRM — Payment Plan Master"
       subtitle="Reusable milestone templates — tag them onto units from Unit Master"
       action={
           <div className="flex items-center gap-3">
@@ -722,7 +727,8 @@ const CrmPaymentPlans: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </CrmShell>
+      </CrmShell>
+    </>
   );
 };
 

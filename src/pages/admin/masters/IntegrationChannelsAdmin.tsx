@@ -31,6 +31,7 @@ import { toast } from "sonner";
 import { Plug, Plus, Pencil, PowerOff, Search, Radio } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -216,7 +217,9 @@ export default function IntegrationChannelsAdmin() {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <AdminShell
+    <>
+      <Breadcrumbs items={["Dashboard", "Admin", "Integration Channels"]} />
+      <AdminShell
         title="Integration Channels"
         subtitle="Manage the channels available in the Communicator"
         icon={Plug}
@@ -446,5 +449,6 @@ export default function IntegrationChannelsAdmin() {
         </AlertDialogContent>
       </AlertDialog>
       </AdminShell>
+    </>
   );
 }

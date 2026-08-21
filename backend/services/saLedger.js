@@ -9,6 +9,7 @@
 const { sql } = require("../db");
 const { getGLHeadId, postVoucher, hasPosting } = require("./generalLedger");
 const { CRM_COLLECTIONS_ACCOUNT } = require("./crmLedger");
+const { assertNoChannelPartnerBrokerageConflict } = require("./saCommissionGuards");
 
 const SA_COMMISSION_EXPENSE_ACCOUNT = "Sales Commission Expense";
 const SA_ADVERTISING_EXPENSE_ACCOUNT = "Advertising & Marketing Expense";
@@ -30,7 +31,7 @@ async function postSaCommissionToGL(pool, commissionId, userEmail) {
     return { posted: true, reason: "already posted (idempotent)" };
 
   const r = await pool.request().input("id", sql.Int, commissionId).query(`
-    SELECT c.Id, c.BookingId, c.SpAmount, c.TlAmount, c.CpAmount, c.PaidAt,
+    SELECT c.Id, c.BookingId, c.ChannelPartnerId, c.SpAmount, c.TlAmount, c.CpAmount, c.PaidAt,
            sp.name AS SalespersonName, tl.name AS TeamLeadName, cp.Name AS ChannelPartnerName,
            b.CompanyId, b.ProjectId
     FROM dbo.SaCommission c
@@ -48,6 +49,10 @@ async function postSaCommissionToGL(pool, commissionId, userEmail) {
   const cpAmount = Number(row.CpAmount) || 0;
   const total = Math.round((spAmount + tlAmount + cpAmount) * 100) / 100;
   if (total <= 0) return { none: true, reason: `Commission ${commissionId} has no amount to pay` };
+  if (row.ChannelPartnerId || cpAmount > 0) {
+    throw new Error("Channel partner payouts must be handled through CRM Brokerage, not SA Commission GL posting.");
+  }
+  await assertNoChannelPartnerBrokerageConflict(pool, row.BookingId, row.ChannelPartnerId, cpAmount);
 
   const expenseHeadId = await getGLHeadId(pool, SA_COMMISSION_EXPENSE_ACCOUNT);
   const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
@@ -57,7 +62,6 @@ async function postSaCommissionToGL(pool, commissionId, userEmail) {
   const legs = [];
   if (spAmount > 0) legs.push({ lHeadId: expenseHeadId, debit: spAmount, narration: `${docNo} — commission paid to ${row.SalespersonName || "salesperson"} (SP)` });
   if (tlAmount > 0) legs.push({ lHeadId: expenseHeadId, debit: tlAmount, narration: `${docNo} — commission paid to ${row.TeamLeadName || "team lead"} (TL)` });
-  if (cpAmount > 0) legs.push({ lHeadId: expenseHeadId, debit: cpAmount, narration: `${docNo} — commission paid to ${row.ChannelPartnerName || "channel partner"} (CP)` });
   legs.push({ lHeadId: collectionsHeadId, credit: total, narration: `${docNo} — sales commission paid` });
 
   await postVoucher(pool, {

@@ -95,10 +95,12 @@ router.get(
   }
 });
 
-// PATCH /:rungId/status — move a rung between report statuses. No
-// order/workflow is enforced between statuses (any -> any) — that's a
-// policy call left for later, not something the schema or this endpoint
-// dictates.
+// PATCH /:rungId/status — move a rung between report statuses, and/or
+// update its Remarks (the Activity Detail modal's Remarks textarea saves
+// on blur independently of the status dropdown, so both fields are
+// optional here — at least one must be present). No order/workflow is
+// enforced between statuses (any -> any) — that's a policy call left for
+// later, not something the schema or this endpoint dictates.
 router.patch(
   "/:rungId/status",
   authMiddleware,
@@ -107,28 +109,40 @@ router.patch(
   const rungId = parseInt(req.params.rungId, 10);
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
 
-  const status = String(req.body?.status || "").toUpperCase();
-  if (!STATUS_VALUES.has(status)) {
+  const hasStatus = req.body?.status !== undefined;
+  const hasRemarks = req.body?.remarks !== undefined;
+  if (!hasStatus && !hasRemarks) {
+    return res.status(400).json({ error: "status or remarks is required" });
+  }
+
+  const status = hasStatus ? String(req.body.status).toUpperCase() : null;
+  if (hasStatus && !STATUS_VALUES.has(status)) {
     return res.status(400).json({ error: `status must be one of: ${[...STATUS_VALUES].join(", ")}` });
   }
+  const remarks = hasRemarks ? String(req.body.remarks || "").slice(0, 1000) : null;
 
   const actor = req.user?.email || req.user?.name || "system";
 
   try {
     const pool = await getPool();
-    const result = await pool.request()
+    const setClauses = [];
+    if (hasStatus) setClauses.push("Status = @status");
+    if (hasRemarks) setClauses.push("Remarks = @remarks");
+    const request = pool.request()
       .input("rungId", sql.Int, rungId)
-      .input("status", sql.NVarChar(20), status)
-      .input("updatedBy", sql.NVarChar(200), actor)
-      .query(`
-        UPDATE dbo.DependencyActivityAssignment
-        SET Status = @status, UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
-        WHERE DependencyMasterActivityId = @rungId
-      `);
+      .input("updatedBy", sql.NVarChar(200), actor);
+    if (hasStatus) request.input("status", sql.NVarChar(20), status);
+    if (hasRemarks) request.input("remarks", sql.NVarChar(1000), remarks);
+
+    const result = await request.query(`
+      UPDATE dbo.DependencyActivityAssignment
+      SET ${setClauses.join(", ")}, UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
+      WHERE DependencyMasterActivityId = @rungId
+    `);
     if (!result.rowsAffected[0]) {
       return res.status(404).json({ error: "No assignment found for this rung" });
     }
-    res.json({ success: true, status });
+    res.json({ success: true, status, remarks });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
     res.status(500).json({ error: err.message });
@@ -239,7 +253,8 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
       engineerIds = engRes.recordset.map((r) => r.engineerId);
 
       const cpRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
-        SELECT Id AS id, CheckpointId AS checkpointId, FieldName AS fieldName, SortOrder AS sortOrder, IsChecked AS isChecked
+        SELECT Id AS id, CheckpointId AS checkpointId, FieldName AS fieldName, SortOrder AS sortOrder,
+               IsChecked AS isChecked, MinWaitDays AS minWaitDays
         FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @assignmentId
         ORDER BY SortOrder ASC, Id ASC
       `);
@@ -293,6 +308,31 @@ router.post("/:rungId", authMiddleware, async (req, res) => {
   if (!Array.isArray(materials)) return res.status(400).json({ error: "materials must be an array" });
   if (checkpoints != null && !Array.isArray(checkpoints)) {
     return res.status(400).json({ error: "checkpoints must be an array" });
+  }
+
+  // A checkpoint with a MinWaitDays snapshot can't honestly be checked off
+  // until that many days have passed since the activity's own start date
+  // — enforced here (not just in the UI) since this route is the only
+  // place checkpoint state is actually persisted.
+  if (Array.isArray(checkpoints)) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (const row of checkpoints) {
+      const minWaitDays = Number.isFinite(row.minWaitDays) ? row.minWaitDays : null;
+      if (!row.isChecked || !minWaitDays || minWaitDays <= 0) continue;
+      if (!startDate) {
+        return res.status(400).json({ error: `"${row.fieldName}" needs a start date set before it can be checked off.` });
+      }
+      const eligible = new Date(startDate);
+      eligible.setDate(eligible.getDate() + minWaitDays);
+      eligible.setHours(0, 0, 0, 0);
+      if (today < eligible) {
+        const daysLeft = Math.ceil((eligible.getTime() - today.getTime()) / 86400000);
+        return res.status(400).json({
+          error: `"${row.fieldName}" can't be checked off yet — needs ${minWaitDays} day(s) after the start date (${daysLeft} day(s) left).`,
+        });
+      }
+    }
   }
   if (labourSource && !SOURCE_VALUES.has(labourSource)) {
     return res.status(400).json({ error: `labourSource must be one of: ${[...SOURCE_VALUES].join(", ")}` });
@@ -397,13 +437,14 @@ router.post("/:rungId", authMiddleware, async (req, res) => {
         .input("checkpointId", sql.Int, Number.isFinite(row.checkpointId) ? row.checkpointId : null)
         .input("fieldName", sql.NVarChar(200), fieldName)
         .input("sortOrder", sql.Int, cpSort)
+        .input("minWaitDays", sql.Int, Number.isFinite(row.minWaitDays) ? row.minWaitDays : null)
         .input("isChecked", sql.Bit, !!row.isChecked)
         .input("checkedAt", sql.DateTime2, row.isChecked ? new Date() : null)
         .input("checkedBy", sql.NVarChar(200), row.isChecked ? actor : null)
         .query(`
           INSERT INTO dbo.DependencyActivityCheckpoint
-            (AssignmentId, CheckpointId, FieldName, SortOrder, IsChecked, CheckedAt, CheckedBy)
-          VALUES (@assignmentId, @checkpointId, @fieldName, @sortOrder, @isChecked, @checkedAt, @checkedBy)
+            (AssignmentId, CheckpointId, FieldName, SortOrder, MinWaitDays, IsChecked, CheckedAt, CheckedBy)
+          VALUES (@assignmentId, @checkpointId, @fieldName, @sortOrder, @minWaitDays, @isChecked, @checkedAt, @checkedBy)
         `);
     }
 
@@ -491,6 +532,19 @@ router.put("/:rungId/blueprint-annotation", authMiddleware, async (req, res) => 
     }
 
     if (current) {
+      // Archive what's about to be overwritten (migration 353) — the
+      // Activity Detail modal's revision scrubber pages back through these
+      // rows, since dbo.ActivityBlueprintAnnotation itself only ever holds
+      // the current state.
+      await pool.request()
+        .input("AnnotationId", sql.Int, current.Id)
+        .query(`
+          INSERT INTO dbo.ActivityBlueprintAnnotationHistory
+            (AnnotationId, Version, ShapesJson, ThumbnailBase64, UpdatedBy, UpdatedAt)
+          SELECT Id, Version, ShapesJson, ThumbnailBase64, UpdatedBy, UpdatedAt
+          FROM dbo.ActivityBlueprintAnnotation WHERE Id = @AnnotationId
+        `);
+
       await pool.request()
         .input("Id", sql.Int, current.Id)
         .input("ShapesJson", sql.NVarChar(sql.MAX), shapesJson)
@@ -519,6 +573,42 @@ router.put("/:rungId/blueprint-annotation", authMiddleware, async (req, res) => 
     res.json({ success: true, version: 1 });
   } catch (err) {
     console.error("[dependency-activity-assignment] PUT /:rungId/blueprint-annotation error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /:rungId/blueprint-annotation/history?roomId=&context= — every past
+// revision (migration 353) plus the current one, oldest first, thumbnail
+// only (no ShapesJson — the scrubber just displays each revision's
+// pre-rendered PNG rather than re-driving a Konva stage per step).
+router.get("/:rungId/blueprint-annotation/history", authMiddleware, async (req, res) => {
+  const rungId = parseInt(req.params.rungId, 10);
+  const roomId = parseInt(req.query.roomId, 10);
+  const context = ANNOTATION_CONTEXTS.has(req.query.context) ? req.query.context : "allocation";
+  if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+  if (!Number.isFinite(roomId)) return res.status(400).json({ error: "roomId is required" });
+
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input("rungId", sql.Int, rungId)
+      .input("roomId", sql.Int, roomId)
+      .input("context", sql.NVarChar(20), context).query(`
+        SELECT h.Version AS version, h.ThumbnailBase64 AS thumbnailBase64,
+               h.UpdatedBy AS updatedBy, h.UpdatedAt AS updatedAt
+        FROM dbo.ActivityBlueprintAnnotation a
+        JOIN dbo.ActivityBlueprintAnnotationHistory h ON h.AnnotationId = a.Id
+        WHERE a.DependencyMasterActivityId = @rungId AND a.RoomId = @roomId AND a.Context = @context
+        UNION ALL
+        SELECT a.Version AS version, a.ThumbnailBase64 AS thumbnailBase64,
+               a.UpdatedBy AS updatedBy, a.UpdatedAt AS updatedAt
+        FROM dbo.ActivityBlueprintAnnotation a
+        WHERE a.DependencyMasterActivityId = @rungId AND a.RoomId = @roomId AND a.Context = @context
+        ORDER BY version ASC
+      `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[dependency-activity-assignment] GET /:rungId/blueprint-annotation/history error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

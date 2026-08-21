@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useGstRates, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { BookingLifecycleBar } from "@/components/crm/BookingLifecycleBar";
+import { usePageRights } from "@/hooks/usePageRights";
 
 const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
@@ -220,6 +221,7 @@ function ReceiptPdfPreview({ receipt, onClose }: { receipt: any; onClose: () => 
 
 export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; onClose: () => void }) {
   const qc = useQueryClient();
+  usePageRights("crm-bookings");
   const { canDoAction, currentUser } = useAuth();
   const isAmendmentApprover = AMENDMENT_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase());
   const canEdit = canDoAction("crm-bookings", "edit");

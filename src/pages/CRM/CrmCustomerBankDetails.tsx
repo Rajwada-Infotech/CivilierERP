@@ -11,6 +11,8 @@ import {
   IdCard, Briefcase, Phone, Building2, Search, Lock, Pencil, CreditCard,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/crm/customer-bank-details";
 const CHECKLIST_API = "/api/crm/welcome-calls";
@@ -381,6 +383,7 @@ type StatusFilter = "All" | "Pending" | "Complete";
 
 const CrmCustomerBankDetails: React.FC = () => {
   const qc = useQueryClient();
+  usePageRights("crm-customer-bank-details");
   const [sp] = useSearchParams();
   const bkgFilter = sp.get("bookingId");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
@@ -422,7 +425,9 @@ const CrmCustomerBankDetails: React.FC = () => {
   }, [list, statusFilter, search]);
 
   return (
-    <CrmShell title="CRM — Customer Bank & Nominee Details" subtitle="KYC captured before agreement preparation">
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Bank Details"]} />
+      <CrmShell title="CRM — Customer Bank & Nominee Details" subtitle="KYC captured before agreement preparation">
       <div className="space-y-4">
         <div className="flex gap-3 items-center flex-wrap">
           <div className="relative flex-1 min-w-48">
@@ -487,7 +492,8 @@ const CrmCustomerBankDetails: React.FC = () => {
           onSaved={() => qc.invalidateQueries({ queryKey: ["crm-bank-details-list"] })}
         />
       )}
-    </CrmShell>
+      </CrmShell>
+    </>
   );
 };
 

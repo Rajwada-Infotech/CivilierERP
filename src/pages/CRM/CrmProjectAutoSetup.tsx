@@ -6,6 +6,8 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Building2, Layers, Ruler, Car, CheckCircle2, Lock, ExternalLink, Pencil, X, ChevronDown, ChevronRight } from "lucide-react";
 import CrmProjectAutoSetupParking from "./CrmProjectAutoSetupParking";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/crm/project-auto-setup";
 const PROJECTS_API = "/api/unit-master/projects";
@@ -109,6 +111,7 @@ const SectionHeader: React.FC<{ icon: React.ElementType; colorClass: string; tit
 
 const CrmProjectAutoSetup: React.FC = () => {
   const qc = useQueryClient();
+  usePageRights("crm-auto-project-setup");
   // Top-level toggle between this page's Block/Floor/Unit wizard and the
   // fully separate Parking Setup component (CrmProjectAutoSetupParking.tsx).
   // Plain in-memory state, not a route — switching tabs never reloads or
@@ -571,8 +574,10 @@ const CrmProjectAutoSetup: React.FC = () => {
   };
 
   return (
-    <CrmShell
-      title="CRM — Auto Project Setup"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Project Auto Setup"]} />
+      <CrmShell
+        title="CRM — Auto Project Setup"
       subtitle="Pick a Project, then generate its Blocks, Floors, and Units in one guided flow instead of one-row-at-a-time forms"
     >
       <div className="space-y-4">
@@ -1289,7 +1294,8 @@ const CrmProjectAutoSetup: React.FC = () => {
         </>
         )}
       </div>
-    </CrmShell>
+      </CrmShell>
+    </>
   );
 };
 

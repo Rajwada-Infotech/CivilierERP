@@ -34,6 +34,8 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { GlassCard, GlassSection, GlassCardSkeleton } from "@/components/dashboard/GlassShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme } from "@/contexts/ThemeContext";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const REPORT_API = "/api/task-performance-report";
 const ACCENT = "#0d9488";
@@ -335,6 +337,7 @@ const PERF_COLS: ColumnDef<UserPerf, unknown>[] = [
 
 const TaskDashboard: React.FC = () => {
   const { isDark, cardStyle } = useGlass();
+  usePageRights("task-performance-report");
   const [filters, setFilters] = React.useState<Filters>(EMPTY_FILTERS);
   const [dateError, setDateError] = React.useState<string | null>(null);
 
@@ -452,8 +455,10 @@ const TaskDashboard: React.FC = () => {
   }, [rows]);
 
   return (
-    <FollowupShell
-      title="Task Management Dashboard"
+    <>
+      <Breadcrumbs items={["Dashboard", "Follow-Up", "Task Dashboard"]} />
+      <FollowupShell
+        title="Task Management Dashboard"
       subtitle="Priority, status and user performance across all tasks — live"
       icon={Chart}
       action={
@@ -583,7 +588,8 @@ const TaskDashboard: React.FC = () => {
           </div>
         </div>
       </GlassSection>
-    </FollowupShell>
+      </FollowupShell>
+    </>
   );
 };
 

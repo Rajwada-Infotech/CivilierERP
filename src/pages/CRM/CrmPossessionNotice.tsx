@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/crm/possession-notice";
 const BKG_API = "/api/crm/bookings";
@@ -36,6 +38,7 @@ async function fetchBookings(): Promise<any[]> {
 const CrmPossessionNotice: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  usePageRights("crm-possession-notice");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
@@ -181,8 +184,10 @@ const CrmPossessionNotice: React.FC = () => {
   ];
 
   return (
-    <CrmShell
-      title="CRM — Possession Notice"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Possession Notice"]} />
+      <CrmShell
+        title="CRM — Possession Notice"
       subtitle="Formal notice issuance to buyers offering possession"
       action={
           <div className="flex items-center gap-3">
@@ -309,7 +314,8 @@ const CrmPossessionNotice: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </CrmShell>
+      </CrmShell>
+    </>
   );
 };
 

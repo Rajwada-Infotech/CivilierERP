@@ -730,6 +730,9 @@ router.get(
       // itself opts back in via ?includeShortClosed=1 so they stay fully
       // visible for document search/history.
       const includeShortClosed = req.query.includeShortClosed === "1";
+      const companyId = req.query.companyId
+        ? parseInt(req.query.companyId, 10) || null
+        : null;
 
       const whereConditions = [];
       if (sourceWOId) whereConditions.push("po.SourceWOId = @sourceWOId");
@@ -738,6 +741,7 @@ router.get(
         whereConditions.push("po.SourceSaleInvoiceId = @sourceSaleInvoiceId");
       if (poTypeFilter) whereConditions.push("po.POType = @poTypeFilter");
       if (!includeShortClosed) whereConditions.push("ISNULL(po.Status, '') != 'Short Closed'");
+      if (companyId) whereConditions.push("po.CompanyId = @companyId");
       const whereClause = whereConditions.length
         ? `WHERE ${whereConditions.join(" AND ")}`
         : "";
@@ -750,7 +754,8 @@ router.get(
         .input("sourceWOId", sql.Int, sourceWOId)
         .input("fyId", sql.Int, fyId)
         .input("sourceSaleInvoiceId", sql.Int, sourceSaleInvoiceId)
-        .input("poTypeFilter", sql.NVarChar(20), poTypeFilter).query(`
+        .input("poTypeFilter", sql.NVarChar(20), poTypeFilter)
+        .input("companyId", sql.Int, companyId).query(`
         SELECT *, COUNT(*) OVER() AS _total FROM (
           ${PO_SELECT}
           ${whereClause}
