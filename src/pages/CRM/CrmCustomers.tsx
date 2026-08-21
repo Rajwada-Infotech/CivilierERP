@@ -478,48 +478,7 @@ const CrmCustomers: React.FC = () => {
     }
   };
 
-  const handleCreate = async () => {
-    if (!form.CustomerName.trim() || !form.Mobile.trim() || !form.PanNo.trim() || !form.PermanentAddress.trim()) {
-      toast.error("Customer Name, Mobile, PAN and Permanent Address are required");
-      return;
-    }
-    if (!/^\d{10}$/.test(form.Mobile.trim())) {
-      toast.error("Mobile must be exactly 10 digits"); return;
-    }
-    if (form.AltMobile.trim() && !/^\d{10}$/.test(form.AltMobile.trim())) {
-      toast.error("Alternate mobile must be exactly 10 digits"); return;
-    }
-    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
-      toast.error("PAN must be in format ABCDE1234F"); return;
-    }
-    if (form.AadhaarNo.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
-      toast.error("Aadhaar must be exactly 12 digits"); return;
-    }
-    if (form.Email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.Email.trim())) {
-      toast.error("Please enter a valid email address"); return;
-    }
-    if (form.PermanentPincode.trim() && !/^\d{6}$/.test(form.PermanentPincode.trim())) {
-      toast.error("Pincode must be exactly 6 digits"); return;
-    }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, LeadId: form.LeadId || null }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`Customer ${data.CustomerNo} registered`);
-      setDialogOpen(false);
-      setForm({ ...EMPTY_FORM });
-      qc.invalidateQueries({ queryKey: ["crm-customers"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
+
 
   const filtered = useMemo(() => customers as any[], [customers]);
 
