@@ -620,7 +620,7 @@ export default function Stock() {
                 value: p.id,
                 label: p.label,
               }))}
-              placeholder={selectedCompany ? "All Projects (this company)" : "All Projects"}
+              placeholder="All Projects"
               icon={FolderKanban}
             />
             <SelectDropdown
