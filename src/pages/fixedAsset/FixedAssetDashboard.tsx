@@ -125,7 +125,7 @@ export default function FixedAssetDashboard() {
             />
             <QuickLinkCard
               icon={Tag}
-              title="Fixed Asset Tagging"
+              title="FA Inventory"
               desc="Tag received stock, track untagged qty"
               onClick={() => navigate("/fixed-asset/tagging")}
             />

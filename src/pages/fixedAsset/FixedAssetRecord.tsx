@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Plus, ArrowLeft, Eye, Pencil, Trash2, AlertCircle, Search,
   Building2, Package, TrendingDown, TrendingUp, IndianRupee, Calendar, User,
-  FileText, MapPin, Hash, Cpu, Check, X,
+  FileText, MapPin, Hash, Cpu, Check, X, ChevronsUpDown, Loader2, Warehouse,
   Boxes, Wallet, PackageCheck, Circle, CheckCircle2, PlayCircle,
 } from "lucide-react";
 import { GlassShell, GlassCard } from "@/components/dashboard/GlassShell";
@@ -21,7 +21,14 @@ import {
   type FixedAssetListItem, type FixedAssetDetail,
 } from "@/api/fixedAssetApi";
 import { getTransferUsers } from "@/api/assetTransferApi";
+import { getUnassignedFAItemCodes, type UnassignedFAItemCode } from "@/api/fixedAssetTaggingApi";
 import { ASSET_CATEGORIES, CATEGORY_ICONS, CATEGORY_COLORS } from "./assetCategories";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const ASSET_STATUS_OPTIONS = ["Pending", "Active", "Sold", "Scrapped", "Under Maintenance"] as const;
@@ -73,6 +80,69 @@ function calcDepreciation(purchaseCost: number, rate: number, purchaseDate: stri
   return { years: parseFloat(years.toFixed(2)), annualDep, totalDep, bookValue };
 }
 
+// ── FA Item Code searchable dropdown (shadcn Popover + Command) ───────────────
+function FAItemCodeCombobox({
+  codes, value, onSelect, loading,
+}: {
+  codes: UnassignedFAItemCode[];
+  value: number | null;
+  onSelect: (code: UnassignedFAItemCode) => void;
+  loading?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = codes.find((c) => c.TagId === value);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className={cn("w-full justify-between font-normal h-9", !selected && "text-muted-foreground")}
+        >
+          <span className="truncate">{selected ? `${selected.FAItemCode} — ${selected.ItemName || "Item"}` : "Search FA Item Code…"}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search generated FA Item Codes…" />
+          <CommandList>
+            {loading ? (
+              <div className="flex items-center justify-center py-6 gap-2 text-muted-foreground text-xs">
+                <Loader2 size={13} className="animate-spin" /> Loading…
+              </div>
+            ) : (
+              <>
+                <CommandEmpty>No unassigned FA Item Codes found. Generate one in FA Inventory first.</CommandEmpty>
+                <CommandGroup>
+                  {codes.map((c) => (
+                    <CommandItem
+                      key={c.TagId}
+                      value={`${c.FAItemCode} ${c.ItemName || ""}`}
+                      onSelect={() => { onSelect(c); setOpen(false); }}
+                    >
+                      <Check className={cn("mr-2 h-4 w-4", value === c.TagId ? "opacity-100" : "opacity-0")} />
+                      <span className="flex flex-col min-w-0">
+                        <span className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 truncate">{c.FAItemCode}</span>
+                        <span className="text-xs truncate">{c.ItemName || "—"}</span>
+                        <span className="text-[11px] text-muted-foreground truncate">
+                          {[c.CompanyName, c.ProjectName, c.GodownName].filter(Boolean).join(" · ")}
+                        </span>
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ── form shape ────────────────────────────────────────────────────────────────
 interface FormState {
   docDate: string;
@@ -80,6 +150,10 @@ interface FormState {
   projectId: string;
   finYear: string;
   assetName: string;
+  sourceTagId: string;
+  faItemCode: string;
+  godownId: string;
+  godownName: string;
   assetCategory: string;
   brand: string;
   model: string;
@@ -111,6 +185,10 @@ const emptyForm = (finYear = ""): FormState => ({
   projectId:          "",
   finYear,
   assetName:          "",
+  sourceTagId:        "",
+  faItemCode:         "",
+  godownId:           "",
+  godownName:         "",
   assetCategory:      "",
   brand:              "",
   model:              "",
@@ -208,7 +286,6 @@ function LivePreviewCard({ form, saving, custodianName, glassStyle }: { form: Fo
     { label: "Asset Name",     value: form.assetName || "—", done: !!form.assetName },
     { label: "Category",       value: form.assetCategory || "—", done: !!form.assetCategory },
     { label: "Brand / Model",  value: [form.brand, form.model].filter(Boolean).join(" · ") || "—", done: !!(form.brand || form.model) },
-    { label: "Serial No.",     value: form.serialNumber || "—", done: !!form.serialNumber },
     { label: "Purchase Cost",  value: form.purchaseCost ? fmtCur(parseFloat(form.purchaseCost)) : "—", done: !!form.purchaseCost },
     { label: "Purchase Date",  value: form.purchaseDate ? fmtDate(form.purchaseDate) : "—", done: !!form.purchaseDate },
     { label: "Activation Date",value: form.activationDate ? fmtDate(form.activationDate) : "—", done: !!form.activationDate },
@@ -324,6 +401,11 @@ export default function FixedAssetRecord() {
   const { data: users = [] } = useQuery({
     queryKey: ["asset-transfer-users"],
     queryFn:  getTransferUsers,
+  });
+  const { data: unassignedCodes = [], isLoading: codesLoading } = useQuery({
+    queryKey: ["fa-unassigned-codes"],
+    queryFn:  getUnassignedFAItemCodes,
+    enabled:  viewMode === "form" && !editingId,
   });
 
   // ── detail query for view/edit ────────────────────────────────────────────
@@ -472,6 +554,10 @@ export default function FixedAssetRecord() {
         projectId:           String(d.ProjectId || ""),
         finYear:             d.FinYear || "",
         assetName:           d.AssetName || "",
+        sourceTagId:         String(d.SourceTagId || ""),
+        faItemCode:          d.FAItemCode || "",
+        godownId:            String(d.GodownID || ""),
+        godownName:          d.GodownName || "",
         assetCategory:       d.AssetCategory || "",
         brand:               d.Brand || "",
         model:               d.Model || "",
@@ -522,7 +608,25 @@ export default function FixedAssetRecord() {
     }
   };
 
+  const handleSelectCode = (c: UnassignedFAItemCode) => {
+    setForm((p) => ({
+      ...p,
+      sourceTagId: String(c.TagId),
+      faItemCode:  c.FAItemCode,
+      assetName:   c.ItemName || "",
+      companyId:   c.CompanyId ? String(c.CompanyId) : "",
+      projectId:   c.ProjectId ? String(c.ProjectId) : "",
+      godownId:    c.GodownId ? String(c.GodownId) : "",
+      godownName:  c.GodownName || "",
+    }));
+  };
+
+  const clearSelectedCode = () => {
+    setForm((p) => ({ ...p, sourceTagId: "", faItemCode: "", assetName: "", godownId: "", godownName: "" }));
+  };
+
   const handleSave = () => {
+    if (!editingId && !form.sourceTagId) return toast.error("Select an FA Item Code");
     if (!form.assetName.trim())    return toast.error("Asset name is required");
     if (!form.assetCategory)       return toast.error("Asset category is required");
     if (!form.purchaseCost)        return toast.error("Purchase cost is required");
@@ -533,6 +637,7 @@ export default function FixedAssetRecord() {
       projectId:           form.projectId ? Number(form.projectId) : undefined,
       finYear:             form.finYear || undefined,
       assetName:           form.assetName,
+      sourceTagId:         !editingId && form.sourceTagId ? Number(form.sourceTagId) : undefined,
       assetCategory:       form.assetCategory,
       brand:               form.brand || undefined,
       model:               form.model || undefined,
@@ -788,7 +893,7 @@ export default function FixedAssetRecord() {
               </div>
               <div>
                 <label className={labelCls}><Building2 size={11} /> Company</label>
-                <select value={form.companyId} onChange={(e) => { setField("companyId", e.target.value); setField("projectId", ""); }} className={inputCls}>
+                <select value={form.companyId} onChange={(e) => { setField("companyId", e.target.value); setField("projectId", ""); }} className={inputCls} disabled={!!form.sourceTagId}>
                   <option value="">Select company…</option>
                   {ensureArray<{ id: number; label: string }>(companies).map((c) => (
                     <option key={c.id} value={c.id}>{c.label}</option>
@@ -797,7 +902,7 @@ export default function FixedAssetRecord() {
               </div>
               <div>
                 <label className={labelCls}>Project</label>
-                <select value={form.projectId} onChange={(e) => setField("projectId", e.target.value)} className={inputCls} disabled={!form.companyId}>
+                <select value={form.projectId} onChange={(e) => setField("projectId", e.target.value)} className={inputCls} disabled={!form.companyId || !!form.sourceTagId}>
                   <option value="">Select project…</option>
                   {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
@@ -823,7 +928,34 @@ export default function FixedAssetRecord() {
             <SubGroup label="Identity">
               <div className="sm:col-span-2">
                 <label className={labelCls}>Fixed Asset Name *</label>
-                <input type="text" value={form.assetName} onChange={(e) => setField("assetName", e.target.value)} placeholder="e.g. Dell Latitude 5520" className={inputCls} />
+                {form.sourceTagId ? (
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/[0.04] px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{form.assetName}</p>
+                      <p className="text-[11px] font-mono text-yellow-600 dark:text-yellow-400 truncate">{form.faItemCode}</p>
+                      {form.godownName && (
+                        <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5 truncate">
+                          <Warehouse size={10} /> {form.godownName}
+                        </p>
+                      )}
+                    </div>
+                    {!editingId && (
+                      <button type="button" onClick={clearSelectedCode}
+                        className="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Change">
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                ) : editingId ? (
+                  <input type="text" value={form.assetName} onChange={(e) => setField("assetName", e.target.value)} placeholder="e.g. Dell Latitude 5520" className={inputCls} />
+                ) : (
+                  <FAItemCodeCombobox codes={unassignedCodes} value={null} onSelect={handleSelectCode} loading={codesLoading} />
+                )}
+                {!editingId && !form.sourceTagId && (
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Select a previously generated, unassigned FA Item Code from FA Inventory — Item Name, Company, Project and Godown auto-fill.
+                  </p>
+                )}
               </div>
               <div>
                 <label className={labelCls}>Asset Category *</label>
@@ -840,8 +972,10 @@ export default function FixedAssetRecord() {
                 </div>
               </div>
               <div>
-                <label className={labelCls}><Hash size={11} /> Serial Number</label>
-                <input type="text" value={form.serialNumber} onChange={(e) => setField("serialNumber", e.target.value)} placeholder="Serial / IMEI…" className={inputCls} />
+                <label className={labelCls}><Hash size={11} /> Doc No.</label>
+                <input type="text" value={editingId ? (detailData as FixedAssetDetail | undefined)?.DocNo || "" : ""} readOnly
+                  placeholder="Auto-generated on save"
+                  className={`${inputCls} bg-muted/30 text-muted-foreground`} />
               </div>
               <div>
                 <label className={labelCls}>Brand</label>

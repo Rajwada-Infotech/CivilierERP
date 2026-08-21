@@ -31,6 +31,10 @@ export interface FixedAssetListItem {
   ProjectName: string | null;
   SupplierId: number | null;
   SupplierName: string | null;
+  GodownID: number | null;
+  GodownName: string | null;
+  SourceTagId: number | null;
+  FAItemCode: string | null;
 }
 
 export interface FixedAssetDetail extends FixedAssetListItem {
@@ -52,8 +56,9 @@ export interface FixedAssetPayload {
   companyId?: number | null;
   projectId?: number | null;
   finYear?: string;
-  assetName: string;
+  assetName?: string;
   assetCategory: string;
+  sourceTagId?: number | null;
   brand?: string;
   model?: string;
   serialNumber?: string;

@@ -203,6 +203,7 @@ const FixedAssetDashboard = lazy(() => import("./pages/fixedAsset/FixedAssetDash
 const FixedAssetRecord = lazy(() => import("./pages/fixedAsset/FixedAssetRecord"));
 const FixedAssetTagging = lazy(() => import("./pages/fixedAsset/FixedAssetTagging"));
 const AssetTransfer = lazy(() => import("./pages/fixedAsset/AssetTransfer"));
+const IDTemplateMaster = lazy(() => import("./pages/fixedAsset/IDTemplateMaster"));
 const ShortClose = lazy(() => import("./pages/material/ShortClose"));
 const DepreciationSetup = lazy(() => import("./pages/fixedAsset/DepreciationSetup"));
 const VehicleInOut = lazy(() => import("./pages/material/VehicleInOut"));
@@ -1134,6 +1135,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="asset-transfer">
             <AssetTransfer />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/id-template-master"
+        element={
+          <ProtectedRoute pageKey="id-template-master">
+            <IDTemplateMaster />
           </ProtectedRoute>
         }
       />

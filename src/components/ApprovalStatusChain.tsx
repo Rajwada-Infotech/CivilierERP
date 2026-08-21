@@ -115,9 +115,12 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
     fetchWithAuth(
       `/api/approval-workflows/trail?module=${table}&id=${recordId}`,
     )
-      .then((r) => r.json().catch(() => ({})))
-      .then((data: TrailData) => {
-        if (!cancelled) setTrail(data);
+      .then((r) => (r.ok ? r.json().catch(() => null) : null))
+      .then((data: TrailData | null) => {
+        // A failed request (e.g. 429 from a burst of concurrent card
+        // fetches) or a malformed body must not be treated as a valid
+        // trail — only accept it once it actually has a steps array.
+        if (!cancelled) setTrail(data && Array.isArray(data.steps) ? data : null);
       })
       .catch(() => {})
       .finally(() => {
