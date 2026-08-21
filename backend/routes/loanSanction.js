@@ -482,6 +482,7 @@ router.get("/:id/payments", requirePageRight("loan-sanction", "view"), async (re
         p.PaymentId, p.LoanId, p.PaymentRef, p.PaymentDate, p.PaymentType,
         p.PrincipalInterestAmount, p.LateFee, p.TotalAmount, p.ExcessCredited,
         p.ClosedLoan, p.Notes, p.CreatedBy, p.CreatedAt,
+        p.IsReversed, p.ReversedAt, p.ReversedReason,
         (SELECT COUNT(*) FROM dbo.LoanEMISchedule e WHERE e.PaymentId = p.PaymentId) AS EmisCovered,
         -- The actual payment instrument used (see migration 340) — settling
         -- a Loan EMI always goes through Finance > Payment first, which is
@@ -716,6 +717,7 @@ async function createLoanSanctionInternal(payload, createdBy) {
     await Promise.all([
       bumpCacheVersion("loan-sanction"),
       bumpCacheVersion("on-account"),
+      bumpCacheVersion("account-head-master"),
     ]);
     return { loanId, loanNo, lenderLHeadId, borrowerLHeadId };
   } catch (err) {
@@ -743,6 +745,16 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
     // Bank Loan/Customer Loan involve only one of our own companies (the
     // other side is an external bank or customer), so they're left to the
     // existing manual post-to-gl flow.
+    // The loan row itself is already committed at this point
+    // (createLoanSanctionInternal's own transaction) — GL posting below is
+    // a separate, best-effort step. If it throws, the loan MUST NOT be
+    // reported as failed (a 500 here previously invited the client to
+    // retry the whole create, which would sanction a second, duplicate
+    // loan on top of the first). Instead the loan is returned as created
+    // with glPosted:false, and POST /:id/post-to-gl (which now handles the
+    // Inter-Company two-voucher split too) is the retry path.
+    let glPosted = false;
+    let glError = null;
     if (req.body.loanType === "Inter-Company" && lenderLHeadId && borrowerLHeadId) {
       const lenderBankAccountId = req.body.lenderBankAccountId ? parseInt(req.body.lenderBankAccountId, 10) : null;
       const borrowerBankAccountId = req.body.borrowerBankAccountId ? parseInt(req.body.borrowerBankAccountId, 10) : null;
@@ -750,42 +762,48 @@ router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) =
       const borrowerCompanyId = parseInt(req.body.borrowerCompanyId, 10);
       const amt = parseFloat(req.body.amount);
       if (lenderBankAccountId && borrowerBankAccountId) {
-        const { postVoucher } = require("../services/generalLedger");
-        const pool = getPool();
-        await postVoucher(pool, {
-          voucherNo: loanNo,
-          voucherDate: req.body.loanDate,
-          sourceType: "LoanPosting",
-          sourceId: loanId,
-          companyId: lenderCompanyId,
-          createdBy,
-          legs: [
-            { lHeadId: borrowerLHeadId, debit: amt, narration: `${loanNo} — inter-company loan receivable (funds sent)` },
-            { lHeadId: lenderBankAccountId, credit: amt, narration: `${loanNo} — loan disbursed` },
-          ],
-        });
-        await postVoucher(pool, {
-          voucherNo: loanNo,
-          voucherDate: req.body.loanDate,
-          sourceType: "LoanPosting",
-          sourceId: loanId,
-          companyId: borrowerCompanyId,
-          createdBy,
-          legs: [
-            { lHeadId: borrowerBankAccountId, debit: amt, narration: `${loanNo} — loan received` },
-            { lHeadId: lenderLHeadId, credit: amt, narration: `${loanNo} — inter-company loan payable (funds received)` },
-          ],
-        });
-        await bumpCacheVersion("journal-voucher");
-        // BUG 9 FIX: stamp DisbursedAt — Inter-Company loans auto-post at
-        // sanction time, so disbursement happens immediately on creation.
-        await pool.request()
-          .input("LoanId", sql.Int, loanId)
-          .query("UPDATE dbo.LoanSanction SET DisbursedAt = SYSDATETIME() WHERE LoanId = @LoanId AND DisbursedAt IS NULL");
+        try {
+          const { postVoucher } = require("../services/generalLedger");
+          const pool = getPool();
+          await postVoucher(pool, {
+            voucherNo: loanNo,
+            voucherDate: req.body.loanDate,
+            sourceType: "LoanPosting",
+            sourceId: loanId,
+            companyId: lenderCompanyId,
+            createdBy,
+            legs: [
+              { lHeadId: borrowerLHeadId, debit: amt, narration: `${loanNo} — inter-company loan receivable (funds sent)` },
+              { lHeadId: lenderBankAccountId, credit: amt, narration: `${loanNo} — loan disbursed` },
+            ],
+          });
+          await postVoucher(pool, {
+            voucherNo: loanNo,
+            voucherDate: req.body.loanDate,
+            sourceType: "LoanPosting",
+            sourceId: loanId,
+            companyId: borrowerCompanyId,
+            createdBy,
+            legs: [
+              { lHeadId: borrowerBankAccountId, debit: amt, narration: `${loanNo} — loan received` },
+              { lHeadId: lenderLHeadId, credit: amt, narration: `${loanNo} — inter-company loan payable (funds received)` },
+            ],
+          });
+          await bumpCacheVersion("journal-voucher");
+          // BUG 9 FIX: stamp DisbursedAt — Inter-Company loans auto-post at
+          // sanction time, so disbursement happens immediately on creation.
+          await pool.request()
+            .input("LoanId", sql.Int, loanId)
+            .query("UPDATE dbo.LoanSanction SET DisbursedAt = SYSDATETIME() WHERE LoanId = @LoanId AND DisbursedAt IS NULL");
+          glPosted = true;
+        } catch (glErr) {
+          console.error("[loan-sanction] Inter-Company GL posting failed after loan creation committed:", glErr.message);
+          glError = "Loan was sanctioned, but posting it to the General Ledger failed. Retry from the loan's detail page.";
+        }
       }
     }
 
-    res.status(201).json({ loanId, loanNo });
+    res.status(201).json({ loanId, loanNo, glPosted, glError });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -867,9 +885,13 @@ router.put("/:id", requirePageRight("loan-sanction", "edit"), async (req, res) =
           .input("RefId", sql.Int, loanId)
           .input("NewAmount", sql.Decimal(18, 2), newAmt)
           .query(`
-            UPDATE TOP (1) dbo.OnAccountLedger
+            UPDATE dbo.OnAccountLedger
             SET Amount = @NewAmount
             WHERE RefType = 'Loan' AND RefId = @RefId AND TxnType = 'CREDIT'
+              AND OAId = (
+                SELECT MIN(OAId) FROM dbo.OnAccountLedger
+                WHERE RefType = 'Loan' AND RefId = @RefId AND TxnType = 'CREDIT'
+              )
           `);
         if (loan.BorrowerLHeadId) {
           await new sql.Request(tx)
@@ -1081,7 +1103,8 @@ router.post("/:id/post-to-gl", requirePageRight("loan-sanction", "edit"), async 
     const { postVoucher } = require("../services/generalLedger");
 
     const loanRes = await pool.request().input("LoanId", sql.Int, loanId).query(`
-      SELECT LoanId, LoanNo, Amount, LenderCompanyId, BorrowerCompanyId, LenderLHeadId, BorrowerLHeadId
+      SELECT LoanId, LoanNo, LoanType, LoanDate, Amount, LenderCompanyId, BorrowerCompanyId,
+             LenderLHeadId, BorrowerLHeadId, LenderBankAccountId, BorrowerBankAccountId
       FROM dbo.LoanSanction WHERE LoanId = @LoanId
     `);
     if (!loanRes.recordset.length) return res.status(404).json({ error: "Loan not found" });
@@ -1109,26 +1132,59 @@ router.post("/:id/post-to-gl", requirePageRight("loan-sanction", "edit"), async 
     const amt = Number(loan.Amount);
     if (!amt || amt <= 0) return res.status(400).json({ error: "Loan has no amount to post." });
 
-    // Dr the borrower's Loan ledger (they now owe this — a receivable from
-    // the sanctioning side), Cr the lender's Loan ledger (funds went out).
-    // Direct posting straight to the General Ledger via postVoucher — same
-    // as the Inter-Company auto-post path above (POST /), not a formal
-    // JournalVoucher record. No dbo.JournalVoucher header/lines, no "JV-"
-    // doc-number lock; the loan's own LoanNo is the voucher reference.
-    const lines = [
-      { LHeadId: loan.BorrowerLHeadId, DebitAmount: amt, CreditAmount: 0, Narration: `Loan Posting: ${loan.LoanNo} — Borrower` },
-      { LHeadId: loan.LenderLHeadId, DebitAmount: 0, CreditAmount: amt, Narration: `Loan Posting: ${loan.LoanNo} — Lender` },
-    ];
-
-    await postVoucher(pool, {
-      voucherNo: loan.LoanNo,
-      voucherDate: new Date(),
-      sourceType: "LoanPosting",
-      sourceId: loanId,
-      companyId: loan.LenderCompanyId || loan.BorrowerCompanyId || null,
-      createdBy: userEmail,
-      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
-    });
+    // Inter-Company involves TWO of our own companies — each needs its own
+    // book entry (Lender's books show the receivable, Borrower's books show
+    // the payable), same two-voucher split POST / already does at creation
+    // time. A single combined voucher tagged to only one company (the old
+    // behavior here) left the other company's books with no entry at all —
+    // permanently broken double-entry across the two books. Bank Loan /
+    // Customer Loan only ever involve ONE of our own companies (the other
+    // side is an external bank or customer), so those still get one voucher.
+    if (loan.LoanType === "Inter-Company") {
+      if (!loan.LenderBankAccountId || !loan.BorrowerBankAccountId) {
+        return res.status(422).json({ error: "This Inter-Company loan is missing a Lender or Borrower Bank A/C — cannot post." });
+      }
+      await postVoucher(pool, {
+        voucherNo: loan.LoanNo,
+        voucherDate: loan.LoanDate,
+        sourceType: "LoanPosting",
+        sourceId: loanId,
+        companyId: loan.LenderCompanyId,
+        createdBy: userEmail,
+        legs: [
+          { lHeadId: loan.BorrowerLHeadId, debit: amt, narration: `${loan.LoanNo} — inter-company loan receivable (funds sent)` },
+          { lHeadId: loan.LenderBankAccountId, credit: amt, narration: `${loan.LoanNo} — loan disbursed` },
+        ],
+      });
+      await postVoucher(pool, {
+        voucherNo: loan.LoanNo,
+        voucherDate: loan.LoanDate,
+        sourceType: "LoanPosting",
+        sourceId: loanId,
+        companyId: loan.BorrowerCompanyId,
+        createdBy: userEmail,
+        legs: [
+          { lHeadId: loan.BorrowerBankAccountId, debit: amt, narration: `${loan.LoanNo} — loan received` },
+          { lHeadId: loan.LenderLHeadId, credit: amt, narration: `${loan.LoanNo} — inter-company loan payable (funds received)` },
+        ],
+      });
+    } else {
+      // Dr the borrower's Loan ledger (they now owe this — a receivable from
+      // the sanctioning side), Cr the lender's Loan ledger (funds went out).
+      const lines = [
+        { LHeadId: loan.BorrowerLHeadId, DebitAmount: amt, CreditAmount: 0, Narration: `Loan Posting: ${loan.LoanNo} — Borrower` },
+        { LHeadId: loan.LenderLHeadId, DebitAmount: 0, CreditAmount: amt, Narration: `Loan Posting: ${loan.LoanNo} — Lender` },
+      ];
+      await postVoucher(pool, {
+        voucherNo: loan.LoanNo,
+        voucherDate: new Date(),
+        sourceType: "LoanPosting",
+        sourceId: loanId,
+        companyId: loan.LenderCompanyId || loan.BorrowerCompanyId || null,
+        createdBy: userEmail,
+        legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
+      });
+    }
 
     // BUG 9 FIX: stamp DisbursedAt when the GL posting confirms money moved.
     // Null until then; setting it here (and in the Inter-Company auto-post
@@ -1279,16 +1335,24 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
       throw Object.assign(new Error("This loan is already closed."), { status: 409 });
     }
 
+    // UPDLOCK+ROWLOCK — without it, two concurrent /:id/pay requests for
+    // this loan both read the same unpaid EMIs under READ COMMITTED and
+    // both proceed to mark them paid, double-recording the same repayment.
+    // Taking the lock here serializes concurrent requests on this loan's
+    // EMI rows; the second one blocks until the first commits, then sees
+    // the now-paid rows and (via the AND IsPaid = 0 guard on the UPDATE
+    // below, plus the rowsAffected check) fails loudly instead of quietly
+    // double-paying.
     const allEmisRes = await new sql.Request(tx)
       .input("LoanId", sql.Int, loanId)
-      .query("SELECT EMIId, EMIAmount, IsPaid FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId ORDER BY InstallmentNo ASC");
+      .query("SELECT EMIId, EMIAmount, IsPaid FROM dbo.LoanEMISchedule WITH (UPDLOCK, ROWLOCK) WHERE LoanId = @LoanId ORDER BY InstallmentNo ASC");
     const allEmis = allEmisRes.recordset;
     const unpaidEmis = allEmis.filter((e) => !e.IsPaid);
     const totalScheduleAmount = allEmis.reduce((s, e) => s + Number(e.EMIAmount), 0);
 
     const alreadyPaidRes = await new sql.Request(tx)
       .input("LoanId", sql.Int, loanId)
-      .query("SELECT ISNULL(SUM(PrincipalInterestAmount), 0) AS paid FROM dbo.LoanPayment WHERE LoanId = @LoanId");
+      .query("SELECT ISNULL(SUM(PrincipalInterestAmount), 0) AS paid FROM dbo.LoanPayment WHERE LoanId = @LoanId AND IsReversed = 0");
     const alreadyPaid = Number(alreadyPaidRes.recordset[0].paid);
 
     let principalInterestAmount;
@@ -1378,15 +1442,21 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
     // remaining unpaid EMIs (lump-sum closure) or just the selected ones.
     const emisToUpdate = emisToUpdateForCloseCheck;
     for (const emiId of emisToUpdate) {
-      await new sql.Request(tx)
+      const emiUpdateRes = await new sql.Request(tx)
         .input("EMIId", sql.Int, emiId)
         .input("PaymentId", sql.Int, paymentId)
         .input("PaidDate", sql.Date, paymentDate)
         .input("PaidBy", sql.NVarChar(150), actor).query(`
           UPDATE dbo.LoanEMISchedule
           SET IsPaid = 1, PaidDate = @PaidDate, PaidBy = @PaidBy, PaymentId = @PaymentId
-          WHERE EMIId = @EMIId
+          WHERE EMIId = @EMIId AND IsPaid = 0
         `);
+      // Defense in depth alongside the UPDLOCK above — if this EMI was
+      // somehow already paid by the time we get here, don't silently
+      // record a second payment on top of it.
+      if (!emiUpdateRes.rowsAffected[0]) {
+        throw Object.assign(new Error("One of the selected EMIs was already paid by another request. Reload and try again."), { status: 409 });
+      }
     }
 
     // Borrower's loan balance goes down by the principal+interest portion —
@@ -1449,6 +1519,7 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
     await Promise.all([
       bumpCacheVersion("loan-sanction"),
       bumpCacheVersion("on-account"),
+      bumpCacheVersion("account-head-master"),
     ]);
 
     // Inter-Company: repayment reverses the sanction-time cash movement —
@@ -1458,38 +1529,54 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
     // and credit the Borrower's counterparty head (receivable shrinks).
     // Only the principal+interest portion moves the loan ledger — late fee
     // is a separate charge, same as the OnAccountLedger entries above.
+    // Everything above this point is already committed (tx.commit() ran
+    // above) — LoanPayment, the EMI IsPaid flags, and the OnAccountLedger
+    // entries are real regardless of what happens next. GL posting from
+    // here on is intentionally wrapped in its own try/catch, same pattern
+    // as the Customer/Bank Loan branches below: a failure here becomes a
+    // glPostingWarning on the response, never a 500. Letting it escape to
+    // the outer catch used to call tx.rollback() on an already-committed
+    // transaction (a silent no-op) and return 500 for a payment that had,
+    // in fact, already succeeded — inviting a client retry that would
+    // record the same repayment twice.
+    let glPostingWarning = null;
     if (
       loan.LoanType === "Inter-Company" &&
       loan.LenderLHeadId && loan.BorrowerLHeadId &&
       loan.LenderCompanyId && loan.BorrowerCompanyId &&
       loan.LenderBankAccountId && loan.BorrowerBankAccountId
     ) {
-      const { postVoucher } = require("../services/generalLedger");
-      await postVoucher(pool, {
-        voucherNo: paymentRef,
-        voucherDate: paymentDate,
-        sourceType: "LoanRepayment",
-        sourceId: paymentId,
-        companyId: loan.BorrowerCompanyId,
-        createdBy: actor,
-        legs: [
-          { lHeadId: loan.LenderLHeadId, debit: principalInterestAmount, narration: `${paymentRef} — loan repayment (${loan.LoanNo})` },
-          { lHeadId: loan.BorrowerBankAccountId, credit: principalInterestAmount, narration: `${paymentRef} — loan repayment sent` },
-        ],
-      });
-      await postVoucher(pool, {
-        voucherNo: paymentRef,
-        voucherDate: paymentDate,
-        sourceType: "LoanRepayment",
-        sourceId: paymentId,
-        companyId: loan.LenderCompanyId,
-        createdBy: actor,
-        legs: [
-          { lHeadId: loan.LenderBankAccountId, debit: principalInterestAmount, narration: `${paymentRef} — loan repayment received` },
-          { lHeadId: loan.BorrowerLHeadId, credit: principalInterestAmount, narration: `${paymentRef} — loan repayment (${loan.LoanNo})` },
-        ],
-      });
-      await bumpCacheVersion("journal-voucher");
+      try {
+        const { postVoucher } = require("../services/generalLedger");
+        await postVoucher(pool, {
+          voucherNo: paymentRef,
+          voucherDate: paymentDate,
+          sourceType: "LoanRepayment",
+          sourceId: paymentId,
+          companyId: loan.BorrowerCompanyId,
+          createdBy: actor,
+          legs: [
+            { lHeadId: loan.LenderLHeadId, debit: principalInterestAmount, narration: `${paymentRef} — loan repayment (${loan.LoanNo})` },
+            { lHeadId: loan.BorrowerBankAccountId, credit: principalInterestAmount, narration: `${paymentRef} — loan repayment sent` },
+          ],
+        });
+        await postVoucher(pool, {
+          voucherNo: paymentRef,
+          voucherDate: paymentDate,
+          sourceType: "LoanRepayment",
+          sourceId: paymentId,
+          companyId: loan.LenderCompanyId,
+          createdBy: actor,
+          legs: [
+            { lHeadId: loan.LenderBankAccountId, debit: principalInterestAmount, narration: `${paymentRef} — loan repayment received` },
+            { lHeadId: loan.BorrowerLHeadId, credit: principalInterestAmount, narration: `${paymentRef} — loan repayment (${loan.LoanNo})` },
+          ],
+        });
+        await bumpCacheVersion("journal-voucher");
+      } catch (glErr) {
+        console.error("[loan-sanction] Inter-Company repayment GL posting failed after payment committed:", glErr.message);
+        glPostingWarning = "Repayment was recorded, but posting it to the General Ledger failed. Retry from the loan's Posting tab.";
+      }
     }
 
     // Customer Loan: single-sided posting into the LENDER's own books only
@@ -1497,14 +1584,21 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
     // into. See postCustomerLoanRepayment above.
     // BUG 7 FIX: the function now returns { posted, reason } so we can
     // surface a warning to the user when GL is skipped due to a missing bank
-    // A/C tag, rather than silently no-oping.
-    let glPostingWarning = null;
+    // A/C tag, rather than silently no-oping. Also try/catch-wrapped for the
+    // same post-commit reason as the Inter-Company branch above — postVoucher
+    // itself can still throw (unbalanced legs, DB error), not just return
+    // {posted:false} for the missing-bank-account precondition.
     if (loan.LoanType === "Customer Loan") {
-      const glResult = await postCustomerLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor });
-      if (glResult && glResult.posted) {
-        await bumpCacheVersion("journal-voucher");
-      } else if (glResult && !glResult.posted) {
-        glPostingWarning = glResult.reason;
+      try {
+        const glResult = await postCustomerLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor });
+        if (glResult && glResult.posted) {
+          await bumpCacheVersion("journal-voucher");
+        } else if (glResult && !glResult.posted) {
+          glPostingWarning = glResult.reason;
+        }
+      } catch (glErr) {
+        console.error("[loan-sanction] Customer Loan repayment GL posting failed after payment committed:", glErr.message);
+        glPostingWarning = "Repayment was recorded, but posting it to the General Ledger failed. Retry from the loan's Posting tab.";
       }
     }
 
@@ -1512,11 +1606,16 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
     // the bank has no ledger in our system to post the mirror leg into.
     // BUG 2 FIX: Bank Loan repayments now post to GL.
     if (loan.LoanType === "Bank Loan") {
-      const glResult = await postBankLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor });
-      if (glResult && glResult.posted) {
-        await bumpCacheVersion("journal-voucher");
-      } else if (glResult && !glResult.posted) {
-        glPostingWarning = glResult.reason;
+      try {
+        const glResult = await postBankLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor });
+        if (glResult && glResult.posted) {
+          await bumpCacheVersion("journal-voucher");
+        } else if (glResult && !glResult.posted) {
+          glPostingWarning = glResult.reason;
+        }
+      } catch (glErr) {
+        console.error("[loan-sanction] Bank Loan repayment GL posting failed after payment committed:", glErr.message);
+        glPostingWarning = "Repayment was recorded, but posting it to the General Ledger failed. Retry from the loan's Posting tab.";
       }
     }
 
@@ -1568,14 +1667,23 @@ router.post("/:id/close", requirePageRight("loan-sanction", "edit"), async (req,
       });
     }
 
-    // Verify total paid >= total scheduled
+    // Verify total paid >= total scheduled. A loan with no EMI schedule at
+    // all (a simple transfer with no interest/tenure — see EMPTY_FORM's
+    // "Inter-Company defaults to a simple transfer" comment on the
+    // frontend) has scheduleSum = 0, which previously made totalSchedule
+    // itself 0 — the check below then passed trivially even with
+    // totalPaid = 0, letting a completely unpaid loan be closed. Falls
+    // back to the loan's own Amount as the target when there's no
+    // schedule to sum.
     const totalsRes = await pool.request().input("LoanId", sql.Int, loanId).query(`
       SELECT
-        ISNULL((SELECT SUM(PrincipalInterestAmount) FROM dbo.LoanPayment WHERE LoanId = @LoanId), 0) AS totalPaid,
-        ISNULL((SELECT SUM(EMIAmount) FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId), 0) AS totalSchedule
+        ISNULL((SELECT SUM(PrincipalInterestAmount) FROM dbo.LoanPayment WHERE LoanId = @LoanId AND IsReversed = 0), 0) AS totalPaid,
+        (SELECT ISNULL(SUM(EMIAmount), 0) FROM dbo.LoanEMISchedule WHERE LoanId = @LoanId) AS scheduleSum,
+        (SELECT Amount FROM dbo.LoanSanction WHERE LoanId = @LoanId) AS loanAmount
     `);
-    const { totalPaid, totalSchedule } = totalsRes.recordset[0];
-    if (Number(totalPaid) < Number(totalSchedule) - 0.01) {
+    const { totalPaid, scheduleSum, loanAmount } = totalsRes.recordset[0];
+    const totalSchedule = Number(scheduleSum) > 0 ? Number(scheduleSum) : Number(loanAmount);
+    if (Number(totalPaid) < totalSchedule - 0.01) {
       return res.status(409).json({
         error: `Cannot close loan — total paid (₹${Number(totalPaid).toFixed(2)}) is less than total scheduled (₹${Number(totalSchedule).toFixed(2)}). Record the remaining payment first.`,
       });
@@ -1806,6 +1914,13 @@ router.delete("/:id", requirePageRight("loan-sanction", "delete"), async (req, r
         `);
     }
 
+    // Reverse whatever GL this loan posted at sanction time (Inter-Company
+    // auto-post at creation, or a manual POST /:id/post-to-gl) — previously
+    // never called here, leaving GeneralLedgerEntry rows for a loan that no
+    // longer exists permanently bloating Trial Balance with a ghost balance.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    await reversePostingBySource(tx, "LoanPosting", loanId);
+
     await new sql.Request(tx)
       .input("LoanId", sql.Int, loanId)
       .query("DELETE FROM dbo.LoanSanction WHERE LoanId = @LoanId");
@@ -1814,6 +1929,8 @@ router.delete("/:id", requirePageRight("loan-sanction", "delete"), async (req, r
     await Promise.all([
       bumpCacheVersion("loan-sanction"),
       bumpCacheVersion("on-account"),
+      bumpCacheVersion("account-head-master"),
+      bumpCacheVersion("journal-voucher"),
     ]);
     res.json({ success: true });
   } catch (err) {

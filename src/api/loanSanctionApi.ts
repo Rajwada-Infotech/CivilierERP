@@ -225,7 +225,7 @@ export const createLoanSanction = (payload: LoanSanctionPayload) =>
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  }).then((r) => handle<{ loanId: number; loanNo: string }>(r));
+  }).then((r) => handle<{ loanId: number; loanNo: string; glPosted?: boolean; glError?: string | null }>(r));
 
 export const toggleEmiPaid = (loanId: number, emiId: number, paid: boolean) =>
   fetchWithAuth(`${BASE}/${loanId}/emi/${emiId}/pay`, {

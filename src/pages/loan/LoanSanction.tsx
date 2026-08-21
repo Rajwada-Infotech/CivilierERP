@@ -713,6 +713,9 @@ export default function LoanSanctionPage() {
         digitalRefNumber: form.digitalRefNumber || null,
       });
       toast.success(`Loan ${res.loanNo} sanctioned`);
+      if (res.glError) {
+        toast.error(res.glError);
+      }
       if (pendingDocumentFile) {
         try {
           await uploadLoanDocument(res.loanId, pendingDocumentFile);
@@ -942,7 +945,15 @@ export default function LoanSanctionPage() {
   // they exist. Falls back to summing IsPaid EMI rows for loans whose repayments
   // pre-date the LoanPayment table — those old rows won't appear in payments[]
   // at all, so we must use the EMI schedule to avoid wrongly showing ₹0 paid.
-  const totalScheduledAmount = schedule.reduce((s, e) => s + Number(e.EMIAmount), 0);
+  // A loan with no EMI schedule at all (a simple Inter-Company transfer,
+  // no interest/tenure) has schedule.length === 0, so summing it gives 0 —
+  // which made outstandingAmount always compute to 0 regardless of whether
+  // anything was actually paid, since Math.max(0, 0 - paid) is 0 either
+  // way. Falls back to the loan's own Amount as the target when there's no
+  // schedule to sum against.
+  const totalScheduledAmount = schedule.length > 0
+    ? schedule.reduce((s, e) => s + Number(e.EMIAmount), 0)
+    : Number(displayAmount ?? 0);
   const paidAmount = payments.length > 0
     ? payments.reduce((s, p) => s + Number(p.PrincipalInterestAmount), 0)
     : schedule.filter((e) => e.IsPaid).reduce((s, e) => s + Number(e.EMIAmount), 0);
@@ -1546,7 +1557,7 @@ export default function LoanSanctionPage() {
                         {/* Close Loan CTA — shown only when all EMIs are paid
                             and loan is still Sanctioned (not yet formally closed).
                             The backend double-checks this before closing. */}
-                        {viewingLoan?.Status !== "Closed" && paidEmis === totalEmis && totalEmis > 0 && outstandingAmount <= 0 && (
+                        {viewingLoan?.Status !== "Closed" && (totalEmis === 0 || paidEmis === totalEmis) && outstandingAmount <= 0 && (
                           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] p-4 flex items-center justify-between gap-4">
                             <div className="space-y-0.5">
                               <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
@@ -2269,7 +2280,7 @@ export default function LoanSanctionPage() {
 
                 {/* Close Loan CTA in Repayment History tab — same logic as in
                     Overview: show only when all EMIs paid and loan still open */}
-                {viewingLoan.Status !== "Closed" && paidEmis === totalEmis && totalEmis > 0 && outstandingAmount <= 0 && (
+                {viewingLoan.Status !== "Closed" && (totalEmis === 0 || paidEmis === totalEmis) && outstandingAmount <= 0 && (
                   <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] p-4 flex items-center justify-between gap-4">
                     <div className="space-y-0.5">
                       <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
