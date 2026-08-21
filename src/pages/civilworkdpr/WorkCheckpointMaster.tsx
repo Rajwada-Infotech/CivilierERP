@@ -9,10 +9,11 @@ import {
   getActivityCheckpoints,
   addActivityCheckpoint,
   renameActivityCheckpoint,
+  setActivityCheckpointMinWaitDays,
   deleteActivityCheckpoint,
   type ActivityCheckpoint,
 } from "@/api/activityCheckpointApi";
-import { ClipboardCheck, ListChecks, Plus, Pencil, Trash2, X, Check } from "lucide-react";
+import { ClipboardCheck, ListChecks, Plus, Pencil, Trash2, X, Check, Timer } from "lucide-react";
 
 const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -29,6 +30,7 @@ function CheckpointRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(checkpoint.fieldName);
+  const [waitDays, setWaitDays] = useState(checkpoint.minWaitDays != null ? String(checkpoint.minWaitDays) : "");
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -38,18 +40,22 @@ function CheckpointRow({
 
   const save = async () => {
     const trimmed = value.trim();
-    if (!trimmed || trimmed === checkpoint.fieldName) {
+    const nextMinWaitDays = waitDays.trim() === "" ? null : parseInt(waitDays, 10);
+    const nameChanged = trimmed && trimmed !== checkpoint.fieldName;
+    const waitChanged = nextMinWaitDays !== (checkpoint.minWaitDays ?? null);
+    if (!nameChanged && !waitChanged) {
       setEditing(false);
       setValue(checkpoint.fieldName);
       return;
     }
     setSaving(true);
     try {
-      await renameActivityCheckpoint(checkpoint.id, trimmed);
+      if (nameChanged) await renameActivityCheckpoint(checkpoint.id, trimmed);
+      if (waitChanged) await setActivityCheckpointMinWaitDays(checkpoint.id, nextMinWaitDays);
       onRenamed();
       setEditing(false);
     } catch (e: any) {
-      toast.error(e.message ?? "Rename failed");
+      toast.error(e.message ?? "Save failed");
     } finally {
       setSaving(false);
     }
@@ -79,10 +85,26 @@ function CheckpointRow({
           disabled={saving}
           className="flex-1 bg-transparent text-sm text-foreground focus:outline-none disabled:opacity-50"
         />
+        <div className="flex items-center gap-1 shrink-0" title="Minimum wait days after start date">
+          <Timer size={12} className="text-muted-foreground" />
+          <input
+            type="number"
+            min={0}
+            value={waitDays}
+            onChange={(e) => setWaitDays(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); save(); }
+              if (e.key === "Escape") { setEditing(false); setValue(checkpoint.fieldName); }
+            }}
+            placeholder="days"
+            disabled={saving}
+            className="w-16 bg-transparent text-xs text-foreground border border-border rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-cyan-500/40 disabled:opacity-50"
+          />
+        </div>
         <button type="button" onClick={save} disabled={saving} className="w-6 h-6 shrink-0 rounded-md bg-cyan-500 text-white flex items-center justify-center hover:bg-cyan-600 disabled:opacity-40 transition-colors">
           <Check size={12} />
         </button>
-        <button type="button" onClick={() => { setEditing(false); setValue(checkpoint.fieldName); }} disabled={saving} className="w-6 h-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center transition-colors">
+        <button type="button" onClick={() => { setEditing(false); setValue(checkpoint.fieldName); setWaitDays(checkpoint.minWaitDays != null ? String(checkpoint.minWaitDays) : ""); }} disabled={saving} className="w-6 h-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center transition-colors">
           <X size={12} />
         </button>
       </div>
@@ -91,10 +113,17 @@ function CheckpointRow({
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
-      <span className="text-sm text-foreground">{checkpoint.fieldName}</span>
+      <span className="flex items-center gap-2 text-sm text-foreground">
+        {checkpoint.fieldName}
+        {checkpoint.minWaitDays != null && checkpoint.minWaitDays > 0 && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+            <Timer size={9} /> {checkpoint.minWaitDays}d wait
+          </span>
+        )}
+      </span>
       <div className="flex items-center gap-1 shrink-0">
         {canEdit && (
-          <button type="button" onClick={() => setEditing(true)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Rename">
+          <button type="button" onClick={() => setEditing(true)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Edit">
             <Pencil size={13} />
           </button>
         )}
@@ -114,6 +143,7 @@ export default function WorkCheckpointMaster() {
 
   const [activityId, setActivityId] = useState<string>("");
   const [newField, setNewField] = useState("");
+  const [newWaitDays, setNewWaitDays] = useState("");
   const [adding, setAdding] = useState(false);
 
   const { data: allActivities = [], isLoading: loadingActivities } = useQuery({
@@ -152,10 +182,12 @@ export default function WorkCheckpointMaster() {
   const handleAdd = async () => {
     const trimmed = newField.trim();
     if (!trimmed || !activityId) return;
+    const minWaitDays = newWaitDays.trim() === "" ? null : parseInt(newWaitDays, 10);
     setAdding(true);
     try {
-      await addActivityCheckpoint(parseInt(activityId, 10), trimmed);
+      await addActivityCheckpoint(parseInt(activityId, 10), trimmed, minWaitDays);
       setNewField("");
+      setNewWaitDays("");
       await invalidate();
     } catch (e: any) {
       toast.error(e.message ?? "Couldn't add checkpoint");
@@ -242,6 +274,9 @@ export default function WorkCheckpointMaster() {
                           {cps.map((cp) => (
                             <li key={cp.id} className="text-xs text-muted-foreground truncate">
                               · {cp.fieldName}
+                              {cp.minWaitDays != null && cp.minWaitDays > 0 && (
+                                <span className="text-amber-600 dark:text-amber-400"> ({cp.minWaitDays}d wait)</span>
+                              )}
                             </li>
                           ))}
                         </ul>
@@ -297,6 +332,21 @@ export default function WorkCheckpointMaster() {
                             disabled={adding}
                             className={`${inputCls} flex-1`}
                           />
+                          <div className="flex items-center gap-1 shrink-0" title="Minimum wait days after start date (optional)">
+                            <Timer size={13} className="text-muted-foreground" />
+                            <input
+                              type="number"
+                              min={0}
+                              value={newWaitDays}
+                              onChange={(e) => setNewWaitDays(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); handleAdd(); }
+                              }}
+                              placeholder="days"
+                              disabled={adding}
+                              className="w-20 h-[42px] rounded-lg text-sm bg-muted border border-border text-foreground px-2.5 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50"
+                            />
+                          </div>
                           <button
                             type="button"
                             onClick={handleAdd}

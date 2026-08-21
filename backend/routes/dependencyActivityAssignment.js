@@ -253,7 +253,8 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
       engineerIds = engRes.recordset.map((r) => r.engineerId);
 
       const cpRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
-        SELECT Id AS id, CheckpointId AS checkpointId, FieldName AS fieldName, SortOrder AS sortOrder, IsChecked AS isChecked
+        SELECT Id AS id, CheckpointId AS checkpointId, FieldName AS fieldName, SortOrder AS sortOrder,
+               IsChecked AS isChecked, MinWaitDays AS minWaitDays
         FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @assignmentId
         ORDER BY SortOrder ASC, Id ASC
       `);
@@ -307,6 +308,31 @@ router.post("/:rungId", authMiddleware, async (req, res) => {
   if (!Array.isArray(materials)) return res.status(400).json({ error: "materials must be an array" });
   if (checkpoints != null && !Array.isArray(checkpoints)) {
     return res.status(400).json({ error: "checkpoints must be an array" });
+  }
+
+  // A checkpoint with a MinWaitDays snapshot can't honestly be checked off
+  // until that many days have passed since the activity's own start date
+  // — enforced here (not just in the UI) since this route is the only
+  // place checkpoint state is actually persisted.
+  if (Array.isArray(checkpoints)) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (const row of checkpoints) {
+      const minWaitDays = Number.isFinite(row.minWaitDays) ? row.minWaitDays : null;
+      if (!row.isChecked || !minWaitDays || minWaitDays <= 0) continue;
+      if (!startDate) {
+        return res.status(400).json({ error: `"${row.fieldName}" needs a start date set before it can be checked off.` });
+      }
+      const eligible = new Date(startDate);
+      eligible.setDate(eligible.getDate() + minWaitDays);
+      eligible.setHours(0, 0, 0, 0);
+      if (today < eligible) {
+        const daysLeft = Math.ceil((eligible.getTime() - today.getTime()) / 86400000);
+        return res.status(400).json({
+          error: `"${row.fieldName}" can't be checked off yet — needs ${minWaitDays} day(s) after the start date (${daysLeft} day(s) left).`,
+        });
+      }
+    }
   }
   if (labourSource && !SOURCE_VALUES.has(labourSource)) {
     return res.status(400).json({ error: `labourSource must be one of: ${[...SOURCE_VALUES].join(", ")}` });
@@ -411,13 +437,14 @@ router.post("/:rungId", authMiddleware, async (req, res) => {
         .input("checkpointId", sql.Int, Number.isFinite(row.checkpointId) ? row.checkpointId : null)
         .input("fieldName", sql.NVarChar(200), fieldName)
         .input("sortOrder", sql.Int, cpSort)
+        .input("minWaitDays", sql.Int, Number.isFinite(row.minWaitDays) ? row.minWaitDays : null)
         .input("isChecked", sql.Bit, !!row.isChecked)
         .input("checkedAt", sql.DateTime2, row.isChecked ? new Date() : null)
         .input("checkedBy", sql.NVarChar(200), row.isChecked ? actor : null)
         .query(`
           INSERT INTO dbo.DependencyActivityCheckpoint
-            (AssignmentId, CheckpointId, FieldName, SortOrder, IsChecked, CheckedAt, CheckedBy)
-          VALUES (@assignmentId, @checkpointId, @fieldName, @sortOrder, @isChecked, @checkedAt, @checkedBy)
+            (AssignmentId, CheckpointId, FieldName, SortOrder, MinWaitDays, IsChecked, CheckedAt, CheckedBy)
+          VALUES (@assignmentId, @checkpointId, @fieldName, @sortOrder, @minWaitDays, @isChecked, @checkedAt, @checkedBy)
         `);
     }
 

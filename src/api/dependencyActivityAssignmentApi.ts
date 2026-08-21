@@ -61,6 +61,9 @@ export interface AssignmentCheckpoint {
   fieldName: string;
   sortOrder?: number;
   isChecked: boolean;
+  // Snapshotted off the master checkpoint (see migration 354) at the
+  // moment it's attached to this rung — null means checkable any time.
+  minWaitDays?: number | null;
 }
 
 export interface RungAssignmentDetail {
