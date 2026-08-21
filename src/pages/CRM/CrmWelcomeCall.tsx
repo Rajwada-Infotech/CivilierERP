@@ -136,7 +136,7 @@ async function fetchExtraCharges(bookingId: number): Promise<any[]> {
 type VcItem = {
   Section: string; SectionLabel: string; ItemKey: string; Label: string;
   IsChecked: boolean; Remarks: string;
-  RecheckStatus: CrmStatus.OPEN | "Resolved" | null; RecheckReason: string | null;
+  RecheckStatus: typeof CrmStatus.OPEN | typeof CrmStatus.RESOLVED | null; RecheckReason: string | null;
   RecheckRequestedAt: string | null; ResolvedAt: string | null;
 };
 type VcSection = { section: string; label: string; items: VcItem[]; complete: boolean; hasOpenRecheck: boolean };

@@ -51,7 +51,7 @@ interface Allotment {
   GstRateSnapshot: number | null;
   GstAmount: number | null;
   TotalAmount: number;
-  PaymentStatus: CrmStatus.PENDING | "Paid";
+  PaymentStatus: typeof CrmStatus.PENDING | typeof CrmStatus.PAID;
   ReceiptNo: string | null;
   PaymentMode: string | null;
   PaymentReceivedDate: string | null;

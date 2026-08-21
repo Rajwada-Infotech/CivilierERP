@@ -24,7 +24,7 @@ interface ReceiptRow {
   PaymentMode: string;
   ChequeNo: string | null;
   ReceivedDate: string;
-  Status: CrmStatus.PENDING | "Approved" | "Bounced";
+  Status: typeof CrmStatus.PENDING | typeof CrmStatus.APPROVED | "Bounced";
   BouncedReason: string | null;
   BookingNo: string;
   ProjectName: string | null;
