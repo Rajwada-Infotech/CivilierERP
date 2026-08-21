@@ -9,7 +9,7 @@ const { requirePageRight, requireAnyPageRight } = require("../middleware/require
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const PHOTO_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"]);
-const PHOTO_PHASES = new Set(["before", "after", "progress"]);
+const PHOTO_PHASES = new Set(["before", "after"]);
 
 const STATUS_VALUES = new Set(["PENDING", "IN_PROGRESS", "HOLD", "CANCELLED", "APPROVED", "REWORK", "COMPLETED"]);
 const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
@@ -607,8 +607,7 @@ router.get("/:rungId/photos", authMiddleware, async (req, res) => {
     `);
     const before = result.recordset.filter((p) => p.phase === "before");
     const after = result.recordset.filter((p) => p.phase === "after");
-    const progress = result.recordset.filter((p) => p.phase === "progress");
-    res.json({ before, after, progress });
+    res.json({ before, after });
   } catch (err) {
     console.error("[dependency-activity-assignment] GET /:rungId/photos error:", err.message);
     res.status(500).json({ error: err.message });
