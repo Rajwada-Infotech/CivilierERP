@@ -2158,22 +2158,13 @@ export default function LoanSanctionPage() {
                   ) : null}
                 </div>
 
-                {/* Event timeline — sanction + actual payment transactions, all
-                    settled exclusively via Finance → Payment (Loan EMIs tab) */}
+                {/* Event timeline — repayments only (money coming BACK from
+                    the borrower/lender). Disbursement (money going OUT) is
+                    not a repayment and belongs on Overview's "Disbursed Via"
+                    card instead — showing it here as the chain's first node
+                    used to make an outgoing loan read as if it were itself
+                    the first incoming repayment. */}
                 <div>
-                  <ChainNode
-                    icon={<MoneyRecive size={13} className="text-emerald-500" />}
-                    title={`Loan Sanctioned — ${viewingLoan.LoanNo}`}
-                    subtitle={`${fmt(viewingLoan.Amount)} disbursed to ${displayBorrower} on ${fmtDate(viewingLoan.LoanDate)}${sanctionInstrumentLabel(viewingLoan) ? ` · ${sanctionInstrumentLabel(viewingLoan)}` : ""}`}
-                    done
-                    // Something always renders after this node — the payments
-                    // list, the "marked paid" node, the Closed node, or the
-                    // "No payments yet" placeholder — so it's never actually
-                    // last. Forcing isLast here used to drop both the
-                    // connector line AND the bottom padding, collapsing the
-                    // gap to this node's neighbor to zero.
-                    isLast={false}
-                  />
                   {payments.map((p, i, arr) => (
                     <ChainNode
                       key={p.PaymentId}
