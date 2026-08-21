@@ -51,6 +51,8 @@ import { getCompanyOptions, getBanks, type CompanyOption, type BankRecord } from
 import { CompanyFilterCombo } from "@/components/CompanyFilterCombo";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { fetchChequeLots, fetchChequeNumbers, deductChequeFromLot } from "@/pages/finance/payment/api";
+import type { ChequeLot } from "@/pages/finance/payment/types";
 import {
   getLoanSanctions,
   getLoanSchedule,
@@ -197,6 +199,147 @@ const LOAN_TYPE_COLORS: Record<LoanType, string> = {
   "Bank Loan": "#0ea5e9",
   "Customer Loan": "#f59e0b",
 };
+
+const inputCls =
+  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 placeholder:text-muted-foreground";
+const labelCls = "text-xs font-semibold uppercase tracking-widest text-muted-foreground";
+
+// Cheque Lot / Cheque Number picker for the disbursement's Cheque or
+// Post-Dated Cheque mode — same fetchChequeLots/fetchChequeNumbers/
+// deductChequeFromLot API Finance > Payment's ChequePanel uses, so a
+// cheque picked here is deducted from the same shared lot and can't be
+// reused by both flows. LoanSanction has no bank-account column of its
+// own for disbursement (only the lender's bank, when the loan type IS a
+// bank), so bankId is optional — fetchChequeLots(null) returns every
+// active lot when there's nothing to filter by.
+function LoanChequePicker({
+  bankId,
+  chequeLotId,
+  chequeNo,
+  chequeDate,
+  isPostDated,
+  onLotChange,
+  onChequeNoChange,
+  onChequeDateChange,
+}: {
+  bankId: number | null;
+  chequeLotId: string;
+  chequeNo: string;
+  chequeDate: string;
+  isPostDated: boolean;
+  onLotChange: (lot: ChequeLot) => void;
+  onChequeNoChange: (chequeNo: string) => void;
+  onChequeDateChange: (date: string) => void;
+}) {
+  const [lots, setLots] = useState<ChequeLot[]>([]);
+  const [loadingLots, setLoadingLots] = useState(false);
+  const [chequeNumbers, setChequeNumbers] = useState<{ number: string; used: boolean; bounced: boolean }[]>([]);
+  const [loadingCheques, setLoadingCheques] = useState(false);
+  const [validating, setValidating] = useState(false);
+
+  useEffect(() => {
+    setLoadingLots(true);
+    fetchChequeLots(bankId)
+      .then((fetched) => {
+        setLots(fetched);
+        if (fetched.length > 0 && !chequeLotId) onLotChange(fetched[0]);
+      })
+      .catch(() => setLots([]))
+      .finally(() => setLoadingLots(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bankId]);
+
+  useEffect(() => {
+    const lotIdNum = chequeLotId ? Number(chequeLotId) : null;
+    if (!lotIdNum) {
+      setChequeNumbers([]);
+      return;
+    }
+    setLoadingCheques(true);
+    fetchChequeNumbers(lotIdNum)
+      .then(setChequeNumbers)
+      .catch(() => setChequeNumbers([]))
+      .finally(() => setLoadingCheques(false));
+  }, [chequeLotId]);
+
+  const activeLot = lots.find((l) => String(l.CId) === chequeLotId) ?? null;
+  const availableCheques = chequeNumbers.filter((c) => !c.used && !c.bounced);
+
+  const handleChequeSelect = async (nextChequeNo: string) => {
+    onChequeNoChange(nextChequeNo);
+    const lotIdNum = chequeLotId ? Number(chequeLotId) : null;
+    if (!nextChequeNo || !lotIdNum) return;
+    setValidating(true);
+    try {
+      await deductChequeFromLot(lotIdNum, nextChequeNo);
+    } catch (err: any) {
+      toast.error(err.message);
+      onChequeNoChange("");
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="space-y-2">
+        <label className={labelCls}>Cheque Lot</label>
+        {loadingLots ? (
+          <div className={`${inputCls} flex items-center text-xs text-muted-foreground`}>Loading lots…</div>
+        ) : lots.length === 0 ? (
+          <div className={`${inputCls} flex items-center text-xs text-amber-600`}>No active cheque lots found.</div>
+        ) : (
+          <select
+            className={inputCls}
+            value={chequeLotId}
+            onChange={(e) => {
+              const lot = lots.find((l) => String(l.CId) === e.target.value);
+              if (lot) onLotChange(lot);
+            }}
+          >
+            <option value="">— Select lot —</option>
+            {lots.map((lot) => (
+              <option key={lot.CId} value={String(lot.CId)}>
+                {lot.ChequeLotNumber}
+                {lot.RemainingCheques != null ? ` (${lot.RemainingCheques} left)` : ""}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      <div className="space-y-2">
+        <label className={labelCls}>Cheque Number</label>
+        <select
+          className={inputCls}
+          value={chequeNo}
+          onChange={(e) => handleChequeSelect(e.target.value)}
+          disabled={!activeLot || loadingCheques || validating}
+        >
+          <option value="">— Select cheque number —</option>
+          {availableCheques.map((c) => (
+            <option key={c.number} value={c.number}>
+              # {c.number}
+            </option>
+          ))}
+        </select>
+        {activeLot && availableCheques.length === 0 && !loadingCheques && (
+          <p className="text-[11px] text-amber-600">No available cheques left in this lot.</p>
+        )}
+      </div>
+      <div className="space-y-2">
+        <label className={labelCls}>{isPostDated ? "Post-Dated Cheque Date" : "Cheque Date"}</label>
+        <input
+          type="date"
+          className={inputCls}
+          value={chequeDate}
+          min={isPostDated ? new Date().toISOString().slice(0, 10) : undefined}
+          max={isPostDated ? undefined : new Date().toISOString().slice(0, 10)}
+          onChange={(e) => onChequeDateChange(e.target.value)}
+        />
+      </div>
+    </>
+  );
+}
 
 export default function LoanSanctionPage() {
   const qc = useQueryClient();
@@ -737,9 +880,6 @@ export default function LoanSanctionPage() {
     },
   ];
 
-  const inputCls =
-    "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 placeholder:text-muted-foreground";
-  const labelCls = "text-xs font-semibold uppercase tracking-widest text-muted-foreground";
   const readOnly = !!viewingLoan;
   const isInterCompanyType = (viewingLoan?.LoanType ?? form.loanType) === "Inter-Company";
   // Combined create+edit flag, same shape as isInterCompanyType — a
@@ -1709,7 +1849,10 @@ export default function LoanSanctionPage() {
                           onChange={(e) => {
                             const v = e.target.value;
                             set("paymentMode", v);
+                            set("isPostDated", v === "Post-Dated Cheque");
                             if (v !== "Cheque" && v !== "Post-Dated Cheque") {
+                              set("chequeLotId", "");
+                              set("chequeLotNumber", "");
                               set("chequeNo", "");
                               set("chequeDate", "");
                             }
@@ -1723,28 +1866,22 @@ export default function LoanSanctionPage() {
                           ))}
                         </select>
                       </div>
-                      
+
                       {(form.paymentMode === "Cheque" || form.paymentMode === "Post-Dated Cheque") && (
-                        <>
-                          <div className="space-y-2">
-                            <label className={labelCls}>Cheque Number</label>
-                            <input
-                              className={inputCls}
-                              placeholder="Cheque No"
-                              value={form.chequeNo}
-                              onChange={(e) => set("chequeNo", e.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <label className={labelCls}>Cheque Date</label>
-                            <input
-                              type="date"
-                              className={inputCls}
-                              value={form.chequeDate}
-                              onChange={(e) => set("chequeDate", e.target.value)}
-                            />
-                          </div>
-                        </>
+                        <LoanChequePicker
+                          bankId={isBankLoan && form.lenderBankId ? Number(form.lenderBankId) : null}
+                          chequeLotId={form.chequeLotId}
+                          chequeNo={form.chequeNo}
+                          chequeDate={form.chequeDate}
+                          isPostDated={form.isPostDated}
+                          onLotChange={(lot) => {
+                            set("chequeLotId", String(lot.CId));
+                            set("chequeLotNumber", lot.ChequeLotNumber);
+                            set("chequeNo", "");
+                          }}
+                          onChequeNoChange={(v) => set("chequeNo", v)}
+                          onChequeDateChange={(v) => set("chequeDate", v)}
+                        />
                       )}
 
                       {!["Cash", "Cheque", "Post-Dated Cheque"].includes(form.paymentMode) && (
