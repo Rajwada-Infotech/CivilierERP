@@ -54,6 +54,68 @@ const CANCEL_SELECT = `
   LEFT JOIN dbo.Users ab ON ab.id = c.ApprovedBy
 `;
 
+// GET /policy — returns the applicable cancellation penalty slab for a given
+// project and booking date. Called by the frontend when a booking is selected
+// in the Request Cancellation dialog so staff see the policy before submitting.
+//
+// Priority:  1. Project-specific slab (ProjectId = bookingId's project)
+//            2. Global slab (ProjectId IS NULL)
+//            3. AppSetting 'CancellationDefaultPct' (single hard fallback)
+//            4. 10 % if nothing is configured at all
+//
+// The "days since booking" calculation uses today's date vs. BookingDate so
+// the slab shown is the one that will actually apply at submission time.
+router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { bookingId } = req.query;
+    if (!bookingId) return res.status(400).json({ error: "bookingId is required" });
+
+    const bkgRow = await pool.request().input("bid", sql.Int, parseInt(bookingId))
+      .query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
+    if (!bkgRow.recordset.length) return res.status(404).json({ error: "Booking not found" });
+
+    const { ProjectId, BookingDate } = bkgRow.recordset[0];
+    const daysSince = BookingDate
+      ? Math.floor((Date.now() - new Date(BookingDate).getTime()) / 86_400_000)
+      : 0;
+
+    // Find the matching slab: project-specific first, then global (NULL).
+    // A slab matches when daysSince >= Min AND (Max IS NULL OR daysSince <= Max).
+    const slabRes = await pool.request()
+      .input("pid", sql.Int, ProjectId || null)
+      .input("days", sql.Int, daysSince)
+      .query(`
+        SELECT TOP 1
+          Id, ProjectId, PolicyName, DaysFromBookingMin, DaysFromBookingMax,
+          DeductionPercent, Notes
+        FROM dbo.CrmCancellationPolicy
+        WHERE IsActive = 1
+          AND @days >= DaysFromBookingMin
+          AND (DaysFromBookingMax IS NULL OR @days <= DaysFromBookingMax)
+          AND (ProjectId = @pid OR ProjectId IS NULL)
+        ORDER BY
+          CASE WHEN ProjectId = @pid THEN 0 ELSE 1 END,  -- project-specific wins
+          DaysFromBookingMin DESC                          -- most restrictive slab first
+      `);
+
+    if (slabRes.recordset.length) {
+      return res.json({ ...slabRes.recordset[0], daysSinceBooking: daysSince, source: "policy" });
+    }
+
+    // No slab configured — fall back to AppSetting
+    const settingRes = await pool.request()
+      .query("SELECT TOP 1 Value FROM dbo.AppSetting WHERE [Key] = 'CancellationDefaultPct'");
+    const fallbackPct = settingRes.recordset.length
+      ? parseFloat(settingRes.recordset[0].Value) || 10
+      : 10;
+    return res.json({ DeductionPercent: fallbackPct, daysSinceBooking: daysSince, source: "default" });
+  } catch (e) {
+    console.error("[crm-cancellations] GET /policy error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET / — all cancellation requests
 router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) => {
   try {
@@ -102,18 +164,44 @@ router.post("/", requirePageRight("crm-cancellations", "create"), async (req, re
       `);
     const totalPaid = paidRes.recordset[0].TotalPaid || 0;
 
-    // Default 10% cancellation charge if the requester doesn't override it.
-    // No per-project/per-plan cancellation policy exists yet to validate
-    // against, but the proposed number must still be a sane percentage —
-    // previously this was taken straight from req.body with only a numeric
-    // parse, so anyone with create rights could pass a negative or >100%
-    // value at request time (the real approve/reject gate is later, but the
-    // *proposed* record itself was unconstrained).
-    let deductionPct = 10;
-    if (b.DeductionPercent != null) {
+    // Determine the deduction %:
+    //   1. If the requester explicitly passes DeductionPercent, validate and use it
+    //      (admin override — still capped 0-100 to prevent typos or malicious values)
+    //   2. Otherwise auto-look up the matching slab from CrmCancellationPolicy
+    //      (project-specific first, global default second)
+    //   3. Final fallback: AppSetting 'CancellationDefaultPct', then 10%
+    let deductionPct;
+    if (b.DeductionPercent != null && String(b.DeductionPercent).trim() !== "") {
       deductionPct = parseFloat(b.DeductionPercent);
       if (!Number.isFinite(deductionPct) || deductionPct < 0 || deductionPct > 100) {
         return res.status(400).json({ error: "DeductionPercent must be a number between 0 and 100" });
+      }
+    } else {
+      // Auto-resolve from policy
+      const bkgMeta = await pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid");
+      const { ProjectId: pId, BookingDate } = bkgMeta.recordset[0] || {};
+      const daysSince = BookingDate
+        ? Math.floor((Date.now() - new Date(BookingDate).getTime()) / 86_400_000)
+        : 0;
+      const policyRes = await pool.request()
+        .input("pid", sql.Int, pId || null).input("days", sql.Int, daysSince)
+        .query(`
+          SELECT TOP 1 DeductionPercent FROM dbo.CrmCancellationPolicy
+          WHERE IsActive = 1
+            AND @days >= DaysFromBookingMin
+            AND (DaysFromBookingMax IS NULL OR @days <= DaysFromBookingMax)
+            AND (ProjectId = @pid OR ProjectId IS NULL)
+          ORDER BY CASE WHEN ProjectId = @pid THEN 0 ELSE 1 END, DaysFromBookingMin DESC
+        `);
+      if (policyRes.recordset.length) {
+        deductionPct = Number(policyRes.recordset[0].DeductionPercent);
+      } else {
+        const settingRes = await pool.request()
+          .query("SELECT TOP 1 Value FROM dbo.AppSetting WHERE [Key] = 'CancellationDefaultPct'");
+        deductionPct = settingRes.recordset.length
+          ? parseFloat(settingRes.recordset[0].Value) || 10
+          : 10;
       }
     }
     const deductionAmt = Math.round(totalPaid * deductionPct / 100 * 100) / 100;

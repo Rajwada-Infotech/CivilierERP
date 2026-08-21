@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -7,7 +7,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { XCircle, CheckCircle2 } from "lucide-react";
+import { XCircle, CheckCircle2, Info } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -41,11 +41,18 @@ async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
 async function fetchAllBanks(): Promise<any[]> {
   try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchCancellationPolicy(bookingId: string): Promise<any | null> {
+  if (!bookingId) return null;
+  try { const r = await fetchWithAuth(`${API}/policy?bookingId=${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
+}
 
 const CrmCancellations: React.FC = () => {
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ BookingId: "", Reason: "", DeductionPercent: "10" });
+  const [form, setForm] = useState({ BookingId: "", Reason: "", DeductionPercent: "" });
+  // Policy data loaded when a booking is selected — shown to staff before submit
+  const [policy, setPolicy] = useState<any | null>(null);
+  const [policyLoading, setPolicyLoading] = useState(false);
   // Holds the full cancellation row (not just its Id) so the refund dialog
   // can read ProjectId/DistinctDepositBankCount/SingleDepositBankId straight
   // off it without a second round-trip.
@@ -59,6 +66,23 @@ const CrmCancellations: React.FC = () => {
   const [refundBankLocked, setRefundBankLocked] = useState(true);
   const [refundConfirmOpen, setRefundConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // When BookingId changes, fetch the applicable policy slab and pre-fill
+  // DeductionPercent. Staff can still override it — the slab info card
+  // makes the policy visible so any deviation is a deliberate choice.
+  useEffect(() => {
+    if (!form.BookingId) { setPolicy(null); setForm((f) => ({ ...f, DeductionPercent: "" })); return; }
+    let cancelled = false;
+    setPolicyLoading(true);
+    fetchCancellationPolicy(form.BookingId).then((p) => {
+      if (cancelled) return;
+      setPolicy(p);
+      if (p?.DeductionPercent != null) {
+        setForm((f) => ({ ...f, DeductionPercent: String(Number(p.DeductionPercent)) }));
+      }
+    }).finally(() => { if (!cancelled) setPolicyLoading(false); });
+    return () => { cancelled = true; };
+  }, [form.BookingId]);
 
   const { data: cancellations = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-cancellations"], queryFn: fetchCancellations, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
@@ -100,14 +124,17 @@ const CrmCancellations: React.FC = () => {
         body: JSON.stringify({
           BookingId: parseInt(form.BookingId),
           Reason: form.Reason || null,
-          DeductionPercent: parseFloat(form.DeductionPercent) || 10,
+          // Only send DeductionPercent if staff actually changed it from the
+          // policy suggestion — omitting it lets the backend re-resolve fresh.
+          DeductionPercent: form.DeductionPercent !== "" ? parseFloat(form.DeductionPercent) : undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success(`Cancellation requested — refund amount: ${fmt(data.refundAmt)}`);
       setDialogOpen(false);
-      setForm({ BookingId: "", Reason: "", DeductionPercent: "10" });
+      setForm({ BookingId: "", Reason: "", DeductionPercent: "" });
+      setPolicy(null);
       qc.invalidateQueries({ queryKey: ["crm-cancellations"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
@@ -221,7 +248,7 @@ const CrmCancellations: React.FC = () => {
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
 
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) setDialogOpen(false); }}>
+      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setPolicy(null); setForm({ BookingId: "", Reason: "", DeductionPercent: "" }); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Request Cancellation</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -235,11 +262,51 @@ const CrmCancellations: React.FC = () => {
                 ))}
               </select>
             </div>
+
+            {/* Policy info card — shown once a booking is selected and the
+                /policy endpoint returns a slab. Makes the penalty rule
+                transparent to staff before they submit. */}
+            {form.BookingId && (
+              <div className={`rounded-lg border px-3 py-2 text-xs space-y-0.5 ${
+                policyLoading
+                  ? "border-border bg-muted/30 text-muted-foreground"
+                  : policy
+                    ? "border-blue-200 bg-blue-50/60 dark:bg-blue-900/10 text-blue-800 dark:text-blue-300"
+                    : "border-border bg-muted/30 text-muted-foreground"
+              }`}>
+                <div className="flex items-center gap-1.5 font-semibold">
+                  <Info size={11} />
+                  {policyLoading ? "Loading cancellation policy…" : policy ? "Cancellation Policy" : "No policy configured — using system default"}
+                </div>
+                {!policyLoading && policy && (
+                  <>
+                    <p>{policy.PolicyName || "Policy"} · {policy.daysSinceBooking} day{policy.daysSinceBooking !== 1 ? "s" : ""} since booking</p>
+                    <p>
+                      Applicable slab: {policy.DaysFromBookingMin ?? 0}–{policy.DaysFromBookingMax != null ? policy.DaysFromBookingMax : "∞"} days
+                      → <span className="font-bold">{Number(policy.DeductionPercent)}% deduction</span>
+                    </p>
+                    {policy.Notes && <p className="text-blue-600/80 dark:text-blue-400/70 italic">{policy.Notes}</p>}
+                    {policy.source === "default" && <p className="text-amber-600">Using global system default (no project-specific policy)</p>}
+                  </>
+                )}
+              </div>
+            )}
+
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Cancellation Charge (%)</label>
+              <label className="text-xs text-muted-foreground block mb-1">
+                Cancellation Charge (%)
+                {policy && form.DeductionPercent !== String(Number(policy.DeductionPercent)) && form.DeductionPercent !== "" && (
+                  <span className="ml-2 text-amber-600 font-medium">⚠ Overriding policy ({Number(policy.DeductionPercent)}%)</span>
+                )}
+              </label>
               <input type="number" min={0} max={100} step="0.01" value={form.DeductionPercent}
+                placeholder={policyLoading ? "Loading…" : "Enter % or leave blank to auto-apply policy"}
                 onChange={(e) => setForm((f) => ({ ...f, DeductionPercent: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                className={`w-full text-sm border rounded px-2 py-1.5 bg-background ${
+                  policy && form.DeductionPercent !== "" && form.DeductionPercent !== String(Number(policy.DeductionPercent))
+                    ? "border-amber-400 ring-1 ring-amber-400/40"
+                    : "border-border"
+                }`} />
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Reason</label>
@@ -248,7 +315,7 @@ const CrmCancellations: React.FC = () => {
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => setDialogOpen(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={() => { setDialogOpen(false); setPolicy(null); setForm({ BookingId: "", Reason: "", DeductionPercent: "" }); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleRequest} disabled={saving}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Submitting..." : "Submit Request"}
