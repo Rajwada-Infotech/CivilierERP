@@ -345,6 +345,21 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
     await pool.request().input("id", sql.Int, id).input("ab", sql.Int, actorId(req))
       .query("UPDATE dbo.CrmCancellation SET ApprovedBy = @ab, ApprovedAt = SYSDATETIME() WHERE Id = @id");
 
+    // ── Maker-Checker Finance Gate ──────────────────────────────────────────
+    // Sales/marketing approval confirms the cancellation is commercially
+    // valid. Finance approval (below, /:id/finance-approve) is the second,
+    // independent gate that clears the actual cash disbursement. We flip the
+    // status to FinancePending immediately after the approvalTransition commit
+    // so the refund cannot be recorded until a finance-authorised user
+    // explicitly approves it — preventing any editor from triggering a cash
+    // outflow unilaterally. Operational side-effects (booking cancellation,
+    // parking release, brokerage clawback) happen here at sales-approval time
+    // since they are commercial decisions, not financial ones.
+    if (result.newStatus === "Approved") {
+      await pool.request().input("id", sql.Int, id)
+        .query("UPDATE dbo.CrmCancellation SET Status = 'FinancePending', UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    }
+
     await pool.request().input("bid", sql.Int, bookingId)
       .query("UPDATE dbo.CrmBooking SET Status = 'Cancelled', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
 
@@ -401,12 +416,13 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       }
     }
 
-    res.json({ success: true, status: result.newStatus });
+    res.json({ success: true, status: result.newStatus === "Approved" ? "FinancePending" : result.newStatus });
   } catch (e) {
     console.error("[crm-cancellations] approve error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
   }
 });
+
 
 // PUT /:id/reject — admin/super_admin/marketing_head only.
 router.put("/:id/reject", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
@@ -419,6 +435,105 @@ router.put("/:id/reject", requirePageRight("crm-cancellations", "edit"), async (
   } catch (e) {
     console.error("[crm-cancellations] reject error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// PUT /:id/finance-approve — second gate in the maker-checker refund chain.
+// Gated to accounts_head / finance_head / admin / super_admin — i.e. the
+// finance authorisation tier that is separate from the CRM/sales approver.
+// Moves Status: FinancePending → Approved, which is the gate mark-refunded
+// already checks for — so no other route needs to change.
+// Records FinanceClearedBy/FinanceClearedAt (if those columns exist) for a
+// full audit trail of who cleared the cash disbursement.
+const FINANCE_APPROVER_ROLES = ["accounts_head", "finance_head", "admin", "super_admin"];
+router.put("/:id/finance-approve", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const actor = actorId(req);
+    const role = (req.user?.role || "").toLowerCase();
+    if (!FINANCE_APPROVER_ROLES.includes(role)) {
+      return res.status(403).json({ error: "Only accounts/finance heads or admins can clear refunds for disbursement" });
+    }
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, RequestedBy, RefundAmount, BookingId FROM dbo.CrmCancellation WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
+    if (cur.recordset[0].Status !== "FinancePending") {
+      return res.status(400).json({ error: `Cannot finance-approve — status must be FinancePending (currently '${cur.recordset[0].Status}')` });
+    }
+
+    // Move to Approved — this is the status mark-refunded already requires.
+    // Try to write FinanceClearedBy/FinanceClearedAt if those columns exist;
+    // degrade gracefully if the migration hasn't been run yet (IGNORE ERRORS).
+    try {
+      await pool.request().input("id", sql.Int, id).input("ab", sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmCancellation SET
+            Status = 'Approved',
+            FinanceClearedBy = @ab,
+            FinanceClearedAt = SYSDATETIME(),
+            UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+    } catch {
+      // Column may not exist yet — run the migration SQL to add it
+      await pool.request().input("id", sql.Int, id)
+        .query("UPDATE dbo.CrmCancellation SET Status = 'Approved', UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    }
+
+    // Notify the requestor that their refund has been finance-cleared
+    const { RequestedBy, RefundAmount } = cur.recordset[0];
+    if (RequestedBy) {
+      const fmtCurrency = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+      await emitNotification(pool, RequestedBy, "crm_cancellation_finance_approved",
+        "Refund Cleared for Disbursement",
+        `Your cancellation refund of ${fmtCurrency(RefundAmount)} has been finance-approved and is now cleared for disbursement.`,
+        id, "crm_cancellation");
+    }
+
+    res.json({ success: true, status: "Approved" });
+  } catch (e) {
+    console.error("[crm-cancellations] finance-approve error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/finance-reject — finance head sends the request back to the CRM
+// team with a note (e.g. "refund amount mismatch — recalculate"). Moves
+// FinancePending back to Pending so sales can revise and re-submit.
+router.put("/:id/finance-reject", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const role = (req.user?.role || "").toLowerCase();
+    if (!FINANCE_APPROVER_ROLES.includes(role)) {
+      return res.status(403).json({ error: "Only accounts/finance heads or admins can finance-reject a cancellation" });
+    }
+    const note = req.body?.note || "Finance rejected — please revise and resubmit";
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, RequestedBy, Notes FROM dbo.CrmCancellation WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
+    if (cur.recordset[0].Status !== "FinancePending") {
+      return res.status(400).json({ error: `Cannot finance-reject — status must be FinancePending (currently '${cur.recordset[0].Status}')` });
+    }
+    const appendedNotes = cur.recordset[0].Notes
+      ? `${cur.recordset[0].Notes}\n[Finance Rejection] ${note}`
+      : `[Finance Rejection] ${note}`;
+    await pool.request().input("id", sql.Int, id).input("notes", sql.NVarChar(sql.MAX), appendedNotes)
+      .query("UPDATE dbo.CrmCancellation SET Status = 'Pending', Notes = @notes, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+
+    // Notify the requestor
+    if (cur.recordset[0].RequestedBy) {
+      await emitNotification(pool, cur.recordset[0].RequestedBy, "crm_cancellation_finance_rejected",
+        "Refund Finance-Rejected",
+        `Your cancellation refund request was sent back by finance: ${note}`,
+        id, "crm_cancellation");
+    }
+    res.json({ success: true, status: "Pending" });
+  } catch (e) {
+    console.error("[crm-cancellations] finance-reject error:", e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

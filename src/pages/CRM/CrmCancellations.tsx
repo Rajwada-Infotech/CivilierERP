@@ -21,6 +21,7 @@ const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Other"];
 
 const statusColor: Record<string, string> = {
   Pending:  "text-orange-600 bg-orange-50 border-orange-200",
+  FinancePending: "text-purple-600 bg-purple-50 border-purple-200",
   Approved: "text-blue-600 bg-blue-50 border-blue-200",
   Rejected: "text-red-600 bg-red-50 border-red-200",
   Refunded: "text-green-600 bg-green-50 border-green-200",
@@ -174,6 +175,31 @@ const CrmCancellations: React.FC = () => {
     }
   };
 
+  const handleFinanceApprove = async (id: number) => {
+    if (!window.confirm("Approve this refund for cash disbursement?")) return;
+    try {
+      const res = await fetchWithAuth(`${API}/${id}/finance-approve`, { method: "PUT" });
+      if (!res.ok) throw new Error((await res.json()).error);
+      toast.success("Finance clearance granted");
+      qc.invalidateQueries({ queryKey: ["crm-cancellations"] });
+    } catch (e: any) { toast.error(translateError(e.message)); }
+  };
+
+  const handleFinanceReject = async (id: number) => {
+    const note = window.prompt("Reason for finance rejection:");
+    if (note === null) return;
+    try {
+      const res = await fetchWithAuth(`${API}/${id}/finance-reject`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note })
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      toast.success("Refund rejected back to CRM");
+      qc.invalidateQueries({ queryKey: ["crm-cancellations"] });
+    } catch (e: any) { toast.error(translateError(e.message)); }
+  };
+
   const columns: ColumnDef<any, unknown>[] = [
     { accessorKey: "CancellationNo", header: "Cancellation No", size: 130,
       cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
@@ -210,6 +236,12 @@ const CrmCancellations: React.FC = () => {
             {c.Status === "Pending" && <span className="text-xs text-muted-foreground">Pending admin approval</span>}
             {c.Status === "Rejected" && c.Notes && (
               <span className="text-xs text-red-600" title={c.Notes}>Rejected: {c.Notes.length > 40 ? c.Notes.slice(0, 40) + "…" : c.Notes}</span>
+            )}
+            {c.Status === "FinancePending" && (
+              <div className="flex items-center gap-2">
+                <button onClick={() => handleFinanceApprove(c.Id)} className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200">Clear Refund</button>
+                <button onClick={() => handleFinanceReject(c.Id)} className="text-xs px-2 py-1 text-red-600 hover:underline">Reject</button>
+              </div>
             )}
             {c.Status === "Approved" && (
               <button onClick={() => openRefundDialog(c)} className="text-xs text-primary hover:underline">Record Refund</button>
