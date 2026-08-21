@@ -13,6 +13,7 @@ const { bumpCacheVersion } = require("../redis");
 const { getNextDocNumber } = require("./docNumber");
 const { validateSourceChain } = require("./sourceChain");
 const { logStatusChange } = require("./crmApplicationWorkflow");
+const { getIo } = require("../socket");
 const { guardAndConvertHold, assertEntityNotTaken, findActiveHold, placeHoldIfNeeded } = require("./crmHoldService");
 const { rollupBookingTotals, applyAddParking } = require("../routes/crmParking");
 const { recalculateRemainingMilestones } = require("./crmWorkflowGuards");

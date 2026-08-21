@@ -6,6 +6,7 @@
  */
 const { sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
+const { getIo } = require("../socket");
 
 const ENTITY_TYPES = ["Unit", "Parking"];
 const MAX_HOLD_DAYS = 90;
@@ -102,7 +103,9 @@ async function placeHold(pool, { entityType, entityId, applicationId, holdDays, 
   if (entityType === "Unit") {
     bumpCacheVersion("unit-master").catch(() => {});
   }
+  try { getIo().emit("matrix:update", {}); } catch(e) {}
 
+  try { getIo().emit("matrix:update", {}); } catch(e) {}
   return { id: result.recordset[0].Id, holdUntil: result.recordset[0].HoldUntil, applicantName: app.recordset[0].ApplicantName };
 }
 
@@ -141,6 +144,7 @@ async function releaseHold(pool, holdId, userId) {
   if (row.recordset[0].EntityType === "Unit") {
     bumpCacheVersion("unit-master").catch(() => {});
   }
+  try { getIo().emit("matrix:update", {}); } catch(e) {}
 }
 
 // Called from booking/parking-allotment creation. If the entity has an
@@ -161,6 +165,7 @@ async function guardAndConvertHold(pool, entityType, entityId, applicationId) {
   if (entityType === "Unit") {
     bumpCacheVersion("unit-master").catch(() => {});
   }
+  try { getIo().emit("matrix:update", {}); } catch(e) {}
 }
 
 // Releases every still-Active hold (Unit and/or Parking) tied to an

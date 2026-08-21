@@ -16,6 +16,7 @@ const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { postCrmCancellationRefundToGL } = require("../services/crmLedger");
 const { releaseAllParkingForBooking } = require("./crmParking");
 const { emitNotification } = require("../services/notify");
+const { getIo } = require("../socket");
 const { findActiveHold, releaseHold } = require("../services/crmHoldService");
 const { syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
 
@@ -121,10 +122,11 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
 router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status } = req.query;
+    const { status, companyId } = req.query;
     const req0 = pool.request();
     const conds = [];
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("c.Status = @st"); }
+    if (companyId) { req0.input("companyId", sql.Int, parseInt(companyId, 10)); conds.push("b.CompanyId = @companyId"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`${CANCEL_SELECT} ${where} ORDER BY c.CreatedAt DESC`);
     res.json(result.recordset);

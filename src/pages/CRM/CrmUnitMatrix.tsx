@@ -1,5 +1,6 @@
 import { CrmStatus } from "@/constants/crmStatuses";
 import { useEffect, useMemo, useState } from "react";
+import socket from '@/lib/socket';
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -410,6 +411,18 @@ export function UnitMatrixPage() {
 
   // Forces a re-render every minute so the hold countdown badges (and any
   // open TileInfoDialog) tick down live instead of only updating on refetch.
+    useEffect(() => {
+    const handleMatrixUpdate = (payload: any) => {
+      if (!payload?.projectId || payload.projectId === Number(projectId)) {
+        qc.invalidateQueries({ queryKey: ["unit-matrix", projectId] });
+      }
+    };
+    socket.on("matrix:update", handleMatrixUpdate);
+    return () => {
+      socket.off("matrix:update", handleMatrixUpdate);
+    };
+  }, [projectId, qc]);
+
   const [, setTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), 60000);
