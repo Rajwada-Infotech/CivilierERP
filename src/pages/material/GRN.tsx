@@ -373,6 +373,10 @@ const inp =
 const inpSel =
   "w-full px-3 py-2 pr-8 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 text-foreground appearance-none";
 
+// Quick-fill chips for GRN.DirectEntryReason — a GRN with no Vehicle
+// In/Out linked skipped the gate control, worth a short explanation.
+const DIRECT_ENTRY_REASONS = ["Local Supplier", "Emergency Procurement", "Same-day Site Delivery"];
+
 // ─── Linked Expense Bookings ──────────────────────────────────────────────────
 interface LinkedBooking {
   Eid: number;
@@ -554,6 +558,19 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
               {grn.POType}
             </span>
           ) : null}
+          {/* Entry Mode — a GRN with no Vehicle In/Out skipped the gate
+              control (raised via "remaining PO items" instead); worth
+              flagging at a glance for audit/reporting. Transfer GRNs never
+              have a vehicle either, but that's expected for that path, not
+              an exception worth badging. */}
+          {!isTRF && !grn.VehicleInOutID && (
+            <span
+              title={grn.DirectEntryReason || undefined}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-400/20 w-fit"
+            >
+              Direct Entry
+            </span>
+          )}
         </div>
       );
     },
@@ -988,6 +1005,9 @@ export default function GRN() {
     // specific Vehicle In/Out lot, or a direct "remaining items on this
     // PO" quick-fill. Empty until the user picks one.
     grnSourceMode: "" as "" | "vehicleInOut" | "remaining",
+    // Why the vehicle gate was skipped — only shown/sent when
+    // grnSourceMode === "remaining" (no Vehicle In/Out on this GRN).
+    directEntryReason: "" as string,
     poTotalAmount: 0 as number,
     poSubtotalAmount: 0 as number,
     poReceivedAmount: 0 as number,
@@ -1431,6 +1451,10 @@ export default function GRN() {
         vehicleInOutId,
         vehicleInOutDocNo: vio?.DocNo ?? "",
         grnSourceMode: "vehicleInOut",
+        // Switching to a Vehicle In/Out lot means this is a Gate Inward
+        // GRN — any Direct Entry reason left over from a prior "remaining
+        // items" pick no longer applies.
+        directEntryReason: "",
         // GRN Date now tracks the linked Vehicle In/Out document's own
         // date — the goods were received on that date, not today.
         grnDate: vio?.DocDate
@@ -1589,6 +1613,9 @@ export default function GRN() {
       vehicleInOutId: formData.vehicleInOutId
         ? Number(formData.vehicleInOutId)
         : null,
+      directEntryReason: !formData.vehicleInOutId && formData.directEntryReason
+        ? formData.directEntryReason
+        : null,
       grnItems: formData.items,
       status: "Draft",
       remarks: formData.remarks,
@@ -1690,6 +1717,7 @@ export default function GRN() {
         : "",
       vehicleInOutDocNo: fullGrn.documentChain?.vehicleInOut?.docNo || "",
       grnSourceMode: fullGrn.VehicleInOutID ? "vehicleInOut" : "remaining",
+      directEntryReason: fullGrn.DirectEntryReason || "",
       poTotalAmount: Number(fullGrn.POTotalAmount ?? 0),
       poSubtotalAmount: Number(fullGrn.POSubtotalAmount ?? 0),
       poReceivedAmount: Number(fullGrn.POTotalReceived ?? 0),
@@ -2251,6 +2279,43 @@ export default function GRN() {
                     </div>
                   )}
                 </div>
+
+                {/* Direct Entry Reason — only when this GRN has no Vehicle
+                    In/Out linked (raised straight from remaining PO
+                    items). Skipping the gate is an exception path, worth
+                    a short note for audit/reporting. Quick-fill chips for
+                    the common cases, but always a free-text field — no
+                    hidden state toggle between "preset" and "custom" to
+                    desync. */}
+                {formData.grnSourceMode === "remaining" && (
+                  <div>
+                    <FieldLabel>Reason for Direct Entry (no vehicle gate)</FieldLabel>
+                    <div className="flex flex-wrap gap-1.5 mb-1.5">
+                      {DIRECT_ENTRY_REASONS.map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setFormData((prev) => ({ ...prev, directEntryReason: r }))}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                            formData.directEntryReason === r
+                              ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                              : "border-border text-muted-foreground hover:border-emerald-500/40"
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      className={inpSel}
+                      placeholder="e.g. Local Supplier, Emergency Procurement… (optional)"
+                      value={formData.directEntryReason}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, directEntryReason: e.target.value }))}
+                      maxLength={200}
+                    />
+                  </div>
+                )}
 
                 {/* Remaining PO Items — the second way to raise a GRN
                     against this PO, grouped alongside the linked PO
@@ -3240,6 +3305,17 @@ export default function GRN() {
                                 color: "text-sky-600 dark:text-sky-400",
                               },
                             ]
+                          : !isTransferGRN(viewingGrn)
+                            ? [
+                                {
+                                  label: "Entry Mode",
+                                  value: "Direct Entry (no vehicle gate)",
+                                  color: "text-amber-600 dark:text-amber-400",
+                                },
+                              ]
+                            : []),
+                        ...(viewingGrn.DirectEntryReason
+                          ? [{ label: "Direct Entry Reason", value: viewingGrn.DirectEntryReason }]
                           : []),
                       ].map(({ label, value, mono, color }: any) => (
                         <div
