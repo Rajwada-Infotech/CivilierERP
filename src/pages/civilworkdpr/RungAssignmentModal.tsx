@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Flag, Trash2, Check } from "lucide-react";
+import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Flag, Trash2, Check, Timer } from "lucide-react";
 import type { LadderActivity, DependencyMasterListRow } from "@/api/dependencyMasterApi";
 import {
   getEngineers,
@@ -268,7 +268,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
         const existingNames = new Set(prev.map((c) => c.fieldName.toLowerCase()));
         const additions = template
           .filter((t) => !existingIds.has(t.id) && !existingNames.has(t.fieldName.toLowerCase()))
-          .map((t): AssignmentCheckpoint => ({ checkpointId: t.id, fieldName: t.fieldName, isChecked: false }));
+          .map((t): AssignmentCheckpoint => ({ checkpointId: t.id, fieldName: t.fieldName, isChecked: false, minWaitDays: t.minWaitDays }));
         if (!additions.length) {
           toast("All of this activity's checkpoints are already on the list.");
           return prev;
@@ -282,10 +282,44 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     }
   };
 
-  const toggleCheckpoint = (index: number) =>
+  // Checking OFF is always allowed; checking ON is blocked until
+  // minWaitDays have passed since Start Date — the same rule the server
+  // enforces on save (see dependencyActivityAssignment.js POST /:rungId),
+  // caught here first so the user gets an immediate, specific reason
+  // instead of a save-time rejection.
+  const toggleCheckpoint = (index: number) => {
+    const cp = checkpoints[index];
+    if (!cp.isChecked && cp.minWaitDays != null && cp.minWaitDays > 0) {
+      if (!startDate) {
+        toast.error(`"${cp.fieldName}" needs a Start Date set before it can be checked off.`);
+        return;
+      }
+      const eligibleDate = addDays(startDate, cp.minWaitDays);
+      const todayStr = new Date().toISOString().slice(0, 10);
+      if (todayStr < eligibleDate) {
+        const daysLeft = diffDays(todayStr, eligibleDate);
+        toast.error(
+          `"${cp.fieldName}" needs ${cp.minWaitDays} day(s) after the start date — ${daysLeft ?? cp.minWaitDays} day(s) left.`,
+        );
+        return;
+      }
+    }
     setCheckpoints((prev) => prev.map((c, i) => (i === index ? { ...c, isChecked: !c.isChecked } : c)));
+  };
   const removeCheckpoint = (index: number) =>
     setCheckpoints((prev) => prev.filter((_, i) => i !== index));
+
+  // Same rule toggleCheckpoint enforces, exposed here so the row can show
+  // *why* a checkpoint can't be checked yet instead of just silently
+  // refusing the click.
+  const checkpointGate = (cp: AssignmentCheckpoint): { locked: boolean; daysLeft: number | null } => {
+    if (cp.isChecked || cp.minWaitDays == null || cp.minWaitDays <= 0) return { locked: false, daysLeft: null };
+    if (!startDate) return { locked: true, daysLeft: null };
+    const eligibleDate = addDays(startDate, cp.minWaitDays);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (todayStr >= eligibleDate) return { locked: false, daysLeft: null };
+    return { locked: true, daysLeft: diffDays(todayStr, eligibleDate) };
+  };
 
   // Days drives End Date whenever Start Date is known; editing End Date
   // directly recomputes Days the other way — whichever field the user last
@@ -565,7 +599,9 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                 </p>
               ) : (
                 <div className="space-y-0">
-                  {checkpoints.map((cp, i) => (
+                  {checkpoints.map((cp, i) => {
+                    const gate = checkpointGate(cp);
+                    return (
                     <div key={`${cp.checkpointId ?? "custom"}-${i}`} className="flex items-start gap-3">
                       {/* Milestone rail — filled circle + connecting line */}
                       <div className="flex flex-col items-center shrink-0">
@@ -575,9 +611,11 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                           className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
                             cp.isChecked
                               ? "bg-emerald-500 border-emerald-500 text-white"
-                              : "bg-background border-border text-transparent hover:border-cyan-500/50"
+                              : gate.locked
+                                ? "bg-background border-amber-500/40 text-transparent"
+                                : "bg-background border-border text-transparent hover:border-cyan-500/50"
                           }`}
-                          title={cp.isChecked ? "Mark incomplete" : "Mark complete"}
+                          title={cp.isChecked ? "Mark incomplete" : gate.locked ? "Not eligible yet" : "Mark complete"}
                         >
                           <Check size={11} strokeWidth={3} />
                         </button>
@@ -586,8 +624,13 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         )}
                       </div>
                       <div className="flex-1 flex items-center justify-between gap-2 pb-3 pt-0.5">
-                        <span className={`text-sm ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
+                        <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
                           {cp.fieldName}
+                          {gate.locked && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                              <Timer size={9} /> {gate.daysLeft != null ? `${gate.daysLeft}d left` : `${cp.minWaitDays}d wait`}
+                            </span>
+                          )}
                         </span>
                         <button
                           type="button"
@@ -599,7 +642,8 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         </button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -28,7 +28,7 @@ function ActivityPhotosBadge({ rungId }: { rungId: number }) {
     queryKey: ["activity-photos", rungId],
     queryFn: () => getActivityPhotos(rungId),
   });
-  const count = (photos?.before.length ?? 0) + (photos?.after.length ?? 0) + (photos?.progress.length ?? 0);
+  const count = (photos?.before.length ?? 0) + (photos?.after.length ?? 0);
 
   return (
     <span

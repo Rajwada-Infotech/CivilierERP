@@ -16,6 +16,7 @@ const { logStatusChange } = require("./crmApplicationWorkflow");
 const { guardAndConvertHold, assertEntityNotTaken, findActiveHold, placeHoldIfNeeded } = require("./crmHoldService");
 const { rollupBookingTotals, applyAddParking } = require("../routes/crmParking");
 const { recalculateRemainingMilestones } = require("./crmWorkflowGuards");
+const { ensureBrokerForChannelPartner } = require("./channelPartnerBrokerBridge");
 
 const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "Website", "EventLead", "Other"];
 
@@ -189,6 +190,13 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   const campaignId = b.CampaignId ? parseInt(b.CampaignId) : (prefill.CampaignId || null);
   const adId       = b.AdId       ? parseInt(b.AdId)       : (prefill.AdId       || null);
   const channelPartnerId = b.ChannelPartnerId ? parseInt(b.ChannelPartnerId) : (prefill.ChannelPartnerId || null);
+  const bridge = !b.BrokerId && channelPartnerId
+    ? await ensureBrokerForChannelPartner(pool, channelPartnerId, actorUserId)
+    : null;
+  const brokerId = b.BrokerId ? parseInt(b.BrokerId) : (bridge?.brokerId || null);
+  const brokerageRatePercent = b.BrokerageRatePercent != null && b.BrokerageRatePercent !== ""
+    ? parseFloat(b.BrokerageRatePercent)
+    : (bridge?.commissionRate ?? null);
 
   const sourceError = await validateSourceChain(pool, { PlatformId: platformId, CampaignId: campaignId, AdId: adId });
   if (sourceError) throw new CrmCreationError(sourceError);
@@ -281,8 +289,8 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("refApp", sql.Int,         b.ReferredByApplicationId ? parseInt(b.ReferredByApplicationId) : null)
       .input("cb",   sql.Int,           actorUserId)
-      .input("brkid", sql.Int,          b.BrokerId ? parseInt(b.BrokerId) : null)
-      .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
+      .input("brkid", sql.Int,          brokerId)
+      .input("brkpct", sql.Decimal(5,2), brokerageRatePercent)
       .input("brkplan", sql.NVarChar(20), ["OneTime", "TwoPart", "AgreementOnly"].includes(b.BrokeragePaymentPlan) ? b.BrokeragePaymentPlan : "OneTime")
       .query(`
         INSERT INTO dbo.CrmApplication
@@ -564,7 +572,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // never exist for are the genuinely dead ones — the same "not dead"
   // exclusion this used before Approved briefly became a real gate.
   const appRow = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
-    .query("SELECT Status, IsActive, PaymentPlanId FROM dbo.CrmApplication WHERE Id = @aid");
+    .query("SELECT Status, IsActive, PaymentPlanId, BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ChannelPartnerId FROM dbo.CrmApplication WHERE Id = @aid");
   if (!appRow.recordset.length) throw new CrmCreationError("Application not found");
   const deadApplicationStatuses = ["Rejected", "Cancelled", "Expired"];
   if (appRow.recordset[0].IsActive === false || deadApplicationStatuses.includes(appRow.recordset[0].Status)) {
@@ -598,6 +606,17 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // unitMatrix.js/parkingMatrix.js's Status derivation), so the deadline
   // below is what the Matrix keeps counting down against in the meantime.
   const confirmDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  const application = appRow.recordset[0];
+  const bookingBridge = !b.BrokerId && !application.BrokerId && application.ChannelPartnerId
+    ? await ensureBrokerForChannelPartner(pool, application.ChannelPartnerId, actorUserId)
+    : null;
+  const bookingBrokerId = b.BrokerId ? parseInt(b.BrokerId) : (application.BrokerId || bookingBridge?.brokerId || null);
+  const bookingBrokerageRatePercent = b.BrokerageRatePercent != null && b.BrokerageRatePercent !== ""
+    ? parseFloat(b.BrokerageRatePercent)
+    : (application.BrokerageRatePercent ?? bookingBridge?.commissionRate ?? null);
+  const bookingBrokeragePaymentPlan = ["OneTime", "TwoPart", "AgreementOnly"].includes(b.BrokeragePaymentPlan)
+    ? b.BrokeragePaymentPlan
+    : (["OneTime", "TwoPart", "AgreementOnly"].includes(application.BrokeragePaymentPlan) ? application.BrokeragePaymentPlan : "OneTime");
 
   await guardAndConvertHold(pool, "Unit", parseInt(b.UnitId), parseInt(b.ApplicationId));
 
@@ -663,9 +682,9 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
     .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
     .input("cb",    sql.Int,           actorUserId)
-    .input("brkid", sql.Int,           b.BrokerId ? parseInt(b.BrokerId) : null)
-    .input("brkpct", sql.Decimal(5,2), b.BrokerageRatePercent != null && b.BrokerageRatePercent !== "" ? parseFloat(b.BrokerageRatePercent) : null)
-    .input("brkplan", sql.NVarChar(20), ["OneTime", "TwoPart", "AgreementOnly"].includes(b.BrokeragePaymentPlan) ? b.BrokeragePaymentPlan : "OneTime")
+    .input("brkid", sql.Int,           bookingBrokerId)
+    .input("brkpct", sql.Decimal(5,2), bookingBrokerageRatePercent)
+    .input("brkplan", sql.NVarChar(20), bookingBrokeragePaymentPlan)
     .input("cdl",   sql.DateTime2(3),  confirmDeadline)
     .query(`
       INSERT INTO dbo.CrmBooking

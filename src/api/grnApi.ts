@@ -102,6 +102,10 @@ export interface GRNFormDataPayload {
   supplierId: number;
   poId: number;
   vehicleInOutId?: number | null;
+  /** Why the vehicle gate was skipped — only meaningful when
+   *  vehicleInOutId is null (a GRN raised straight from remaining PO
+   *  items instead of a Vehicle In/Out lot). */
+  directEntryReason?: string | null;
   grnItems: GRNItemLine[];
   status: string;
   remarks?: string;

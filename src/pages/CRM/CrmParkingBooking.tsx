@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -328,6 +330,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 // ── MAIN PAGE ────────────────────────────────────────────────────────────────
 
 const CrmParkingBooking: React.FC = () => {
+  usePageRights("crm-parking-booking");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { currentUser } = useAuth();
@@ -585,9 +588,11 @@ const CrmParkingBooking: React.FC = () => {
   ];
 
   return (
-    <CrmShell
-      title="Parking Allotments"
-      subtitle="Standalone parking sales and unit-linked allotments across all bookings"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Parking Bookings"]} />
+      <CrmShell
+        title="Parking Allotments"
+        subtitle="Standalone parking sales and unit-linked allotments across all bookings"
       action={
         <button
           onClick={() => setNewDialogOpen(true)}
@@ -845,7 +850,8 @@ const CrmParkingBooking: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </CrmShell>
+      </CrmShell>
+    </>
   );
 };
 

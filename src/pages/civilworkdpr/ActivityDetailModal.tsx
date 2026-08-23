@@ -45,9 +45,8 @@ type DetailTab = "overview" | "blueprint" | "photos";
 const TAG_META: Record<PhotoPhase, { label: string; icon: LucideIcon; color: string }> = {
   before: { label: "Before", icon: Clock, color: "#f59e0b" },
   after: { label: "After", icon: CheckCircle2, color: "#22c55e" },
-  progress: { label: "Progress", icon: ActivityIcon, color: "#38bdf8" },
 };
-const TAG_ORDER: PhotoPhase[] = ["before", "after", "progress"];
+const TAG_ORDER: PhotoPhase[] = ["before", "after"];
 
 function fmtDateTime(iso: string | null) {
   if (!iso) return "—";
@@ -343,7 +342,7 @@ function PhotosTab({ rungId }: { rungId: number }) {
           <Loader2 size={18} className="animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {TAG_ORDER.map((tag) => {
             const meta = TAG_META[tag];
             const Icon = meta.icon;
@@ -592,7 +591,7 @@ export default function ActivityDetailModal({
   });
 
   const hasBlueprint = row.roomId != null && !!annotation;
-  const photoCount = (photos?.before.length ?? 0) + (photos?.after.length ?? 0) + (photos?.progress.length ?? 0);
+  const photoCount = (photos?.before.length ?? 0) + (photos?.after.length ?? 0);
 
   const visibleTabs = useMemo(() => TABS.filter((t) => t.id !== "blueprint" || hasBlueprint), [hasBlueprint]);
 

@@ -55,8 +55,10 @@ const requireUserName = (req, res) => {
 router.get("/", cache("cheque-master", 300), async (req, res) => {
   try {
     const pool = getPool();
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
 
-    const result = await pool.request().query(`
+    const request = pool.request().input("companyId", sql.Int, companyId);
+    const result = await request.query(`
       SELECT
         cm.CId,
         cm.CompanyId,
@@ -84,6 +86,7 @@ router.get("/", cache("cheque-master", 300), async (req, res) => {
       FROM dbo.ChequeMaster cm
       LEFT JOIN dbo.AccountHeadMaster ahm ON cm.BankId = ahm.LHeadId
       LEFT JOIN dbo.enterprise co ON co.id = cm.CompanyId AND co.business_type = 'C'
+      WHERE (@companyId IS NULL OR cm.CompanyId = @companyId)
     `);
 
     res.json(result.recordset);

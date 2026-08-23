@@ -60,6 +60,7 @@ import {
   updateReceivedPayment,
   deleteReceivedPayment,
 } from "@/api/receivedPaymentApi";
+import { getPayableEmis, payLoan, type PayableEmi } from "@/api/loanSanctionApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
 import { getContractOptions, type ContractOption } from "@/api/contractApi";
@@ -356,6 +357,79 @@ export default function ReceivedPaymentPage() {
   const [form, setForm] = useDraftForm("received-payment", EMPTY_FORM, {
     skip: editingId !== null,
   });
+
+  // ── Loan Repayment (Customer Loan only) ─────────────────────────────────
+  // A Customer Loan repayment is cash coming IN from the customer who
+  // borrowed it — the same direction every other Received Payment already
+  // models, so it belongs here rather than on the outgoing Payment page
+  // (see migration 356 / getPayableEmis's direction="incoming").
+  const [loanEmiOptions, setLoanEmiOptions] = useState<PayableEmi[]>([]);
+  const [loanEmisLoading, setLoanEmisLoading] = useState(false);
+  const [selectedLoanEmi, setSelectedLoanEmi] = useState<PayableEmi | null>(null);
+  const [loanPaymentDetailsOpen, setLoanPaymentDetailsOpen] = useState(false);
+  const [loanPayMode, setLoanPayMode] = useState<"emis" | "lumpsum">("emis");
+  const [selectedLoanEmiIds, setSelectedLoanEmiIds] = useState<number[]>([]);
+  const [loanLumpSumAmount, setLoanLumpSumAmount] = useState("");
+  const [loanLateFee, setLoanLateFee] = useState("");
+  const [loanPaymentNotes, setLoanPaymentNotes] = useState("");
+
+  useEffect(() => {
+    const companyId = Number(form.companyId) || null;
+    if (!companyId) {
+      setLoanEmiOptions([]);
+      return;
+    }
+    setLoanEmisLoading(true);
+    getPayableEmis(companyId, "incoming")
+      .then(setLoanEmiOptions)
+      .catch(() => setLoanEmiOptions([]))
+      .finally(() => setLoanEmisLoading(false));
+  }, [form.companyId]);
+
+  const loanSiblingEmis = selectedLoanEmi
+    ? loanEmiOptions.filter((e) => e.LoanId === selectedLoanEmi.LoanId).sort((a, b) => a.InstallmentNo - b.InstallmentNo)
+    : [];
+  const loanSelectedEmisTotal = loanSiblingEmis
+    .filter((e) => selectedLoanEmiIds.includes(e.EMIId))
+    .reduce((s, e) => s + Number(e.EMIAmount), 0);
+  const loanOutstandingTotal = loanSiblingEmis.reduce((s, e) => s + Number(e.EMIAmount), 0);
+
+  const clearLoanEmiLink = () => {
+    setSelectedLoanEmi(null);
+    setSelectedLoanEmiIds([]);
+    setLoanLumpSumAmount("");
+    setLoanLateFee("");
+    setLoanPaymentNotes("");
+  };
+
+  const handleLoanEmiSelect = (emi: PayableEmi) => {
+    setSelectedLoanEmi(emi);
+    setLoanPayMode("emis");
+    setSelectedLoanEmiIds([emi.EMIId]);
+    setLoanLumpSumAmount("");
+    setLoanLateFee("");
+    setLoanPaymentNotes("");
+    // Customer Loan only reaches this picker (direction="incoming" already
+    // filters server-side) — Company is the LENDER (whose books this
+    // repayment is recorded under), Customer Name is the borrower paying
+    // it back.
+    setForm((prev) => ({
+      ...prev,
+      customerName: emi.BorrowerName || prev.customerName,
+      amount: String(Number(emi.EMIAmount)),
+      remarks: `Loan EMI ${emi.InstallmentNo} — ${emi.LoanNo}`,
+    }));
+    setLoanPaymentDetailsOpen(true);
+  };
+
+  const toggleLoanEmiSelected = (emiId: number) => {
+    setSelectedLoanEmiIds((prev) => {
+      const next = prev.includes(emiId) ? prev.filter((id) => id !== emiId) : [...prev, emiId];
+      const total = loanSiblingEmis.filter((e) => next.includes(e.EMIId)).reduce((s, e) => s + Number(e.EMIAmount), 0);
+      setForm((f) => ({ ...f, amount: String(total) }));
+      return next;
+    });
+  };
 
   // Only reopen on an actual browser reload, not a plain in-app navigation
   // (e.g. clicking "Received Payment" in the sidebar remounts this
@@ -664,9 +738,37 @@ export default function ReceivedPaymentPage() {
         await updateReceivedPayment(Number(editingId), payload as any);
         toast.success("Payment updated");
       } else {
-        await addReceivedPayment(payload as any);
+        const created = await addReceivedPayment(payload as any);
         toast.success("Payment recorded successfully");
+
+        // This Received Payment IS a Customer Loan repayment settling —
+        // link it back to the loan (migration 356) the same way Finance >
+        // Payment already does for the outgoing directions, so the loan's
+        // own Repayment History shows how it was actually paid.
+        if (selectedLoanEmi) {
+          try {
+            const res = await payLoan(selectedLoanEmi.LoanId, {
+              receivedPaymentId: created.RPPaymentID,
+              emiIds: loanPayMode === "emis" ? selectedLoanEmiIds : undefined,
+              lumpSumAmount: loanPayMode === "lumpsum" ? loanLumpSumAmount : undefined,
+              paymentDate: date!.toISOString().slice(0, 10),
+              lateFee: loanLateFee || undefined,
+              notes: loanPaymentNotes || `Received via Received Payment — ${payload.RPDocDate}`,
+            });
+            toast.success(
+              res.readyToClose
+                ? `All installments settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef} — go to Loan Sanction to formally close it.`
+                : `Loan repayment settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef}`,
+            );
+            if (res.glPostingWarning) toast.error(res.glPostingWarning);
+          } catch (loanErr: any) {
+            toast.error(
+              `Payment was recorded, but linking it to the loan failed: ${loanErr.message}. Settle it manually from Loan Sanction.`,
+            );
+          }
+        }
       }
+      clearLoanEmiLink();
       setView("list");
       setEditingId(null);
       await loadPayments(currentPage);
@@ -1370,6 +1472,68 @@ export default function ReceivedPaymentPage() {
                   </div>
                 </div>
 
+                {/* Loan EMIs — a Customer Loan repayment this company (as
+                    lender) is due to receive back. Only shows once a
+                    company with outstanding Customer Loan EMIs is picked. */}
+                {form.companyId && !editingId && (loanEmisLoading || loanEmiOptions.length > 0) && (
+                  <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                    <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-muted-foreground">
+                      Settle a Loan Repayment
+                    </p>
+                    {loanEmisLoading ? (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <Loader2 size={12} className="animate-spin" /> Checking for outstanding loan EMIs…
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {Array.from(new Map(loanEmiOptions.map((e) => [e.LoanId, e])).values()).map((emi) => (
+                          <button
+                            key={emi.LoanId}
+                            type="button"
+                            onClick={() => handleLoanEmiSelect(emi)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                              selectedLoanEmi?.LoanId === emi.LoanId
+                                ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                : "border-border bg-background text-muted-foreground hover:border-emerald-500/40",
+                            )}
+                          >
+                            <Landmark size={11} />
+                            {emi.LoanNo} — {emi.BorrowerName}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {selectedLoanEmi && (
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <p className="text-[11px] text-muted-foreground">
+                          {loanPayMode === "lumpsum"
+                            ? "Lump sum"
+                            : `${selectedLoanEmiIds.length} EMI${selectedLoanEmiIds.length === 1 ? "" : "s"} selected`}
+                          {" · "}
+                          <span className="font-mono font-medium text-foreground/80">{formatINR(Number(form.amount) || 0)}</span>
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setLoanPaymentDetailsOpen(true)}
+                            className="text-[11px] font-medium text-primary hover:underline"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={clearLoanEmiLink}
+                            className="text-[11px] font-medium text-muted-foreground hover:text-destructive"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Date of Receipt */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -1698,6 +1862,122 @@ export default function ReceivedPaymentPage() {
           </div>
         )}
       </FinanceShell>
+
+      {/* ── Loan Repayment details — EMIs / lump sum, late fee, notes ──────── */}
+      <Dialog
+        open={loanPaymentDetailsOpen}
+        onOpenChange={(o) => {
+          if (!o) setLoanPaymentDetailsOpen(false);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-base flex items-center gap-2">
+              <Landmark size={16} className="text-primary" />
+              Loan Repayment — {selectedLoanEmi?.LoanNo}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {selectedLoanEmi?.BorrowerName}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedLoanEmi && (
+            <div className="space-y-4 py-1">
+              <div className="flex rounded-lg border border-border p-0.5 bg-muted/30 w-fit">
+                <button
+                  type="button"
+                  onClick={() => setLoanPayMode("emis")}
+                  className={cn(
+                    "px-3 py-1 rounded-md text-xs font-medium transition-colors",
+                    loanPayMode === "emis" ? "bg-card shadow-sm text-primary border border-border" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  Select EMIs
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoanPayMode("lumpsum");
+                    if (!loanLumpSumAmount) {
+                      setLoanLumpSumAmount(String(loanOutstandingTotal));
+                      setForm((f) => ({ ...f, amount: String(loanOutstandingTotal) }));
+                    }
+                  }}
+                  className={cn(
+                    "px-3 py-1 rounded-md text-xs font-medium transition-colors",
+                    loanPayMode === "lumpsum" ? "bg-card shadow-sm text-primary border border-border" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  Lump Sum
+                </button>
+              </div>
+
+              {loanPayMode === "emis" ? (
+                <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                  {loanSiblingEmis.map((e) => {
+                    const checked = selectedLoanEmiIds.includes(e.EMIId);
+                    return (
+                      <label
+                        key={e.EMIId}
+                        className={cn(
+                          "flex items-center justify-between gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors",
+                          checked ? "border-emerald-500/40 bg-emerald-500/5" : "border-border hover:bg-muted/30",
+                        )}
+                      >
+                        <span className="flex items-center gap-2 text-xs">
+                          <input type="checkbox" checked={checked} onChange={() => toggleLoanEmiSelected(e.EMIId)} className="accent-emerald-500" />
+                          Installment #{e.InstallmentNo}
+                          {e.IsOverdue && <span className="text-[10px] font-semibold text-destructive">OVERDUE</span>}
+                        </span>
+                        <span className="font-mono text-xs font-medium">{formatINR(Number(e.EMIAmount))}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div>
+                  <FieldLabel>Lump Sum Amount</FieldLabel>
+                  <Input
+                    type="number"
+                    value={loanLumpSumAmount}
+                    onChange={(e) => {
+                      setLoanLumpSumAmount(e.target.value);
+                      setForm((f) => ({ ...f, amount: e.target.value }));
+                    }}
+                    className="h-9 text-sm"
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Outstanding on this loan: <span className="font-mono font-medium text-foreground/80">{formatINR(loanOutstandingTotal)}</span>
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <FieldLabel>Late Fee (optional)</FieldLabel>
+                <Input
+                  type="number"
+                  value={loanLateFee}
+                  onChange={(e) => setLoanLateFee(e.target.value)}
+                  placeholder="0.00"
+                  className="h-9 text-sm"
+                />
+              </div>
+              <div>
+                <FieldLabel>Notes (optional)</FieldLabel>
+                <Input
+                  value={loanPaymentNotes}
+                  onChange={(e) => setLoanPaymentNotes(e.target.value)}
+                  className="h-9 text-sm"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button size="sm" onClick={() => setLoanPaymentDetailsOpen(false)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Submit for Approval Confirm ─────────────────────────────────────── */}
       <Dialog

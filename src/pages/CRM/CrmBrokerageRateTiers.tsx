@@ -8,6 +8,8 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, Pencil, Percent, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/crm/brokerage-rate-tiers";
 
@@ -22,6 +24,7 @@ const fmt = (n: number | null) => n == null ? "—" : `₹${Number(n).toLocaleSt
 // constants (2% under 1Cr, 1% at 1Cr+), now this real, editable table.
 const CrmBrokerageRateTiers: React.FC = () => {
   const qc = useQueryClient();
+  usePageRights("crm-brokerage-rate-tiers");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [minVal, setMinVal] = useState("");
@@ -121,8 +124,10 @@ const CrmBrokerageRateTiers: React.FC = () => {
   ];
 
   return (
-    <CrmShell
-      title="CRM — Brokerage Rate Tiers"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Brokerage Rate Tiers"]} />
+      <CrmShell
+        title="CRM — Brokerage Rate Tiers"
       subtitle="Default commission % by deal value — only applies when Application/Booking staff don't type an explicit override"
       action={
           <div className="flex items-center gap-3">
@@ -207,7 +212,8 @@ const CrmBrokerageRateTiers: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </CrmShell>
+      </CrmShell>
+    </>
   );
 };
 

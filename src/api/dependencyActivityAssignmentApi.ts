@@ -61,6 +61,9 @@ export interface AssignmentCheckpoint {
   fieldName: string;
   sortOrder?: number;
   isChecked: boolean;
+  // Snapshotted off the master checkpoint (see migration 354) at the
+  // moment it's attached to this rung — null means checkable any time.
+  minWaitDays?: number | null;
 }
 
 export interface RungAssignmentDetail {
@@ -287,10 +290,8 @@ export const getBlueprintAnnotationHistory = async (
 
 // ── Before/After Photo Capture ──────────────────────────────────────────────
 // Replaces the reporting-context blueprint markup as how a field engineer
-// actually updates a work report — see migration 348. "progress" (added for
-// the Activity Detail modal's Photos tab) is a free-standing mid-work shot,
-// not part of the before/after pairing.
-export type PhotoPhase = "before" | "after" | "progress";
+// actually updates a work report — see migration 348.
+export type PhotoPhase = "before" | "after";
 
 export interface ActivityPhotoMeta {
   id: number;
@@ -305,7 +306,6 @@ export interface ActivityPhotoMeta {
 export interface ActivityPhotos {
   before: ActivityPhotoMeta[];
   after: ActivityPhotoMeta[];
-  progress: ActivityPhotoMeta[];
 }
 
 export interface ActivityPhotoData {

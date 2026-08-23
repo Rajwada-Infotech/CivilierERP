@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -282,6 +283,7 @@ const StatSkeleton = () => (
 
 // --- Main Component -----------------------------------------------------------
 const CrmDashboard: React.FC = () => {
+  usePageRights("crm-dashboard");
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const qc = useQueryClient();

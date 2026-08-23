@@ -8,6 +8,8 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, Pencil, ListOrdered, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const API = "/api/crm/milestone-master";
 
@@ -17,6 +19,7 @@ async function fetchAll(): Promise<any[]> {
 
 const CrmMilestoneMaster: React.FC = () => {
   const qc = useQueryClient();
+  usePageRights("crm-milestone-master");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState("");
@@ -113,8 +116,10 @@ const CrmMilestoneMaster: React.FC = () => {
   ];
 
   return (
-    <CrmShell
-      title="CRM — Milestone Master"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Milestone Master"]} />
+      <CrmShell
+        title="CRM — Milestone Master"
       subtitle="Reusable milestone steps — Payment Plan Master picks from this list instead of retyping names"
       action={
           <div className="flex items-center gap-3">
@@ -197,7 +202,8 @@ const CrmMilestoneMaster: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </CrmShell>
+      </CrmShell>
+    </>
   );
 };
 

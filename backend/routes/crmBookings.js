@@ -120,6 +120,7 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const { status, applicationId, includeCancelled } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const req0 = pool.request();
     const conds = ["b.IsActive = 1"];
     if (status) {
@@ -129,6 +130,7 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
       conds.push("b.Status NOT IN ('Cancelled', 'Rejected')");
     }
     if (applicationId) { req0.input("appId", sql.Int, parseInt(applicationId)); conds.push("b.ApplicationId = @appId"); }
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     const result = await req0.query(`${BOOKING_SELECT} WHERE ${conds.join(" AND ")} ORDER BY b.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (e) {

@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { FileText, Download, Search, ExternalLink, Plus, ChevronDown, ChevronRight, Building2, Info, CheckCircle2, Clock, AlertCircle, Ban } from "lucide-react";
@@ -731,9 +733,13 @@ const CrmInvoices: React.FC = () => {
     qc.invalidateQueries({ queryKey: ["crm-invoices"] });
   }
 
+  usePageRights("crm-invoices");
+
   return (
-    <CrmShell
-      title="CRM — Invoices"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Invoices"]} />
+      <CrmShell
+        title="CRM — Invoices"
       subtitle="Booking-wise invoice history and generation — Milestone (beyond the Booking Amount), Maintenance, Other, and On-Account. The Booking Amount invoice itself is generated from the Booking's own Payment & Invoice tab."
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
     >
@@ -867,6 +873,7 @@ const CrmInvoices: React.FC = () => {
         <GenerateInvoiceDialog initialBookingId={genBookingId} onClose={() => setGenBookingId(undefined)} onGenerated={handleGenerated} />
       )}
     </CrmShell>
+    </>
   );
 };
 

@@ -427,9 +427,15 @@ router.post("/:id/import-leads", requirePageRight("sa-leads", "create"), async (
     const utm = parseUtmParameters(ad.UtmParameters);
     let inserted = 0;
     let skipped = 0;
+    let invalid = 0;
 
     for (const lead of normalized) {
-      if (!lead.Mobile && !lead.Email) {
+      if (lead.ValidationErrors?.length) {
+        skipped += 1;
+        invalid += 1;
+        continue;
+      }
+      if (!lead.Mobile) {
         skipped += 1;
         continue;
       }
@@ -460,8 +466,11 @@ router.post("/:id/import-leads", requirePageRight("sa-leads", "create"), async (
         .query(`
           IF NOT EXISTS (
             SELECT 1 FROM dbo.SaLead
-            WHERE (ExternalLeadId = @ExternalLeadId AND @ExternalLeadId IS NOT NULL)
-               OR ((Mobile = @Mobile AND @Mobile IS NOT NULL) AND AdId = @AdId)
+            WHERE IsActive = 1
+              AND (
+                (ExternalLeadId = @ExternalLeadId AND @ExternalLeadId IS NOT NULL)
+                OR (Mobile = @Mobile AND @Mobile IS NOT NULL)
+              )
           )
           BEGIN
             INSERT INTO dbo.SaLead
@@ -491,7 +500,7 @@ router.post("/:id/import-leads", requirePageRight("sa-leads", "create"), async (
       .input("Direction", sql.NVarChar(10), "Import")
       .input("Status", sql.NVarChar(20), "Success")
       .input("LeadsGenerated", sql.Int, inserted)
-      .input("RawResponse", sql.NVarChar(sql.MAX), JSON.stringify({ received: incoming.length, inserted, skipped }))
+      .input("RawResponse", sql.NVarChar(sql.MAX), JSON.stringify({ received: incoming.length, inserted, skipped, invalid }))
       .input("CreatedBy", sql.Int, createdBy)
       .query(`
         INSERT INTO dbo.SaAdSyncLog
@@ -502,9 +511,12 @@ router.post("/:id/import-leads", requirePageRight("sa-leads", "create"), async (
            @Status, @LeadsGenerated, @RawResponse, SYSDATETIME(), @CreatedBy)
       `);
 
-    res.json({ success: true, received: incoming.length, inserted, skipped });
+    res.json({ success: true, received: incoming.length, inserted, skipped, invalid });
   } catch (err) {
     console.error("[sa-ads] POST /import-leads error:", err.message);
+    if (err.number === 2601 || err.number === 2627) {
+      return res.status(409).json({ error: "A lead with this mobile number already exists." });
+    }
     res.status(500).json({ error: err.message || "Lead import failed" });
   }
 });

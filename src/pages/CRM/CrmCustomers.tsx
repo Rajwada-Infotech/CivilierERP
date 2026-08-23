@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { usePageRights } from "@/hooks/usePageRights";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Plus, Search, ChevronRight, IdCard, IndianRupee, Lock, Pencil, BookUser,
@@ -499,9 +501,13 @@ const CrmCustomers: React.FC = () => {
       ) },
   ];
 
+  usePageRights("crm-customers");
+
   return (
-    <CrmShell
-      title="CRM — Customers"
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Customers"]} />
+      <CrmShell
+        title="CRM — Customers"
       subtitle="The master identity record every Application is built on — name, KYC, address, co-applicant"
       action={
         <div className="flex items-center gap-2">
@@ -637,6 +643,7 @@ const CrmCustomers: React.FC = () => {
         />
       )}
     </CrmShell>
+    </>
   );
 };
 

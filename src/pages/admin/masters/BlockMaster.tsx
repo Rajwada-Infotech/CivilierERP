@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
 import { safeHtml } from "@/utils/escapeHtml";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import {
@@ -140,6 +141,7 @@ const exportColumns: ExportColumn[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 const BlockMaster: React.FC = () => {
+  usePageRights("block-master");
   const queryClient = useQueryClient();
 
   const {

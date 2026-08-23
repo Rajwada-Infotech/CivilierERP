@@ -45,6 +45,8 @@ export interface LoanSanction {
   CreatedAt?: string | null;
   TotalEMIs?: number;
   PaidEMIs?: number;
+  TotalScheduledAmount?: number;
+  TotalPaidAmount?: number;
   LenderLHeadCode?: string | null;
   LenderGroupName?: string | null;
   LenderParentGroupName?: string | null;
@@ -155,6 +157,10 @@ export interface LoanPayment {
   // The real dbo.NewPayment record this settlement was made through (see
   // migration 340) — null for older rows recorded before this link existed.
   NewPaymentId?: number | null;
+  // Or, for a Customer Loan repayment settled via Received Payment instead
+  // (money coming IN — see migration 356), the dbo.ReceivedPayment record.
+  // Exactly one of NewPaymentId/ReceivedPaymentId is set, never both.
+  ReceivedPaymentId?: number | null;
   PaymentMode?: string | null;
   ChequeNo?: string | null;
   ChequeDate?: string | null;
@@ -172,10 +178,14 @@ export interface PayLoanPayload {
   lateFee?: number | string;
   paymentDate: string;
   notes?: string;
-  // The dbo.NewPayment row Payment.tsx just created for this settlement —
-  // links the loan's own payment record back to the one that actually
-  // carries mode/cheque/bank details (see migration 340).
+  // Exactly one of these two — whichever page this settlement was actually
+  // recorded from. The dbo.NewPayment row Payment.tsx just created (money
+  // going OUT, migration 340), or the dbo.ReceivedPayment row Received
+  // Payment just created (money coming IN — a Customer Loan repayment,
+  // migration 356). Links the loan's own payment record back to the one
+  // that actually carries mode/cheque/bank details.
   newPaymentId?: number;
+  receivedPaymentId?: number;
 }
 
 export interface PayLoanResponse {
@@ -225,7 +235,7 @@ export const createLoanSanction = (payload: LoanSanctionPayload) =>
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  }).then((r) => handle<{ loanId: number; loanNo: string }>(r));
+  }).then((r) => handle<{ loanId: number; loanNo: string; glPosted?: boolean; glError?: string | null }>(r));
 
 export const toggleEmiPaid = (loanId: number, emiId: number, paid: boolean) =>
   fetchWithAuth(`${BASE}/${loanId}/emi/${emiId}/pay`, {
@@ -268,8 +278,13 @@ export const updateLoanSanction = (id: number, payload: LoanEditPayload) =>
 // Scoped to the company the payment is being made from — a loan's EMI is
 // only "payable" from the company that is its lender or borrower, same
 // scoping the backend enforces (400s without a companyId).
-export const getPayableEmis = (companyId: number) =>
-  fetchWithAuth(`${BASE}/emi-payable?companyId=${companyId}`).then((r) => handle<PayableEmi[]>(r));
+// direction "outgoing" (default): Inter-Company/Bank Loan repayments this
+// company pays OUT — feeds Finance > Payment's Loan EMIs picker.
+// direction "incoming": Customer Loan repayments only, where this company
+// is the lender being paid BACK — feeds Received Payment's Loan EMIs
+// picker (migration 356).
+export const getPayableEmis = (companyId: number, direction: "outgoing" | "incoming" = "outgoing") =>
+  fetchWithAuth(`${BASE}/emi-payable?companyId=${companyId}&direction=${direction}`).then((r) => handle<PayableEmi[]>(r));
 
 export const getLoanPayments = (loanId: number) =>
   fetchWithAuth(`${BASE}/${loanId}/payments`).then((r) => handle<LoanPayment[]>(r));

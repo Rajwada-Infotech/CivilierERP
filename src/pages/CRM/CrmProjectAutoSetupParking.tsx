@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Car, CheckCircle2, Lock, ExternalLink, Pencil, X, ChevronDown, ChevronRight } from "lucide-react";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // Deliberately its own component/file, rendered as a separate toggle inside
 // CrmProjectAutoSetup.tsx rather than folded into that page's Block/Floor/
@@ -46,6 +47,7 @@ const cardCls = "rounded-xl border border-border p-4 space-y-3";
 
 const CrmProjectAutoSetupParking: React.FC = () => {
   const qc = useQueryClient();
+  usePageRights("crm-auto-project-setup");
   // Strict Company -> Project gate — matches the cascade now enforced in
   // CrmProjectAutoSetup.tsx and every other Company->Project master page.
   const [companyId, setCompanyId] = useState("");

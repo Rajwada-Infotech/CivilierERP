@@ -125,6 +125,22 @@ router.post("/record", requirePageRight("on-account-adjustment", "create"), asyn
       }
     }
 
+    // A DEBIT reduces the party's balance — same rigor as CREDIT above:
+    // don't let a caller drive OnAccountBalance negative, a state that
+    // should be impossible (an on-account credit balance being adjusted
+    // down further than it actually has).
+    if (String(txnType).toUpperCase() === "DEBIT") {
+      const balRes = await pool.request().input("PartyId", sql.Int, partyId).query(
+        `SELECT ISNULL(OnAccountBalance, 0) AS balance FROM dbo.AccountHeadMaster WHERE LHeadId = @PartyId`
+      );
+      const currentBalance = parseFloat(balRes.recordset[0]?.balance ?? 0);
+      if (currentBalance < parseFloat(amount) - 0.01) {
+        return res.status(400).json({
+          error: `Insufficient on-account balance — has ₹${currentBalance.toFixed(2)}, tried to debit ₹${parseFloat(amount).toFixed(2)}.`,
+        });
+      }
+    }
+
     const r = await pool.request()
       .input("PartyId",     sql.Int,           partyId)
       .input("PartyType",   sql.NVarChar(20),  partyType ?? "")
