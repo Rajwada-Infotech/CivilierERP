@@ -873,7 +873,7 @@ export default function LoanSanctionPage() {
               {label}
             </span>
             {instrument && (
-              <span className="text-[11px] text-muted-foreground pl-3">{instrument}</span>
+              <span className="text-[11px] text-muted-foreground pl-3 whitespace-nowrap">{instrument}</span>
             )}
           </div>
         );
