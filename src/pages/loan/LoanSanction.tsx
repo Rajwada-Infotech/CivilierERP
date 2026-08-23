@@ -169,6 +169,22 @@ function sanctionInstrumentLabel(loan: LoanSanction): string | null {
   return loan.DigitalRefNumber ? `${loan.PaymentMode} (Ref: ${loan.DigitalRefNumber})` : loan.PaymentMode;
 }
 
+// Same info as sanctionInstrumentLabel, compressed for the list table's
+// narrow Status column — "#353123 · 19 Aug" instead of "Cheque #353123
+// dated 19 Aug 2026". Truncating the full label there cut off the date
+// (the actually useful half) rather than the redundant filler words.
+function sanctionInstrumentLabelCompact(loan: LoanSanction): string | null {
+  if (!loan.PaymentMode) return null;
+  if (loan.PaymentMode === "Cheque" || loan.PaymentMode === "Post-Dated Cheque") {
+    if (!loan.ChequeNo) return loan.PaymentMode;
+    const date = loan.ChequeDate
+      ? new Date(loan.ChequeDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+      : null;
+    return `#${loan.ChequeNo}${date ? ` · ${date}` : ""}`;
+  }
+  return loan.DigitalRefNumber ? `${loan.PaymentMode} · ${loan.DigitalRefNumber}` : loan.PaymentMode;
+}
+
 function paymentInstrumentLabel(p: LoanPayment): string | null | "NOT_ON_FILE" {
   // BUG 3 FIX: distinguish "no NewPaymentId at all" from "has one but mode blank"
   if (p.NewPaymentId == null) return "NOT_ON_FILE";
@@ -865,7 +881,8 @@ export default function LoanSanctionPage() {
           : fullyPaid
             ? "text-emerald-600 dark:text-emerald-400"
             : "text-blue-600 dark:text-blue-400";
-        const instrument = sanctionInstrumentLabel(row.original);
+        const instrument = sanctionInstrumentLabelCompact(row.original);
+        const instrumentFull = sanctionInstrumentLabel(row.original);
         return (
           <div className="flex flex-col gap-0.5">
             <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${textColor}`}>
@@ -874,8 +891,8 @@ export default function LoanSanctionPage() {
             </span>
             {instrument && (
               <span
-                title={instrument}
-                className="inline-block max-w-[140px] truncate text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full"
+                title={instrumentFull ?? undefined}
+                className="inline-block w-fit whitespace-nowrap text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full"
               >
                 {instrument}
               </span>
