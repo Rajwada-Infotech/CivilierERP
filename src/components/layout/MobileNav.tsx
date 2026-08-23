@@ -44,6 +44,7 @@ import {
   Wand2,
   GitBranch,
   XCircle,
+  Percent,
 } from "lucide-react";
 import {
   Bank,
@@ -376,6 +377,16 @@ const materialSetupItems: SetupItem[] = [
   },
 ];
 
+const fixedAssetSetupItems: SetupItem[] = [
+  {
+    icon: Percent,
+    label: "Depreciation Setup",
+    path: "/fixed-asset/depreciation-setup",
+    color: "text-yellow-500",
+    pageKey: "depreciation-setup",
+  },
+];
+
 const followupSetupItems: SetupItem[] = [
   {
     icon: ClipboardList,
@@ -630,6 +641,8 @@ export const MobileNav: React.FC = () => {
       return { items: adminSetupItems, label: "Admin", available: true };
     if (activeModule === "material")
       return { items: materialSetupItems, label: "Material", available: true };
+    if (activeModule === "fixed-asset")
+      return { items: fixedAssetSetupItems, label: "Fixed Asset", available: true };
     if (activeModule === "followup")
       return { items: followupSetupItems, label: "Follow-Up", available: true };
     if (activeModule === "engineering")

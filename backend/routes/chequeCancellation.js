@@ -324,7 +324,7 @@ async function reverseLoanRepaymentIfLinked(pool, { newPaymentId, reason }) {
     .request()
     .input("RefId", sql.Int, loanPayment.PaymentId)
     .query(`
-      SELECT LedgerId, PartyId, PartyType, TxnType, Amount, RefType, RefDocNo, CompanyId
+      SELECT OAId, PartyId, PartyType, TxnType, Amount, RefType, RefDocNo, CompanyId
       FROM dbo.OnAccountLedger WHERE RefType IN ('LoanPayment', 'LoanOverpayment') AND RefId = @RefId
     `);
   for (const row of oaRows.recordset) {
@@ -579,3 +579,9 @@ module.exports = router;
 // scripts/cancelDuplicatePayment.js) that need to run the exact same
 // cancellation logic the API route uses, rather than reimplementing it.
 module.exports.cancelPaymentCheque = cancelPaymentCheque;
+// Exposed separately so a repair script can finish a partial reversal
+// directly — e.g. if cancelPaymentCheque crashed mid-way through this
+// step on an earlier run (the OAId column-name bug fixed above could
+// have caused exactly that: NewPayment cancelled, its own GL reversed,
+// but the loan-side reversal never completed).
+module.exports.reverseLoanRepaymentIfLinked = reverseLoanRepaymentIfLinked;

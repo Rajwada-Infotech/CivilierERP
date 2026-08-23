@@ -33,7 +33,7 @@ const loanNoArg = process.argv.slice(2).find((a) => !a.startsWith("--"));
   const pool = getPool();
 
   const result = await pool.request().input("LoanNo", sql.NVarChar(50), loanNoArg || null).query(`
-    SELECT ls.LoanId, ls.LoanNo, ls.LoanType, ls.Status, ls.Amount, ls.CreatedBy
+    SELECT ls.LoanId, ls.LoanNo, ls.LoanType, ls.Status, ls.Amount, ls.CreatedBy, ls.LoanDate, ls.DisbursedAt
     FROM dbo.LoanSanction ls
     WHERE (@LoanNo IS NULL OR ls.LoanNo = @LoanNo)
       AND EXISTS (
@@ -60,7 +60,14 @@ const loanNoArg = process.argv.slice(2).find((a) => !a.startsWith("--"));
   let skipped = 0;
 
   for (const loan of result.recordset) {
-    const label = `${loan.LoanNo} (${loan.LoanType}, ₹${loan.Amount}, ${loan.Status}, created by ${loan.CreatedBy || "unknown"})`;
+    // postLoanToGLInternal's own DisbursedAt update is guarded by
+    // "AND DisbursedAt IS NULL" — every loan matched here already has one
+    // reversed LoanPosting entry, meaning DisbursedAt was already stamped
+    // during that original posting and stays untouched by this re-post
+    // (confirmed against LN-000005: DisbursedAt was already non-null).
+    // Surfaced here only so that's visible/auditable, not because
+    // anything needs correcting.
+    const label = `${loan.LoanNo} (${loan.LoanType}, ₹${loan.Amount}, ${loan.Status}, created by ${loan.CreatedBy || "unknown"}, DisbursedAt=${loan.DisbursedAt ? new Date(loan.DisbursedAt).toISOString().slice(0, 10) : "null"})`;
     if (!APPLY) {
       console.log(`WOULD RE-POST  ${label}`);
       continue;

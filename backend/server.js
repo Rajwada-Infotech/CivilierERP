@@ -226,6 +226,7 @@ const ALL_ROUTES = [
   { path: "/api/fixed-assets",       file: "./routes/fixedAssets" },
   { path: "/api/fixed-asset-tagging", file: "./routes/fixedAssetTagging" },
   { path: "/api/asset-transfer", file: "./routes/assetTransfer" },
+  { path: "/api/id-template-master", file: "./routes/idTemplateMaster" },
   { path: "/api/work-progress", file: "./routes/workProgress" },
   { path: "/api/contractor-allocation", file: "./routes/contractorAllocation" },
   { path: "/api/daily-labour", file: "./routes/dailyLabour" },
