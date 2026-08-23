@@ -27,7 +27,11 @@ router.get("/users", requirePageRight("asset-transfer", "view"), async (req, res
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT id, name FROM dbo.users WHERE ISNULL(discontinue, 0) = 0 ORDER BY name
+      SELECT u.id, u.name, u.avatar_url, u.DepartmentId, d.DepartmentName
+      FROM dbo.users u
+      LEFT JOIN dbo.DepartmentMaster d ON d.Id = u.DepartmentId
+      WHERE ISNULL(u.discontinue, 0) = 0
+      ORDER BY u.name
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -65,6 +69,40 @@ router.get("/eligible-assets", requirePageRight("asset-transfer", "view"), async
   }
 });
 
+// ── GET /transferable-assets — active assets with their current holder ───────
+// Unlike /eligible-assets, this isn't scoped to a From User — the caller
+// picks the asset first and the current custodian (From User) is derived
+// from it, always reflecting the latest successful transfer.
+router.get("/transferable-assets", requirePageRight("asset-transfer", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    // Scoped to individually FA-Item-Code-tagged assets only — a transfer
+    // needs a unique per-unit identifier to select against, and a record
+    // without a code (e.g. a legacy/manual entry) has nothing unambiguous
+    // to pick here.
+    let where = ["fa.AssetStatus = 'Active'", "fa.Status <> 'Deleted'", "fa.CustodianUserId IS NOT NULL", "fa.FAItemCode IS NOT NULL"];
+
+    if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }
+    if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("fa.ProjectId = @ProjectId"); }
+    if (req.query.finYear)   { request.input("FinYear", sql.NVarChar(20), req.query.finYear);          where.push("fa.FinYear = @FinYear"); }
+
+    const result = await request.query(`
+      SELECT fa.AssetId, fa.AssetName, fa.AssetCode, fa.AssetCategory, fa.FAItemCode,
+             fa.CompanyId, fa.ProjectId, fa.FinYear,
+             fa.CustodianUserId, fa.Custodian AS CustodianName, cu.avatar_url AS CustodianAvatar
+      FROM dbo.FixedAssetRecord fa
+      LEFT JOIN dbo.users cu ON cu.id = fa.CustodianUserId
+      WHERE ${where.join(" AND ")}
+      ORDER BY fa.FAItemCode
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[assetTransfer] GET /transferable-assets:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET / — list transfer history ─────────────────────────────────────────────
 router.get("/", requirePageRight("asset-transfer", "view"), async (req, res) => {
   try {
@@ -88,10 +126,11 @@ router.get("/", requirePageRight("asset-transfer", "view"), async (req, res) => 
         h.Id, h.DocNo, h.DocDate, h.TransferDate, h.FinYear, h.Remarks, h.CreatedAt,
         h.CompanyId, co.name AS CompanyName,
         h.ProjectId, pr.name AS ProjectName,
-        h.AssetId, fa.AssetName, fa.AssetCode, fa.AssetCategory,
-        h.FromUserId, fu.name AS FromUserName,
-        h.ToUserId, tu.name AS ToUserName,
-        h.TransferredBy, bu.name AS TransferredByName
+        h.AssetId, fa.AssetName, fa.AssetCode, fa.AssetCategory, fa.FAItemCode,
+        h.FromUserId, fu.name AS FromUserName, fu.avatar_url AS FromUserAvatar,
+        h.ToUserId, tu.name AS ToUserName, tu.avatar_url AS ToUserAvatar,
+        h.TransferredBy, bu.name AS TransferredByName,
+        h.DepartmentId, dm.DepartmentName
       FROM dbo.AssetTransferHistory h
       LEFT JOIN dbo.enterprise co ON co.id = h.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = h.ProjectId
@@ -99,6 +138,7 @@ router.get("/", requirePageRight("asset-transfer", "view"), async (req, res) => 
       LEFT JOIN dbo.users fu ON fu.id = h.FromUserId
       LEFT JOIN dbo.users tu ON tu.id = h.ToUserId
       LEFT JOIN dbo.users bu ON bu.id = h.TransferredBy
+      LEFT JOIN dbo.DepartmentMaster dm ON dm.Id = h.DepartmentId
       ${whereClause}
       ORDER BY h.CreatedAt DESC
     `);
@@ -119,8 +159,9 @@ router.get("/:id", requirePageRight("asset-transfer", "view"), async (req, res) 
       SELECT
         h.*,
         co.name AS CompanyName, pr.name AS ProjectName,
-        fa.AssetName, fa.AssetCode, fa.AssetCategory,
-        fu.name AS FromUserName, tu.name AS ToUserName, bu.name AS TransferredByName
+        fa.AssetName, fa.AssetCode, fa.AssetCategory, fa.FAItemCode,
+        fu.name AS FromUserName, tu.name AS ToUserName, bu.name AS TransferredByName,
+        dm.DepartmentName
       FROM dbo.AssetTransferHistory h
       LEFT JOIN dbo.enterprise co ON co.id = h.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = h.ProjectId
@@ -128,6 +169,7 @@ router.get("/:id", requirePageRight("asset-transfer", "view"), async (req, res) 
       LEFT JOIN dbo.users fu ON fu.id = h.FromUserId
       LEFT JOIN dbo.users tu ON tu.id = h.ToUserId
       LEFT JOIN dbo.users bu ON bu.id = h.TransferredBy
+      LEFT JOIN dbo.DepartmentMaster dm ON dm.Id = h.DepartmentId
       WHERE h.Id = @Id
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
@@ -145,18 +187,21 @@ router.post("/", requirePageRight("asset-transfer", "create"), async (req, res) 
 
   const {
     docDate, transferDate, companyId, projectId, finYear,
-    assetId, fromUserId, toUserId, remarks,
+    assetId, fromUserId, toUserId, departmentId, remarks,
   } = req.body;
 
   const assetIdVal = toInt(assetId);
   const projectIdVal = toInt(projectId);
   const fromUserIdVal = toInt(fromUserId);
   const toUserIdVal = toInt(toUserId);
+  const departmentIdVal = toInt(departmentId);
 
   if (!assetIdVal) return res.status(400).json({ error: "assetId is required" });
   if (!projectIdVal) return res.status(400).json({ error: "projectId is required" });
   if (!fromUserIdVal || !toUserIdVal) return res.status(400).json({ error: "fromUserId and toUserId are required" });
   if (fromUserIdVal === toUserIdVal) return res.status(400).json({ error: "From User and To User must be different" });
+  if (!departmentIdVal) return res.status(400).json({ error: "departmentId is required" });
+  if (!remarks || !String(remarks).trim()) return res.status(400).json({ error: "Remarks are required" });
 
   try {
     const pool = getPool();
@@ -172,6 +217,12 @@ router.post("/", requirePageRight("asset-transfer", "create"), async (req, res) 
       return res.status(400).json({ error: "Both From User and To User must be active accounts" });
     }
     const toUserName = userCheck.recordset.find((u) => u.id === toUserIdVal)?.name || null;
+
+    const deptCheck = await pool.request().input("DepartmentId", sql.Int, departmentIdVal).query(`
+      SELECT DepartmentName FROM dbo.DepartmentMaster WHERE Id = @DepartmentId AND IsActive = 1
+    `);
+    const departmentName = deptCheck.recordset[0]?.DepartmentName;
+    if (!departmentName) return res.status(400).json({ error: "Selected department is not valid" });
 
     const tx = pool.transaction();
     await tx.begin();
@@ -208,10 +259,12 @@ router.post("/", requirePageRight("asset-transfer", "create"), async (req, res) 
         .input("FromUserId", sql.Int, fromUserIdVal)
         .input("ToUserId", sql.Int, toUserIdVal)
         .input("ToUserName", sql.NVarChar(200), toUserName)
+        .input("Department", sql.NVarChar(100), departmentName)
         .input("UpdatedBy", sql.NVarChar(200), email)
         .query(`
           UPDATE dbo.FixedAssetRecord
           SET CustodianUserId = @ToUserId, Custodian = @ToUserName,
+              Department = @Department,
               UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
           WHERE AssetId = @AssetId AND CustodianUserId = @FromUserId
         `);
@@ -230,14 +283,15 @@ router.post("/", requirePageRight("asset-transfer", "create"), async (req, res) 
         .input("AssetId", sql.Int, assetIdVal)
         .input("FromUserId", sql.Int, fromUserIdVal)
         .input("ToUserId", sql.Int, toUserIdVal)
+        .input("DepartmentId", sql.Int, departmentIdVal)
         .input("TransferredBy", sql.Int, transferredBy ? parseInt(transferredBy, 10) : null)
         .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
         .query(`
           INSERT INTO dbo.AssetTransferHistory
-            (DocNo, DocDate, TransferDate, CompanyId, ProjectId, FinYear, AssetId, FromUserId, ToUserId, TransferredBy, Remarks, CreatedAt)
+            (DocNo, DocDate, TransferDate, CompanyId, ProjectId, FinYear, AssetId, FromUserId, ToUserId, DepartmentId, TransferredBy, Remarks, CreatedAt)
           OUTPUT INSERTED.Id
           VALUES
-            (@DocNo, @DocDate, @TransferDate, @CompanyId, @ProjectId, @FinYear, @AssetId, @FromUserId, @ToUserId, @TransferredBy, @Remarks, SYSDATETIME())
+            (@DocNo, @DocDate, @TransferDate, @CompanyId, @ProjectId, @FinYear, @AssetId, @FromUserId, @ToUserId, @DepartmentId, @TransferredBy, @Remarks, SYSDATETIME())
         `);
       const newId = insert.recordset[0].Id;
 

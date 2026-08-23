@@ -21,6 +21,7 @@ import {
   type FixedAssetListItem, type FixedAssetDetail,
 } from "@/api/fixedAssetApi";
 import { getTransferUsers } from "@/api/assetTransferApi";
+import { getDepartmentOptions } from "@/api/departmentMasterApi";
 import { getUnassignedFAItemCodes, type UnassignedFAItemCode } from "@/api/fixedAssetTaggingApi";
 import { ASSET_CATEGORIES, CATEGORY_ICONS, CATEGORY_COLORS } from "./assetCategories";
 import { Button } from "@/components/ui/button";
@@ -122,6 +123,7 @@ function FAItemCodeCombobox({
                       key={c.TagId}
                       value={`${c.FAItemCode} ${c.ItemName || ""}`}
                       onSelect={() => { onSelect(c); setOpen(false); }}
+                      className="data-[selected=true]:bg-neutral-900 data-[selected=true]:text-neutral-50"
                     >
                       <Check className={cn("mr-2 h-4 w-4", value === c.TagId ? "opacity-100" : "opacity-0")} />
                       <span className="flex flex-col min-w-0">
@@ -217,7 +219,7 @@ const emptyForm = (finYear = ""): FormState => ({
 type ViewMode = "list" | "form" | "detail";
 
 // ── small presentational helpers ──────────────────────────────────────────────
-const inputCls    = "w-full h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow";
+const inputCls    = "w-full h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:cursor-pointer";
 const labelCls    = "flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1";
 // Layout only — the glass background/border/blur comes from the
 // `glassSection` style object (computed per-theme inside the component) so
@@ -402,6 +404,14 @@ export default function FixedAssetRecord() {
     queryKey: ["asset-transfer-users"],
     queryFn:  getTransferUsers,
   });
+  const { data: departments = [] } = useQuery({
+    queryKey: ["department-master"],
+    queryFn:  getDepartmentOptions,
+  });
+  const departmentNames = useMemo(
+    () => departments.filter((d) => d.IsActive).map((d) => d.DepartmentName),
+    [departments],
+  );
   const { data: unassignedCodes = [], isLoading: codesLoading } = useQuery({
     queryKey: ["fa-unassigned-codes"],
     queryFn:  getUnassignedFAItemCodes,
@@ -496,6 +506,9 @@ export default function FixedAssetRecord() {
     onSuccess: (r) => {
       toast.success(`Asset created — ${r.docNo} (${r.assetCode})`);
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+      qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
       resetForm();
       setViewMode("list");
     },
@@ -518,6 +531,9 @@ export default function FixedAssetRecord() {
     onSuccess: () => {
       toast.success("Asset deleted");
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+      qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
       setDeleteId(null);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -1014,10 +1030,6 @@ export default function FixedAssetRecord() {
                 <input type="number" min="0" step="0.01" value={form.purchaseCost} onChange={(e) => setField("purchaseCost", e.target.value)} placeholder="0.00"
                   className={`${inputCls} font-semibold border-yellow-500/30 focus:ring-yellow-500/30 bg-yellow-500/[0.03]`} />
               </div>
-              <div>
-                <label className={labelCls}>Quantity</label>
-                <input type="number" min="1" step="1" value={form.quantity} onChange={(e) => setField("quantity", e.target.value)} className={inputCls} />
-              </div>
               <div className="sm:col-span-2">
                 <label className={labelCls}>Supplier</label>
                 <select value={form.supplierId} onChange={(e) => setField("supplierId", e.target.value)} className={inputCls}>
@@ -1033,14 +1045,32 @@ export default function FixedAssetRecord() {
                 <input type="text" value={form.location} onChange={(e) => setField("location", e.target.value)} placeholder="Office / Site…" className={inputCls} />
               </div>
               <div>
-                <label className={labelCls}>Department</label>
-                <input type="text" value={form.department} onChange={(e) => setField("department", e.target.value)} placeholder="Department name…" className={inputCls} />
-              </div>
-              <div>
                 <label className={labelCls}><User size={11} /> Custodian / Assigned To</label>
-                <select value={form.custodianUserId} onChange={(e) => setField("custodianUserId", e.target.value)} className={inputCls}>
+                <select
+                  value={form.custodianUserId}
+                  onChange={(e) => {
+                    const userId = e.target.value;
+                    const selectedUser = users.find((u) => String(u.id) === userId);
+                    setForm((p) => ({
+                      ...p,
+                      custodianUserId: userId,
+                      department:      selectedUser?.DepartmentName || "",
+                    }));
+                  }}
+                  className={inputCls}
+                >
                   <option value="">Unassigned…</option>
                   {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Department</label>
+                <select value={form.department} onChange={(e) => setField("department", e.target.value)} className={inputCls}>
+                  <option value="">Select department…</option>
+                  {form.department && !departmentNames.includes(form.department) && (
+                    <option value={form.department}>{form.department}</option>
+                  )}
+                  {departmentNames.map((d) => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
             </SubGroup>

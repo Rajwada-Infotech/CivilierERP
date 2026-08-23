@@ -167,7 +167,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
           FROM dbo.FixedAssetTagging t WITH (UPDLOCK, HOLDLOCK)
           LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
           WHERE t.TagId = @TagId AND t.FAItemCode IS NOT NULL AND t.Status = 'Tagged'
-            AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetRecord fa WHERE fa.SourceTagId = t.TagId)
+            AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetRecord fa WHERE fa.SourceTagId = t.TagId AND fa.Status <> 'Deleted')
         `);
         const tag = tagRes.recordset[0];
         if (!tag) { await tx.rollback(); return res.status(400).json({ error: "This FA Item Code is no longer available — it may already be assigned" }); }
@@ -347,24 +347,64 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
   }
 });
 
-// ── DELETE /:id ───────────────────────────────────────────────────────────────
+// ── DELETE /:id — soft-delete, and release any FA Item Code it consumed ──────
+// An individual asset created by picking an unassigned FA Item Code
+// (SourceTagId set) is the only thing standing between its FA Item Code and
+// re-selectability — the code's dbo.FixedAssetTagging row is left exactly
+// as-is (still Status='Tagged': it's still a real, physically-tagged unit,
+// nothing about the tagging itself is undone). Soft-deleting the record is
+// enough on its own: every "is this code available?" query (unassigned-codes,
+// the create-time re-check, FA Inventory's Record column) is keyed off
+// `NOT EXISTS a non-Deleted FixedAssetRecord with this SourceTagId`, so the
+// same code reappears immediately and can be picked again for a new record —
+// no new code is minted, and Godown-wise Stock's untagged count is untouched
+// since the unit never stopped being tagged.
 router.delete("/:id", requirePageRight("fixed-asset-record", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const email = requireUser(req, res);
   if (!email) return;
   try {
     const pool = getPool();
-    await pool.request()
-      .input("AssetId",   sql.Int,           id)
-      .input("UpdatedBy", sql.NVarChar(200),  email)
-      .query(`
-        UPDATE dbo.FixedAssetRecord
-        SET Status = 'Deleted', UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const assetRes = await tx.request().input("AssetId", sql.Int, id).query(`
+        SELECT AssetId, Status
+        FROM dbo.FixedAssetRecord WITH (UPDLOCK, HOLDLOCK)
         WHERE AssetId = @AssetId
       `);
-    await bumpCacheVersion("fixed-assets");
-    res.json({ ok: true });
+      const asset = assetRes.recordset[0];
+      if (!asset) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
+      if (asset.Status === "Deleted") { await tx.rollback(); return res.json({ ok: true }); }
+
+      // A batch record (auto-allocated from a GRN, or manually entered) that
+      // still has live tagged units against it can't be deleted outright —
+      // that would corrupt the Tagging Transaction History for every FA Item
+      // Code cut from it. Those tags must be released individually first.
+      const liveTagsRes = await tx.request().input("AssetId", sql.Int, id).query(`
+        SELECT COUNT(*) AS Cnt FROM dbo.FixedAssetTagging WHERE AssetId = @AssetId AND Status = 'Tagged'
+      `);
+      if (liveTagsRes.recordset[0].Cnt > 0) {
+        await tx.rollback();
+        return res.status(400).json({ error: "This asset still has tagged units in Tagging Transaction History — release those tags first." });
+      }
+
+      await tx.request()
+        .input("AssetId",   sql.Int,           id)
+        .input("UpdatedBy", sql.NVarChar(200),  email)
+        .query(`
+          UPDATE dbo.FixedAssetRecord
+          SET Status = 'Deleted', UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+          WHERE AssetId = @AssetId
+        `);
+
+      await tx.commit();
+      await bumpCacheVersion("fixed-assets");
+      await bumpCacheVersion("fixed-asset-tagging");
+      res.json({ ok: true });
+    } catch (e) { await tx.rollback(); throw e; }
   } catch (err) {
+    console.error("[fixedAssets] DELETE /:id:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

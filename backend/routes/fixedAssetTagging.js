@@ -23,6 +23,20 @@ function toInt(val) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// Financial Year is derived from the Document Date, never trusted from the
+// client — this is the single source of truth both at save time and for the
+// list's Financial Year filter, so a tagging entry's date and its FinYear
+// can never drift apart the way manually-picked values could.
+async function deriveFinYear(pool, docDate) {
+  if (!docDate) return null;
+  const result = await pool.request().input("DocDate", sql.Date, docDate).query(`
+    SELECT TOP 1 FName FROM dbo.FinYear
+    WHERE @DocDate BETWEEN FStartDate AND FEndDate
+    ORDER BY FStartDate DESC
+  `);
+  return result.recordset[0]?.FName || null;
+}
+
 // ── GET /eligible-items — Fixed-Asset-type Item Master items with untagged
 // stock (StockLedger balance minus tagged-so-far) at the given Godown ───────
 router.get("/eligible-items", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
@@ -87,7 +101,7 @@ router.get("/unassigned-codes", requirePageRight("fixed-asset-record", "view"), 
       LEFT JOIN dbo.enterprise pr ON pr.id = t.ProjectId
       LEFT JOIN dbo.Godowns gd ON gd.GodownID = t.GodownId
       WHERE t.FAItemCode IS NOT NULL AND t.Status = 'Tagged'
-        AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetRecord fa WHERE fa.SourceTagId = t.TagId)
+        AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetRecord fa WHERE fa.SourceTagId = t.TagId AND fa.Status <> 'Deleted')
       ORDER BY t.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -121,7 +135,15 @@ router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res
         t.CompanyId, co.name AS CompanyName,
         t.ProjectId, pr.name AS ProjectName,
         t.GodownId, gd.GodownName,
-        t.AssetId, fa.AssetName, fa.AssetCategory, fa.AssetCode
+        t.AssetId, fa.AssetName, fa.AssetCategory, fa.AssetCode,
+        CASE
+          WHEN t.FAItemCode IS NULL THEN NULL
+          WHEN EXISTS (
+            SELECT 1 FROM dbo.FixedAssetRecord fr
+            WHERE fr.SourceTagId = t.TagId AND fr.Status <> 'Deleted'
+          ) THEN 'Done'
+          ELSE 'Pending'
+        END AS RecordStatus
       FROM dbo.FixedAssetTagging t
       LEFT JOIN dbo.enterprise co ON co.id = t.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = t.ProjectId
@@ -176,7 +198,7 @@ router.post("/", requirePageRight("fixed-asset-tagging", "create"), async (req, 
   if (!email) return;
 
   const {
-    docDate, companyId, projectId, finYear, godownId, itemId, numberOfItems, remarks,
+    docDate, companyId, projectId, godownId, itemId, numberOfItems, remarks,
   } = req.body;
 
   const projectIdVal = toInt(projectId);
@@ -184,6 +206,7 @@ router.post("/", requirePageRight("fixed-asset-tagging", "create"), async (req, 
   const itemIdVal = itemId ? String(itemId) : null;
   const countVal = parseInt(numberOfItems, 10);
 
+  if (!docDate) return res.status(400).json({ error: "docDate is required" });
   if (!projectIdVal) return res.status(400).json({ error: "projectId is required" });
   if (!godownIdVal) return res.status(400).json({ error: "godownId is required" });
   if (!itemIdVal) return res.status(400).json({ error: "itemId is required" });
@@ -191,6 +214,11 @@ router.post("/", requirePageRight("fixed-asset-tagging", "create"), async (req, 
 
   try {
     const pool = getPool();
+
+    const finYear = await deriveFinYear(pool, docDate);
+    if (!finYear) {
+      return res.status(400).json({ error: "No Financial Year is configured for this date — set one up in Financial Year Setup first" });
+    }
 
     const templateRes = await pool.request().input("ProjectId", sql.Int, projectIdVal).query(`
       SELECT ProjectAlias FROM dbo.IDTemplateMaster WHERE ProjectId = @ProjectId AND IsActive = 1

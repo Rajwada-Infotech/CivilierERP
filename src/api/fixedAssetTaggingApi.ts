@@ -32,6 +32,7 @@ export interface TaggingListItem {
   AssetName: string | null;
   AssetCategory: string | null;
   AssetCode: string | null;
+  RecordStatus: "Pending" | "Done" | null;
 }
 
 export interface TaggingDetail extends TaggingListItem {

@@ -131,7 +131,7 @@ export default function FixedAssetDashboard() {
             />
             <QuickLinkCard
               icon={ArrowSwapHorizontal}
-              title="Asset Transfer"
+              title="User-Wise Asset Transfer"
               desc="Move assets between users, project-wise"
               onClick={() => navigate("/fixed-asset/transfer")}
             />

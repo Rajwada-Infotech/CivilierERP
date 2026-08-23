@@ -5,6 +5,9 @@ const BASE = "/api/asset-transfer";
 export interface TransferUser {
   id: number;
   name: string;
+  avatar_url?: string | null;
+  DepartmentId?: number | null;
+  DepartmentName?: string | null;
 }
 
 export interface EligibleTransferAsset {
@@ -15,6 +18,20 @@ export interface EligibleTransferAsset {
   CompanyId: number | null;
   ProjectId: number | null;
   FinYear: string | null;
+}
+
+export interface TransferableAsset {
+  AssetId: number;
+  AssetName: string;
+  AssetCode: string | null;
+  AssetCategory: string;
+  FAItemCode: string | null;
+  CompanyId: number | null;
+  ProjectId: number | null;
+  FinYear: string | null;
+  CustodianUserId: number | null;
+  CustodianName: string | null;
+  CustodianAvatar: string | null;
 }
 
 export interface TransferListItem {
@@ -33,12 +50,17 @@ export interface TransferListItem {
   AssetName: string | null;
   AssetCode: string | null;
   AssetCategory: string | null;
+  FAItemCode: string | null;
   FromUserId: number;
   FromUserName: string | null;
+  FromUserAvatar: string | null;
   ToUserId: number;
   ToUserName: string | null;
+  ToUserAvatar: string | null;
   TransferredBy: number | null;
   TransferredByName: string | null;
+  DepartmentId: number | null;
+  DepartmentName: string | null;
 }
 
 export type TransferDetail = TransferListItem;
@@ -52,7 +74,8 @@ export interface TransferPayload {
   assetId: number;
   fromUserId: number;
   toUserId: number;
-  remarks?: string;
+  departmentId: number;
+  remarks: string;
 }
 
 async function handleError(res: Response, fallback: string) {
@@ -79,6 +102,20 @@ export const getEligibleTransferAssets = async (params: {
   if (params.finYear)    qs.set("finYear",    params.finYear);
   const res = await fetchWithAuth(`${BASE}/eligible-assets${qs.toString() ? `?${qs}` : ""}`);
   if (!res.ok) await handleError(res, "Failed to fetch eligible assets");
+  return res.json();
+};
+
+export const getTransferableAssets = async (params: {
+  projectId?: number;
+  companyId?: number;
+  finYear?: string;
+}): Promise<TransferableAsset[]> => {
+  const qs = new URLSearchParams();
+  if (params.projectId)  qs.set("projectId",  String(params.projectId));
+  if (params.companyId)  qs.set("companyId",  String(params.companyId));
+  if (params.finYear)    qs.set("finYear",    params.finYear);
+  const res = await fetchWithAuth(`${BASE}/transferable-assets${qs.toString() ? `?${qs}` : ""}`);
+  if (!res.ok) await handleError(res, "Failed to fetch transferable assets");
   return res.json();
 };
 
