@@ -22,7 +22,7 @@ const { sql } = require("../db");
 async function autoCreateFixedAssetsFromGRN(pool, grnId, userEmail) {
   const grnRes = await pool.request().input("GRNID", sql.Int, grnId).query(`
     SELECT grn.GRNID, grn.DocNo, grn.GRNNo, grn.GRNDate, grn.GRNItems,
-           grn.SupplierID, p.CompanyId, p.ProjectId
+           grn.SupplierID, grn.GodownID, p.CompanyId, p.ProjectId
     FROM dbo.GoodsReceiptNotes grn
     LEFT JOIN dbo.PurchaseOrders p ON p.PurchaseOrderID = grn.POID
     WHERE grn.GRNID = @GRNID
@@ -92,16 +92,17 @@ async function autoCreateFixedAssetsFromGRN(pool, grnId, userEmail) {
         .input("SourceType", sql.NVarChar(20), "GRN")
         .input("SourceId", sql.Int, grnId)
         .input("SourceItemId", sql.NVarChar(100), itemId)
+        .input("GodownId", sql.Int, grn.GodownID ?? null)
         .input("CreatedBy", sql.NVarChar(200), userEmail || null)
         .query(`
           INSERT INTO dbo.FixedAssetRecord
             (DocDate, CompanyId, ProjectId, AssetName, AssetCategory,
              PurchaseDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, Quantity,
-             AssetStatus, Remarks, SourceType, SourceId, SourceItemId, CreatedBy)
+             AssetStatus, Remarks, SourceType, SourceId, SourceItemId, GodownID, CreatedBy)
           VALUES
             (@DocDate, @CompanyId, @ProjectId, @AssetName, @AssetCategory,
              @PurchaseDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @Quantity,
-             @AssetStatus, @Remarks, @SourceType, @SourceId, @SourceItemId, @CreatedBy)
+             @AssetStatus, @Remarks, @SourceType, @SourceId, @SourceItemId, @GodownId, @CreatedBy)
         `);
       created++;
     } catch (err) {

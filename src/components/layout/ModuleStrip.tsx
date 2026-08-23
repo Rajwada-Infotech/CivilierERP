@@ -207,7 +207,7 @@ export const ModuleStrip: React.FC = () => {
   const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
     finance:     ["finance-dashboard", "new-payment", "received-payment", "brs", "transactions", "expense-booking"],
     material:    ["material-dashboard", "purchase-orders", "grn-master", "material-request", "material-issues", "stock-ledger"],
-    "fixed-asset": ["fixed-asset-dashboard", "fixed-asset-record", "fixed-asset-tagging", "asset-transfer", "depreciation-setup"],
+    "fixed-asset": ["fixed-asset-dashboard", "fixed-asset-record", "fixed-asset-tagging", "asset-transfer", "depreciation-setup", "id-template-master"],
     followup:    ["followup-dashboard", "followup-applications", "followup-bookings", "followup-agreements", "followup-demands"],
     engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
     ticket:      ["ticket-dashboard", "tickets"],

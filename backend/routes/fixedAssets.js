@@ -82,11 +82,13 @@ router.get("/", async (req, res) => {
         fa.Status, fa.CreatedBy, fa.CreatedAt,
         fa.CompanyId, co.name AS CompanyName,
         fa.ProjectId, pr.name AS ProjectName,
-        fa.SupplierId, sup.LHeadName AS SupplierName
+        fa.SupplierId, sup.LHeadName AS SupplierName,
+        fa.GodownID, gd.GodownName, fa.SourceTagId, fa.FAItemCode
       FROM dbo.FixedAssetRecord fa
       LEFT JOIN dbo.enterprise co  ON co.id = fa.CompanyId
       LEFT JOIN dbo.enterprise pr  ON pr.id = fa.ProjectId
       LEFT JOIN dbo.AccountHeadMaster sup ON sup.LHeadId = fa.SupplierId
+      LEFT JOIN dbo.Godowns gd ON gd.GodownID = fa.GodownID
       ${whereClause}
       ORDER BY fa.CreatedAt DESC
     `);
@@ -108,11 +110,13 @@ router.get("/:id", async (req, res) => {
         co.name AS CompanyName,
         pr.name AS ProjectName,
         sup.LHeadName AS SupplierName,
-        sup.LHeadCode AS SupplierCode
+        sup.LHeadCode AS SupplierCode,
+        gd.GodownName
       FROM dbo.FixedAssetRecord fa
       LEFT JOIN dbo.enterprise co  ON co.id = fa.CompanyId
       LEFT JOIN dbo.enterprise pr  ON pr.id = fa.ProjectId
       LEFT JOIN dbo.AccountHeadMaster sup ON sup.LHeadId = fa.SupplierId
+      LEFT JOIN dbo.Godowns gd ON gd.GodownID = fa.GodownID
       WHERE fa.AssetId = @AssetId
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
@@ -134,70 +138,110 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       purchaseDate, activationDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity,
       location, department, custodianUserId,
       depreciationSetupId, depreciationType, depreciationRate, usefulLife,
-      remarks,
+      remarks, sourceTagId,
     } = req.body;
 
-    if (!assetName || !assetCategory)
-      return res.status(400).json({ error: "assetName and assetCategory are required" });
+    if (!assetCategory)
+      return res.status(400).json({ error: "assetCategory is required" });
 
-    const docTypeId = await resolveDocTypeId(pool, sql, "FA");
-    const docNo     = await lockNextDocNumber(pool, sql, {
-      docTypeId, finYear, tableName: "FixedAssetRecord", issuedBy: email,
-    });
-    const assetCode = await generateAssetCode(pool, assetCategory);
+    const sourceTagIdVal = sourceTagId ? parseInt(sourceTagId, 10) : null;
+    if (!sourceTagIdVal && !assetName)
+      return res.status(400).json({ error: "assetName is required when no FA Item Code is selected" });
+
     const custodianUserIdVal = custodianUserId ? parseInt(custodianUserId, 10) : null;
     const custodianName = await resolveCustodianName(pool, custodianUserIdVal);
 
-    const insert = await pool.request()
-      .input("DocNo",               sql.NVarChar(100), docNo)
-      .input("DocDate",             sql.Date,          docDate || null)
-      .input("CompanyId",           sql.Int,           companyId   ? parseInt(companyId, 10)   : null)
-      .input("ProjectId",           sql.Int,           projectId   ? parseInt(projectId, 10)   : null)
-      .input("FinYear",             sql.NVarChar(20),  finYear || null)
-      .input("AssetName",           sql.NVarChar(200), assetName)
-      .input("AssetCategory",       sql.NVarChar(100), assetCategory)
-      .input("AssetCode",           sql.NVarChar(50),  assetCode)
-      .input("Brand",               sql.NVarChar(100), brand || null)
-      .input("Model",               sql.NVarChar(100), model || null)
-      .input("SerialNumber",        sql.NVarChar(100), serialNumber || null)
-      .input("PurchaseDate",        sql.Date,          purchaseDate || null)
-      .input("ActivationDate",      sql.Date,          activationDate || null)
-      .input("PurchaseInvoiceRef",  sql.NVarChar(100), purchaseInvoiceRef || null)
-      .input("SupplierId",          sql.Int,           supplierId  ? parseInt(supplierId, 10)  : null)
-      .input("PurchaseCost",        sql.Decimal(18,2), purchaseCost ? parseFloat(purchaseCost) : 0)
-      .input("Quantity",            sql.Decimal(18,3), quantity    ? parseFloat(quantity)      : 1)
-      .input("Location",            sql.NVarChar(200), location || null)
-      .input("Department",          sql.NVarChar(100), department || null)
-      .input("Custodian",           sql.NVarChar(200), custodianName)
-      .input("CustodianUserId",     sql.Int,           custodianUserIdVal)
-      .input("DepreciationSetupId", sql.Int,           depreciationSetupId ? parseInt(depreciationSetupId, 10) : null)
-      .input("DepreciationType",    sql.NVarChar(50),  depreciationType || null)
-      .input("DepreciationRate",    sql.Decimal(5,2),  depreciationRate != null ? parseFloat(depreciationRate) : null)
-      .input("UsefulLife",          sql.Int,           usefulLife  ? parseInt(usefulLife, 10)  : null)
-      .input("Remarks",             sql.NVarChar(sql.MAX), remarks || null)
-      .input("CreatedBy",           sql.NVarChar(200), email)
-      .query(`
-        INSERT INTO dbo.FixedAssetRecord
-          (DocNo, DocDate, CompanyId, ProjectId, FinYear,
-           AssetName, AssetCategory, AssetCode, Brand, Model, SerialNumber,
-           PurchaseDate, ActivationDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, Quantity,
-           Location, Department, Custodian, CustodianUserId,
-           DepreciationSetupId, DepreciationType, DepreciationRate, UsefulLife,
-           AssetStatus, Status, Remarks, CreatedBy, CreatedAt)
-        VALUES
-          (@DocNo, @DocDate, @CompanyId, @ProjectId, @FinYear,
-           @AssetName, @AssetCategory, @AssetCode, @Brand, @Model, @SerialNumber,
-           @PurchaseDate, @ActivationDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @Quantity,
-           @Location, @Department, @Custodian, @CustodianUserId,
-           @DepreciationSetupId, @DepreciationType, @DepreciationRate, @UsefulLife,
-           'Active', 'Draft', @Remarks, @CreatedBy, SYSDATETIME());
-        SELECT SCOPE_IDENTITY() AS AssetId;
-      `);
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      // Linking an FA Item Code: re-verify inside the lock that the code
+      // still exists and is unassigned, and pull its item/company/project/
+      // godown to populate the record — mirrors the same "select an
+      // unassigned resource, re-check under UPDLOCK, insert" pattern used
+      // by Asset Transfer's eligibility check.
+      let sourceItemName = null, sourceCompanyId = null, sourceProjectId = null, sourceGodownId = null, sourceCode = null;
+      if (sourceTagIdVal) {
+        const tagRes = await tx.request().input("TagId", sql.Int, sourceTagIdVal).query(`
+          SELECT t.TagId, t.FAItemCode, t.CompanyId, t.ProjectId, t.GodownId,
+                 im.M_Name AS ItemName
+          FROM dbo.FixedAssetTagging t WITH (UPDLOCK, HOLDLOCK)
+          LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
+          WHERE t.TagId = @TagId AND t.FAItemCode IS NOT NULL AND t.Status = 'Tagged'
+            AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetRecord fa WHERE fa.SourceTagId = t.TagId)
+        `);
+        const tag = tagRes.recordset[0];
+        if (!tag) { await tx.rollback(); return res.status(400).json({ error: "This FA Item Code is no longer available — it may already be assigned" }); }
+        sourceItemName   = tag.ItemName;
+        sourceCompanyId  = tag.CompanyId;
+        sourceProjectId  = tag.ProjectId;
+        sourceGodownId   = tag.GodownId;
+        sourceCode       = tag.FAItemCode;
+      }
 
-    const newId = insert.recordset[0]?.AssetId;
-    await backPatchRecordId(pool, sql, docNo, "FixedAssetRecord", newId);
-    await bumpCacheVersion("fixed-assets");
-    res.json({ assetId: newId, docNo, assetCode });
+      const docTypeId = await resolveDocTypeId(pool, sql, "FA");
+      const docNo     = await lockNextDocNumber(pool, sql, {
+        docTypeId, finYear, tableName: "FixedAssetRecord", issuedBy: email,
+      });
+      const assetCode = await generateAssetCode(pool, assetCategory);
+
+      const insert = await tx.request()
+        .input("DocNo",               sql.NVarChar(100), docNo)
+        .input("DocDate",             sql.Date,          docDate || null)
+        .input("CompanyId",           sql.Int,           sourceTagIdVal ? sourceCompanyId : (companyId ? parseInt(companyId, 10) : null))
+        .input("ProjectId",           sql.Int,           sourceTagIdVal ? sourceProjectId : (projectId ? parseInt(projectId, 10) : null))
+        .input("FinYear",             sql.NVarChar(20),  finYear || null)
+        .input("AssetName",           sql.NVarChar(200), sourceTagIdVal ? sourceItemName : assetName)
+        .input("AssetCategory",       sql.NVarChar(100), assetCategory)
+        .input("AssetCode",           sql.NVarChar(50),  assetCode)
+        .input("Brand",               sql.NVarChar(100), brand || null)
+        .input("Model",               sql.NVarChar(100), model || null)
+        .input("SerialNumber",        sql.NVarChar(100), serialNumber || null)
+        .input("PurchaseDate",        sql.Date,          purchaseDate || null)
+        .input("ActivationDate",      sql.Date,          activationDate || null)
+        .input("PurchaseInvoiceRef",  sql.NVarChar(100), purchaseInvoiceRef || null)
+        .input("SupplierId",          sql.Int,           supplierId  ? parseInt(supplierId, 10)  : null)
+        .input("PurchaseCost",        sql.Decimal(18,2), purchaseCost ? parseFloat(purchaseCost) : 0)
+        .input("Quantity",            sql.Decimal(18,3), quantity    ? parseFloat(quantity)      : 1)
+        .input("Location",            sql.NVarChar(200), location || null)
+        .input("Department",          sql.NVarChar(100), department || null)
+        .input("Custodian",           sql.NVarChar(200), custodianName)
+        .input("CustodianUserId",     sql.Int,           custodianUserIdVal)
+        .input("DepreciationSetupId", sql.Int,           depreciationSetupId ? parseInt(depreciationSetupId, 10) : null)
+        .input("DepreciationType",    sql.NVarChar(50),  depreciationType || null)
+        .input("DepreciationRate",    sql.Decimal(5,2),  depreciationRate != null ? parseFloat(depreciationRate) : null)
+        .input("UsefulLife",          sql.Int,           usefulLife  ? parseInt(usefulLife, 10)  : null)
+        .input("Remarks",             sql.NVarChar(sql.MAX), remarks || null)
+        .input("CreatedBy",           sql.NVarChar(200), email)
+        .input("GodownId",            sql.Int,           sourceGodownId)
+        .input("SourceTagId",         sql.Int,           sourceTagIdVal)
+        .input("FAItemCode",          sql.NVarChar(200), sourceCode)
+        .query(`
+          INSERT INTO dbo.FixedAssetRecord
+            (DocNo, DocDate, CompanyId, ProjectId, FinYear,
+             AssetName, AssetCategory, AssetCode, Brand, Model, SerialNumber,
+             PurchaseDate, ActivationDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, Quantity,
+             Location, Department, Custodian, CustodianUserId,
+             DepreciationSetupId, DepreciationType, DepreciationRate, UsefulLife,
+             AssetStatus, Status, Remarks, CreatedBy, CreatedAt,
+             GodownID, SourceTagId, FAItemCode)
+          VALUES
+            (@DocNo, @DocDate, @CompanyId, @ProjectId, @FinYear,
+             @AssetName, @AssetCategory, @AssetCode, @Brand, @Model, @SerialNumber,
+             @PurchaseDate, @ActivationDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @Quantity,
+             @Location, @Department, @Custodian, @CustodianUserId,
+             @DepreciationSetupId, @DepreciationType, @DepreciationRate, @UsefulLife,
+             'Active', 'Draft', @Remarks, @CreatedBy, SYSDATETIME(),
+             @GodownId, @SourceTagId, @FAItemCode);
+          SELECT SCOPE_IDENTITY() AS AssetId;
+        `);
+
+      const newId = insert.recordset[0]?.AssetId;
+      await tx.commit();
+      await backPatchRecordId(pool, sql, docNo, "FixedAssetRecord", newId);
+      await bumpCacheVersion("fixed-assets");
+      await bumpCacheVersion("fixed-asset-tagging");
+      res.json({ assetId: newId, docNo, assetCode });
+    } catch (e) { await tx.rollback(); throw e; }
   } catch (err) {
     console.error("[fixedAssets] POST /:", err.message);
     res.status(500).json({ error: err.message });
