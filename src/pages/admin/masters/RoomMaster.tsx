@@ -1,7 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { FileText, Upload } from "lucide-react";
+import { FileText, Sparkles, Upload } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { safeHtml } from "@/utils/escapeHtml";
@@ -112,6 +112,107 @@ function BlueprintUploadField({
         <Upload size={12} />
         {pendingFile || existingName ? "Replace file" : "Choose file"}
       </button>
+    </div>
+  );
+}
+
+// Generates real RoomMaster rows for a unit from its BHK layout template
+// (Unit Type -> Room Composition Builder's category x quantity, the same
+// data Work Reporting's synthetic Room dropdown reads) instead of typing
+// each room in by hand. Scoped to Project -> Unit only — Block is implied
+// by the unit, same as the create form above.
+function GenerateFromLayoutPanel({
+  units,
+  onGenerated,
+}: {
+  units: { Id: number; Name: string; ProjectId: number; UnitType?: string | null }[];
+  onGenerated: () => void;
+}) {
+  const [projectId, setProjectId] = React.useState("");
+  const [unitId, setUnitId] = React.useState("");
+  const [generating, setGenerating] = React.useState(false);
+  const { data: projectOptions = [] } = useQuery({
+    queryKey: ["room-master-project-options"],
+    queryFn: fetchProjectOptions,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const unitOptions = React.useMemo(
+    () => units.filter((u) => (projectId ? String(u.ProjectId) === projectId : true)),
+    [units, projectId],
+  );
+  const selectedUnit = unitOptions.find((u) => String(u.Id) === unitId);
+
+  const handleGenerate = async () => {
+    if (!unitId) return;
+    setGenerating(true);
+    try {
+      const res = await fetchWithAuth(`${API}/generate/${unitId}`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Failed to generate rooms");
+      toast.success(body.message || "Rooms generated");
+      if (body.createdCount > 0) onGenerated();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to generate rooms");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
+        <Sparkles size={14} className="text-cyan-600 dark:text-cyan-400" />
+        <span className="text-sm font-heading font-semibold text-foreground">Generate from Unit Layout</span>
+      </div>
+      <div className="p-5 flex flex-col sm:flex-row sm:items-end gap-3">
+        <div className="flex-1 space-y-1">
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Project</label>
+          <select
+            value={projectId}
+            onChange={(e) => {
+              setProjectId(e.target.value);
+              setUnitId("");
+            }}
+            className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm"
+          >
+            <option value="">Select project</option>
+            {projectOptions.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1 space-y-1">
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Unit</label>
+          <select
+            value={unitId}
+            onChange={(e) => setUnitId(e.target.value)}
+            disabled={!projectId}
+            className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm disabled:opacity-50"
+          >
+            <option value="">Select unit</option>
+            {unitOptions.map((u) => (
+              <option key={u.Id} value={u.Id}>
+                {u.Name}{u.UnitType ? ` (${u.UnitType})` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={!unitId || generating || (!!selectedUnit && !selectedUnit.UnitType)}
+          title={selectedUnit && !selectedUnit.UnitType ? "This unit has no Unit Type set" : undefined}
+          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-4 py-2 h-9 rounded-lg bg-gradient-to-r from-cyan-500 to-teal-400 hover:opacity-90 disabled:opacity-50 transition-all"
+        >
+          <Sparkles size={13} /> {generating ? "Generating…" : "Generate Rooms"}
+        </button>
+      </div>
+      {selectedUnit && !selectedUnit.UnitType && (
+        <p className="px-5 pb-4 -mt-2 text-xs text-amber-600 dark:text-amber-400">
+          This unit has no Unit Type set, so its layout can't be resolved — set one in Unit Master first.
+        </p>
+      )}
     </div>
   );
 }
@@ -243,7 +344,7 @@ const RoomMaster: React.FC = () => {
   // Fetch all units once — passed into form as __units so optionsProvider /
   // the read-only block display can filter & look up by id.
   const { data: allUnits = [] } = useQuery<
-    { Id: number; Name: string; ProjectId: number; BlockId: number; BlockName: string | null }[]
+    { Id: number; Name: string; ProjectId: number; BlockId: number; BlockName: string | null; UnitType: string | null }[]
   >({
     queryKey: ["room-master-units"],
     queryFn: async () => {
@@ -361,6 +462,10 @@ const RoomMaster: React.FC = () => {
     <>
       <Breadcrumbs items={["Dashboard", "Follow-Up", "Setup", "Room Master"]} />
       <FollowupShell title="Room Master">
+      <GenerateFromLayoutPanel
+        units={allUnits}
+        onGenerated={() => queryClient.invalidateQueries({ queryKey: ["room-master"] })}
+      />
       <MasterPage
         title="Room"
         fields={fields}

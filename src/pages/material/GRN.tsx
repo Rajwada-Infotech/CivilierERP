@@ -1098,22 +1098,6 @@ export default function GRN() {
     queryFn: () => getProjects(formData.companyId || null),
   });
 
-  // POs eligible for a GRN must have at least one Vehicle In/Out already
-  // logged against them — goods can't be receipted before a vehicle's
-  // actually brought them in.
-  const { data: poIdsWithVio = [] } = useQuery({
-    queryKey: ["po-ids-with-vio"],
-    queryFn: () =>
-      fetchWithAuth("/api/vehicle-in-out/po-ids-with-vio")
-        .then((r) => r.json())
-        .then((d) => (Array.isArray(d) ? d.map(Number) : [])),
-    staleTime: 60_000,
-  });
-  const poIdsWithVioSet = useMemo(
-    () => new Set(poIdsWithVio as number[]),
-    [poIdsWithVio],
-  );
-
   const { data: companiesData = [] } = useQuery({
     queryKey: ["grn-companies"],
     queryFn: getCompanies,
@@ -1146,10 +1130,6 @@ export default function GRN() {
             if (String((po as any).ProjectId ?? "") !== formData.projectId)
               return false;
           }
-          // A GRN can only be raised once a vehicle's actually brought the
-          // goods in — a PO with no Vehicle In/Out logged against it yet
-          // has nothing to receipt.
-          if (!poIdsWithVioSet.has(Number(po.PurchaseOrderID))) return false;
           return true;
         })
         .map((po) => {
@@ -1172,7 +1152,6 @@ export default function GRN() {
       formData.projectId,
       formData.poId,
       editingId,
-      poIdsWithVioSet,
     ],
   );
 
