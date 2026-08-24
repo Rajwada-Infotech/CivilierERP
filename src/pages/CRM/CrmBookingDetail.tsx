@@ -234,9 +234,48 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
   const [previewReceipt, setPreviewReceipt] = useState<any | null>(null);
   const [previewAttachment, setPreviewAttachment] = useState<any | null>(null);
+  const [previewAttachmentBlobUrl, setPreviewAttachmentBlobUrl] = useState<string | null>(null);
+  const [previewAttachmentLoading, setPreviewAttachmentLoading] = useState(false);
+  const [previewAttachmentError, setPreviewAttachmentError] = useState<string | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "", MilestoneId: "", OnAccountPaymentId: "" });
   const [parkingForm, setParkingForm] = useState({ Quantity: "1" });
   const [discountForm, setDiscountForm] = useState({ Amount: "", Note: "" });
+
+  useEffect(() => {
+    if (!previewAttachment?.fileUrl) {
+      setPreviewAttachmentBlobUrl(null);
+      setPreviewAttachmentError(null);
+      return;
+    }
+
+    let alive = true;
+    let objectUrl: string | null = null;
+    setPreviewAttachmentLoading(true);
+    setPreviewAttachmentError(null);
+    setPreviewAttachmentBlobUrl(null);
+
+    fetchWithAuth(previewAttachment.fileUrl)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Preview unavailable");
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!alive) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewAttachmentBlobUrl(objectUrl);
+      })
+      .catch((e: any) => {
+        if (alive) setPreviewAttachmentError(e.message || "Preview unavailable");
+      })
+      .finally(() => {
+        if (alive) setPreviewAttachmentLoading(false);
+      });
+
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [previewAttachment]);
 
   const handleDownloadReceiptPdf = async (receipt: any) => {
     try {
@@ -2666,28 +2705,38 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     )}
     {previewAttachment && (
       <Dialog open onOpenChange={(o) => { if (!o) setPreviewAttachment(null); }}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <div className="flex items-center justify-between gap-3 pr-6">
-              <DialogTitle className="flex items-center gap-2 text-sm font-medium truncate">
+        <DialogContent className="max-w-6xl w-[94vw] max-h-[90vh] p-0 overflow-hidden">
+          <DialogHeader className="px-4 py-3 border-b border-border">
+            <div className="flex items-center justify-between gap-3 pr-8">
+              <DialogTitle className="flex min-w-0 items-center gap-2 text-sm font-medium">
                 <Paperclip size={14} className="text-primary shrink-0" />
                 <span className="truncate">{previewAttachment.FileName}</span>
               </DialogTitle>
-              <a href={previewAttachment.fileUrl} target="_blank" rel="noopener noreferrer" download={previewAttachment.FileName}
+              <a href={previewAttachmentBlobUrl || previewAttachment.fileUrl} target="_blank" rel="noopener noreferrer" download={previewAttachment.FileName}
                 className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted font-medium">
                 <Download size={13} /> Download
               </a>
             </div>
           </DialogHeader>
-          <div className="flex items-center justify-center min-h-[300px] max-h-[65vh] bg-muted/20 rounded-lg overflow-hidden border border-border">
-            {/\.pdf$/i.test(previewAttachment.FileName || "") ? (
-              <iframe src={previewAttachment.fileUrl} title={previewAttachment.FileName} className="w-full h-[65vh] border-0" />
+          <div className="h-[76vh] bg-neutral-950 flex items-center justify-center">
+            {previewAttachmentLoading ? (
+              <div className="text-xs text-neutral-300">Loading preview...</div>
+            ) : previewAttachmentError ? (
+              <div className="text-center space-y-2 px-4">
+                <p className="text-sm text-neutral-100">{previewAttachmentError}</p>
+                <a href={previewAttachment.fileUrl} target="_blank" rel="noopener noreferrer" download={previewAttachment.FileName}
+                  className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
+                  <Download size={13} /> Download file
+                </a>
+              </div>
+            ) : !previewAttachmentBlobUrl ? null : /\.pdf$/i.test(previewAttachment.FileName || "") ? (
+              <iframe src={previewAttachmentBlobUrl} title={previewAttachment.FileName} className="w-full h-full border-0 bg-white" />
             ) : (
-              <img src={previewAttachment.fileUrl} alt={previewAttachment.FileName} className="max-w-full max-h-[65vh] object-contain" />
+              <img src={previewAttachmentBlobUrl} alt={previewAttachment.FileName} className="max-w-full max-h-full object-contain" />
             )}
           </div>
           {previewAttachment.CreatedAt && (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="px-4 py-2 text-[11px] text-muted-foreground border-t border-border">
               Uploaded {new Date(previewAttachment.CreatedAt).toLocaleDateString("en-IN")}
               {previewAttachment.UploaderName ? ` by ${previewAttachment.UploaderName}` : ""}
             </p>

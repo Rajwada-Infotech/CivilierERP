@@ -3377,6 +3377,46 @@ const AttachmentsStep: React.FC<{
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [docType, setDocType] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState<any | null>(null);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!previewDoc) {
+      setPreviewBlobUrl(null);
+      setPreviewError(null);
+      return;
+    }
+
+    let alive = true;
+    let objectUrl: string | null = null;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewBlobUrl(null);
+
+    fetchWithAuth(`${DOC_API}/file/${previewDoc.Id}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Preview unavailable");
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!alive) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewBlobUrl(objectUrl);
+      })
+      .catch((e: any) => {
+        if (alive) setPreviewError(e.message || "Preview unavailable");
+      })
+      .finally(() => {
+        if (alive) setPreviewLoading(false);
+      });
+
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [previewDoc]);
 
   const { data: docData, refetch: refetchDocs } = useQuery({
     queryKey: ["crm-app-documents", applicationId],
@@ -3442,10 +3482,10 @@ const AttachmentsStep: React.FC<{
                 <span className="truncate flex-1">{d.DocumentType} — {d.FileName}</span>
                 <div className="flex items-center gap-1 shrink-0">
                   {previewable && (
-                    <a href={fileUrl} target="_blank" rel="noopener noreferrer"
+                    <button type="button" title="Preview" onClick={() => setPreviewDoc(d)}
                       className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
                       <Eye size={12} />
-                    </a>
+                    </button>
                   )}
                   <a href={fileUrl} download={d.FileName}
                     className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
@@ -3461,6 +3501,41 @@ const AttachmentsStep: React.FC<{
           )}
         </div>
       </div>
+      {previewDoc && (
+        <Dialog open onOpenChange={(o) => { if (!o) setPreviewDoc(null); }}>
+          <DialogContent className="max-w-6xl w-[94vw] max-h-[90vh] p-0 overflow-hidden">
+            <DialogHeader className="px-4 py-3 border-b border-border">
+              <div className="flex items-center justify-between gap-3 pr-8">
+                <DialogTitle className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                  <FileText size={15} className="text-primary shrink-0" />
+                  <span className="truncate">{previewDoc.DocumentType} — {previewDoc.FileName}</span>
+                </DialogTitle>
+                <a href={previewBlobUrl || `${DOC_API}/file/${previewDoc.Id}`} download={previewDoc.FileName}
+                  className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted font-medium">
+                  <Download size={13} /> Download
+                </a>
+              </div>
+            </DialogHeader>
+            <div className="h-[76vh] bg-neutral-950 flex items-center justify-center">
+              {previewLoading ? (
+                <div className="text-xs text-neutral-300">Loading preview...</div>
+              ) : previewError ? (
+                <div className="text-center space-y-2 px-4">
+                  <p className="text-sm text-neutral-100">{previewError}</p>
+                  <a href={`${DOC_API}/file/${previewDoc.Id}`} download={previewDoc.FileName}
+                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
+                    <Download size={13} /> Download file
+                  </a>
+                </div>
+              ) : !previewBlobUrl ? null : /\.pdf$/i.test(previewDoc.FileName || "") ? (
+                <iframe src={previewBlobUrl} title={previewDoc.FileName} className="w-full h-full border-0 bg-white" />
+              ) : (
+                <img src={previewBlobUrl} alt={previewDoc.FileName} className="max-w-full max-h-full object-contain" />
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 };
