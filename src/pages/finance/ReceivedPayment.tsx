@@ -56,10 +56,13 @@ import {
 } from "lucide-react";
 import {
   getReceivedPayments,
+  getReceivedPayment,
   addReceivedPayment,
   updateReceivedPayment,
   deleteReceivedPayment,
+  type ReceivedPaymentRecord,
 } from "@/api/receivedPaymentApi";
+import { useSearchParams } from "react-router-dom";
 import { getPayableEmis, payLoan, type PayableEmi } from "@/api/loanSanctionApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
@@ -133,6 +136,38 @@ export type ReceivedPayment = {
 interface CustomerOption {
   id: number;
   label: string;
+}
+
+// Shared between the paginated list load and the single-record deep-link
+// fetch (Trial Balance's ledger drill-down navigates here as
+// /received-payments?view=<id>) — same raw-row shape from the backend either
+// way, so both map through here instead of duplicating the field list.
+function mapReceivedPaymentRow(r: ReceivedPaymentRecord): ReceivedPayment {
+  return {
+    id: String(r.RPPaymentID),
+    docNo: (r as any).RPDocNo || `REC/${String(r.RPPaymentID).padStart(6, "0")}`,
+    companyId: (r as any).RPCompanyId ?? undefined,
+    companyName: r.RPCompanyName ?? "",
+    projectId: (r as any).RPProjectId ?? undefined,
+    projectName: r.RPProjectName,
+    finYear: (r as any).RPFinYear ?? undefined,
+    docTypeId: (r as any).RPDocTypeId ?? undefined,
+    receivedFrom: r.RPReceivedFrom,
+    customerName: (r as any).RPCustomerName ?? undefined,
+    depositBankId: (r as any).RPDepositBankId ?? undefined,
+    depositBankName: (r as any).RPDepositBankName ?? undefined,
+    docDate: r.RPDocDate,
+    mode: r.RPMode as ReceivedPayment["mode"],
+    amount: Number(r.RPAmount),
+    bankName: r.RPBankName ?? undefined,
+    transactionId: r.RPTransactionID ?? undefined,
+    checkNumber: r.RPCheckNumber ?? undefined,
+    chequeDate: r.RPChequeDate ? String(r.RPChequeDate).slice(0, 10) : undefined,
+    isPostDated: !!r.RPIsPostDated,
+    remarks: r.RPRemarks ?? undefined,
+    status: (r.RPStatus as ReceivedPayment["status"]) || "Draft",
+    createdAt: r.RPCreatedAt,
+  };
 }
 
 const PAYMENT_MODES: PaymentMode[] = [
@@ -348,6 +383,20 @@ export default function ReceivedPaymentPage() {
     null,
   );
   const PAGE_SIZE = 20;
+
+  // Deep-link support — Trial Balance's ledger drill-down navigates here as
+  // /received-payments?view=<id> to open this exact receipt.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    getReceivedPayment(Number(viewId))
+      .then((row) => setViewingPayment(mapReceivedPaymentRow(row)))
+      .catch(() => toast.error(`Received payment #${viewId} not found`));
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Form state ───────────────────────────────────────────────────────────────
   // This form only shows when view === "form" (a full-page swap), so a
@@ -568,37 +617,7 @@ export default function ReceivedPaymentPage() {
       setTotalCount(res.total);
       setCurrentPage(page);
       if (res.summary) setSummary(res.summary);
-      setPayments(
-        res.data.map((r) => ({
-          id: String(r.RPPaymentID),
-          docNo:
-            (r as any).RPDocNo ||
-            `REC/${String(r.RPPaymentID).padStart(6, "0")}`,
-          companyId: (r as any).RPCompanyId ?? undefined,
-          companyName: r.RPCompanyName ?? "",
-          projectId: (r as any).RPProjectId ?? undefined,
-          projectName: r.RPProjectName,
-          finYear: (r as any).RPFinYear ?? undefined,
-          docTypeId: (r as any).RPDocTypeId ?? undefined,
-          receivedFrom: r.RPReceivedFrom,
-          customerName: (r as any).RPCustomerName ?? undefined,
-          depositBankId: (r as any).RPDepositBankId ?? undefined,
-          depositBankName: (r as any).RPDepositBankName ?? undefined,
-          docDate: r.RPDocDate,
-          mode: r.RPMode as ReceivedPayment["mode"],
-          amount: Number(r.RPAmount),
-          bankName: r.RPBankName ?? undefined,
-          transactionId: r.RPTransactionID ?? undefined,
-          checkNumber: r.RPCheckNumber ?? undefined,
-          chequeDate: r.RPChequeDate
-            ? String(r.RPChequeDate).slice(0, 10)
-            : undefined,
-          isPostDated: !!r.RPIsPostDated,
-          remarks: r.RPRemarks ?? undefined,
-          status: (r.RPStatus as ReceivedPayment["status"]) || "Draft",
-          createdAt: r.RPCreatedAt,
-        })),
-      );
+      setPayments(res.data.map(mapReceivedPaymentRow));
     } catch {
       toast.error("Failed to load received payments");
     } finally {

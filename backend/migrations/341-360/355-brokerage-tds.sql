@@ -85,14 +85,42 @@ END
 GO
 
 -- 8. NetPayable — what Finance disburses (ComputedAmount - TDSAmount)
+--
+-- Add / backfill / tighten must be THREE separate batches. SQL Server
+-- compiles a whole batch before executing any of it, so an UPDATE naming a
+-- column that the same batch's ALTER TABLE is about to add fails to compile
+-- with "Invalid column name 'NetPayable'" — the ADD never gets to run first.
+-- Each step re-checks its own precondition so the migration stays idempotent
+-- and is safe to re-run after a partial failure.
 IF NOT EXISTS (
   SELECT 1 FROM sys.columns
   WHERE object_id = OBJECT_ID('dbo.CrmBrokerageMaster') AND name = 'NetPayable'
 )
 BEGIN
   ALTER TABLE dbo.CrmBrokerageMaster ADD NetPayable DECIMAL(18,2) NULL;
-  -- Backfill: pre-migration rows had no TDS; net = gross
-  UPDATE dbo.CrmBrokerageMaster SET NetPayable = ISNULL(ComputedAmount, 0) WHERE NetPayable IS NULL;
+END
+GO
+
+-- 8b. Backfill: pre-migration rows had no TDS, so net = gross
+IF EXISTS (
+  SELECT 1 FROM sys.columns
+  WHERE object_id = OBJECT_ID('dbo.CrmBrokerageMaster') AND name = 'NetPayable'
+)
+BEGIN
+  UPDATE dbo.CrmBrokerageMaster
+  SET NetPayable = ISNULL(ComputedAmount, 0)
+  WHERE NetPayable IS NULL;
+END
+GO
+
+-- 8c. Tighten to NOT NULL once every row has a value
+IF EXISTS (
+  SELECT 1 FROM sys.columns
+  WHERE object_id = OBJECT_ID('dbo.CrmBrokerageMaster')
+    AND name = 'NetPayable'
+    AND is_nullable = 1
+)
+BEGIN
   ALTER TABLE dbo.CrmBrokerageMaster ALTER COLUMN NetPayable DECIMAL(18,2) NOT NULL;
 END
 GO

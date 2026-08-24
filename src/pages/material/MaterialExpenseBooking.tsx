@@ -299,6 +299,15 @@ export default function MaterialExpenseBooking() {
   const [companyFilter, setCompanyFilter] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [docNoFilter, setDocNoFilter] = useState("");
+  // The input itself stays bound to docNoFilter (immediate, so typing feels
+  // responsive), but the actual server fetch only fires off this debounced
+  // copy — otherwise every single keystroke re-queried the list and yanked
+  // focus out from under the next character typed.
+  const [debouncedDocNoFilter, setDebouncedDocNoFilter] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedDocNoFilter(docNoFilter), 400);
+    return () => clearTimeout(t);
+  }, [docNoFilter]);
   const [vendorFilter, setVendorFilter] = useState("");
   // Same scoping as filteredProjectOptions above, but for the list-view
   // filter panel (independent of the create/edit form's own company field).
@@ -376,7 +385,7 @@ export default function MaterialExpenseBooking() {
       if (dateToFilter) qs.set("to", dateToFilter);
       if (companyFilter) qs.set("companyId", companyFilter);
       if (projectFilter) qs.set("projectName", projectFilter);
-      if (docNoFilter) qs.set("docNo", docNoFilter);
+      if (debouncedDocNoFilter) qs.set("docNo", debouncedDocNoFilter);
       if (vendorFilter) qs.set("supplierId", vendorFilter);
       const data = await apiFetch(`${API}?${qs.toString()}`);
       setRecords((data.data ?? []).map(dbToRecord));
@@ -391,7 +400,7 @@ export default function MaterialExpenseBooking() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, docNoFilter, vendorFilter]);
+  }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, debouncedDocNoFilter, vendorFilter]);
 
   // Export must cover every matching record, not just whatever page happens
   // to be on screen — the list endpoint caps `limit` at 100 server-side, so
@@ -424,14 +433,14 @@ export default function MaterialExpenseBooking() {
     }) as unknown as Record<string, unknown>[];
   }, [statusFilter, finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, docNoFilter, vendorFilter]);
 
-  // Deep-link support — Linked Documents panels navigate here as
-  // /material/expense-booking?view=<Eid> to open this exact Invoice/booking.
+  // Deep-link support — Linked Documents panels and Trial Balance's ledger
+  // drill-down navigate here as /material/expense-booking?view=<Eid> to open
+  // this exact Invoice/booking directly in its real form view (openEditForm
+  // does its own fetch), not just a preview card.
   useEffect(() => {
     const viewId = searchParams.get("view");
     if (!viewId) return;
-    apiFetch(`${API}/${viewId}`)
-      .then((row: any) => setPreviewRecord(dbToRecord(row)))
-      .catch(() => toast.error(`Booking #${viewId} not found`));
+    openEditForm({ id: viewId } as unknown as ExpenseRecord);
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -582,7 +591,7 @@ export default function MaterialExpenseBooking() {
       return;
     }
     fetchRecords(1);
-  }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, docNoFilter, vendorFilter, fetchRecords]);
+  }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, debouncedDocNoFilter, vendorFilter, fetchRecords]);
 
   useEffect(() => {
     fetchRecords(1);

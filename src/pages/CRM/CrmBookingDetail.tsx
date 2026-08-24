@@ -233,6 +233,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [invoiceDialog, setInvoiceDialog] = useState(false);
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
   const [previewReceipt, setPreviewReceipt] = useState<any | null>(null);
+  const [previewAttachment, setPreviewAttachment] = useState<any | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "", MilestoneId: "", OnAccountPaymentId: "" });
   const [parkingForm, setParkingForm] = useState({ Quantity: "1" });
   const [discountForm, setDiscountForm] = useState({ Amount: "", Note: "" });
@@ -2365,8 +2366,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 <span className="truncate max-w-[200px] sm:max-w-[300px]">{a.FileName}</span>
                               </td>
                               <td className="px-2.5 py-2 text-xs text-muted-foreground">{a.CreatedAt ? new Date(a.CreatedAt).toLocaleDateString("en-IN") : "—"}</td>
-                              <td className="px-2.5 py-2 text-right">
-                                <a href={a.FileUrl} target="_blank" rel="noopener noreferrer"
+                              <td className="px-2.5 py-2 text-right flex items-center justify-end gap-1 flex-wrap">
+                                {/\.(jpe?g|png|gif|webp|bmp|svg|pdf)$/i.test(a.FileName || "") && (
+                                  <button onClick={() => setPreviewAttachment(a)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border rounded hover:bg-muted">
+                                    <Eye size={11} /> Preview
+                                  </button>
+                                )}
+                                <a href={a.FileUrl} target="_blank" rel="noopener noreferrer" download={a.FileName}
                                   className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border rounded hover:bg-muted">
                                   <Download size={11} /> Download
                                 </a>
@@ -2638,6 +2645,37 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     </Dialog>
     {previewReceipt && (
       <ReceiptPdfPreview receipt={previewReceipt} onClose={() => setPreviewReceipt(null)} />
+    )}
+    {previewAttachment && (
+      <Dialog open onOpenChange={(o) => { if (!o) setPreviewAttachment(null); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <div className="flex items-center justify-between gap-3 pr-6">
+              <DialogTitle className="flex items-center gap-2 text-sm font-medium truncate">
+                <Paperclip size={14} className="text-primary shrink-0" />
+                <span className="truncate">{previewAttachment.FileName}</span>
+              </DialogTitle>
+              <a href={previewAttachment.FileUrl} target="_blank" rel="noopener noreferrer" download={previewAttachment.FileName}
+                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted font-medium">
+                <Download size={13} /> Download
+              </a>
+            </div>
+          </DialogHeader>
+          <div className="flex items-center justify-center min-h-[300px] max-h-[65vh] bg-muted/20 rounded-lg overflow-hidden border border-border">
+            {/\.pdf$/i.test(previewAttachment.FileName || "") ? (
+              <iframe src={previewAttachment.FileUrl} title={previewAttachment.FileName} className="w-full h-[65vh] border-0" />
+            ) : (
+              <img src={previewAttachment.FileUrl} alt={previewAttachment.FileName} className="max-w-full max-h-[65vh] object-contain" />
+            )}
+          </div>
+          {previewAttachment.CreatedAt && (
+            <p className="text-[11px] text-muted-foreground">
+              Uploaded {new Date(previewAttachment.CreatedAt).toLocaleDateString("en-IN")}
+              {previewAttachment.UploaderName ? ` by ${previewAttachment.UploaderName}` : ""}
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
     )}
     {reasonDialog && (
       <Dialog open onOpenChange={(o) => { if (!o) setReasonDialog(null); }}>

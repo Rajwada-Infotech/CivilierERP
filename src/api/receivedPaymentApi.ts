@@ -99,6 +99,14 @@ export async function createReceivedPayment(
   return res.json().catch(() => ({}));
 }
 
+export async function getReceivedPayment(
+  id: number,
+): Promise<ReceivedPaymentRecord> {
+  const res = await fetchWithAuth(`${BASE}/${id}`);
+  if (!res.ok) throw await readError(res, "Failed to fetch received payment");
+  return res.json();
+}
+
 export async function updateReceivedPayment(
   id: number,
   payload: Partial<ReceivedPaymentPayload>,
