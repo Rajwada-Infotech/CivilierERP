@@ -991,7 +991,11 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           AND (@DateFrom IS NULL OR eb.EDocDate >= @DateFrom)
           AND (@DateTo IS NULL OR eb.EDocDate <= @DateTo)
           AND (@CompanyId IS NULL OR eb.ECompanyId = @CompanyId)
-          AND (@ProjectName IS NULL OR eb.EProjectName = @ProjectName)
+          -- EProjectName is a misnomer — it stores the enterprise ID as text,
+          -- not the name (see ExpenseBooking/helpers.ts). The frontend filter
+          -- sends the project's actual name, so this has to match against the
+          -- already-joined ep.name, not the raw id column.
+          AND (@ProjectName IS NULL OR ep.name = @ProjectName)
           AND (@DocNo IS NULL OR eb.EDocNo LIKE @DocNo)
           AND (@SupplierId IS NULL OR (${ebSupplierList.idExpr}) = @SupplierId)
         ORDER BY eb.Eid DESC
@@ -3143,10 +3147,11 @@ router.put(
     let wasApproved = false;
     let beforeSnapshot = null;
     try {
+      // A Pending record is freely editable — it hasn't been approved yet,
+      // so there's nothing for an edit to conflict with. Only an Approved
+      // record's edits need to be tracked, which is what the amendment log
+      // below is for; Pending never reaches that path.
       const currentStatus = await getRecordStatus("expense-booking", numericId);
-      if (currentStatus === "Pending") {
-        return res.status(400).json({ error: "Cannot edit a record that is pending approval. Reject it first." });
-      }
       wasApproved = currentStatus === "Approved";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.ExpenseBooking", "Eid", numericId);

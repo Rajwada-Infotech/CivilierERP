@@ -6,12 +6,12 @@ function assertSanePercentRate(rateType, rateValue, dealValue = null) {
     throw new Error('RateValue must be a positive number');
   }
   if (rateType === 'Percentage' && rate > MAX_SANE_PERCENT) {
-    throw new Error(\Brokerage percentage of \% looks like a mistake (max allowed is \%) - check whether this should be a smaller percentage or a Fixed Amount instead\);
+    throw new Error(`Brokerage percentage of ${rate}% looks like a mistake (max allowed is ${MAX_SANE_PERCENT}%) - check whether this should be a smaller percentage or a Fixed Amount instead`);
   }
   if (rateType === 'Amount' && dealValue !== null) {
     const maxAmount = (dealValue * MAX_SANE_PERCENT) / 100;
     if (rate > maxAmount) {
-      throw new Error(\Brokerage flat amount of \ exceeds \% of deal value (\) and looks like a mistake\);
+      throw new Error(`Brokerage flat amount of ${rate} exceeds ${MAX_SANE_PERCENT}% of deal value (${maxAmount}) and looks like a mistake`);
     }
   }
 }
