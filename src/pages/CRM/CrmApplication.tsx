@@ -113,6 +113,7 @@ const STAGES = ["InProcess", "Converted", "NotConverted"] as const;
 type Stage = typeof STAGES[number];
 const stageLabel: Record<Stage, string> = { InProcess: "In Process", Converted: "Converted", NotConverted: "Not Converted" };
 const stageIcon: Record<Stage, any> = { InProcess: Clock, Converted: CheckCircle2, NotConverted: XCircle };
+const normalizeRole = (role?: string) => String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 async function fetchCustomers(): Promise<any[]> {
   try {
     const res = await fetchWithAuth(CUSTOMER_API);
@@ -258,7 +259,10 @@ const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { currentUser } = useAuth();
+  const { currentUser, canDoAction } = useAuth();
+  const isAdmin = ["admin", "super_admin"].includes(normalizeRole(currentUser?.role));
+  const canEditApplications = canDoAction("crm-applications", "edit");
+  const canRequestBookingCancellation = canDoAction("crm-cancellations", "create");
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const [search, setSearch] = useState("");
@@ -556,13 +560,13 @@ const CrmApplication: React.FC = () => {
   // so this never shows for an Approved application. The button itself is
   // just a convenience gate; the backend re-checks and is the real guard.
   //
-  // BUG FIX: same Stage gap as isResumeEditable above — Status can still
-  // read 'Pending' on an already-Converted application (real Booking exists,
-  // possibly Approved), which incorrectly offered "Cancel Application" here
-  // too, alongside Resume, for a record that isn't cancellable through this
-  // flow anymore — its Booking's own Cancellation Request is the only real
-  // path once converted.
-  const canCancelApplication = (app: any) => !!app && app.Stage !== "Converted" && !["Approved", "Cancelled", "Expired"].includes(app.Status);
+  // Direct cancel is only valid before a Booking exists (Stage=InProcess/NotConverted).
+  // Once a Booking is auto-created (Stage=Converted), the only cancel path is the
+  // formal Cancellation Request flow — the backend enforces this too.
+  const canCancelApplication = (app: any) => !!app && canEditApplications && app.Stage !== "Converted" && !["Approved", "Cancelled", "Expired"].includes(app.Status);
+  // Admin delete is visible for all stages — backend rejects with a clear error
+  // ("Delete the unprogressed booking first") when an active booking exists.
+  const canDeleteApplication = (app: any) => !!app && isAdmin;
 
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.
@@ -1063,6 +1067,22 @@ const CrmApplication: React.FC = () => {
       setCancelling(false);
     }
   };
+  const handleDeleteApplication = async (a: any) => {
+    if (!window.confirm(`Delete application ${a.ApplicationNo}? This is only allowed before a live booking has progressed.`)) return;
+    try {
+      const res = await fetchWithAuth(`${API}/${a.Id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to delete application");
+      toast.success(data.message || "Application deleted");
+      qc.invalidateQueries({ queryKey: ["crm-apps"] });
+      qc.invalidateQueries({ queryKey: ["unit-master"] });
+      qc.invalidateQueries({ queryKey: ["unit-matrix"] });
+      qc.invalidateQueries({ queryKey: ["parking-matrix"] });
+      if (viewingAppId === a.Id) setViewingAppId(null);
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    }
+  };
   const handleCreateBooking = async (a: any) => {
     if (!a.PreferredUnitId) {
       toast.error("This application has no unit selected — edit it and pick a unit before a booking can be created");
@@ -1145,6 +1165,12 @@ const CrmApplication: React.FC = () => {
             className="flex items-center gap-1 text-xs text-primary hover:underline">
             <Building2 size={12} /> View Booking <ChevronRight size={12} />
           </button>
+          {(canEditApplications || canRequestBookingCancellation) && i.row.original.BookingId && i.row.original.BookingStatus !== CrmStatus.CANCELLED && (
+            <button onClick={() => navigate(`/crm/cancellations?bookingId=${i.row.original.BookingId}`)}
+              className="flex items-center gap-1 text-xs text-red-600 hover:underline">
+              <Ban size={12} /> Request Cancellation
+            </button>
+          )}
         </div>
       ) },
   ];
@@ -1287,16 +1313,34 @@ const CrmApplication: React.FC = () => {
                       <Ban size={12} /> Cancel
                     </button>
                   )}
+                  {canDeleteApplication(a) && (
+                    <button
+                      onClick={() => handleDeleteApplication(a)}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
+                    >
+                      <Trash2 size={12} /> Delete
+                    </button>
+                  )}
                 </>
               ) : (
-                canCancelApplication(a) && (
-                  <button
-                    onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
-                  >
-                    <Ban size={12} /> Cancel
-                  </button>
-                )
+                <>
+                  {canCancelApplication(a) && (
+                    <button
+                      onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
+                    >
+                      <Ban size={12} /> Cancel
+                    </button>
+                  )}
+                  {canDeleteApplication(a) && (
+                    <button
+                      onClick={() => handleDeleteApplication(a)}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
+                    >
+                      <Trash2 size={12} /> Delete
+                    </button>
+                  )}
+                </>
               )}
             </div>
             {/* Status hint lives on its own line as a plain caption, never
@@ -2394,6 +2438,22 @@ const CrmApplication: React.FC = () => {
                 className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50"
               >
                 Cancel Application
+              </button>
+            )}
+            {(canEditApplications || canRequestBookingCancellation) && viewingAppDetail?.application?.BookingId && viewingAppDetail.application.BookingStatus !== CrmStatus.CANCELLED && (
+              <button
+                onClick={() => navigate(`/crm/cancellations?bookingId=${viewingAppDetail.application.BookingId}`)}
+                className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50"
+              >
+                Request Booking Cancellation
+              </button>
+            )}
+            {viewingAppDetail && canDeleteApplication(viewingAppDetail.application) && (
+              <button
+                onClick={() => handleDeleteApplication(viewingAppDetail.application)}
+                className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50"
+              >
+                Delete Application
               </button>
             )}
             {viewingAppDetail && (isResumable(viewingAppDetail.application) || isEditableApplication(viewingAppDetail.application)) && (

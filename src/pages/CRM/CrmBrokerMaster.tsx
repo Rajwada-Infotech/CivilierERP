@@ -39,6 +39,8 @@ interface Broker {
   LHeadPaymentTerms: string | null;
   LHeadAddress: string | null;
   LHeadStatus: boolean;
+  isTdsApplicable: boolean;
+  tdsLimitApplicable: boolean;
 }
 
 interface BrokerForm {
@@ -52,12 +54,17 @@ interface BrokerForm {
   LHeadPaymentTerms: string;
   LHeadAddress: string;
   LHeadStatus: boolean;
+  isTdsApplicable: boolean;
+  tdsLimitApplicable: boolean;
 }
 
 const EMPTY_FORM: BrokerForm = {
   LHeadName: "", LHeadContactPerson: "", LHeadPhone: "", LHeadEmail: "",
   LGST: "", LHeadPan: "", LHeadRera: "", LHeadPaymentTerms: "", LHeadAddress: "",
   LHeadStatus: true,
+  // Brokerage almost always falls under TDS Sec. 194H — default ON
+  isTdsApplicable: true,
+  tdsLimitApplicable: true,
 };
 
 const EXPORT_COLUMNS: ExportColumn[] = [
@@ -68,6 +75,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "PAN Number", accessor: "LHeadPan" },
   { header: "RERA Number", accessor: "LHeadRera" },
   { header: "Payment Terms", accessor: "LHeadPaymentTerms" },
+  { header: "TDS Applicable", accessor: (r) => (r.isTdsApplicable ? "Yes" : "No") },
   { header: "Status", accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive") },
 ];
 
@@ -114,6 +122,8 @@ const CrmBrokerMaster: React.FC = () => {
       LHeadPaymentTerms: item.LHeadPaymentTerms || null,
       LHeadAddress: item.LHeadAddress || null,
       LHeadStatus: Boolean(item.LHeadStatus),
+      isTdsApplicable: Boolean(item.IsTdsApplicable),
+      tdsLimitApplicable: item.TdsLimitApplicable == null ? true : Boolean(item.TdsLimitApplicable),
     }));
   }, [rawData]);
 
@@ -135,6 +145,8 @@ const CrmBrokerMaster: React.FC = () => {
     LHeadPaymentTerms: f.LHeadPaymentTerms || null,
     LHeadAddress: f.LHeadAddress || null,
     LHeadStatus: f.LHeadStatus,
+    IsTdsApplicable: f.isTdsApplicable,
+    TdsLimitApplicable: f.tdsLimitApplicable,
     LBranchName: null,
     LGSTState: null,
     LCountry: "India",
@@ -196,6 +208,8 @@ const CrmBrokerMaster: React.FC = () => {
       LGST: b.LGST ?? "", LHeadPan: b.LHeadPan ?? "", LHeadRera: b.LHeadRera ?? "",
       LHeadPaymentTerms: b.LHeadPaymentTerms ?? "", LHeadAddress: b.LHeadAddress ?? "",
       LHeadStatus: b.LHeadStatus,
+      isTdsApplicable: b.isTdsApplicable,
+      tdsLimitApplicable: b.tdsLimitApplicable,
     });
     setErrors({});
     setLocked(true);
@@ -381,8 +395,28 @@ const CrmBrokerMaster: React.FC = () => {
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${form.LHeadStatus ? "bg-emerald-500" : "bg-muted-foreground/30"}`}>
                 <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.LHeadStatus ? "translate-x-4" : "translate-x-0.5"}`} />
               </button>
-              <span className="text-xs text-muted-foreground">{form.LHeadStatus ? "Active" : "Inactive"}</span>
+              <span className="text-xs text-muted-foreground">Status — <span className={form.LHeadStatus ? "text-emerald-600 font-medium" : ""}>{form.LHeadStatus ? "Active" : "Inactive"}</span></span>
             </div>
+
+            {/* TDS Applicable — Sec. 194H applies to brokerage payments */}
+            <div className="flex items-center gap-3">
+              <button type="button" disabled={locked} onClick={() => setForm((p) => ({ ...p, isTdsApplicable: !p.isTdsApplicable }))}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${form.isTdsApplicable ? "bg-amber-500" : "bg-muted-foreground/30"}`}>
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.isTdsApplicable ? "translate-x-4" : "translate-x-0.5"}`} />
+              </button>
+              <span className="text-xs text-muted-foreground">TDS Applicable — <span className={form.isTdsApplicable ? "text-amber-600 font-medium" : ""}>{form.isTdsApplicable ? "Yes (Sec. 194H)" : "No"}</span></span>
+            </div>
+
+            {/* TDS Limit — only shown when TDS is on */}
+            {form.isTdsApplicable && (
+              <div className="flex items-center gap-3">
+                <button type="button" disabled={locked} onClick={() => setForm((p) => ({ ...p, tdsLimitApplicable: !p.tdsLimitApplicable }))}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${form.tdsLimitApplicable ? "bg-amber-500" : "bg-muted-foreground/30"}`}>
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.tdsLimitApplicable ? "translate-x-4" : "translate-x-0.5"}`} />
+                </button>
+                <span className="text-xs text-muted-foreground">TDS Limit (₹30k / ₹1L threshold) — <span className={form.tdsLimitApplicable ? "text-amber-600 font-medium" : ""}>{form.tdsLimitApplicable ? "Applied" : "Deduct on every bill"}</span></span>
+              </div>
+            )}
           </div>
           <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-muted/10">
             {editingId != null && locked ? (
@@ -440,6 +474,8 @@ const CrmBrokerMaster: React.FC = () => {
                 { label: "PAN Number", value: viewRecord.LHeadPan || "—" },
                 { label: "RERA Number", value: viewRecord.LHeadRera || "—" },
                 { label: "Payment Terms", value: viewRecord.LHeadPaymentTerms || "—" },
+                { label: "TDS Applicable", value: viewRecord.isTdsApplicable ? "Yes (Sec. 194H)" : "No" },
+                { label: "TDS Limit", value: viewRecord.isTdsApplicable ? (viewRecord.tdsLimitApplicable ? "Applied (₹30k / ₹1L threshold)" : "Deduct on every bill") : "—" },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value }) => (
                 <div key={label}>

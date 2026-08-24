@@ -752,10 +752,6 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
 // Reason is mandatory unconditionally and always written to the audit trail.
 router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
   try {
-    if (req.user?.role !== "super_admin") {
-      return res.status(403).json({ error: "Only a Super Admin can release a parking allotment" });
-    }
-
     const pool = getPool();
     const id = parseInt(req.params.id);
     const reason = (req.query.reason || req.body?.Reason || "").trim();

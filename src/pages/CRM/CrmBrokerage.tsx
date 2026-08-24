@@ -260,7 +260,16 @@ const CrmBrokerage: React.FC = () => {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Broker * (from Broker Master)</label>
-              <select value={form.BrokerId} disabled={!!editingId} onChange={(e) => setForm((f) => ({ ...f, BrokerId: e.target.value }))}
+              <select value={form.BrokerId} disabled={!!editingId} onChange={(e) => {
+                  const brokerId = e.target.value;
+                  const broker = (brokers as any[]).find((b: any) => String(b.LHeadId) === brokerId);
+                  setForm((f) => ({
+                    ...f,
+                    BrokerId: brokerId,
+                    // Clear TDS if broker is marked TDS not applicable
+                    TDSId: broker && !broker.IsTdsApplicable ? "" : f.TDSId,
+                  }));
+                }}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select broker</option>
                 {(brokers as any[]).map((b: any) => (
@@ -278,6 +287,7 @@ const CrmBrokerage: React.FC = () => {
                 {selectedBroker.LHeadPan && <div><span className="text-muted-foreground">PAN: </span><span className="font-mono font-medium">{selectedBroker.LHeadPan}</span></div>}
                 {selectedBroker.LHeadRera && <div><span className="text-muted-foreground">RERA: </span><span className="font-mono font-medium">{selectedBroker.LHeadRera}</span></div>}
                 {selectedBroker.LHeadPaymentTerms && <div><span className="text-muted-foreground">Terms: </span><span className="font-medium">{selectedBroker.LHeadPaymentTerms}</span></div>}
+                <div><span className="text-muted-foreground">TDS: </span><span className={`font-medium ${selectedBroker.IsTdsApplicable !== false ? "text-amber-600" : "text-muted-foreground"}`}>{selectedBroker.IsTdsApplicable !== false ? "Applicable (Sec. 194H)" : "Not Applicable"}</span></div>
               </div>
             )}
 
@@ -303,9 +313,15 @@ const CrmBrokerage: React.FC = () => {
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">TDS (Sec. 194H)</label>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  TDS (Sec. 194H)
+                  {selectedBroker && selectedBroker.IsTdsApplicable === false && (
+                    <span className="ml-1.5 text-[10px] text-muted-foreground">· Not applicable per Broker Master</span>
+                  )}
+                </label>
                 <select value={form.TDSId} onChange={(e) => setForm((f) => ({ ...f, TDSId: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  disabled={selectedBroker?.IsTdsApplicable === false}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background disabled:opacity-50 disabled:cursor-not-allowed">
                   <option value="">None / Nil certificate</option>
                   {tdsRecords.filter((t) => t.status).map((t) => (
                     <option key={t.id} value={t.id}>{t.name} ({t.percentage}%)</option>

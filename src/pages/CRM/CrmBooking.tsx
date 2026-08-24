@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Plus, Search, ChevronRight, MoreHorizontal, CheckCircle2,
   Eye, Phone, MessageSquare, Landmark, FileSignature, IndianRupee, Repeat, Building2,
+  AlertTriangle, Trash2,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -136,6 +137,8 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 const fmt = (n: number | null | undefined) =>
   n != null ? `₹${(n / 1e5).toFixed(2)}L` : "—";
 
+const normalizeRole = (role?: string) => String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+
 // The real workflow gate: Welcome Call -> Bank Details -> Agreement (both
 // approvals) -> Payments. Only ever surface the ONE step the booking is
 // actually sitting at right now — never let staff jump ahead to a later
@@ -164,12 +167,14 @@ if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-
 
 const CrmBooking: React.FC = () => {
   const qc = useQueryClient();
-  const { canDoAction } = useAuth();
+  const { canDoAction, currentUser } = useAuth();
   // Bookings mainly auto-create on Application approval, with this dialog
   // as the manual fallback (e.g. an Application with no unit preselected).
   // canEdit gates both this and the other mutating actions on this review
   // page (see CrmBookingDetail.tsx).
   const canEdit = canDoAction("crm-bookings", "edit");
+  const canRequestCancellation = canDoAction("crm-cancellations", "create");
+  const isAdmin = ["admin", "super_admin"].includes(normalizeRole(currentUser?.role));
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const navigate = useNavigate();
@@ -441,6 +446,33 @@ const CrmBooking: React.FC = () => {
     }
   };
 
+  const canDeleteBooking = (b: any) =>
+    isAdmin
+    && b.Status !== CrmStatus.APPROVED
+    && b.WorkflowStage === "Review"
+    && !b.ReadyForApprovalAt
+    && !b.AgreementId
+    && Number(b.TotalCleared || 0) <= 0
+    && Number(b.MRReceivedTotal || 0) <= 0
+    && Number(b.ApprovedOnAccount || 0) <= 0;
+
+  const handleDeleteBooking = async (b: any) => {
+    if (!window.confirm(`Delete booking ${b.BookingNo}? This is only allowed before approval/progress and will return the application to the pre-booking list.`)) return;
+    try {
+      const res = await fetchWithAuth(`${API}/${b.Id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to delete booking");
+      toast.success(data.message || "Booking deleted");
+      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+      qc.invalidateQueries({ queryKey: ["crm-apps"] });
+      qc.invalidateQueries({ queryKey: ["unit-master"] });
+      qc.invalidateQueries({ queryKey: ["unit-matrix"] });
+      if (viewingBookingId === b.Id) setViewingBookingId(null);
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    }
+  };
+
   const bookingColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "BookingNo", header: "Booking No", size: 115,
       cell: (i) => (
@@ -605,11 +637,26 @@ const CrmBooking: React.FC = () => {
                 <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)} className="gap-2">
                   <MessageSquare size={14} className="text-amber-700 dark:text-amber-400" /> Communication
                 </DropdownMenuItem>
-                {b.Status !== CrmStatus.CANCELLED && canEdit && (
+                {b.Status !== CrmStatus.CANCELLED && (canRequestCancellation || canEdit) && (
                   <>
                     <DropdownMenuSeparator />
+                    {(canRequestCancellation || canEdit) && (
+                      <DropdownMenuItem onClick={() => navigate(`/crm/cancellations?bookingId=${b.Id}`)} className="gap-2 text-rose-600 focus:text-rose-600">
+                        <AlertTriangle size={14} /> Request Cancellation
+                      </DropdownMenuItem>
+                    )}
+                    {canEdit && (
                     <DropdownMenuItem onClick={() => { setUnitChangeBooking(b); setUnitChangeNewId(""); setUnitChangeReason(""); }} className="gap-2 text-rose-600 focus:text-rose-600">
                       <Repeat size={14} /> Change Unit
+                    </DropdownMenuItem>
+                    )}
+                  </>
+                )}
+                {canDeleteBooking(b) && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handleDeleteBooking(b)} className="gap-2 text-red-600 focus:text-red-600">
+                      <Trash2 size={14} /> Delete Booking
                     </DropdownMenuItem>
                   </>
                 )}
