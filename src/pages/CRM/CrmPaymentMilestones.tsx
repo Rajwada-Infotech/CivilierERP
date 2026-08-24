@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -353,7 +354,7 @@ const CrmPaymentMilestones: React.FC = () => {
     { accessorKey: "DueDate", header: "Due Date", size: 110,
       cell: (i) => {
         const m = i.row.original;
-        const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
+        const isOverdue = m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date();
         return (
           <span className="text-xs">
             {m.DueDate ? String(m.DueDate).slice(0, 10) : "—"}
@@ -390,8 +391,8 @@ const CrmPaymentMilestones: React.FC = () => {
     { id: "status", header: "Status", size: 120, enableSorting: false,
       cell: (i) => {
         const m = i.row.original;
-        const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
-        const displayStatus = isOverdue && m.Status === "Pending" ? "Overdue" : m.Status;
+        const isOverdue = m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date();
+        const displayStatus = isOverdue && m.Status === CrmStatus.PENDING ? "Overdue" : m.Status;
         return (
           <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium w-fit ${statusColor[displayStatus] || ""}`}>
             {statusIcon[displayStatus]}{displayStatus}
@@ -407,7 +408,7 @@ const CrmPaymentMilestones: React.FC = () => {
         const m = i.row.original;
         return (
           <div className="flex items-center gap-2 whitespace-nowrap">
-            {m.Status !== "Paid" && m.Status !== "Waived" && (
+            {m.Status !== CrmStatus.PAID && m.Status !== "Waived" && (
               <>
                 <button onClick={() => handleOpenPayment(m)}
                   className="text-xs text-primary hover:underline">
@@ -615,7 +616,7 @@ const CrmPaymentMilestones: React.FC = () => {
             className="rounded-xl border border-border overflow-hidden bg-card"
             rowClassName={(row) => {
               const m = row.original as any;
-              const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
+              const isOverdue = m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date();
               return isOverdue ? "bg-red-50/30" : "";
             }}
           />

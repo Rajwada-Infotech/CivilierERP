@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -135,7 +136,7 @@ async function fetchExtraCharges(bookingId: number): Promise<any[]> {
 type VcItem = {
   Section: string; SectionLabel: string; ItemKey: string; Label: string;
   IsChecked: boolean; Remarks: string;
-  RecheckStatus: "Open" | "Resolved" | null; RecheckReason: string | null;
+  RecheckStatus: typeof CrmStatus.OPEN | typeof CrmStatus.RESOLVED | null; RecheckReason: string | null;
   RecheckRequestedAt: string | null; ResolvedAt: string | null;
 };
 type VcSection = { section: string; label: string; items: VcItem[]; complete: boolean; hasOpenRecheck: boolean };
@@ -273,7 +274,7 @@ const ChecklistItemRow: React.FC<{
   const [showRecheckBox, setShowRecheckBox] = useState(false);
   const [showRemarksBox, setShowRemarksBox] = useState(false);
   const dirty = checked !== item.IsChecked || remarks !== (item.Remarks || "");
-  const isOpenRecheck = item.RecheckStatus === "Open";
+  const isOpenRecheck = item.RecheckStatus === CrmStatus.OPEN;
 
   useEffect(() => { setChecked(item.IsChecked); setRemarks(item.Remarks || ""); }, [item.IsChecked, item.Remarks]);
 
@@ -430,7 +431,7 @@ const InlineVerify: React.FC<{
   useEffect(() => { setRemarks(item?.Remarks || ""); }, [item?.Remarks]);
 
   if (!item) return null;
-  const isOpenRecheck = item.RecheckStatus === "Open";
+  const isOpenRecheck = item.RecheckStatus === CrmStatus.OPEN;
 
   const handleToggleChecked = async () => {
     if (locked || isOpenRecheck || saving) return;
@@ -1345,7 +1346,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                     cleared={cleared}
                     pendingReceipts={Math.max(0, mrReceived - cleared)}
                     approvedOnAccount={Number(callContext?.onAccount?.availableBalance ?? 0)}
-                    overdueCount={milestones.filter((m: any) => m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date()).length}
+                    overdueCount={milestones.filter((m: any) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date()).length}
                     compact
                   />
                 );
@@ -1382,7 +1383,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                       const due = Number(m.AmountDue || 0);
                       const paid = Number(m.AmountPaid || 0);
                       const balance = Math.max(0, due - paid);
-                      const isDone = m.Status === "Paid" || m.Status === "Waived";
+                      const isDone = m.Status === CrmStatus.PAID || m.Status === "Waived";
                       const label = m.Status === "Waived" ? "Waived" : isDone ? "Paid" : paid > 0 ? "Partially Paid" : "Pending";
                       return (
                         <div key={m.Id} className="text-[11px] space-y-0.5">
@@ -1519,7 +1520,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                       { label: "Co-Applicant Added", state: checklist.coApplicants.count > 0 ? "done" : "blank" },
                       { label: "Bank & Nominee", state: checklist.bankDetails.complete ? "done" : checklist.bankDetails.started ? "progress" : "blank" },
                       { label: "NOC Issued", state: nocIssued ? "done" : hasNoc ? "progress" : "blank" },
-                      { label: "Agreement", state: checklist.agreement?.Status === "Executed" ? "done" : checklist.agreement ? "progress" : "blank" },
+                      { label: "Agreement", state: checklist.agreement?.Status === CrmStatus.EXECUTED ? "done" : checklist.agreement ? "progress" : "blank" },
                     ];
                     return steps.map((s) => (
                       <div key={s.label} className="flex items-center gap-1.5 text-xs">

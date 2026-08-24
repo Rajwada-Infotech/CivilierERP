@@ -81,7 +81,7 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         hassn.name AS HoldAssignedToName, hassn.email AS HoldAssignedToEmail
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired')
+      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (bk.Status = 'Approved' OR bk.ConfirmDeadline IS NULL OR bk.ConfirmDeadline >= SYSDATETIME())
       LEFT JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
       LEFT JOIN dbo.users assn ON assn.id = a.AssignedTo
       LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()

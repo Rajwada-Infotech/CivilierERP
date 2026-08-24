@@ -5,8 +5,6 @@ import { useSaNotifications } from "@/hooks/useSaNotifications";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 
-const SA_ROLES = new Set(["marketing_head", "sales_team_lead", "sales_person"]);
-
 function timeAgo(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
   const m = Math.floor(diff / 60_000);
@@ -18,20 +16,22 @@ function timeAgo(isoDate: string): string {
 }
 
 export const SaNotificationBell: React.FC = () => {
-  const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { notifications, unreadCount, markRead, markAllRead } = useSaNotifications();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  if (!SA_ROLES.has(currentUser?.role ?? "")) return null;
-
   const recent = notifications.slice(0, 10);
 
   const handleClick = (n: (typeof notifications)[number]) => {
     if (!n.isRead) markRead(n.id);
-    if (n.refId && n.refType === "lead") {
-      navigate("/sales-automation/leads");
+    if (n.refId) {
+      if (n.refType === "lead") navigate("/sales-automation/leads");
+      else if (n.refType === "crm_cancellation") navigate("/crm/cancellations");
+      else if (n.refType === "crm_booking_amendment") navigate("/crm/dashboard");
+      else if (n.refType === "crm_service_ticket") navigate("/crm/service-tickets");
+      else if (n.refType === "crm_handover") navigate("/crm/handovers");
+      else if (n.refType?.startsWith("crm_")) navigate("/crm/dashboard");
     }
     setOpen(false);
   };
@@ -41,7 +41,7 @@ export const SaNotificationBell: React.FC = () => {
       <button
         onClick={() => setOpen((p) => !p)}
         className="relative w-8 h-8 rounded-full flex items-center justify-center border border-border bg-muted hover:bg-muted/80 text-foreground transition-all"
-        title="SA Notifications"
+        title="Notifications"
       >
         <Notification size={14} variant={unreadCount > 0 ? "Bold" : "Outline"} color="hsl(var(--foreground))" />
         {unreadCount > 0 && (
@@ -60,7 +60,7 @@ export const SaNotificationBell: React.FC = () => {
             <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
               <div className="flex items-center gap-2">
                 <Megaphone size={14} className="text-orange-500" />
-                <span className="text-sm font-heading font-semibold text-foreground">SA Notifications</span>
+                <span className="text-sm font-heading font-semibold text-foreground">Notifications</span>
                 {unreadCount > 0 && (
                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-500/10 text-orange-500">
                     {unreadCount} new

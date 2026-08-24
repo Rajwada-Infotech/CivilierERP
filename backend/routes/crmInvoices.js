@@ -20,7 +20,7 @@ router.use(apiRateLimit);
 router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { type, search } = req.query;
+    const { type, search, companyId } = req.query;
     const req0 = pool.request();
     const conds = [];
     if (type) { req0.input("t", sql.NVarChar(30), type); conds.push("inv.InvoiceType = @t"); }
@@ -28,6 +28,7 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
       req0.input("q", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @q OR b.BookingNo LIKE @q OR inv.InvoiceNo LIKE @q)");
     }
+    if (companyId) { req0.input("companyId", sql.Int, parseInt(companyId, 10)); conds.push("b.CompanyId = @companyId"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`
       SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.Status, inv.VoidReason, inv.CreatedAt,

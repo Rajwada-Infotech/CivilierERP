@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -119,7 +120,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
   // unlocks Agreement prep.
   const [milestone1Status, setMilestone1Status] = useState<string | null>(null);
   const [milestone1PendingApproval, setMilestone1PendingApproval] = useState(false);
-  const bookingAmountPaid = milestone1Status === "Paid";
+  const bookingAmountPaid = milestone1Status === CrmStatus.PAID;
 
   useQuery({
     queryKey: ["crm-bank-detail", row.BookingId],
@@ -411,7 +412,7 @@ const CrmCustomerBankDetails: React.FC = () => {
 
   const filtered = useMemo(() => {
     let rows = list as any[];
-    if (statusFilter === "Pending") rows = rows.filter((r) => !r.IsComplete);
+    if (statusFilter === CrmStatus.PENDING) rows = rows.filter((r) => !r.IsComplete);
     if (statusFilter === "Complete") rows = rows.filter((r) => r.IsComplete);
     if (search.trim()) {
       const q = search.trim().toLowerCase();

@@ -16,35 +16,26 @@ export interface SaNotification {
   createdAt: string;
 }
 
-const SA_ROLES = new Set(["marketing_head", "sales_team_lead", "sales_person"]);
-
 export function useSaNotifications() {
-  const { currentUser } = useAuth();
-  const isSaUser = SA_ROLES.has(currentUser?.role ?? "");
-
   const [notifications, setNotifications] = useState<SaNotification[]>([]);
-
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
   const fetchNotifications = useCallback(async () => {
-    if (!isSaUser) return;
     try {
       const res = await fetchWithAuth("/api/sa/notifications");
       if (res.ok) setNotifications(await res.json());
     } catch {}
-  }, [isSaUser]);
+  }, []);
 
   // Initial fetch + 30-second polling
   useEffect(() => {
-    if (!isSaUser) return;
     fetchNotifications();
     const timer = setInterval(fetchNotifications, 30_000);
     return () => clearInterval(timer);
-  }, [fetchNotifications, isSaUser]);
+  }, [fetchNotifications]);
 
   // Real-time socket updates
   useEffect(() => {
-    if (!isSaUser) return;
     const socket = connectSocket();
     if (!socket) return;
 
@@ -55,7 +46,7 @@ export function useSaNotifications() {
 
     socket.on("sa:notification", onSaNotification);
     return () => { socket.off("sa:notification", onSaNotification); };
-  }, [isSaUser]);
+  }, []);
 
   const markRead = useCallback(async (id: number) => {
     try {

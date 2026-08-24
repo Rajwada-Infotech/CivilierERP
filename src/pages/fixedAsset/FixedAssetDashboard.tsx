@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { usePageRights } from "@/hooks/usePageRights";
 import { Cpu, Tag, Setting2, ArrowSwapHorizontal } from "iconsax-react";
 import { Boxes, AlertCircle, PlayCircle, Wallet, ChevronRight } from "lucide-react";
 import { GlassShell, GlassCard, GlassSection } from "@/components/dashboard/GlassShell";
@@ -66,6 +67,7 @@ function QuickLinkCard({
 }
 
 export default function FixedAssetDashboard() {
+  usePageRights("fixed-asset-dashboard");
   const navigate = useNavigate();
 
   const { data: assets = [], isLoading } = useQuery({

@@ -666,21 +666,21 @@ async function syncLegalMilestoneFromDocument(pool, docId, actorUserId) {
 // onto what's actually still owed, so e.g. a booking amount of ₹5L against a
 // ₹50L total leaves the remaining milestones' percentages summing to 100%
 // of the ₹45L left, not 100% of the original ₹50L.
-async function recalculateRemainingMilestones(pool, bookingId, { fixedMilestoneId } = {}) {
-  const bkRes = await pool.request().input("bid", sql.Int, bookingId)
+async function recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilestoneId } = {}) {
+  const bkRes = await poolOrTx.request().input("bid", sql.Int, bookingId)
     .query("SELECT GrandTotal, TotalValue, PaymentPlanId FROM dbo.CrmBooking WHERE Id = @bid");
   const booking = bkRes.recordset[0];
   const grandTotal = Number(booking?.GrandTotal || booking?.TotalValue || 0);
   if (!grandTotal) return;
 
-  const msRes = await pool.request().input("bid", sql.Int, bookingId)
+  const msRes = await poolOrTx.request().input("bid", sql.Int, bookingId)
     .query("SELECT Id, MilestoneNo, AmountDue, AmountPaid, [Percent], Status, ExtraChargeId, ParkingAllotmentId FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
   const rows = msRes.recordset;
   if (!rows.length) return;
 
   let planPercentByNo = {};
   if (booking?.PaymentPlanId) {
-    const planRes = await pool.request().input("pid", sql.Int, booking.PaymentPlanId)
+    const planRes = await poolOrTx.request().input("pid", sql.Int, booking.PaymentPlanId)
       .query("SELECT MilestoneNo, [Percent] FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @pid");
     for (const r of planRes.recordset) planPercentByNo[r.MilestoneNo] = Number(r.Percent);
   }
@@ -750,7 +750,7 @@ async function recalculateRemainingMilestones(pool, bookingId, { fixedMilestoneI
     const finalAmount = Math.max(0, amount);
     const percent = remainingTarget > 0 ? Math.round((finalAmount / remainingTarget) * 10000) / 100 : 0;
 
-    await pool.request()
+    await poolOrTx.request()
       .input("id", sql.Int, r.Id)
       .input("amt", sql.Decimal(18, 2), finalAmount)
       .input("pct", sql.Decimal(5, 2), percent)

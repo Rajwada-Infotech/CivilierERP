@@ -81,6 +81,7 @@ async function fetchMoneyReceiptData(pool, receiptId) {
       mr.*,
       rp.RPStatus, rp.RPRejectionNote,
       b.BookingNo, b.UnitNo, b.BlockName, b.ProjectName,
+      b.TotalValue, b.TotalGstAmount, b.GrandTotal,
       a.ApplicationNo, a.ApplicantName, a.Mobile, a.Email,
       comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2,
       comp.city AS CompanyCity, comp.state AS CompanyState, comp.pincode AS CompanyPincode,
@@ -229,15 +230,35 @@ function renderMoneyReceiptPdfBuffer(d) {
 
     // ── Hero amount panel ─────────────────────────────────────────────────
     const heroTop = doc.y;
-    const heroH = 62;
+    const heroH = 80;
     doc.roundedRect(left, heroTop, pageWidth, heroH, 8).fillColor("#f8fafc").fill();
     doc.roundedRect(left, heroTop, pageWidth, heroH, 8).strokeColor("#e2e8f0").lineWidth(0.75).stroke();
+    
+    // Use stored snapshot if available (set at receipt creation time via migration 357);
+    // fall back to deriving from booking-level GST for older receipts.
+    const amount = Number(d.Amount || 0);
+    let amountGst, amountPrin;
+    if (d.BaseAmount != null && d.GSTAmount != null) {
+      amountGst = Number(d.GSTAmount);
+      amountPrin = Number(d.BaseAmount);
+    } else {
+      const grandTotal = Number(d.GrandTotal || 1);
+      const gstRatio = Number(d.TotalGstAmount || 0) / grandTotal;
+      amountGst = amount * gstRatio;
+      amountPrin = amount - amountGst;
+    }
+
     doc.font("Helvetica").fontSize(8).fillColor("#64748b")
       .text("AMOUNT RECEIVED", left, heroTop + 12, { width: pageWidth, align: "center", characterSpacing: 0.5 });
     doc.font("Helvetica-Bold").fontSize(24).fillColor("#0f172a")
       .text(`Rs. ${money(d.Amount)}`, left, heroTop + 22, { width: pageWidth, align: "center" });
+    
+    doc.font("Helvetica").fontSize(8.5).fillColor("#475569")
+      .text(`Towards Principal: Rs. ${money(amountPrin)}   |   Towards GST: Rs. ${money(amountGst)}`, left, heroTop + 50, { width: pageWidth, align: "center" });
+
     doc.font("Helvetica-Oblique").fontSize(8).fillColor("#64748b")
-      .text(numberToWordsIndian(d.Amount), left, heroTop + 47, { width: pageWidth, align: "center" });
+      .text(numberToWordsIndian(d.Amount), left, heroTop + 65, { width: pageWidth, align: "center" });
+    
     doc.fillColor("#000000");
     doc.y = heroTop + heroH + 16;
 

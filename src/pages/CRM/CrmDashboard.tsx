@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -284,6 +285,7 @@ const StatSkeleton = () => (
 // --- Main Component -----------------------------------------------------------
 const CrmDashboard: React.FC = () => {
   usePageRights("crm-dashboard");
+  const navigate = useNavigate();
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const qc = useQueryClient();
@@ -446,7 +448,7 @@ const CrmDashboard: React.FC = () => {
                   ? <p className="text-xs text-muted-foreground">No bookings yet</p>
                   : bkgsData.map((b: any) => (
                       <HBar key={b.Status} label={b.Status} value={b.Count} total={bkgsTotal}
-                        color={b.Status === "Approved" ? "bg-green-500" : b.Status === "Cancelled" ? "bg-red-400" : "bg-primary"} />
+                        color={b.Status === CrmStatus.APPROVED ? "bg-green-500" : b.Status === CrmStatus.CANCELLED ? "bg-red-400" : "bg-primary"} />
                     ))}
                 {bkgsData.length > 0 && (
                   <div className="text-[11px] text-muted-foreground mt-2 border-t border-border pt-2 font-medium">
@@ -545,7 +547,61 @@ const CrmDashboard: React.FC = () => {
           </div>
         </CrmSection>
 
-        {/* -- SECTION 3: Analytics � Pie Charts ------------------------------- */}
+        {/* -- SECTION 2b: Conversion Funnel ------------------------------------ */}
+        <CrmSection title="Conversion Funnel" icon={TrendingUp} accentColor="#f59e0b">
+          <p className="text-xs text-muted-foreground -mt-1 mb-4">Pipeline conversion from Applications through to Possession</p>
+          {isLoading
+            ? <Skeleton className="h-28 w-full rounded-xl" />
+            : (() => {
+                const f = data?.funnel ?? { Applications: 0, Bookings: 0, Agreements: 0, Possessions: 0 };
+                const stages: { label: string; key: keyof typeof f; color: string; route: string }[] = [
+                  { label: "Applications", key: "Applications", color: "#f59e0b", route: "/crm/applications" },
+                  { label: "Bookings",     key: "Bookings",     color: "#22c55e", route: "/crm/bookings" },
+                  { label: "Agreements",   key: "Agreements",   color: "#3b82f6", route: "/crm/agreements" },
+                  { label: "Possessions",  key: "Possessions",  color: "#8b5cf6", route: "/crm/handover" },
+                ];
+                const top = Math.max(1, f.Applications);
+                return (
+                  <div className="space-y-3">
+                    {stages.map((s, i) => {
+                      const count = f[s.key] as number;
+                      const prev  = i === 0 ? null : f[stages[i - 1].key] as number;
+                      const pct   = Math.round((count / top) * 100);
+                      const conv  = prev != null && prev > 0 ? Math.round((count / prev) * 100) : null;
+                      return (
+                        <button
+                          key={s.label}
+                          onClick={() => navigate(s.route)}
+                          className="w-full text-left group"
+                        >
+                          <div className="flex items-center justify-between mb-1 text-xs">
+                            <span className="font-medium text-foreground">{s.label}</span>
+                            <div className="flex items-center gap-2">
+                              {conv !== null && (
+                                <span className="text-muted-foreground">
+                                  {conv}% of prev
+                                </span>
+                              )}
+                              <span className="font-bold tabular-nums" style={{ color: s.color }}>{count.toLocaleString()}</span>
+                              <ChevronRight size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                          </div>
+                          <div className="w-full h-6 rounded-lg bg-muted overflow-hidden">
+                            <div
+                              className="h-full rounded-lg transition-all duration-500"
+                              style={{ width: `${Math.max(pct, count > 0 ? 2 : 0)}%`, background: s.color, opacity: 0.85 }}
+                            />
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()
+          }
+        </CrmSection>
+
+        {/* -- SECTION 3: Analytics – Pie Charts ------------------------------- */}
         <CrmSection title="Status Distribution" icon={PieIcon} accentColor="#f59e0b">
           <p className="text-xs text-muted-foreground -mt-1 mb-3">Booking and application status breakdown as of now</p>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

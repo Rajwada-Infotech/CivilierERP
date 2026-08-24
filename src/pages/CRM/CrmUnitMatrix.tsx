@@ -1,4 +1,6 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import { useEffect, useMemo, useState } from "react";
+import { getSocket } from '@/lib/socket';
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -365,7 +367,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
           {hasUnpaidBooking ? (
             <>
-              {unit.BookingStatus === "Pending" && (
+              {unit.BookingStatus === CrmStatus.PENDING && (
                 <button onClick={handleCancelBooking} disabled={cancelling}
                   className="px-3 py-1.5 text-sm border border-rose-200 text-rose-600 rounded-lg font-medium hover:bg-rose-50 disabled:opacity-40">
                   {cancelling ? "Cancelling..." : "Cancel Booking"}
@@ -402,6 +404,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
 export function UnitMatrixPage() {
   const navigate = useNavigate();
   usePageRights("crm-unit-matrix");
+  const qc = useQueryClient();
   const [projectId, setProjectId] = useState("");
   const [blockId, setBlockId] = useState("");
   const [holdTarget, setHoldTarget] = useState<MatrixUnit | null>(null);
@@ -409,6 +412,20 @@ export function UnitMatrixPage() {
 
   // Forces a re-render every minute so the hold countdown badges (and any
   // open TileInfoDialog) tick down live instead of only updating on refetch.
+  useEffect(() => {
+    const sock = getSocket();
+    if (!sock) return;
+    const handleMatrixUpdate = (payload: any) => {
+      if (!payload?.projectId || payload.projectId === Number(projectId)) {
+        qc.invalidateQueries({ queryKey: ["unit-matrix", projectId] });
+      }
+    };
+    sock.on("matrix:update", handleMatrixUpdate);
+    return () => {
+      sock.off("matrix:update", handleMatrixUpdate);
+    };
+  }, [projectId, qc]);
+
   const [, setTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), 60000);
@@ -457,7 +474,7 @@ export function UnitMatrixPage() {
   const stats = useMemo(() => {
     const total = units.length;
     const available = units.filter((u) => u.Status === "Available").length;
-    const booked = units.filter((u) => u.Status === "Booked").length;
+    const booked = units.filter((u) => u.Status === CrmStatus.BOOKED).length;
     const onHold = units.filter((u) => u.Status === "OnHold").length;
     const blocked = units.filter((u) => u.Status === "Blocked").length;
     return { total, available, booked, onHold, blocked };
@@ -584,7 +601,7 @@ export function UnitMatrixPage() {
                                 key={u.Id}
                                 onClick={() => {
                                   if (u.Status === "Available") setHoldTarget(u);
-                                  else if (u.Status === "OnHold" || u.Status === "Booked") setInfoTarget(u);
+                                  else if (u.Status === "OnHold" || u.Status === CrmStatus.BOOKED) setInfoTarget(u);
                                 }}
                                 disabled={u.Status === "Blocked"}
                                 className={`text-left bg-card border border-border rounded-xl p-3.5 transition-colors ${
@@ -599,7 +616,7 @@ export function UnitMatrixPage() {
                                   </span>
                                 </div>
                                 <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
-                                  {u.Status === "Booked" ? (u.ApplicantName || u.BookingNo || "—")
+                                  {u.Status === CrmStatus.BOOKED ? (u.ApplicantName || u.BookingNo || "—")
                                     : u.Status === "OnHold" ? (
                                       <>
                                         <Clock size={11} className="shrink-0" />

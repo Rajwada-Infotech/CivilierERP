@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -35,7 +36,7 @@ router.get("/booking-register", requirePageRight("crm-bookings", "view"), async 
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(b.BookingDate AS DATE)");
-    const conds = ["b.IsActive = 1", "b.Status NOT IN ('Cancelled','Rejected')", ...dr.clauses];
+    const conds = ["b.IsActive = 1", "b.Status NOT IN (CrmStatus.CANCELLED,CrmStatus.REJECTED)", ...dr.clauses];
     const r = pool.request();
     dr.bind(r);
     const result = await r.query(`
@@ -56,7 +57,7 @@ router.get("/payment-collection", requirePageRight("crm-payments", "view"), asyn
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(m.DueDate AS DATE)");
-    const conds = ["b.IsActive = 1", "b.Status NOT IN ('Cancelled','Rejected')", ...dr.clauses];
+    const conds = ["b.IsActive = 1", "b.Status NOT IN (CrmStatus.CANCELLED,CrmStatus.REJECTED)", ...dr.clauses];
     const r = pool.request();
     dr.bind(r);
     const result = await r.query(`
@@ -107,10 +108,10 @@ router.get("/overdue-payments", requirePageRight("crm-payments", "view"), async 
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE m.Status = 'Pending'
+      WHERE m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate < CAST(SYSDATETIME() AS DATE)
         AND b.IsActive = 1
-        AND b.Status NOT IN ('Cancelled','Rejected')
+        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')
       ORDER BY m.DueDate ASC
     `);
     res.json(result.recordset);
@@ -288,11 +289,11 @@ router.get("/sales-deed-report", requirePageRight("crm-sales-deed", "view"), asy
         d.DeedValue, d.StampDuty, d.RegistrationFee,
         CAST(d.DeedDate AS DATE) AS DeedDate, d.RegistrationNo,
         CASE
-          WHEN b.Status = 'Cancelled' THEN 'Cancelled'
-          WHEN d.RegistrationNo IS NOT NULL THEN 'Registered'
-          WHEN d.ExecutedBy IS NOT NULL THEN 'Executed'
+          WHEN b.Status = '${CrmStatus.CANCELLED}' THEN '${CrmStatus.CANCELLED}'
+          WHEN d.RegistrationNo IS NOT NULL THEN '${CrmStatus.REGISTERED}'
+          WHEN d.ExecutedBy IS NOT NULL THEN '${CrmStatus.EXECUTED}'
           WHEN d.DeedDate IS NOT NULL AND d.DeedDate < CAST(GETDATE() AS DATE) THEN 'Overdue'
-          ELSE 'Draft'
+          ELSE '${CrmStatus.DRAFT}'
         END AS Status,
         d.CustomerApprovalStatus, d.DirectorApprovalStatus
       FROM dbo.CrmSalesDeed d
@@ -453,10 +454,10 @@ router.get("/aging-analysis", requirePageRight("crm-payments", "view"), async (r
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE m.Status = 'Pending'
+      WHERE m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate < CAST(SYSDATETIME() AS DATE)
         AND b.IsActive = 1
-        AND b.Status NOT IN ('Cancelled','Rejected')
+        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')
       ORDER BY DaysOverdue DESC
     `);
     res.json(result.recordset);
@@ -476,7 +477,7 @@ router.get("/inventory-status", requirePageRight("crm-bookings", "view"), async 
         SUM(CASE WHEN bk.Id IS NULL THEN 1 ELSE 0 END) AS AvailableUnits
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise ep ON ep.id = u.ProjectId
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled','Rejected')
+      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')
       WHERE u.IsActive = 1
       GROUP BY ep.name, u.UnitType
       ORDER BY ep.name, u.UnitType

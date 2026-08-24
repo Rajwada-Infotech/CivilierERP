@@ -72,6 +72,7 @@ async function fetchInvoiceData(pool, invoiceId) {
     SELECT
       inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.CreatedAt, inv.Status, inv.MilestoneId, inv.OnAccountPaymentId,
       b.BookingNo, b.UnitNo, b.BlockName, b.ProjectName, b.AreaSqFt, b.RatePerSqFt, b.GrandTotal, b.HsnCode,
+      b.TotalGstAmount, b.UnitParkingGstRate,
       a.ApplicationNo, a.ApplicantName, a.Mobile, a.Email,
       comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2,
       comp.city AS CompanyCity, comp.state AS CompanyState, comp.pincode AS CompanyPincode,
@@ -235,12 +236,48 @@ function renderInvoicePdfBuffer(d) {
 
     doc.y = tableTop + 22 + rowH + 10;
 
-    // ── Total ──────────────────────────────────────────────────────────────
-    doc.font("Helvetica-Bold").fontSize(11)
-      .text(`Total: Rs. ${money(d.Amount)}`, left, doc.y, { width: pageWidth, align: "right" });
-    doc.moveDown(0.4);
+    // ── GST breakdown ──────────────────────────────────────────────────────
+    // Derive the GST split for this invoice amount from the booking-level
+    // effective rate (TotalGstAmount / GrandTotal). The rate is the combined
+    // CGST+SGST rate (e.g. 5% → CGST 2.5% + SGST 2.5%).
+    const invAmt = Number(d.Amount || 0);
+    const grandTotal = Number(d.GrandTotal || 1);
+    const totalGstAmt = Number(d.TotalGstAmount || 0);
+    const gstRatio = totalGstAmt / grandTotal;
+    const invGst = Math.round(invAmt * gstRatio * 100) / 100;
+    const invBase = Math.round((invAmt - invGst) * 100) / 100;
+    const combinedRate = Number(d.UnitParkingGstRate || 0);
+    const halfRate = combinedRate / 2;
+    const halfGst = Math.round(invGst / 2 * 100) / 100;
+
+    const taxBreakX = left + pageWidth * 0.55;
+    const taxBreakW = pageWidth * 0.45;
+    let ty2 = doc.y;
+
+    const taxRow = (label, val) => {
+      doc.font("Helvetica").fontSize(9).fillColor("#475569")
+        .text(label, taxBreakX, ty2, { width: taxBreakW * 0.65, continued: false });
+      doc.font("Helvetica").fontSize(9).fillColor("#000000")
+        .text(val, taxBreakX + taxBreakW * 0.65, ty2, { width: taxBreakW * 0.35, align: "right" });
+      ty2 = doc.y + 2;
+    };
+
+    if (d.HsnCode) taxRow(`HSN/SAC Code`, d.HsnCode);
+    taxRow(`Taxable Value (Base)`, `Rs. ${money(invBase)}`);
+    taxRow(`CGST @ ${halfRate}%`, `Rs. ${money(halfGst)}`);
+    taxRow(`SGST @ ${halfRate}%`, `Rs. ${money(invGst - halfGst)}`);
+
+    doc.moveTo(taxBreakX, ty2 + 2).lineTo(taxBreakX + taxBreakW, ty2 + 2).strokeColor("#cbd5e1").stroke();
+    ty2 += 6;
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f172a")
+      .text("Total Amount", taxBreakX, ty2, { width: taxBreakW * 0.65 });
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f172a")
+      .text(`Rs. ${money(invAmt)}`, taxBreakX + taxBreakW * 0.65, ty2, { width: taxBreakW * 0.35, align: "right" });
+
+    doc.y = ty2 + 16;
+    doc.fillColor("#000000");
     doc.font("Helvetica-Oblique").fontSize(8.5).fillColor("#475569")
-      .text(`Amount in words: ${numberToWordsIndian(d.Amount)}`, left, doc.y, { width: pageWidth, align: "right" });
+      .text(`Amount in words: ${numberToWordsIndian(invAmt)}`, left, doc.y, { width: pageWidth, align: "right" });
     doc.fillColor("#000000");
     doc.moveDown(1.2);
 
