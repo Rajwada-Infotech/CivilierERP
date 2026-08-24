@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -46,7 +47,7 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
 
     const deed = await pool.request().input("bid", sql.Int, bookingId)
       .query(`SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
-    if (!deed.recordset.length || !["Executed", "Registered"].includes(deed.recordset[0].Status)) {
+    if (!deed.recordset.length || ![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(deed.recordset[0].Status)) {
       return res.status(400).json({ error: "Possession notice requires an Executed or Registered sales deed first" });
     }
     const pp = await pool.request().input("bid", sql.Int, bookingId)
@@ -119,7 +120,7 @@ router.put("/:id/mark-sent", requirePageRight("crm-possession-notice", "edit"), 
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status, DeliveryMode FROM dbo.CrmPossessionNotice WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
-    if (cur.recordset[0].Status !== "Draft") {
+    if (cur.recordset[0].Status !== CrmStatus.DRAFT) {
       return res.status(400).json({ error: `Cannot mark-sent from status '${cur.recordset[0].Status}'` });
     }
     if (!cur.recordset[0].DeliveryMode && !b.DeliveryMode) {
@@ -230,12 +231,12 @@ router.put("/:id/retract-dispute", requirePageRight("crm-possession-notice", "ed
       .input("ub", sql.Int, actorId(req))
       .query(`
         UPDATE dbo.CrmPossessionNotice SET
-          Status = 'Draft', DisputedAt = NULL, DisputeReason = NULL,
+          Status = '${CrmStatus.DRAFT}', DisputedAt = NULL, DisputeReason = NULL,
           Notes = ISNULL(Notes + CHAR(10), '') + 'Dispute retracted: ' + @reason,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
-    res.json({ success: true, status: "Draft" });
+    res.json({ success: true, status: CrmStatus.DRAFT });
   } catch (e) {
     console.error("[crm-possession-notice] retract-dispute error:", e.message);
     res.status(500).json({ error: e.message });

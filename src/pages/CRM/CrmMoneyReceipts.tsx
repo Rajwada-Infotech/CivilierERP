@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,10 +21,12 @@ interface ReceiptRow {
   BookingId: number;
   ReceivedPaymentId: number;
   Amount: number;
+  BaseAmount: number | null;
+  GSTAmount: number | null;
   PaymentMode: string;
   ChequeNo: string | null;
   ReceivedDate: string;
-  Status: "Pending" | "Approved" | "Bounced";
+  Status: typeof CrmStatus.PENDING | typeof CrmStatus.APPROVED | "Bounced";
   BouncedReason: string | null;
   BookingNo: string;
   ProjectName: string | null;
@@ -52,7 +55,7 @@ async function fetchReceipts(bookingId?: string): Promise<ReceiptRow[]> {
 }
 
 function StatusPill({ status }: { status: ReceiptRow["Status"] }) {
-  if (status === "Approved")
+  if (status === CrmStatus.APPROVED)
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800"><CheckCircle2 className="w-3 h-3" /> Approved</span>;
   if (status === "Bounced")
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-red-50 text-red-700 border border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800"><AlertTriangle className="w-3 h-3" /> Bounced</span>;
@@ -155,7 +158,19 @@ const CrmMoneyReceipts: React.FC = () => {
           {i.row.original.Mobile && <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>}
         </div>
       ) },
-    { accessorKey: "Amount", header: "Amount", size: 100, cell: (i) => <span className="font-semibold text-sm">{fmtMoney(i.row.original.Amount)}</span> },
+    { accessorKey: "Amount", header: "Amount", size: 130, cell: (i) => {
+        const r = i.row.original;
+        return (
+          <div>
+            <div className="font-semibold text-sm">{fmtMoney(r.Amount)}</div>
+            {r.BaseAmount != null && r.GSTAmount != null && (
+              <div className="text-[11px] text-muted-foreground font-mono">
+                Base {fmtMoney(r.BaseAmount)} + GST {fmtMoney(r.GSTAmount)}
+              </div>
+            )}
+          </div>
+        );
+      } },
     { accessorKey: "PaymentMode", header: "Mode", size: 90,
       cell: (i) => (
         <div>

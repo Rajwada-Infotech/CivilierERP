@@ -1,6 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   Printer,
   AlertCircle,
@@ -248,6 +249,7 @@ const detailExportColumns: ExportColumn[] = [
 ];
 
 const EntryTypeDocFollowUpReport: React.FC = () => {
+  usePageRights("entry-type-doc-followup-report");
   const { isDark, cardStyle } = useGlass();
   const queryClient = useQueryClient();
   const [filters, setFilters] = React.useState<Filters>(EMPTY_FILTERS);

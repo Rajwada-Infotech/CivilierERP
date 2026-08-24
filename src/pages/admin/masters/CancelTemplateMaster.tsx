@@ -1,5 +1,6 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FollowupShell } from "@/components/followup/FollowupShell";
@@ -46,6 +47,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const CancelTemplateMaster: React.FC = () => {
+  usePageRights("followup-cancel-template-master");
   const queryClient = useQueryClient();
 
   const { data: templates, isLoading, error } = useQuery({

@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -147,7 +148,7 @@ router.put("/:id", requirePageRight("crm-service-tickets", "edit"), async (req, 
         UPDATE dbo.CrmServiceTicket SET
           Priority = ISNULL(@pri, Priority),
           AssignedTo = ISNULL(@asgn, AssignedTo),
-          Status = CASE WHEN Status = 'Open' AND @asgn IS NOT NULL THEN 'Assigned' ELSE Status END,
+          Status = CASE WHEN Status = '${CrmStatus.OPEN}' AND @asgn IS NOT NULL THEN 'Assigned' ELSE Status END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
@@ -185,9 +186,9 @@ router.put("/:id/mark-in-progress", requirePageRight("crm-service-tickets", "edi
       return res.status(400).json({ error: "Ticket must be assigned before work can start" });
     }
     await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).query(`
-      UPDATE dbo.CrmServiceTicket SET Status = 'InProgress', UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id
+      UPDATE dbo.CrmServiceTicket SET Status = '${CrmStatus.IN_PROGRESS}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id
     `);
-    res.json({ success: true, status: "InProgress" });
+    res.json({ success: true, status: CrmStatus.IN_PROGRESS });
   } catch (e) {
     console.error("[crm-service-tickets] mark-in-progress error:", e.message);
     res.status(500).json({ error: e.message });
@@ -208,7 +209,7 @@ router.put("/:id/resolve", requirePageRight("crm-service-tickets", "edit"), asyn
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
-    if (!["Assigned", "InProgress", "Reopened"].includes(cur.recordset[0].Status)) {
+    if (!["Assigned", CrmStatus.IN_PROGRESS, "Reopened"].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot resolve from status '${cur.recordset[0].Status}'` });
     }
 
@@ -218,11 +219,11 @@ router.put("/:id/resolve", requirePageRight("crm-service-tickets", "edit"), asyn
       .input("ub", sql.Int, actorId(req))
       .query(`
         UPDATE dbo.CrmServiceTicket SET
-          Status = 'Resolved', ResolutionNotes = @res, ResolvedAt = SYSDATETIME(),
+          Status = '${CrmStatus.RESOLVED}', ResolutionNotes = @res, ResolvedAt = SYSDATETIME(),
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
-    res.json({ success: true, status: "Resolved" });
+    res.json({ success: true, status: CrmStatus.RESOLVED });
   } catch (e) {
     console.error("[crm-service-tickets] resolve error:", e.message);
     res.status(500).json({ error: e.message });
@@ -240,7 +241,7 @@ router.put("/:id/close", requirePageRight("crm-service-tickets", "edit"), async 
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
-    if (cur.recordset[0].Status !== "Resolved") {
+    if (cur.recordset[0].Status !== CrmStatus.RESOLVED) {
       return res.status(400).json({ error: `Cannot close from status '${cur.recordset[0].Status}'` });
     }
 
@@ -251,12 +252,12 @@ router.put("/:id/close", requirePageRight("crm-service-tickets", "edit"), async 
       .input("ub", sql.Int, actorId(req))
       .query(`
         UPDATE dbo.CrmServiceTicket SET
-          Status = 'Closed', CustomerRating = ISNULL(@rate, CustomerRating),
+          Status = '${CrmStatus.CLOSED}', CustomerRating = ISNULL(@rate, CustomerRating),
           CustomerFeedback = ISNULL(@fb, CustomerFeedback),
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
-    res.json({ success: true, status: "Closed" });
+    res.json({ success: true, status: CrmStatus.CLOSED });
   } catch (e) {
     console.error("[crm-service-tickets] close error:", e.message);
     res.status(500).json({ error: e.message });
@@ -276,7 +277,7 @@ router.put("/:id/reopen", requirePageRight("crm-service-tickets", "edit"), async
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
-    if (!["Resolved", "Closed"].includes(cur.recordset[0].Status)) {
+    if (![CrmStatus.RESOLVED, CrmStatus.CLOSED].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot reopen from status '${cur.recordset[0].Status}'` });
     }
 

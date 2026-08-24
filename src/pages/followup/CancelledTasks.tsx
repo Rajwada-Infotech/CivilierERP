@@ -1,6 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
+import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
 import { Search, XCircle, ClipboardList } from "lucide-react";
 import { FollowupShell } from "@/components/followup/FollowupShell";
@@ -181,6 +182,7 @@ const CancelledTaskCard: React.FC<{ task: CancelledTask; index: number; onClick:
 };
 
 const CancelledTasks: React.FC = () => {
+  usePageRights("followup-cancelled-tasks");
   const queryClient = useQueryClient();
   const { glassCard } = useGlass();
   const [search, setSearch] = React.useState("");

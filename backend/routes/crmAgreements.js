@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
 const { getPool, sql } = require("../db");
@@ -19,10 +20,10 @@ const { transition: approvalTransition } = require("../services/approvalService"
 // Explicit agreement workflow state machine — matches the Status values the
 // handover workflow guard (crmHandover.js) already checks for.
 const AGREEMENT_TRANSITIONS = {
-  Draft:      ["Draft", "Executed", "Cancelled"],
-  Executed:   ["Executed", "Registered", "Cancelled"],
-  Registered: ["Registered"],
-  Cancelled:  ["Cancelled"],
+  Draft:      [CrmStatus.DRAFT, CrmStatus.EXECUTED, CrmStatus.CANCELLED],
+  Executed:   [CrmStatus.EXECUTED, CrmStatus.REGISTERED, CrmStatus.CANCELLED],
+  Registered: [CrmStatus.REGISTERED],
+  Cancelled:  [CrmStatus.CANCELLED],
 };
 
 router.use(authMiddleware);
@@ -85,7 +86,7 @@ async function getAgreementBookingLockReason(pool, agreementId) {
   `);
   if (!result.recordset.length) return null;
   const row = result.recordset[0];
-  if (row.BookingIsActive === false || ["Cancelled", "Rejected"].includes(row.BookingStatus)) {
+  if (row.BookingIsActive === false || [CrmStatus.CANCELLED, CrmStatus.REJECTED].includes(row.BookingStatus)) {
     return `the underlying booking is ${row.BookingStatus || "inactive"}`;
   }
   return null;
@@ -103,7 +104,7 @@ async function agreementExecutedLockReason(pool, agreementId) {
     .query("SELECT Status FROM dbo.CrmAgreement WHERE Id = @id");
   if (!result.recordset.length) return null;
   const status = result.recordset[0].Status;
-  if (["Executed", "Registered"].includes(status)) {
+  if ([CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(status)) {
     return `this agreement is already ${status}`;
   }
   return null;
@@ -166,7 +167,7 @@ router.get("/eligible-bookings", requirePageRight("crm-agreements", "create"), a
       SELECT b.Id, b.BookingNo, a.ApplicantName
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE b.Status = 'Approved' AND b.IsActive = 1
+      WHERE b.Status = '${CrmStatus.APPROVED}' AND b.IsActive = 1
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id)
       ORDER BY b.BookingNo
     `);
@@ -205,7 +206,7 @@ router.get("/:id", requirePageRight("crm-agreements", "view"), async (req, res) 
          FROM dbo.CrmOnAccountPayment WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
       pool.request().input("id", sql.Int, id).query(
         `SELECT ISNULL(SUM(Amount),0) AS MRTotal FROM dbo.CrmMoneyReceipt
-         WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id) AND Status IN ('Pending','Approved')`),
+         WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id) AND Status IN ('${CrmStatus.PENDING}','${CrmStatus.APPROVED}')`),
     ]);
     if (!agRes.recordset[0]) return res.status(404).json({ error: "Agreement not found" });
     const mil = milRes.recordset[0] || {};
@@ -259,7 +260,7 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
       .query("SELECT Status, IsActive FROM dbo.CrmBooking WHERE Id = @bid");
     if (!bookingRow.recordset.length) return res.status(404).json({ error: "Booking not found" });
     const bkg = bookingRow.recordset[0];
-    if (bkg.IsActive === false || ["Cancelled", "Rejected"].includes(bkg.Status)) {
+    if (bkg.IsActive === false || [CrmStatus.CANCELLED, CrmStatus.REJECTED].includes(bkg.Status)) {
       return res.status(400).json({ error: `Cannot create an agreement — this booking is ${bkg.Status || "inactive"}.` });
     }
 
@@ -365,7 +366,7 @@ router.put("/:id/submit", requirePageRight("crm-agreements", "edit"), async (req
     const pool = getPool();
     const lockReason = await getAgreementBookingLockReason(pool, id);
     if (lockReason) return res.status(409).json({ error: `Cannot resubmit — ${lockReason}. Cancel the agreement instead.` });
-    const result = await approvalTransition("crm-agreements", id, "Pending", userEmail, req.user?.role);
+    const result = await approvalTransition("crm-agreements", id, CrmStatus.PENDING, userEmail, req.user?.role);
     await pool.request()
       .input("id", sql.Int, id)
       .query(`
@@ -374,7 +375,7 @@ router.put("/:id/submit", requirePageRight("crm-agreements", "edit"), async (req
           SeniorApprovedAt = NULL,
           SeniorApprovalRemarks = NULL,
           SentToCustomerAt = NULL,
-          CustomerApprovalStatus = 'Pending',
+          CustomerApprovalStatus = '${CrmStatus.PENDING}',
           CustomerApprovedAt = NULL,
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
@@ -432,8 +433,8 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
     // mandatory below, since that field-name mismatch would then hard-block
     // every real reject even when staff DID type a reason.
     const remarks = req.body?.note || null;
-    const result = await approvalTransition("crm-agreements", id, "Approved", userEmail, req.user?.role, remarks, actorId(req));
-    if (result.newStatus === "Approved") {
+    const result = await approvalTransition("crm-agreements", id, CrmStatus.APPROVED, userEmail, req.user?.role, remarks, actorId(req));
+    if (result.newStatus === CrmStatus.APPROVED) {
       const pool = getPool();
       await pool.request()
         .input("id", sql.Int, id)
@@ -469,7 +470,7 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
         if (!already.recordset[0].SentToCustomerAt) {
           await pool.request().input("id", sql.Int, id).query(`
             UPDATE dbo.CrmAgreement SET
-              SentToCustomerAt = SYSDATETIME(), CustomerApprovalStatus = 'Pending', CustomerApprovedAt = NULL
+              SentToCustomerAt = SYSDATETIME(), CustomerApprovalStatus = '${CrmStatus.PENDING}', CustomerApprovedAt = NULL
             WHERE Id = @id
           `);
           await pool.request().input("agid", sql.Int, id).query(`
@@ -504,7 +505,7 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
 
     // Only log the audit entry once ALL approval levels are satisfied —
     // partial multi-level approvals should not appear as "SeniorApprove" in the trail.
-    if (result.newStatus === "Approved") {
+    if (result.newStatus === CrmStatus.APPROVED) {
       await logApprovalHistory(id, "SeniorApprove", remarks, actorId(req));
     }
     // Forward the full transition() result (not just `status`) — when this
@@ -539,12 +540,12 @@ router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req
     const oldRow = (await pool.request().input("id", sql.Int, id)
       .query("SELECT VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes FROM dbo.CrmAgreement WHERE Id = @id")).recordset[0];
 
-    const result = await approvalTransition("crm-agreements", id, "Rejected", userEmail, req.user?.role, remarks);
+    const result = await approvalTransition("crm-agreements", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks);
     // Check if customer had already approved before resetting — log it so the
     // reset is traceable and not a silent discard.
     const priorCustomer = (await pool.request().input("id", sql.Int, id)
       .query("SELECT CustomerApprovalStatus, CustomerApprovedAt FROM dbo.CrmAgreement WHERE Id = @id")).recordset[0];
-    const customerHadApproved = priorCustomer?.CustomerApprovalStatus === "Approved";
+    const customerHadApproved = priorCustomer?.CustomerApprovalStatus === CrmStatus.APPROVED;
 
     await pool.request()
       .input("id", sql.Int, id)
@@ -555,7 +556,7 @@ router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req
           SeniorApprovedAt = NULL,
           SeniorApprovalRemarks = @rem,
           SentToCustomerAt = NULL,
-          CustomerApprovalStatus = 'Pending',
+          CustomerApprovalStatus = '${CrmStatus.PENDING}',
           CustomerApprovedAt = NULL,
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
@@ -613,8 +614,8 @@ router.put("/:id/date/approve", requirePageRight("crm-agreements", "edit"), asyn
     // reached through the shared ApprovalActions component (module
     // "crm-agreement-date" in ApprovalInbox.tsx), which posts { note: ... }.
     const remarks = req.body?.note || null;
-    const result = await approvalTransition("crm-agreement-date", id, "Approved", userEmail, req.user?.role, remarks, actorId(req));
-    if (result.newStatus === "Approved") {
+    const result = await approvalTransition("crm-agreement-date", id, CrmStatus.APPROVED, userEmail, req.user?.role, remarks, actorId(req));
+    if (result.newStatus === CrmStatus.APPROVED) {
       const pool = getPool();
       const confirmedDate = await finalizeAgreementDate(pool, id);
 
@@ -659,7 +660,7 @@ router.put("/:id/date/reject", requirePageRight("crm-agreements", "edit"), async
     const pool = getPool();
     const lockReason = await getAgreementBookingLockReason(pool, id);
     if (lockReason) return res.status(409).json({ error: `Cannot reject a date — ${lockReason}. Cancel the agreement instead.` });
-    const result = await approvalTransition("crm-agreement-date", id, "Rejected", userEmail, req.user?.role, remarks);
+    const result = await approvalTransition("crm-agreement-date", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks);
     await resetAgreementDateNegotiation(pool, id);
     await pool.request()
       .input("agid", sql.Int, id)
@@ -730,7 +731,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
       WHERE ag.Id = @id
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "Agreement not found" });
-    if (ag.recordset[0].SeniorApprovalStatus !== "Approved") {
+    if (ag.recordset[0].SeniorApprovalStatus !== CrmStatus.APPROVED) {
       return res.status(400).json({ error: "Agreement must receive senior approval before it can be sent to the customer" });
     }
     if (!ag.recordset[0].DocumentCount) {
@@ -756,7 +757,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
         .input("pd", sql.Date, proposedDate)
         .query(`
           UPDATE dbo.CrmAgreement SET
-            ProposedDate = @pd, ProposedDateStatus = 'PendingCustomerReview'
+            ProposedDate = @pd, ProposedDateStatus = '${CrmStatus.PENDING_CUSTOMER_REVIEW}'
           WHERE Id = @id
         `);
     }
@@ -766,7 +767,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
       .query(`
         UPDATE dbo.CrmAgreement SET
           SentToCustomerAt = SYSDATETIME(),
-          CustomerApprovalStatus = 'Pending',
+          CustomerApprovalStatus = '${CrmStatus.PENDING}',
           CustomerApprovedAt = NULL
         WHERE Id = @id
       `);
@@ -901,7 +902,7 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
     // beyond the booking-lock check above, so LegalName/PAN/Aadhaar could
     // still be edited (with a real VersionNo bump + revision row) on an
     // already-executed contract with nobody notified.
-    if (["Executed", "Registered"].includes(oldRow.Status)) {
+    if ([CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(oldRow.Status)) {
       return res.status(409).json({ error: `Cannot edit — this agreement is already ${oldRow.Status}. Its legal content is locked.` });
     }
 
@@ -995,7 +996,7 @@ router.put("/:id/assign-legal", requirePageRight("crm-agreements", "edit"), asyn
       .query("SELECT LegalExecutiveId, AgreementNo, Status, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
     if (!old.recordset.length) return res.status(404).json({ error: "Agreement not found" });
     const oldRow = old.recordset[0];
-    if (["Registered", "Cancelled"].includes(oldRow.Status)) {
+    if ([CrmStatus.REGISTERED, CrmStatus.CANCELLED].includes(oldRow.Status)) {
       return res.status(400).json({ error: `Cannot reassign a legal executive on an agreement that is already ${oldRow.Status}` });
     }
 
@@ -1041,10 +1042,10 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
     const row = cur.recordset[0];
 
-    if (row.Status !== "Draft") {
+    if (row.Status !== CrmStatus.DRAFT) {
       return res.status(400).json({ error: `Cannot mark-executed from status '${row.Status}'` });
     }
-    if (row.SeniorApprovalStatus !== "Approved" || row.CustomerApprovalStatus !== "Approved") {
+    if (row.SeniorApprovalStatus !== CrmStatus.APPROVED || row.CustomerApprovalStatus !== CrmStatus.APPROVED) {
       return res.status(400).json({ error: "Both senior and customer approval must be Approved before execution" });
     }
     if (!row.AgreementDate) {
@@ -1073,12 +1074,12 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
       .input("ub",  sql.Int, actor)
       .query(`
         UPDATE dbo.CrmAgreement SET
-          Status = 'Executed', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          Status = '${CrmStatus.EXECUTED}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
 
     await logCrmAudit(pool, "Agreement", id, actor, [
-      { field: "Status", oldVal: "Draft", newVal: "Executed" },
+      { field: "Status", oldVal: CrmStatus.DRAFT, newVal: CrmStatus.EXECUTED },
     ]);
 
     // Auto-flow: execution is one of two sales-deed prerequisites — fire the
@@ -1090,7 +1091,7 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     // bookings or ones with no broker.
     await maybeUnlockBrokerageOnAgreementExecuted(pool, row.BookingId);
 
-    res.json({ success: true, status: "Executed" });
+    res.json({ success: true, status: CrmStatus.EXECUTED });
   } catch (e) {
     console.error("[crm-agreements] mark-executed error:", e.message);
     res.status(500).json({ error: e.message });
@@ -1109,7 +1110,7 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status FROM dbo.CrmAgreement WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
-    if (cur.recordset[0].Status !== "Executed") {
+    if (cur.recordset[0].Status !== CrmStatus.EXECUTED) {
       return res.status(400).json({ error: `Cannot mark-registered from status '${cur.recordset[0].Status}'` });
     }
 
@@ -1125,15 +1126,15 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
       .input("id", sql.Int, id)
       .input("ub", sql.Int, actor)
       .query(`
-        UPDATE dbo.CrmAgreement SET Status = 'Registered', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        UPDATE dbo.CrmAgreement SET Status = '${CrmStatus.REGISTERED}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
 
     await logCrmAudit(pool, "Agreement", id, actor, [
-      { field: "Status", oldVal: "Executed", newVal: "Registered" },
+      { field: "Status", oldVal: CrmStatus.EXECUTED, newVal: CrmStatus.REGISTERED },
     ]);
 
-    res.json({ success: true, status: "Registered" });
+    res.json({ success: true, status: CrmStatus.REGISTERED });
   } catch (e) {
     console.error("[crm-agreements] mark-registered error:", e.message);
     res.status(500).json({ error: e.message });
@@ -1161,15 +1162,15 @@ router.put("/:id/cancel", requirePageRight("crm-agreements", "edit"), async (req
       .input("id", sql.Int, id)
       .input("ub", sql.Int, actor)
       .query(`
-        UPDATE dbo.CrmAgreement SET Status = 'Cancelled', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        UPDATE dbo.CrmAgreement SET Status = '${CrmStatus.CANCELLED}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
 
     await logCrmAudit(pool, "Agreement", id, actor, [
-      { field: "Status", oldVal: cur.recordset[0].Status, newVal: "Cancelled" },
+      { field: "Status", oldVal: cur.recordset[0].Status, newVal: CrmStatus.CANCELLED },
     ]);
 
-    res.json({ success: true, status: "Cancelled" });
+    res.json({ success: true, status: CrmStatus.CANCELLED });
   } catch (e) {
     console.error("[crm-agreements] cancel error:", e.message);
     res.status(500).json({ error: e.message });
@@ -1373,7 +1374,7 @@ router.post("/:id/documents/:docId/attach", requirePageRight("crm-documents", "c
         .input("id", sql.Int, docId).input("agid", sql.Int, agreementId)
         .query("SELECT Id, Status FROM dbo.CrmAgreementDocument WHERE Id = @id AND AgreementId = @agid");
       if (!cur.recordset.length) return res.status(404).json({ error: "Document not found for this agreement" });
-      if (!["Requested", "Rejected"].includes(cur.recordset[0].Status)) {
+      if (!["Requested", CrmStatus.REJECTED].includes(cur.recordset[0].Status)) {
         return res.status(400).json({ error: "This document already has a file — use Add Document to upload a corrected version instead" });
       }
 
@@ -1503,7 +1504,7 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
     // which meant a plain status-dropdown flip could reject a real
     // contractual document with zero explanation and nothing useful in the
     // audit trail beyond "Status: Uploaded -> Rejected".
-    if (b.Status === "Rejected" && !String(b.Remarks || "").trim()) {
+    if (b.Status === CrmStatus.REJECTED && !String(b.Remarks || "").trim()) {
       return res.status(400).json({ error: "Remarks are required to reject a document" });
     }
     // Split, not a blanket freeze: Verified is still allowed post-execution
@@ -1512,7 +1513,7 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
     // re-upload, but the customer-facing upload route is itself frozen at
     // Executed/Registered (crmPortal.js), so a post-execution reject would
     // leave the document permanently stuck Rejected with no way back.
-    if (b.Status === "Rejected") {
+    if (b.Status === CrmStatus.REJECTED) {
       const execLockReason = await agreementExecutedLockReason(pool, agreementId);
       if (execLockReason) return res.status(409).json({ error: `Cannot reject — ${execLockReason}. The document can no longer be re-uploaded, so rejecting it now would leave it permanently stuck.` });
     }
@@ -1604,8 +1605,8 @@ router.put("/documents/bulk-review", requirePageRight("crm-documents", "edit"), 
     const actor = actorId(req);
     const { docIds, status, remarks } = req.body || {};
     if (!Array.isArray(docIds) || !docIds.length) return res.status(400).json({ error: "docIds is required" });
-    if (!["Verified", "Rejected"].includes(status)) return res.status(400).json({ error: "status must be Verified or Rejected" });
-    if (status === "Rejected" && !String(remarks || "").trim()) return res.status(400).json({ error: "Remarks are required to reject" });
+    if (!["Verified", CrmStatus.REJECTED].includes(status)) return res.status(400).json({ error: "status must be Verified or Rejected" });
+    if (status === CrmStatus.REJECTED && !String(remarks || "").trim()) return res.status(400).json({ error: "Remarks are required to reject" });
 
     const results = { succeeded: [], skipped: [] };
     for (const rawId of docIds) {
@@ -1625,7 +1626,7 @@ router.put("/documents/bulk-review", requirePageRight("crm-documents", "edit"), 
         // post-execution (the customer's upload route is frozen too, so a
         // reject here would leave the document permanently stuck), Verified
         // stays allowed since it doesn't touch legal content.
-        if (status === "Rejected") {
+        if (status === CrmStatus.REJECTED) {
           const execLockReason = await agreementExecutedLockReason(pool, row.AgreementId);
           if (execLockReason) { results.skipped.push({ docId, reason: execLockReason }); continue; }
         }
@@ -1656,7 +1657,7 @@ router.put("/:id/portal/deactivate", requirePageRight("crm-agreements", "edit"),
     const result = await setPortalActive(pool, id, false);
     if (result.error) return res.status(result.status).json({ error: result.error });
     await logCrmAudit(pool, "Agreement", id, actorId(req), [
-      { field: "PortalAccess", oldVal: "Active", newVal: "Deactivated" },
+      { field: "PortalAccess", oldVal: CrmStatus.ACTIVE, newVal: "Deactivated" },
     ]);
     res.json({ success: true });
   } catch (e) {
@@ -1672,7 +1673,7 @@ router.put("/:id/portal/reactivate", requirePageRight("crm-agreements", "edit"),
     const result = await setPortalActive(pool, id, true);
     if (result.error) return res.status(result.status).json({ error: result.error });
     await logCrmAudit(pool, "Agreement", id, actorId(req), [
-      { field: "PortalAccess", oldVal: "Deactivated", newVal: "Active" },
+      { field: "PortalAccess", oldVal: "Deactivated", newVal: CrmStatus.ACTIVE },
     ]);
     res.json({ success: true });
   } catch (e) {

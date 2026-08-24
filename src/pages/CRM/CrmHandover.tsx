@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -168,7 +169,7 @@ const CrmHandover: React.FC = () => {
       const res = await fetchWithAuth(`${API}/${selectedId}/snags/${snagId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Status: "Resolved" }),
+        body: JSON.stringify({ Status: CrmStatus.RESOLVED }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("Snag resolved");
@@ -357,7 +358,7 @@ const CrmHandover: React.FC = () => {
                         className={`text-xs px-3 py-1.5 border rounded-lg font-medium transition-colors ${
                           s === "Completed"
                             ? "border-green-300 text-green-700 hover:bg-green-50"
-                            : s === "Cancelled"
+                            : s === CrmStatus.CANCELLED
                             ? "border-red-200 text-red-600 hover:bg-red-50"
                             : "border-border hover:bg-muted"
                         }`}>
@@ -388,7 +389,7 @@ const CrmHandover: React.FC = () => {
                       {s.RaisedByName && <div className="text-xs text-muted-foreground">Raised by {s.RaisedByName}</div>}
                       {s.ResolvedByName && <div className="text-xs text-muted-foreground">Resolved by {s.ResolvedByName}</div>}
                     </div>
-                    {s.Status === "Resolved" ? (
+                    {s.Status === CrmStatus.RESOLVED ? (
                       <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 size={12} /> Resolved</span>
                     ) : (
                       <button onClick={() => handleResolveSnag(s.Id)} className="text-xs text-primary hover:underline whitespace-nowrap">

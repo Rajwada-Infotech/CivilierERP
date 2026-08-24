@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -11,7 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   Search, Send, Undo2, Clock, CheckCircle2, AlertTriangle,
   ChevronDown, ChevronRight, Building2, User, Phone,
-  CalendarClock, FileText, Hash, LayoutList, Rows3,
+  CalendarClock, FileText, Hash, LayoutList, Rows3, Zap,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -89,17 +90,17 @@ async function fetchDemands(search: string): Promise<{ demands: DemandRow[] }> {
 // applied per-milestone instead of per-booking, so a booking with a mix of
 // statuses no longer dumps its whole balance into a single section.
 function classify(m: DemandRow): TabKey | null {
-  if (m.DemandStatus === "Paid") return "paid";
+  if (m.DemandStatus === CrmStatus.PAID) return "paid";
   if (m.IsOverdue) return "overdue";
-  if (m.DemandStatus === "Demanded") return "demanded";
-  if (m.DemandStatus === "Pending") return "pending";
+  if (m.DemandStatus === CrmStatus.DEMANDED) return "demanded";
+  if (m.DemandStatus === CrmStatus.PENDING) return "pending";
   return null;
 }
 
 function MilestoneStatusBadge({ status }: { status: DemandStatus }) {
-  if (status === "Paid")
+  if (status === CrmStatus.PAID)
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"><CheckCircle2 className="w-3 h-3" /> Cleared</span>;
-  if (status === "Demanded")
+  if (status === CrmStatus.DEMANDED)
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400"><Send className="w-3 h-3" /> Demanded</span>;
   return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400"><Clock className="w-3 h-3" /> Not Raised</span>;
 }
@@ -124,7 +125,7 @@ function MilestoneRow({
   showBooking?: boolean;
 }) {
   const balance = Math.max(0, Number(m.AmountDue || 0) - Number(m.AmountPaid || 0));
-  const isOverdue = !!m.IsOverdue && m.DemandStatus !== "Paid";
+  const isOverdue = !!m.IsOverdue && m.DemandStatus !== CrmStatus.PAID;
   return (
     <div className={`flex items-center gap-3 px-4 py-2.5 text-sm ${isOverdue ? "bg-red-50/50 dark:bg-red-950/10" : ""}`}>
       {showBooking && (
@@ -167,14 +168,14 @@ function MilestoneRow({
       </div>
 
       <div className="shrink-0 w-20">
-        {!canEdit ? null : m.DemandStatus === "Pending" && balance > 0 ? (
+        {!canEdit ? null : m.DemandStatus === CrmStatus.PENDING && balance > 0 ? (
           <button
             onClick={(e) => { e.stopPropagation(); onRaise(m); }}
             className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 font-semibold w-full justify-center"
           >
             <Send className="w-3 h-3" /> Raise
           </button>
-        ) : m.DemandStatus === "Demanded" ? (
+        ) : m.DemandStatus === CrmStatus.DEMANDED ? (
           <button
             onClick={(e) => { e.stopPropagation(); onUndo(m); }}
             className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] border border-border rounded-lg hover:bg-muted text-foreground/70 hover:text-foreground w-full justify-center"
@@ -263,6 +264,10 @@ const CrmDemands: React.FC = () => {
   const [undoRow, setUndoRow] = useState<DemandRow | null>(null);
   const [raising, setRaising] = useState(false);
   const [undoing, setUndoing] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkProject, setBulkProject] = useState("");
+  const [bulkMilestone, setBulkMilestone] = useState("");
+  const [bulkRunning, setBulkRunning] = useState(false);
 
   // canDoAction is AuthContext's own permission check (backed by
   // AuthUtils.createPermissionCheckers) — using it directly instead of
@@ -361,6 +366,31 @@ const CrmDemands: React.FC = () => {
     }
   }
 
+  async function handleBulkRaise() {
+    setBulkRunning(true);
+    try {
+      const res = await fetchWithAuth(`${API}/demands/bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectName: bulkProject.trim() || undefined,
+          milestoneName: bulkMilestone.trim() || undefined,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "Bulk demand failed");
+      toast.success(`Raised ${body.raised} demand${body.raised !== 1 ? "s" : ""}${body.skipped ? ` · ${body.skipped} already raised` : ""}${body.errors?.length ? ` · ${body.errors.length} error(s)` : ""}`);
+      setBulkOpen(false);
+      setBulkProject("");
+      setBulkMilestone("");
+      qc.invalidateQueries({ queryKey: ["crm-demands"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setBulkRunning(false);
+    }
+  }
+
   // Single source of truth: derived from tabbed (classify()), same as the
   // tab bar below. Previously read from the backend's `summary` object,
   // which classifies overdue as an ADDITIVE flag (a Pending-and-overdue row
@@ -382,7 +412,19 @@ const CrmDemands: React.FC = () => {
       <CrmShell
         title="CRM — Payment Demands"
       subtitle="Raise and track formal payment demands across all bookings"
-      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
+      action={
+        <div className="flex items-center gap-2">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          {canEdit && (
+            <button
+              onClick={() => setBulkOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
+            >
+              <Zap size={14} /> Raise All
+            </button>
+          )}
+        </div>
+      }
     >
       {/* Summary strip — always computed from the FULL result set (view=all,
           search only), so these numbers never collapse to 0 just because a
@@ -562,6 +604,50 @@ const CrmDemands: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* Bulk Raise Dialog */}
+      <Dialog open={bulkOpen} onOpenChange={(o) => { if (!o) { setBulkOpen(false); setBulkProject(""); setBulkMilestone(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Zap size={16} /> Raise All Eligible Demands</DialogTitle></DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-xs text-muted-foreground">
+              Raises demands for every <strong>Pending</strong> milestone that has an outstanding balance.
+              Leave filters blank to target all projects and milestones.
+            </p>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Filter by Project (optional)</label>
+              <input
+                type="text"
+                value={bulkProject}
+                onChange={(e) => setBulkProject(e.target.value)}
+                placeholder="e.g. Sunrise Heights"
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Filter by Milestone Name (optional)</label>
+              <input
+                type="text"
+                value={bulkMilestone}
+                onChange={(e) => setBulkMilestone(e.target.value)}
+                placeholder="e.g. Slab Completion"
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+              />
+            </div>
+            <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              This action raises demands in bulk. Already-raised or paid milestones are skipped automatically.
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <button onClick={() => { setBulkOpen(false); setBulkProject(""); setBulkMilestone(""); }}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleBulkRaise} disabled={bulkRunning}
+              className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              <Zap className="w-3.5 h-3.5" /> {bulkRunning ? "Raising…" : "Raise All"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </CrmShell>
     </>
   );

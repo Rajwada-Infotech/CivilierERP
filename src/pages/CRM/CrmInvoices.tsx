@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -95,13 +96,13 @@ function getMilestoneInsight(m: any, existingInvoices: any[]): MilestoneInsight 
   if (existingInv) {
     return { tone: "invoiced", message: `Already invoiced — ${existingInv.InvoiceNo}`, icon: FileText as any };
   }
-  if (m.Status !== "Paid" && m.Status !== "Waived") {
+  if (m.Status !== CrmStatus.PAID && m.Status !== "Waived") {
     const due = Number(m.AmountDue || 0) - Number(m.AmountPaid || 0);
     return Number(m.AmountPaid) > 0
       ? { tone: "partial", message: `${fmtMoney(due)} more needed to complete this milestone`, icon: Clock }
       : { tone: "unpaid", message: "No payment received yet", icon: Clock };
   }
-  if (m.DemandStatus === "Pending") {
+  if (m.DemandStatus === CrmStatus.PENDING) {
     return { tone: "demand", message: "Fully paid — raise a demand (Demands page) to unlock invoicing", icon: AlertCircle };
   }
   return { tone: "ready", message: "Ready to invoice", icon: CheckCircle2 };
@@ -286,7 +287,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
   // Other invoice never touches this, so raising one while this is non-empty
   // is the exact shape of mistake this warning exists to catch.
   const outstandingMilestones = milestones.filter(
-    (m) => m.Status !== "Paid" && m.Status !== "Waived" && (Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)) > 0
+    (m) => m.Status !== CrmStatus.PAID && m.Status !== "Waived" && (Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)) > 0
   );
   const outstandingTotal = outstandingMilestones.reduce((s, m) => s + (Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)), 0);
   const showUnlinkedWarning = (form.InvoiceType === "Maintenance" || form.InvoiceType === "Other") && outstandingMilestones.length > 0;
@@ -376,7 +377,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
 
   // Milestone status pill styling, shared by the payment-plan table below.
   function milestoneStatusPill(m: any) {
-    if (m.Status === "Paid") return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-emerald-700 bg-emerald-50 border-emerald-200">Paid</span>;
+    if (m.Status === CrmStatus.PAID) return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-emerald-700 bg-emerald-50 border-emerald-200">Paid</span>;
     if (m.Status === "Waived") return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">Waived</span>;
     if (Number(m.AmountPaid) > 0) return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">Partially Paid</span>;
     return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">Pending</span>;
@@ -429,8 +430,8 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-xs font-semibold text-primary">{b.BookingNo}</span>
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${
-                          b.Status === "Approved" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-                            : b.Status === "Rejected" || b.Status === "Cancelled" ? "text-red-700 bg-red-50 border-red-200"
+                          b.Status === CrmStatus.APPROVED ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                            : b.Status === CrmStatus.REJECTED || b.Status === CrmStatus.CANCELLED ? "text-red-700 bg-red-50 border-red-200"
                             : "text-amber-700 bg-amber-50 border-amber-200"
                         }`}>{b.Status}</span>
                       </div>

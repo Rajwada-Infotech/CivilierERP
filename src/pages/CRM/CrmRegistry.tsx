@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -144,7 +145,7 @@ const CrmRegistry: React.FC = () => {
         if (r.Status === "Completed") return <span className="text-xs text-muted-foreground">�</span>;
         return (
           <div className="flex items-center gap-2">
-            {r.Status === "Pending" && (
+            {r.Status === CrmStatus.PENDING && (
               <button onClick={() => { setScheduleId(r.Id); setScheduledDate(""); }} className="flex items-center gap-1 text-xs text-primary hover:underline">
                 <CalendarClock size={11} /> Schedule
               </button>

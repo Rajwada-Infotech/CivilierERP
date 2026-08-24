@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -107,7 +108,7 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
   const milestone = await pool.request().input("ecid", sql.Int, id)
     .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ExtraChargeId = @ecid ORDER BY Id DESC");
   if (milestone.recordset.length) {
-    if (milestone.recordset[0].Status === "Paid") {
+    if (milestone.recordset[0].Status === CrmStatus.PAID) {
       throw chargeError("This charge has already been paid and cannot be edited", 409);
     }
   } else if (await isBookingFullySettled(pool, BookingId)) {
@@ -175,7 +176,7 @@ async function applyAddExtraChargeToApplication(pool, applicationId, b, actorUse
   if (!app.recordset.length) throw chargeError("Application not found", 404);
   // Same Draft/Pending gate as Parking's Application-stage step
   // (ParkingSelectionStep) — free to change pre-approval, locked after.
-  if (!["Draft", "Pending"].includes(app.recordset[0].Status)) {
+  if (![CrmStatus.DRAFT, CrmStatus.PENDING].includes(app.recordset[0].Status)) {
     throw chargeError(`Cannot change this application's extra work once it is ${app.recordset[0].Status} — this is locked after approval.`);
   }
 
@@ -226,7 +227,7 @@ async function applyReleaseExtraCharge(pool, id) {
     if (ApplicationId) {
       const app = await pool.request().input("aid", sql.Int, ApplicationId)
         .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
-      if (app.recordset.length && !["Draft", "Pending"].includes(app.recordset[0].Status)) {
+      if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING].includes(app.recordset[0].Status)) {
         throw chargeError(`Cannot change this application's extra work once it is ${app.recordset[0].Status} — this is locked after approval.`);
       }
     }
@@ -240,7 +241,7 @@ async function applyReleaseExtraCharge(pool, id) {
   const milestone = await pool.request().input("ecid", sql.Int, id)
     .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ExtraChargeId = @ecid ORDER BY Id DESC");
   if (milestone.recordset.length) {
-    if (milestone.recordset[0].Status === "Paid") {
+    if (milestone.recordset[0].Status === CrmStatus.PAID) {
       throw chargeError("This charge has already been paid and cannot be removed", 409);
     }
   } else if (await isBookingFullySettled(pool, BookingId)) {

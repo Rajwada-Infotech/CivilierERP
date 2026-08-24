@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -39,7 +40,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     const alertWelcomeCallQ = addPid(pool.request()).query(`
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmBooking b
-      WHERE b.IsActive = 1 AND b.Status = 'Approved' ${projBookingCond}
+      WHERE b.IsActive = 1 AND b.Status = '${CrmStatus.APPROVED}' ${projBookingCond}
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmWelcomeCall w
           WHERE w.BookingId = b.Id AND w.Outcome = 'Welcomed'
@@ -51,8 +52,8 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected') ${projBookingCond}
-        AND m.Status = 'Pending' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
+        AND m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
     `);
 
     // 3. Disputed possession notices (permanently blocks handover)
@@ -79,7 +80,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmServiceTicket t
       JOIN dbo.CrmBooking b ON b.Id = t.BookingId
-      WHERE t.Status NOT IN ('Resolved','Closed') ${projBookingCond}
+      WHERE t.Status NOT IN ('${CrmStatus.RESOLVED}','${CrmStatus.CLOSED}') ${projBookingCond}
         AND t.Priority IN ('Urgent','High')
     `);
 
@@ -88,7 +89,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmCancellation c
       JOIN dbo.CrmBooking b ON b.Id = c.BookingId
-      WHERE c.Status = 'Pending' ${projBookingCond}
+      WHERE c.Status = '${CrmStatus.PENDING}' ${projBookingCond}
     `);
 
     // 7. Sales deeds awaiting customer portal approval
@@ -96,7 +97,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmSalesDeed sd
       JOIN dbo.CrmBooking b ON b.Id = sd.BookingId
-      WHERE sd.CustomerApprovalStatus = 'Pending' ${projBookingCond}
+      WHERE sd.CustomerApprovalStatus = '${CrmStatus.PENDING}' ${projBookingCond}
         AND b.IsActive = 1
     `);
 
@@ -105,7 +106,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmSalesDeed sd
       JOIN dbo.CrmBooking b ON b.Id = sd.BookingId
-      WHERE sd.DirectorApprovalStatus = 'Pending' ${projBookingCond}
+      WHERE sd.DirectorApprovalStatus = '${CrmStatus.PENDING}' ${projBookingCond}
         AND b.IsActive = 1
     `);
 
@@ -114,7 +115,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmNoc n
       JOIN dbo.CrmBooking b ON b.Id = n.BookingId
-      WHERE n.Status = 'Approved' ${projBookingCond}
+      WHERE n.Status = '${CrmStatus.APPROVED}' ${projBookingCond}
         AND b.IsActive = 1
     `);
 
@@ -123,12 +124,12 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     const alertAgreementsPendingQ = addPid(pool.request()).query(`
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmBooking b
-      WHERE b.IsActive = 1 AND b.Status = 'Approved' ${projBookingCond}
+      WHERE b.IsActive = 1 AND b.Status = '${CrmStatus.APPROVED}' ${projBookingCond}
         AND (
           NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement a WHERE a.BookingId = b.Id)
           OR EXISTS (
             SELECT 1 FROM dbo.CrmAgreement a
-            WHERE a.BookingId = b.Id AND a.Status = 'Draft'
+            WHERE a.BookingId = b.Id AND a.Status = '${CrmStatus.DRAFT}'
               AND DATEDIFF(DAY, a.CreatedAt, SYSDATETIME()) > 5
           )
         )
@@ -152,8 +153,8 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
           WHERE r.Status = 'Scheduled' AND CAST(r.ScheduledDate AS DATE) = d.D ${projBookingCond}), 0) AS Registries,
         ISNULL((SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
           JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-          WHERE m.Status = 'Pending' AND CAST(m.DueDate AS DATE) = d.D
-            AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected') ${projBookingCond}), 0) AS MilestonesDue
+          WHERE m.Status = '${CrmStatus.PENDING}' AND CAST(m.DueDate AS DATE) = d.D
+            AND b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}), 0) AS MilestonesDue
       FROM Days d
       ORDER BY d.D
     `);
@@ -164,7 +165,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     const unitsSoldThisMonthQ = addPid(pool.request()).query(`
       SELECT COUNT(*) AS Cnt, ISNULL(SUM(TotalValue), 0) AS TotalValue
       FROM dbo.CrmBooking b
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected') ${projBookingCond}
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
         AND CAST(b.BookingDate AS DATE) >= DATEFROMPARTS(YEAR(SYSDATETIME()), MONTH(SYSDATETIME()), 1)
     `);
 
@@ -174,10 +175,10 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         b.ProjectName,
         ISNULL(SUM(m.AmountDue), 0)  AS TotalDue,
         ISNULL(SUM(m.AmountPaid), 0) AS TotalPaid,
-        SUM(CASE WHEN m.Status = 'Pending' AND m.DueDate < CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END) AS OverdueCount
+        SUM(CASE WHEN m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END) AS OverdueCount
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected')
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME())
       GROUP BY b.ProjectName
       ORDER BY b.ProjectName
     `);
@@ -189,10 +190,35 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         COUNT(*) AS MilestoneCount
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected') ${projBookingCond}
-        AND m.Status = 'Pending'
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
+        AND m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate BETWEEN CAST(SYSDATETIME() AS DATE)
             AND DATEADD(DAY, 30, CAST(SYSDATETIME() AS DATE))
+    `);
+
+    // Funnel stage counts — Applications → Bookings → Agreements → Possessions
+    const funnelQ = addPid(pool.request()).query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.CrmApplication a
+          WHERE a.IsActive = 1
+          ${projectId ? "AND EXISTS (SELECT 1 FROM dbo.CrmBooking bx WHERE bx.ApplicationId = a.Id AND bx.ProjectId = @pid)" : ""}
+        ) AS Applications,
+        (SELECT COUNT(*) FROM dbo.CrmBooking b
+          WHERE b.IsActive = 1
+            AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired')
+            ${projectId ? "AND b.ProjectId = @pid" : ""}
+        ) AS Bookings,
+        (SELECT COUNT(*) FROM dbo.CrmAgreement ag
+          JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+          WHERE ag.Status IN ('${CrmStatus.EXECUTED}','${CrmStatus.REGISTERED}')
+            AND b.IsActive = 1
+            ${projectId ? "AND b.ProjectId = @pid" : ""}
+        ) AS Agreements,
+        (SELECT COUNT(*) FROM dbo.CrmHandover h
+          JOIN dbo.CrmBooking b ON b.Id = h.BookingId
+          WHERE h.Status = 'Completed'
+            ${projectId ? "AND b.ProjectId = @pid" : ""}
+        ) AS Possessions
     `);
 
     // Existing aggregates (scoped to project where possible)
@@ -215,10 +241,10 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT
         ISNULL(SUM(m.AmountDue), 0)  AS TotalDue,
         ISNULL(SUM(m.AmountPaid), 0) AS TotalPaid,
-        SUM(CASE WHEN m.Status = 'Pending' AND m.DueDate < CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END) AS OverdueCount
+        SUM(CASE WHEN m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END) AS OverdueCount
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected') ${projBookingCond}
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
     `);
 
     const ticketsQ = addPid(pool.request()).query(`
@@ -281,6 +307,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       alertDeedsCustomer, alertDeedsDirector, alertNocsNotIssued, alertAgreements,
       thisWeek, unitsSoldThisMonth, collectionPerProject, forwardDue,
       apps, bkgs, payments, tickets, cancellations, handovers, monthlyTrend,
+      funnel,
     ] = await Promise.all([
       projectsQ,
       alertWelcomeCallQ, alertOverdueDemandsQ, alertDisputedNoticesQ,
@@ -289,6 +316,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       alertNocsNotIssuedQ, alertAgreementsPendingQ,
       thisWeekQ, unitsSoldThisMonthQ, collectionPerProjectQ, forwardDueQ,
       appsQ, bookingsQ, paymentsQ, ticketsQ, cancellationsQ, handoversQ, monthlyTrendQ,
+      funnelQ,
     ]);
 
     res.json({
@@ -320,6 +348,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       cancellations:  cancellations.recordset,
       handovers:      handovers.recordset,
       monthlyTrend:   monthlyTrend.recordset,
+      funnel:         funnel.recordset[0] ?? { Applications: 0, Bookings: 0, Agreements: 0, Possessions: 0 },
     });
   } catch (e) {
     console.error("[crm-dashboard] GET error:", e.message);
