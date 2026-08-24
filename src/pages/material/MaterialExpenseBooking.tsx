@@ -355,6 +355,22 @@ export default function MaterialExpenseBooking() {
     () => [...supplierHeads, ...contractorHeads, ...customerHeads],
     [supplierHeads, contractorHeads, customerHeads],
   );
+  // Payable Party picker below — the Select's own value has to be each
+  // head's unique id, not its display name. Two different real parties can
+  // share the exact same name (e.g. two people both named "Raja Biswas",
+  // one a Contractor and one a Broker) — keying by name gave Radix's Select
+  // two DOM nodes registered under the identical value, and it rendered
+  // BOTH matching labels concatenated in the trigger ("Raja BiswasRaja
+  // Biswas"). Derived here (not separate state) from supplierLHeadId, the
+  // one field that's already guaranteed unique.
+  const supplierSelectValue = useMemo(() => {
+    const id = form.supplierLHeadId;
+    if (id == null) return "";
+    if (supplierHeads.some((s) => s.id === id)) return `s:${id}`;
+    if (contractorHeads.some((c) => c.id === id)) return `c:${id}`;
+    if (brokerHeads.some((b) => b.id === id)) return `b:${id}`;
+    return "";
+  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads]);
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
@@ -1799,14 +1815,15 @@ export default function MaterialExpenseBooking() {
                         </div>
                       ) : (
                         <Select
-                          value={form.supplier || ""}
-                          onValueChange={(name) => {
+                          value={supplierSelectValue}
+                          onValueChange={(key) => {
+                            const [prefix, idStr] = key.split(":");
+                            const id = Number(idStr);
+                            const list =
+                              prefix === "s" ? supplierHeads : prefix === "c" ? contractorHeads : brokerHeads;
+                            const head = list.find((h) => h.id === id);
+                            const name = head?.label ?? "";
                             set("supplier", name);
-                            const head = name
-                              ? supplierHeads.find((s) => s.label === name) ??
-                                contractorHeads.find((c) => c.label === name) ??
-                                brokerHeads.find((b) => b.label === name)
-                              : undefined;
                             set("supplierLHeadId", head?.id ?? null);
                             // Other Expenses (TOD) bookings have no source-doc
                             // label to name themselves after — keep the
@@ -1837,7 +1854,7 @@ export default function MaterialExpenseBooking() {
                               <SelectGroup>
                                 <SelectLabel>Suppliers</SelectLabel>
                                 {supplierHeads.map((s) => (
-                                  <SelectItem key={`s-${s.id}`} value={s.label}>{s.label}</SelectItem>
+                                  <SelectItem key={`s-${s.id}`} value={`s:${s.id}`}>{s.label}</SelectItem>
                                 ))}
                               </SelectGroup>
                             )}
@@ -1845,7 +1862,7 @@ export default function MaterialExpenseBooking() {
                               <SelectGroup>
                                 <SelectLabel>Contractors</SelectLabel>
                                 {contractorHeads.map((c) => (
-                                  <SelectItem key={`c-${c.id}`} value={c.label}>{c.label}</SelectItem>
+                                  <SelectItem key={`c-${c.id}`} value={`c:${c.id}`}>{c.label}</SelectItem>
                                 ))}
                               </SelectGroup>
                             )}
@@ -1853,7 +1870,7 @@ export default function MaterialExpenseBooking() {
                               <SelectGroup>
                                 <SelectLabel>Brokers</SelectLabel>
                                 {brokerHeads.map((b) => (
-                                  <SelectItem key={`b-${b.id}`} value={b.label}>{b.label}</SelectItem>
+                                  <SelectItem key={`b-${b.id}`} value={`b:${b.id}`}>{b.label}</SelectItem>
                                 ))}
                               </SelectGroup>
                             )}
