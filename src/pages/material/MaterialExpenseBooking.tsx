@@ -1825,10 +1825,26 @@ export default function MaterialExpenseBooking() {
                             const name = head?.label ?? "";
                             set("supplier", name);
                             set("supplierLHeadId", head?.id ?? null);
+                            // This Select only ever renders when no PO/GRN/
+                            // Work Done is linked (the branch above it covers
+                            // that case) — so picking a party here always
+                            // means a direct/"Other Expenses" booking. It
+                            // used to rely on selectedDoc already being
+                            // {kind:"TOD"} from a separate template-list pick
+                            // first, but nothing requires that step anymore —
+                            // stamp it here instead, otherwise isDirect &&
+                            // selectedDoc?.kind==='TOD' (which gates TDS, the
+                            // Direct Items table, and Expense Head
+                            // Allocation) never turns on and none of them
+                            // ever show for a party picked straight from
+                            // this field.
+                            if (name && !selectedDoc) {
+                              setSelectedDoc({ kind: "TOD", docNo: "", sourceId: 0 });
+                            }
                             // Other Expenses (TOD) bookings have no source-doc
                             // label to name themselves after — keep the
                             // booking name in sync with the chosen supplier.
-                            if (name && selectedDoc?.kind === "TOD") {
+                            if (name && (selectedDoc?.kind === "TOD" || !selectedDoc)) {
                               set("bookingName", `Payment for ${name}`);
                             }
                             if (!name) return;
