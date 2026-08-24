@@ -112,6 +112,35 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
   }
 });
 
+// ── GET /:id — single record, for deep links (Trial Balance's ledger
+// drill-down navigates here as /received-payments?view=<id>) ────────────────
+router.get("/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("id", sql.Int, id).query(`
+        SELECT
+          RPPaymentID, RPCompanyName, RPReceivedFrom, RPProjectName,
+          RPDocDate, RPMode, RPAmount, RPBankName, RPTransactionID, RPCheckNumber,
+          RPChequeDate, RPIsPostDated, RPRemarks, RPIsEmi, RPEmiTotal, RPEmiMonths, RPEmiStartDate,
+          RPEmiSchedule, RPEmiPaying, RPStatus, RPCreatedBy, RPCreatedAt,
+          RPUpdatedBy, RPUpdatedAt, RPApprovedBy, RPApprovedAt,
+          RPRejectedBy, RPRejectedAt, RPRejectionNote,
+          RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
+          RPCustomerName, RPDepositBankId, RPDepositBankName,
+          SourceSaleInvoiceId, SourceSaleInvoiceDocNo
+        FROM dbo.ReceivedPayment
+        WHERE RPPaymentID = @id
+      `);
+    if (!result.recordset.length) return res.status(404).json({ error: "Received payment not found" });
+    res.json(result.recordset[0]);
+  } catch (err) {
+    console.error("GET /received-payment/:id error:", err);
+    res.status(500).json({ error: "Failed to fetch received payment" });
+  }
+});
+
 // ── POST / ────────────────────────────────────────────────────────────────────
 // ─── Internal creation function ──────────────────────────────────────────────
 // Extracted from POST / so other server-side callers (the Inter-Company
