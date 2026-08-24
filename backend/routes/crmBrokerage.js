@@ -130,7 +130,8 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
   if (existing.recordset.length) return { existing: true, ...existing.recordset[0] };
 
   const br = await pool.request().input("id", sql.Int, brokerageId).query(`
-    SELECT br.Id, br.Status, br.ComputedAmount, br.TDSPercentage, br.TDSAmount, br.NetPayable,
+    SELECT br.Id, br.Status, br.ComputedAmount, br.TDSId, br.TDSNature, br.TDSName,
+           br.TDSPercentage, br.TDSAmount, br.NetPayable,
            br.BrokerId, br.BrokerName, br.TrancheLabel, b.BookingNo, b.CompanyId, b.ProjectId
     FROM dbo.CrmBrokerageMaster br
     JOIN dbo.CrmBooking b ON b.Id = br.BookingId
@@ -183,12 +184,18 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
     .input("finYearId", sql.Int, pFinYearId)
     .input("sourceBrokerageId", sql.Int, brokerageId)
     .input("createdBy", sql.NVarChar(100), actorEmail || String(actorId(req)))
+    .input("tdsId",     sql.Int,           row.TDSId ?? null)
+    .input("tdsNature", sql.NVarChar(200), row.TDSNature ?? null)
+    .input("tdsName",   sql.NVarChar(200), row.TDSName ?? null)
+    .input("tdsPct",    sql.Decimal(5,2),  Number(row.TDSPercentage) || 0)
+    .input("tdsAmt",    sql.Decimal(18,2), Number(row.TDSAmount) || 0)
     .query(`
       INSERT INTO dbo.NewPayment (
         PPaymentName, PRemarks, PMode, PBankName, PAmount, PDocType, PDate,
         PProject, PCompany, PPartyId,
         DocNo, DocTypeId, DocYear, DocSerial, PFinYearId,
         SourceCrmBrokerageId,
+        TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount,
         PCreatedAt, PCreatedBy, PApprovedBy, Status
       )
       OUTPUT INSERTED.PPaymentID
@@ -197,6 +204,7 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
         @project, @company, @partyId,
         @docNo, @docTypeId, @docYear, @docSerial, @finYearId,
         @sourceBrokerageId,
+        @tdsId, @tdsNature, @tdsName, @tdsPct, @tdsAmt,
         SYSDATETIME(), @createdBy, NULL, 'Pending'
       )
     `);
@@ -263,15 +271,24 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     }
 
     const broker = await pool.request().input("bid", sql.Int, parseInt(b.BrokerId))
-      .query("SELECT LHeadId, LHeadName, LHeadPhone FROM dbo.AccountHeadMaster WHERE LHeadId = @bid AND LHeadType = 'BR' AND LHeadStatus = 1");
+      .query("SELECT LHeadId, LHeadName, LHeadPhone, ISNULL(IsTdsApplicable,1) AS IsTdsApplicable, ISNULL(TdsLimitApplicable,1) AS TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @bid AND LHeadType = 'BR' AND LHeadStatus = 1");
     if (!broker.recordset.length) return res.status(400).json({ error: "Selected broker does not exist or is inactive" });
+
+    const brokerRow = broker.recordset[0];
+    // Enforce TDS flag from Broker Master — if broker is marked non-applicable,
+    // silently clear any submitted TDSId; if applicable and TDSId omitted,
+    // warn but allow (threshold enforcement would need cumulative lookup).
+    if (!brokerRow.IsTdsApplicable && b.TDSId) {
+      b.TDSId = null; // Broker marked TDS not applicable — ignore submitted TDS
+    }
 
     const rateType = b.RateType === "Amount" ? "Amount" : "Percentage";
     const rateValue = parseFloat(b.RateValue);
     if (!rateValue || rateValue <= 0) return res.status(400).json({ error: "RateValue must be greater than 0" });
     const bk = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
-      .query("SELECT TotalValue, ParkingTotal FROM dbo.CrmBooking WHERE Id = @bid");
-    const dealValue = Number(bk.recordset[0]?.TotalValue || 0) + Number(bk.recordset[0]?.ParkingTotal || 0);
+      .query("SELECT TotalValue, ParkingTotal, CompanyId FROM dbo.CrmBooking WHERE Id = @bid");
+    const bkRow = bk.recordset[0] || {};
+    const dealValue = Number(bkRow.TotalValue || 0) + Number(bkRow.ParkingTotal || 0);
 
     try {
       assertSanePercentRate(rateType, rateValue, dealValue);
@@ -280,27 +297,40 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     }
     const computedAmount = rateType === "Percentage" ? Math.round(dealValue * rateValue) / 100 : rateValue;
 
-    // Resolve TDS snapshot from TDSMaster (same pattern as ExpenseBooking)
-    let tdsId = null, tdsNature = null, tdsName = null, tdsPercentage = 0, tdsAmount = 0;
-    if (b.TDSId) {
-      const tdsRow = await pool.request().input("TDSId", sql.Int, parseInt(b.TDSId, 10))
-        .query("SELECT TDSId, Nature, Name, Percentage, Status FROM dbo.TDSMaster WHERE TDSId = @TDSId");
-      const tds = tdsRow.recordset[0];
-      if (!tds || !tds.Status) return res.status(400).json({ error: "Selected TDS is not a valid, active TDS record" });
-      tdsId = tds.TDSId;
-      tdsNature = tds.Nature;
-      tdsName = tds.Name;
-      tdsPercentage = Number(tds.Percentage) || 0;
-      tdsAmount = calculateTds(computedAmount, tdsPercentage);
+    // Resolve TDS via the shared tds.js pipeline (same as ExpenseBooking /
+    // NewPayment direct-payment path) — this enforces IsTdsApplicable,
+    // evaluates the TdsLimitApplicable threshold (₹30k single / ₹1L
+    // cumulative per company per FY), and validates the selected TDS record.
+    const { resolveTds } = require("../services/tds");
+    let tdsSnapshot;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const finYearId = await resolveFinYearId(pool, today);
+      tdsSnapshot = await resolveTds(pool, sql, {
+        partyHeadId: brokerRow.LHeadId,
+        tdsApplicableFlag: !!brokerRow.IsTdsApplicable,
+        tdsLimitApplicable: !!brokerRow.TdsLimitApplicable,
+        billAmount: computedAmount,
+        companyId: bkRow.CompanyId ? parseInt(bkRow.CompanyId, 10) : null,
+        finYearId,
+        selectedTdsId: b.TDSId ? parseInt(b.TDSId, 10) : null,
+      });
+    } catch (tdsErr) {
+      return res.status(tdsErr.status || 400).json({ error: tdsErr.message });
     }
+    const tdsId = tdsSnapshot.tdsId;
+    const tdsNature = tdsSnapshot.tdsNature;
+    const tdsName = tdsSnapshot.tdsName;
+    const tdsPercentage = tdsSnapshot.tdsPercentage || 0;
+    const tdsAmount = tdsSnapshot.tdsAmount || 0;
     const netPayable = Math.round((computedAmount - tdsAmount) * 100) / 100;
 
     const result = await pool.request()
       .input("bid",   sql.Int,           parseInt(b.BookingId))
-      .input("brid",  sql.Int,           broker.recordset[0].LHeadId)
-      .input("name",  sql.NVarChar(200), broker.recordset[0].LHeadName)
+      .input("brid",  sql.Int,           brokerRow.LHeadId)
+      .input("name",  sql.NVarChar(200), brokerRow.LHeadName)
       .input("firm",  sql.NVarChar(200), b.BrokerFirm || null)
-      .input("con",   sql.NVarChar(20),  broker.recordset[0].LHeadPhone || null)
+      .input("con",   sql.NVarChar(20),  brokerRow.LHeadPhone || null)
       .input("rt",    sql.NVarChar(20),  rateType)
       .input("rv",    sql.Decimal(18,2), rateValue)
       .input("camt",  sql.Decimal(18,2), computedAmount)
@@ -342,15 +372,23 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
     const cur = await pool.request().input("id", sql.Int, id).query(`
       SELECT br.Status, br.RateType, br.RateValue,
              br.TDSId, br.TDSNature, br.TDSName, br.TDSPercentage,
-             b.TotalValue, b.ParkingTotal
+             br.BrokerId,
+             b.TotalValue, b.ParkingTotal, b.CompanyId,
+             ISNULL(ahm.IsTdsApplicable,1)    AS BrokerIsTdsApplicable,
+             ISNULL(ahm.TdsLimitApplicable,1) AS BrokerTdsLimitApplicable
       FROM dbo.CrmBrokerageMaster br
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = br.BrokerId
       WHERE br.Id = @id
     `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Brokerage record not found" });
     const row = cur.recordset[0];
     if (row.Status === CrmStatus.APPROVED || row.Status === CrmStatus.PAID) {
       return res.status(400).json({ error: "Brokerage can only be customized before approval" });
+    }
+    // If broker is marked TDS not applicable, ignore any submitted TDSId
+    if (!row.BrokerIsTdsApplicable && b.TDSId) {
+      b.TDSId = "";
     }
 
     const rateType = b.RateType === "Amount" ? "Amount" : (b.RateType === "Percentage" ? "Percentage" : row.RateType);
@@ -369,25 +407,36 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
       return res.status(400).json({ error: "ComputedAmount must be greater than 0" });
     }
 
-    // Re-resolve TDS snapshot if a new TDSId is supplied, otherwise keep existing
-    let putTdsId = row.TDSId ?? null;
-    let putTdsNature = row.TDSNature ?? null;
-    let putTdsName = row.TDSName ?? null;
-    let putTdsPct = Number(row.TDSPercentage) || 0;
-    if (b.TDSId != null) {
-      if (b.TDSId === "" || b.TDSId === 0) {
-        // Caller explicitly cleared TDS
-        putTdsId = null; putTdsNature = null; putTdsName = null; putTdsPct = 0;
-      } else {
-        const tdsRow = await pool.request().input("TDSId", sql.Int, parseInt(b.TDSId, 10))
-          .query("SELECT TDSId, Nature, Name, Percentage, Status FROM dbo.TDSMaster WHERE TDSId = @TDSId");
-        const tds = tdsRow.recordset[0];
-        if (!tds || !tds.Status) return res.status(400).json({ error: "Selected TDS is not a valid, active TDS record" });
-        putTdsId = tds.TDSId; putTdsNature = tds.Nature; putTdsName = tds.Name;
-        putTdsPct = Number(tds.Percentage) || 0;
-      }
+    // Re-resolve TDS via the shared pipeline — enforces IsTdsApplicable and
+    // TdsLimitApplicable threshold (₹30k / ₹1L) exactly like the POST path.
+    // The caller may pass a new TDSId, clear it (""/0), or omit it (null),
+    // in which case we keep what is already stored on the record.
+    const selectedTdsId =
+      b.TDSId === "" || b.TDSId === 0 ? null
+      : b.TDSId != null               ? parseInt(b.TDSId, 10)
+      :                                  row.TDSId ?? null;
+    const { resolveTds: resolveTdsPut } = require("../services/tds");
+    let putTdsSnapshot;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const finYearId = await resolveFinYearId(pool, today);
+      putTdsSnapshot = await resolveTdsPut(pool, sql, {
+        partyHeadId: parseInt(row.BrokerId, 10),
+        tdsApplicableFlag: !!row.BrokerIsTdsApplicable,
+        tdsLimitApplicable: !!row.BrokerTdsLimitApplicable,
+        billAmount: computedAmount,
+        companyId: row.CompanyId ? parseInt(row.CompanyId, 10) : null,
+        finYearId,
+        selectedTdsId,
+      });
+    } catch (tdsErr) {
+      return res.status(tdsErr.status || 400).json({ error: tdsErr.message });
     }
-    const putTdsAmt = calculateTds(computedAmount, putTdsPct);
+    const putTdsId  = putTdsSnapshot.tdsId;
+    const putTdsNature = putTdsSnapshot.tdsNature;
+    const putTdsName   = putTdsSnapshot.tdsName;
+    const putTdsPct    = putTdsSnapshot.tdsPercentage || 0;
+    const putTdsAmt    = putTdsSnapshot.tdsAmount || 0;
     const putNet = Math.round((computedAmount - putTdsAmt) * 100) / 100;
 
     await pool.request()

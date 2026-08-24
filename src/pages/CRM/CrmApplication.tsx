@@ -13,7 +13,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
-  Mail, MapPin, IndianRupee, Users2, Briefcase, X, PlayCircle, Ban, Lock, Wallet,
+  Mail, MapPin, IndianRupee, Users2, Briefcase, X, PlayCircle, Ban, Lock, Wallet, Eye, Download,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -113,6 +113,7 @@ const STAGES = ["InProcess", "Converted", "NotConverted"] as const;
 type Stage = typeof STAGES[number];
 const stageLabel: Record<Stage, string> = { InProcess: "In Process", Converted: "Converted", NotConverted: "Not Converted" };
 const stageIcon: Record<Stage, any> = { InProcess: Clock, Converted: CheckCircle2, NotConverted: XCircle };
+const normalizeRole = (role?: string) => String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 async function fetchCustomers(): Promise<any[]> {
   try {
     const res = await fetchWithAuth(CUSTOMER_API);
@@ -258,7 +259,10 @@ const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { currentUser } = useAuth();
+  const { currentUser, canDoAction } = useAuth();
+  const isAdmin = ["admin", "super_admin"].includes(normalizeRole(currentUser?.role));
+  const canEditApplications = canDoAction("crm-applications", "edit");
+  const canRequestBookingCancellation = canDoAction("crm-cancellations", "create");
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const [search, setSearch] = useState("");
@@ -274,6 +278,7 @@ const CrmApplication: React.FC = () => {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [loadingApplication, setLoadingApplication] = useState(false);
+  const [hasBooking, setHasBooking] = useState(false);
   const [applicationId, setApplicationId] = useState<number | null>(null);
   const [applicationNo, setApplicationNo] = useState<string | null>(null);
   // Status of the application currently open in the wizard, as loaded from
@@ -555,13 +560,13 @@ const CrmApplication: React.FC = () => {
   // so this never shows for an Approved application. The button itself is
   // just a convenience gate; the backend re-checks and is the real guard.
   //
-  // BUG FIX: same Stage gap as isResumeEditable above — Status can still
-  // read 'Pending' on an already-Converted application (real Booking exists,
-  // possibly Approved), which incorrectly offered "Cancel Application" here
-  // too, alongside Resume, for a record that isn't cancellable through this
-  // flow anymore — its Booking's own Cancellation Request is the only real
-  // path once converted.
-  const canCancelApplication = (app: any) => !!app && app.Stage !== "Converted" && !["Approved", "Cancelled", "Expired"].includes(app.Status);
+  // Direct cancel is only valid before a Booking exists (Stage=InProcess/NotConverted).
+  // Once a Booking is auto-created (Stage=Converted), the only cancel path is the
+  // formal Cancellation Request flow — the backend enforces this too.
+  const canCancelApplication = (app: any) => !!app && canEditApplications && app.Stage !== "Converted" && !["Approved", "Cancelled", "Expired"].includes(app.Status);
+  // Admin delete is visible for all stages — backend rejects with a clear error
+  // ("Delete the unprogressed booking first") when an active booking exists.
+  const canDeleteApplication = (app: any) => !!app && isAdmin;
 
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.
@@ -718,6 +723,7 @@ const CrmApplication: React.FC = () => {
     // A brand-new application starts with no status of its own.
     setWizardAppStatus(null);
     setUnitLocked(false);
+    setHasBooking(false);
     setPaymentLocked(false);
   };
 
@@ -744,6 +750,7 @@ const CrmApplication: React.FC = () => {
       const body = await res.json();
       const app = body.application;
       if (!app) throw new Error("Application record missing from response");
+      setHasBooking((body.bookings || []).length > 0);
 
       // ChequeNo/ChequeDate/TransactionRef live on CrmCustomerBankDetail
       // (keyed by ApplicationId), not on CrmApplication itself — same table
@@ -888,6 +895,7 @@ const CrmApplication: React.FC = () => {
       if (!res.ok) throw new Error(data.error || "Failed to create application");
       setApplicationId(data.id);
       setApplicationNo(data.ApplicationNo);
+      setHasBooking(false);
       // Freshly created — always Draft, and stays unlocked since this is the
       // same step-1 pick that was just made, not yet a saved value to guard.
       setWizardAppStatus("Draft");
@@ -997,12 +1005,11 @@ const CrmApplication: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["parking-matrix"] });
       qc.invalidateQueries({ queryKey: ["unit-master"] });
       if (subData.booking?.BookingNo) {
-        // Booking is auto-created server-side on submit, but we deliberately
-        // do NOT navigate there — Application and Booking are meant to be
-        // handled by two different users/steps (no enforced user-gate yet,
-        // that's a separate future change), so staff stay on this page
-        // instead of being forced onto the booking they didn't create.
-        toast.success(`Booking ${subData.booking.BookingNo} created — payment milestones auto-generated`);
+          if (subData.booking.alreadyExists) {
+            toast.success("Application edits submitted successfully");
+          } else {
+            toast.success(`Booking ${subData.booking.BookingNo} created — payment milestones auto-generated`);
+          }
       } else if (subData.bookingError) {
         // Auto-create failed (e.g. a unit-hold conflict in the interim) —
         // the Application itself still submitted fine; staff can retry via
@@ -1058,6 +1065,22 @@ const CrmApplication: React.FC = () => {
       toast.error(translateError(e.message));
     } finally {
       setCancelling(false);
+    }
+  };
+  const handleDeleteApplication = async (a: any) => {
+    if (!window.confirm(`Delete application ${a.ApplicationNo}? This is only allowed before a live booking has progressed.`)) return;
+    try {
+      const res = await fetchWithAuth(`${API}/${a.Id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to delete application");
+      toast.success(data.message || "Application deleted");
+      qc.invalidateQueries({ queryKey: ["crm-apps"] });
+      qc.invalidateQueries({ queryKey: ["unit-master"] });
+      qc.invalidateQueries({ queryKey: ["unit-matrix"] });
+      qc.invalidateQueries({ queryKey: ["parking-matrix"] });
+      if (viewingAppId === a.Id) setViewingAppId(null);
+    } catch (e: any) {
+      toast.error(translateError(e.message));
     }
   };
   const handleCreateBooking = async (a: any) => {
@@ -1142,6 +1165,12 @@ const CrmApplication: React.FC = () => {
             className="flex items-center gap-1 text-xs text-primary hover:underline">
             <Building2 size={12} /> View Booking <ChevronRight size={12} />
           </button>
+          {(canEditApplications || canRequestBookingCancellation) && i.row.original.BookingId && i.row.original.BookingStatus !== CrmStatus.CANCELLED && (
+            <button onClick={() => navigate(`/crm/cancellations?bookingId=${i.row.original.BookingId}`)}
+              className="flex items-center gap-1 text-xs text-red-600 hover:underline">
+              <Ban size={12} /> Request Cancellation
+            </button>
+          )}
         </div>
       ) },
   ];
@@ -1284,16 +1313,34 @@ const CrmApplication: React.FC = () => {
                       <Ban size={12} /> Cancel
                     </button>
                   )}
+                  {canDeleteApplication(a) && (
+                    <button
+                      onClick={() => handleDeleteApplication(a)}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
+                    >
+                      <Trash2 size={12} /> Delete
+                    </button>
+                  )}
                 </>
               ) : (
-                canCancelApplication(a) && (
-                  <button
-                    onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
-                  >
-                    <Ban size={12} /> Cancel
-                  </button>
-                )
+                <>
+                  {canCancelApplication(a) && (
+                    <button
+                      onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
+                    >
+                      <Ban size={12} /> Cancel
+                    </button>
+                  )}
+                  {canDeleteApplication(a) && (
+                    <button
+                      onClick={() => handleDeleteApplication(a)}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
+                    >
+                      <Trash2 size={12} /> Delete
+                    </button>
+                  )}
+                </>
               )}
             </div>
             {/* Status hint lives on its own line as a plain caption, never
@@ -2084,7 +2131,7 @@ const CrmApplication: React.FC = () => {
               {step === 7 && (
                 <button onClick={handleFinalSave} disabled={saving}
                   className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
-                  {saving ? "Submitting..." : "Submit Application"}
+                  {saving ? "Submitting..." : hasBooking ? "Submit Edits" : "Submit Application"}
                 </button>
               )}
             </div>
@@ -2105,7 +2152,7 @@ const CrmApplication: React.FC = () => {
                   <span className="font-mono text-primary">{viewingAppDetail.application.ApplicationNo}</span>
                   <span>— {viewingAppDetail.application.ApplicantName}</span>
                   <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[viewingAppDetail.application.Status] || ""}`}>
-                    {viewingAppDetail.application.Status}
+                    {viewingAppDetail.bookings && viewingAppDetail.bookings.length > 0 ? "Submitted" : viewingAppDetail.application.Status}
                   </span>
                 </>
               ) : "Application Details"}
@@ -2391,6 +2438,22 @@ const CrmApplication: React.FC = () => {
                 className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50"
               >
                 Cancel Application
+              </button>
+            )}
+            {(canEditApplications || canRequestBookingCancellation) && viewingAppDetail?.application?.BookingId && viewingAppDetail.application.BookingStatus !== CrmStatus.CANCELLED && (
+              <button
+                onClick={() => navigate(`/crm/cancellations?bookingId=${viewingAppDetail.application.BookingId}`)}
+                className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50"
+              >
+                Request Booking Cancellation
+              </button>
+            )}
+            {viewingAppDetail && canDeleteApplication(viewingAppDetail.application) && (
+              <button
+                onClick={() => handleDeleteApplication(viewingAppDetail.application)}
+                className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50"
+              >
+                Delete Application
               </button>
             )}
             {viewingAppDetail && (isResumable(viewingAppDetail.application) || isEditableApplication(viewingAppDetail.application)) && (
@@ -3374,6 +3437,46 @@ const AttachmentsStep: React.FC<{
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [docType, setDocType] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState<any | null>(null);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!previewDoc) {
+      setPreviewBlobUrl(null);
+      setPreviewError(null);
+      return;
+    }
+
+    let alive = true;
+    let objectUrl: string | null = null;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewBlobUrl(null);
+
+    fetchWithAuth(`${DOC_API}/file/${previewDoc.Id}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Preview unavailable");
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!alive) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewBlobUrl(objectUrl);
+      })
+      .catch((e: any) => {
+        if (alive) setPreviewError(e.message || "Preview unavailable");
+      })
+      .finally(() => {
+        if (alive) setPreviewLoading(false);
+      });
+
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [previewDoc]);
 
   const { data: docData, refetch: refetchDocs } = useQuery({
     queryKey: ["crm-app-documents", applicationId],
@@ -3431,17 +3534,68 @@ const AttachmentsStep: React.FC<{
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleUploadFiles(e.target.files)} />
         </div>
         <div className="space-y-1">
-          {(docData?.documents || []).map((d: any) => (
-            <div key={d.Id} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
-              <span className="truncate">{d.DocumentType} — {d.FileName}</span>
-              <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-red-600 shrink-0"><Trash2 size={12} /></button>
-            </div>
-          ))}
+          {(docData?.documents || []).map((d: any) => {
+            const fileUrl = `${DOC_API}/file/${d.Id}`;
+            const previewable = /\.(jpe?g|png|gif|webp|bmp|svg|pdf)$/i.test(d.FileName || "");
+            return (
+              <div key={d.Id} className="flex items-center justify-between gap-2 text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
+                <span className="truncate flex-1">{d.DocumentType} — {d.FileName}</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  {previewable && (
+                    <button type="button" title="Preview" onClick={() => setPreviewDoc(d)}
+                      className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
+                      <Eye size={12} />
+                    </button>
+                  )}
+                  <a href={fileUrl} download={d.FileName}
+                    className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
+                    <Download size={12} />
+                  </a>
+                  <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+                </div>
+              </div>
+            );
+          })}
           {(!docData?.documents || docData.documents.length === 0) && (
             <p className="text-xs text-muted-foreground">No documents uploaded yet.</p>
           )}
         </div>
       </div>
+      {previewDoc && (
+        <Dialog open onOpenChange={(o) => { if (!o) setPreviewDoc(null); }}>
+          <DialogContent className="max-w-6xl w-[94vw] max-h-[90vh] p-0 overflow-hidden">
+            <DialogHeader className="px-4 py-3 border-b border-border">
+              <div className="flex items-center justify-between gap-3 pr-8">
+                <DialogTitle className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                  <FileText size={15} className="text-primary shrink-0" />
+                  <span className="truncate">{previewDoc.DocumentType} — {previewDoc.FileName}</span>
+                </DialogTitle>
+                <a href={previewBlobUrl || `${DOC_API}/file/${previewDoc.Id}`} download={previewDoc.FileName}
+                  className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted font-medium">
+                  <Download size={13} /> Download
+                </a>
+              </div>
+            </DialogHeader>
+            <div className="h-[76vh] bg-neutral-950 flex items-center justify-center">
+              {previewLoading ? (
+                <div className="text-xs text-neutral-300">Loading preview...</div>
+              ) : previewError ? (
+                <div className="text-center space-y-2 px-4">
+                  <p className="text-sm text-neutral-100">{previewError}</p>
+                  <a href={`${DOC_API}/file/${previewDoc.Id}`} download={previewDoc.FileName}
+                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
+                    <Download size={13} /> Download file
+                  </a>
+                </div>
+              ) : !previewBlobUrl ? null : /\.pdf$/i.test(previewDoc.FileName || "") ? (
+                <iframe src={previewBlobUrl} title={previewDoc.FileName} className="w-full h-full border-0 bg-white" />
+              ) : (
+                <img src={previewBlobUrl} alt={previewDoc.FileName} className="max-w-full max-h-full object-contain" />
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 };

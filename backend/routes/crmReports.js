@@ -128,9 +128,12 @@ router.get("/brokerage-report", requirePageRight("crm-brokerage", "view"), async
     dr.bind(r);
     const result = await r.query(`
       SELECT br.BrokerName, br.BrokerFirm, b.BookingNo, b.ProjectName, a.ApplicantName,
-        br.RateType, br.RateValue, br.ComputedAmount, br.Status,
+        br.RateType, br.RateValue, br.ComputedAmount,
+        br.TDSName, br.TDSPercentage, ISNULL(br.TDSAmount, 0) AS TDSAmount,
+        ISNULL(br.NetPayable, br.ComputedAmount) AS NetPayable,
+        br.Status,
         ISNULL((SELECT SUM(Amount) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id), 0) AS TotalPaid,
-        (br.ComputedAmount - ISNULL((SELECT SUM(Amount) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id), 0)) AS Balance
+        (ISNULL(br.NetPayable, br.ComputedAmount) - ISNULL((SELECT SUM(Amount) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id), 0)) AS Balance
       FROM dbo.CrmBrokerageMaster br
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId

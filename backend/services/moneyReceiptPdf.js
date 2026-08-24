@@ -81,7 +81,7 @@ async function fetchMoneyReceiptData(pool, receiptId) {
       mr.*,
       rp.RPStatus, rp.RPRejectionNote,
       b.BookingNo, b.UnitNo, b.BlockName, b.ProjectName,
-      b.TotalValue, b.TotalGstAmount, b.GrandTotal,
+      b.TotalValue, b.TotalGstAmount, b.GrandTotal, b.UnitParkingGstRate,
       a.ApplicationNo, a.ApplicantName, a.Mobile, a.Email,
       comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2,
       comp.city AS CompanyCity, comp.state AS CompanyState, comp.pincode AS CompanyPincode,
@@ -138,10 +138,9 @@ function drawWatermark(doc, text, color) {
 
 // Renders the receipt to an in-memory PDF buffer — a compact, single-page,
 // certificate-style layout: thin brand accent rule, centered logo + company
-// identity, a large diagonal PENDING APPROVAL / BOUNCED watermark for
-// anything short of a clean Approved document, and one hero amount panel
-// rather than a dense table — brief and presentable enough to hand straight
-// to a customer.
+// identity, a large diagonal PROVISIONAL / BOUNCED watermark for anything
+// short of a clean Approved document, and one hero amount panel rather than
+// a dense table — brief and presentable enough to hand straight to a customer.
 function renderMoneyReceiptPdfBuffer(d) {
   return new Promise((resolve, reject) => {
     // A brief, single-panel document doesn't need a full A4 sheet — a
@@ -158,7 +157,7 @@ function renderMoneyReceiptPdfBuffer(d) {
     const logoBuf = decodeLogo(d.CompanyLogo);
 
     const accent = d.Status === "Approved" ? "#15803d" : d.Status === "Bounced" ? "#b91c1c" : "#b45309";
-    const statusLabel = d.Status === "Approved" ? "APPROVED" : d.Status === "Bounced" ? "BOUNCED" : "PENDING APPROVAL";
+    const statusLabel = d.Status === "Approved" ? "APPROVED" : d.Status === "Bounced" ? "BOUNCED" : "PROVISIONAL";
 
     if (d.Status !== "Approved") {
       drawWatermark(doc, statusLabel, accent);
@@ -235,17 +234,26 @@ function renderMoneyReceiptPdfBuffer(d) {
     doc.roundedRect(left, heroTop, pageWidth, heroH, 8).strokeColor("#e2e8f0").lineWidth(0.75).stroke();
     
     // Use stored snapshot if available (set at receipt creation time via migration 357);
-    // fall back to deriving from booking-level GST for older receipts.
+    // fall back to deriving from the booking's own GST rate for older receipts.
+    // Formula: gst = amount × rate/100, principal = amount − gst
+    // (rate/100 not rate/(100+rate) — the receipt amount is the agreed booking
+    // amount on which GST is levied; the customer pays principal + GST separately).
     const amount = Number(d.Amount || 0);
     let amountGst, amountPrin;
     if (d.BaseAmount != null && d.GSTAmount != null) {
       amountGst = Number(d.GSTAmount);
       amountPrin = Number(d.BaseAmount);
     } else {
-      const grandTotal = Number(d.GrandTotal || 1);
-      const gstRatio = Number(d.TotalGstAmount || 0) / grandTotal;
-      amountGst = amount * gstRatio;
-      amountPrin = amount - amountGst;
+      const rate = Number(d.UnitParkingGstRate || 0);
+      if (rate > 0) {
+        amountGst = Math.round(amount * rate / 100 * 100) / 100;
+        amountPrin = Math.round((amount - amountGst) * 100) / 100;
+      } else {
+        const grandTotal = Number(d.GrandTotal || 1);
+        const gstRatio = Number(d.TotalGstAmount || 0) / grandTotal;
+        amountGst = Math.round(amount * gstRatio * 100) / 100;
+        amountPrin = Math.round((amount - amountGst) * 100) / 100;
+      }
     }
 
     doc.font("Helvetica").fontSize(8).fillColor("#64748b")
@@ -303,7 +311,7 @@ function renderMoneyReceiptPdfBuffer(d) {
       ? "This receipt confirms an approved payment against the booking referenced above. Please retain it for your records."
       : d.Status === "Bounced"
       ? "This instrument did not clear and this receipt is void. A fresh payment will generate a new receipt."
-      : "Acknowledges the amount/instrument noted above, pending internal finance approval. If it does not clear, this receipt will be marked Bounced.";
+      : "This is a provisional receipt acknowledging the amount/instrument noted above. It becomes an approved receipt upon clearance by internal finance. If the instrument does not clear, this receipt will be marked Bounced.";
     doc.font("Helvetica").fontSize(7.75).fillColor("#64748b")
       .text(note, left, noteTop, { width: noteColW });
 

@@ -7,11 +7,12 @@ const { triggerBookingConfirmed } = require("../services/communicationTriggers")
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const allowRoles = require("../middleware/role");
 const { actorId, requireUserEmail, isSaAdmin } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
 const { getIo } = require("../socket");
-const { guardAndConvertHold } = require("../services/crmHoldService");
+const { guardAndConvertHold, placeHoldIfNeeded } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones } = require("../services/crmWorkflowGuards");
 const { generateInvoicePdf, getInvoicePdfBuffer } = require("../services/invoicePdf");
@@ -122,10 +123,11 @@ const BOOKING_SELECT = `
 router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, applicationId, includeCancelled } = req.query;
+    const { status, applicationId, includeCancelled, deleted } = req.query;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const req0 = pool.request();
-    const conds = ["b.IsActive = 1"];
+    const showDeleted = deleted === "1" || deleted === "true";
+    const conds = [showDeleted ? "b.IsActive = 0" : "b.IsActive = 1"];
     if (status) {
       req0.input("st", sql.NVarChar(30), status);
       conds.push("b.Status = @st");
@@ -843,6 +845,163 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
   }
 });
 
+// DELETE /:id - admin cleanup only. This is intentionally not the business
+// cancellation flow: once a booking has entered approval or downstream
+// execution, staff must use Cancellation Request so refunds, parking, legal
+// records, and audit steps are handled explicitly.
+router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const rowRes = await pool.request().input("id", sql.Int, id).query(`
+      SELECT Id, BookingNo, ApplicationId, UnitId, Status, IsActive, WorkflowStage,
+             ReadyForApprovalAt, MarketingHeadApprovedAt, DirectorApprovedAt, ConfirmedAt
+      FROM dbo.CrmBooking
+      WHERE Id = @id AND IsActive = 1
+    `);
+    const booking = rowRes.recordset[0];
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+
+    const progressedReasons = [];
+    if (booking.Status === CrmStatus.APPROVED) progressedReasons.push("booking is fully approved");
+    if (booking.WorkflowStage && booking.WorkflowStage !== "Review") progressedReasons.push(`workflow is at ${booking.WorkflowStage}`);
+    if (booking.ReadyForApprovalAt) progressedReasons.push("booking has been submitted for approval");
+    if (booking.MarketingHeadApprovedAt || booking.DirectorApprovedAt || booking.ConfirmedAt) progressedReasons.push("approval stamps already exist");
+
+    const downstream = await pool.request().input("bid", sql.Int, id).query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.CrmAgreement WHERE BookingId = @bid) AS Agreements,
+        (SELECT COUNT(*) FROM dbo.CrmLegalMilestone WHERE BookingId = @bid) AS LegalMilestones,
+        (SELECT COUNT(*) FROM dbo.CrmSalesDeed WHERE BookingId = @bid) AS SalesDeeds,
+        (SELECT COUNT(*) FROM dbo.CrmInvoice WHERE BookingId = @bid AND Status <> 'Void') AS Invoices,
+        (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Rejected') AS MoneyReceipts,
+        (SELECT COUNT(*) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS OnAccountPayments,
+        (SELECT COUNT(*) FROM dbo.CrmPaymentReceipt r JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid) AS PaymentReceipts,
+        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))) AS PaidMilestones
+    `);
+    const d = downstream.recordset[0] || {};
+    for (const [label, count] of Object.entries(d)) {
+      if (Number(count) > 0) progressedReasons.push(label);
+    }
+    if (progressedReasons.length) {
+      return res.status(400).json({
+        error: `Cannot delete booking ${booking.BookingNo} because it has progressed: ${progressedReasons.join(", ")}. Use Cancellation Request instead.`,
+      });
+    }
+
+    const actor = actorId(req);
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("ub", sql.Int, actor)
+      .query(`
+        UPDATE dbo.CrmBooking
+        SET IsActive = 0, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    // Revert Application-stage rows so the application can be corrected and
+    // re-booked without stale child rows remaining pinned to the deleted booking.
+    await pool.request().input("bid", sql.Int, id).input("aid", sql.Int, booking.ApplicationId).query(`
+      UPDATE dbo.CrmCustomerBankDetail SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+      UPDATE dbo.CrmBookingDocument SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+      UPDATE dbo.CrmParkingAllotment SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+      UPDATE dbo.CrmCoApplicant SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+      UPDATE dbo.CrmExtraCharge SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+    `);
+
+    if (booking.UnitId) {
+      try {
+        await placeHoldIfNeeded(pool, {
+          entityType: "Unit",
+          entityId: booking.UnitId,
+          applicationId: booking.ApplicationId,
+          holdDays: 3,
+          reason: "Booking deleted by admin - application reverted to pre-booking hold",
+          userId: actor,
+        });
+      } catch (holdErr) {
+        console.error("[crm-bookings] unit hold restore after delete failed:", holdErr.message);
+      }
+    }
+
+    await logCrmAudit(pool, "Booking", id, actor, [
+      { field: "IsActive", oldVal: 1, newVal: 0 },
+    ]);
+
+    res.json({ success: true, message: `Booking ${booking.BookingNo} deleted` });
+  } catch (e) {
+    console.error("[crm-bookings] DELETE error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /:id/permanent - hard delete, only from the soft-deleted booking
+// section. Still refuses approved/progressed records so this cannot become a
+// back door around the cancellation/refund/legal workflow.
+router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const rowRes = await pool.request().input("id", sql.Int, id).query(`
+      SELECT Id, BookingNo, Status, IsActive, WorkflowStage,
+             ReadyForApprovalAt, MarketingHeadApprovedAt, DirectorApprovedAt, ConfirmedAt
+      FROM dbo.CrmBooking
+      WHERE Id = @id
+    `);
+    const booking = rowRes.recordset[0];
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+    if (booking.IsActive) return res.status(400).json({ error: "Only soft-deleted bookings can be permanently deleted" });
+
+    const progressedReasons = [];
+    if (booking.Status === CrmStatus.APPROVED) progressedReasons.push("booking is fully approved");
+    if (booking.WorkflowStage && booking.WorkflowStage !== "Review") progressedReasons.push(`workflow is at ${booking.WorkflowStage}`);
+    if (booking.ReadyForApprovalAt) progressedReasons.push("booking has been submitted for approval");
+    if (booking.MarketingHeadApprovedAt || booking.DirectorApprovedAt || booking.ConfirmedAt) progressedReasons.push("approval stamps already exist");
+
+    const downstream = await pool.request().input("bid", sql.Int, id).query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.CrmAgreement WHERE BookingId = @bid) AS Agreements,
+        (SELECT COUNT(*) FROM dbo.CrmLegalMilestone WHERE BookingId = @bid) AS LegalMilestones,
+        (SELECT COUNT(*) FROM dbo.CrmSalesDeed WHERE BookingId = @bid) AS SalesDeeds,
+        (SELECT COUNT(*) FROM dbo.CrmInvoice WHERE BookingId = @bid AND Status <> 'Void') AS Invoices,
+        (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Rejected') AS MoneyReceipts,
+        (SELECT COUNT(*) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS OnAccountPayments,
+        (SELECT COUNT(*) FROM dbo.CrmPaymentReceipt r JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid) AS PaymentReceipts,
+        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))) AS PaidMilestones
+    `);
+    const d = downstream.recordset[0] || {};
+    for (const [label, count] of Object.entries(d)) {
+      if (Number(count) > 0) progressedReasons.push(label);
+    }
+    if (progressedReasons.length) {
+      return res.status(400).json({
+        error: `Cannot permanently delete booking ${booking.BookingNo} because it has progressed: ${progressedReasons.join(", ")}.`,
+      });
+    }
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingAttachment WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingStageLog WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmUnitChangeLog WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.ApprovalAuditLog WHERE TableName = 'CrmBooking' AND RecordId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmAuditLog WHERE EntityType = 'Booking' AND EntityId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBooking WHERE Id = @bid");
+      await tx.commit();
+    } catch (txErr) {
+      await tx.rollback().catch(() => {});
+      throw txErr;
+    }
+
+    res.json({ success: true, message: `Booking ${booking.BookingNo} permanently deleted` });
+  } catch (e) {
+    console.error("[crm-bookings] permanent DELETE error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /:id/loan — home loan / bank coordination detail for a booking.
 // DisbursedAmount is no longer a manually-typed column — it's computed live
 // from real money: CrmPaymentReceipt rows (via CrmPaymentMilestone.BookingId)
@@ -1289,12 +1448,30 @@ router.get("/:id/attachments", requirePageRight("crm-bookings", "view"), async (
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
+    // Return both booking-level attachments AND application-level KYC documents
+    // (uploaded during the Application wizard) in one unified list, so staff
+    // see everything in one place without re-uploading.
     const result = await pool.request().input("id", sql.Int, id).query(`
-      SELECT a.Id, a.Label, a.FileName, a.FileSize, a.MimeType, a.UploadedAt, u.name AS UploadedByName
+      SELECT a.Id, a.Label, a.FileName, a.FileSize, a.MimeType,
+             a.UploadedAt AS CreatedAt, u.name AS UploaderName,
+             'booking' AS Source, NULL AS DocumentType
       FROM dbo.CrmBookingAttachment a
       LEFT JOIN dbo.Users u ON u.id = a.UploadedBy
       WHERE a.BookingId = @id
-      ORDER BY a.UploadedAt DESC
+
+      UNION ALL
+
+      SELECT d.Id, d.DocumentType AS Label, d.FileName, d.FileSize, d.MimeType,
+             d.CreatedAt, cu.name AS UploaderName,
+             'application' AS Source, d.DocumentType
+      FROM dbo.CrmBookingDocument d
+      LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy
+      WHERE d.BookingId = @id
+         OR (d.ApplicationId = (
+              SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1
+            ) AND d.BookingId IS NULL)
+
+      ORDER BY CreatedAt DESC
     `);
     res.json(result.recordset);
   } catch (e) {
