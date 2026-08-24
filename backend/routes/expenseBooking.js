@@ -4053,7 +4053,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     const ebSupplierPost2 = expenseBookingSupplierSql("eb", "postgl");
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
-      SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
+      SELECT eb.Eid, eb.EDocNo, eb.EDocDate, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
              eb.ELinkedGrnIds, eb.EGLAccountId, eb.TDSAmount, eb.TDSId,
              eb.ECgstRate, eb.ESgstRate, eb.EIgstRate,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
@@ -4307,7 +4307,11 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     await postVoucher(pool, {
       voucherNo: finalDocNo || `GL-EXB${ebId}`,
-      voucherDate: new Date(),
+      // The invoice's own document date, not the date it happened to get
+      // posted to GL — an invoice dated 8 June logged/posted on 10 Aug must
+      // still show 8 June in the ledger and Trial Balance, not the posting
+      // date.
+      voucherDate: eb.EDocDate,
       sourceType: "InvoicePosting",
       sourceId: ebId,
       companyId: eb.CompanyId ?? null,

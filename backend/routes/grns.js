@@ -1855,7 +1855,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     // Fetch posting preview (reuse endpoint logic via internal call)
     const grnRes = await pool.request().input("GRNID", sql.Int, grnId).query(`
-      SELECT g.GRNID, g.GRNNo, g.GRNItems, g.POID,
+      SELECT g.GRNID, g.GRNNo, g.GRNDate, g.GRNItems, g.POID,
              po.CompanyId, po.ProjectId, po.CostCenterId
       FROM dbo.GoodsReceiptNotes g
       LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = g.POID
@@ -1955,7 +1955,9 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const { postVoucher } = require("../services/generalLedger");
     await postVoucher(pool, {
       voucherNo: finalDocNo || `JV-GRN${grnId}`,
-      voucherDate: new Date(),
+      // The GRN's own date, not the date it happened to get posted — same
+      // fix as Invoice/Loan posting below.
+      voucherDate: grn.GRNDate,
       sourceType: "GRNPosting",
       sourceId: grnId,
       companyId: grn.CompanyId ?? null,
