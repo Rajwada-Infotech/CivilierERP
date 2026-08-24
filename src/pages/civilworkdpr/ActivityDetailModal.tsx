@@ -209,13 +209,12 @@ function PhotosTab({ rungId }: { rungId: number }) {
   // A new "After" shot marks one work cycle done — the field engineer
   // shouldn't have to separately re-photograph "Before" for the next
   // cycle when it's just whatever the site looked like a moment ago,
-  // i.e. the After that was just superseded. So the first time a new
-  // After comes in since the last one was captured, clone that previous
-  // After into Before automatically. Guarded by comparing timestamps
-  // (not just "any before exists") so multiple After shots in a row each
-  // still carry forward exactly once, right when the next one lands.
+  // i.e. the After that was just superseded. So the moment there's an
+  // After newer than the current Before, clone that After into Before
+  // automatically. Guarded by comparing timestamps (not just "any before
+  // exists") so this stays idempotent — safe to call on every load, not
+  // just right before a new capture.
   const carryForwardBeforeIfNeeded = async () => {
-    if (activeTag !== "after") return;
     try {
       const current = await getActivityPhotos(rungId);
       const lastAfter = current.after[0]; // ORDER BY CapturedAt DESC
@@ -227,10 +226,21 @@ function PhotosTab({ rungId }: { rungId: number }) {
       const blob = await (await fetch(`data:${raw.mimeType};base64,${raw.dataBase64}`)).blob();
       const file = new File([blob], `before-carried-${Date.now()}.jpg`, { type: raw.mimeType });
       await uploadActivityPhoto(rungId, "before", file, CARRIED_FORWARD_NOTE);
+      refresh();
     } catch {
       // Best-effort — a failed carry-forward should never block the new capture.
     }
   };
+
+  // Reconciles on every load too, not just right before a new capture —
+  // otherwise a Before that should already reflect yesterday's After only
+  // ever shows up the next time someone happens to take a new After photo,
+  // which could be days later. Keyed on the latest After's own id so this
+  // re-checks whenever a new After actually lands, not on every re-render.
+  useEffect(() => {
+    if (data?.after?.[0]) carryForwardBeforeIfNeeded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.after?.[0]?.id]);
 
   const addPhoto = async (blob: Blob) => {
     setUploading(true);
