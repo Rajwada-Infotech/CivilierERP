@@ -1237,10 +1237,14 @@ async function postLoanToGLInternal(pool, loanId, userEmail) {
   // Null until then; setting it here (and in the Inter-Company auto-post
   // path in POST / above) gives the loan a distinct disbursement moment
   // separate from its sanction date, enabling the "Given vs Received"
-  // lifecycle distinction on the frontend.
+  // lifecycle distinction on the frontend. Uses the loan's own LoanDate,
+  // not SYSDATETIME() — "Post to GL" can happen well after the real
+  // disbursement (a legacy loan reposted today shouldn't show today as
+  // its disbursement date).
   await pool.request()
     .input("LoanId", sql.Int, loanId)
-    .query("UPDATE dbo.LoanSanction SET DisbursedAt = SYSDATETIME() WHERE LoanId = @LoanId AND DisbursedAt IS NULL");
+    .input("LoanDate", sql.Date, loan.LoanDate)
+    .query("UPDATE dbo.LoanSanction SET DisbursedAt = @LoanDate WHERE LoanId = @LoanId AND DisbursedAt IS NULL");
 
   await bumpCacheVersion("loan-sanction");
   return { voucherNo: loan.LoanNo };
