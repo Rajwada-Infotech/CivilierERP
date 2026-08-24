@@ -12,6 +12,7 @@ import { XCircle, CheckCircle2, Info } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { useSearchParams } from "react-router-dom";
 
 const API = "/api/crm/cancellations";
 const BKG_API = "/api/crm/bookings";
@@ -50,11 +51,22 @@ async function fetchCancellationPolicy(bookingId: string): Promise<any | null> {
 
 const CrmCancellations: React.FC = () => {
   const qc = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const bookingIdParam = searchParams.get("bookingId") || "";
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ BookingId: "", Reason: "", DeductionPercent: "" });
   // Policy data loaded when a booking is selected — shown to staff before submit
   const [policy, setPolicy] = useState<any | null>(null);
   const [policyLoading, setPolicyLoading] = useState(false);
+
+  useEffect(() => {
+    if (bookingIdParam) {
+      setForm((f) => ({ ...f, BookingId: bookingIdParam }));
+      setDialogOpen(true);
+      setSearchParams(new URLSearchParams());
+    }
+  }, [bookingIdParam, setSearchParams]);
+
   // Holds the full cancellation row (not just its Id) so the refund dialog
   // can read ProjectId/DistinctDepositBankCount/SingleDepositBankId straight
   // off it without a second round-trip.

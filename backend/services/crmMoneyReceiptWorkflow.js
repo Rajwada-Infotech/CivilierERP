@@ -88,10 +88,18 @@ async function createMoneyReceiptForBooking(pool, bookingId, data = {}, actorUse
     : Number(defaults.TokenValue != null ? defaults.TokenValue : defaults.BookingAmount);
   if (!amount || amount <= 0) throw new MoneyReceiptError("Amount must be greater than 0");
 
+  // Use the booking's explicit GST rate (UnitParkingGstRate: 1 or 5 for unit/parking,
+  // which is the applicable rate for the booking amount milestone). Applying it as
+  // rate/(100+rate) extracts the GST portion from the tax-inclusive payment correctly:
+  // e.g. ₹10,000 at 1% → GST = 10000×1/101 = ₹99.01, base = ₹9,900.99.
+  // If the rate is not set, fall back to the blended TotalGstAmount/GrandTotal ratio.
   const gstRow = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal FROM dbo.CrmBooking WHERE Id = @bid");
-  const { TotalGstAmount: totalGstAmt, GrandTotal: grandTotal } = gstRow.recordset[0] || {};
-  const gstRatio = grandTotal > 0 ? Number(totalGstAmt) / Number(grandTotal) : 0;
+    .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal, ISNULL(UnitParkingGstRate,0) AS UnitParkingGstRate FROM dbo.CrmBooking WHERE Id = @bid");
+  const { TotalGstAmount: totalGstAmt, GrandTotal: grandTotal, UnitParkingGstRate: gstRate } = gstRow.recordset[0] || {};
+  const rate = Number(gstRate || 0);
+  const gstRatio = rate > 0
+    ? rate / 100          // GST = amount × rate/100; base = amount - gstAmount
+    : (grandTotal > 0 ? Number(totalGstAmt) / Number(grandTotal) : 0);
   const gstAmount = Math.round(amount * gstRatio * 100) / 100;
   const baseAmount = Math.round((amount - gstAmount) * 100) / 100;
 

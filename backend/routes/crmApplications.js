@@ -5,6 +5,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const allowRoles = require("../middleware/role");
 const { actorId, requireUserEmail, isSuperAdminOnly } = require("../services/saAccess");
 const { validateSourceChain } = require("../services/sourceChain");
 const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
@@ -14,6 +15,7 @@ const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow
 const { transition: approvalTransition } = require("../services/approvalService");
 const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
 const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releaseHold } = require("../services/crmHoldService");
+const { recalculateRemainingMilestones, requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { releaseAllParkingForApplication } = require("../routes/crmParking");
 const { ensureBrokerForChannelPartner } = require("../services/channelPartnerBrokerBridge");
 
@@ -526,46 +528,111 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
     // already reads as "taken") and add nothing.
     const pool = getPool();
     const actor = actorId(req);
-    try {
-      const app = await pool.request().input("id", sql.Int, id)
-        .query("SELECT PreferredUnitId FROM dbo.CrmApplication WHERE Id = @id");
-      const unitId = app.recordset[0]?.PreferredUnitId;
-      if (unitId) {
-        await placeHoldIfNeeded(pool, {
-          entityType: "Unit", entityId: unitId, applicationId: id, holdDays: 3,
-          reason: "Application submitted — auto-hold", userId: actor,
-        });
-      }
-    } catch (holdErr) {
-      // A deliberate business-rule throw (unit already held by another
-      // application, unit already booked, project mismatch, etc.) always
-      // carries an explicit .status — that's this codebase's own convention
-      // (CrmCreationError, and crmHoldService.js's manually-set e.status).
-      // Those must block the submit, not be treated as tolerable infra noise
-      // — otherwise a second application for the same unit sails into the
-      // approval queue with no hold protecting it. Only a truly unexpected
-      // error (driver timeout, connection reset — no .status) stays
-      // non-blocking, matching the tolerance this comment originally intended.
-      if (holdErr.status) {
-        console.error("[crm-applications] auto-hold on submit blocked:", holdErr.message);
-        return res.status(holdErr.status).json({ error: holdErr.message });
-      }
-      console.error("[crm-applications] auto-hold on submit failed:", holdErr.message);
-    }
 
-    // Auto-create the Booking the moment submit succeeds — no separate
-    // "wait for Application approval, then click Create Booking" step
-    // anymore. Best-effort: a real conflict here (unit taken in the
-    // interim, no payment plan resolvable, etc.) is reported back but
-    // never fails the submit itself — staff retry via the "Create Booking"
-    // fallback button, same as before.
+    // First check if it already has a booking (it was already submitted once).
     let booking = null;
     let bookingError = null;
     const already = await pool.request().input("aid", sql.Int, id)
       .query("SELECT TOP 1 Id, BookingNo FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1");
     if (already.recordset.length) {
-      booking = { id: already.recordset[0].Id, BookingNo: already.recordset[0].BookingNo };
+      booking = { id: already.recordset[0].Id, BookingNo: already.recordset[0].BookingNo, alreadyExists: true };
+      
+      // SYNC edits from Application to the existing Booking
+      const app = await pool.request().input("id", sql.Int, id).query(`
+        SELECT PreferredUnitId, RatePerSqFt, PaymentPlanId, DateOfApply,
+               TokenType, TokenValue, BookingAmount, PaymentMode, DepositBankId,
+               AssignedTo, Notes, BrokerId, BrokerageRatePercent, BrokeragePaymentPlan
+        FROM dbo.CrmApplication WHERE Id = @id
+      `);
+      const a = app.recordset[0];
+      
+      if (a) {
+        await pool.request()
+          .input("bid", sql.Int, booking.id)
+          .input("RatePerSqFt", sql.Decimal(18, 2), a.RatePerSqFt)
+          .input("PaymentPlanId", sql.Int, a.PaymentPlanId)
+          .input("BookingDate", sql.Date, a.DateOfApply)
+          .input("TokenType", sql.NVarChar(50), a.TokenType)
+          .input("TokenValue", sql.Decimal(18, 2), a.TokenValue)
+          .input("BookingAmount", sql.Decimal(18, 2), a.BookingAmount)
+          .input("PaymentMode", sql.NVarChar(50), a.PaymentMode)
+          .input("DepositBankId", sql.Int, a.DepositBankId)
+          .input("AssignedTo", sql.Int, a.AssignedTo)
+          .input("Notes", sql.NVarChar(sql.MAX), a.Notes)
+          .input("BrokerId", sql.Int, a.BrokerId)
+          .input("BrokerageRatePercent", sql.Decimal(5, 2), a.BrokerageRatePercent)
+          .input("BrokeragePaymentPlan", sql.NVarChar(100), a.BrokeragePaymentPlan)
+          .query(`
+            UPDATE dbo.CrmBooking
+            SET RatePerSqFt = @RatePerSqFt,
+                PaymentPlanId = @PaymentPlanId,
+                BookingDate = @BookingDate,
+                TokenType = @TokenType,
+                TokenValue = @TokenValue,
+                BookingAmount = @BookingAmount,
+                PaymentMode = @PaymentMode,
+                AssignedTo = @AssignedTo,
+                Notes = @Notes,
+                BrokerId = @BrokerId,
+                BrokerageRatePercent = @BrokerageRatePercent,
+                BrokeragePaymentPlan = @BrokeragePaymentPlan,
+                UpdatedAt = SYSDATETIME()
+            WHERE Id = @bid
+          `);
+      }
+
+      // Resync Milestone #1 (Booking Amount) to match the updated BookingAmount.
+      // Without this, editing the application's token/booking amount and re-submitting
+      // would update the CrmBooking row but leave the milestone's AmountDue stale.
+      if (a?.BookingAmount) {
+        try {
+          const m1Res = await pool.request().input("bid", sql.Int, booking.id)
+            .query("SELECT TOP 1 Id, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+          const m1 = m1Res.recordset[0];
+          if (m1 && m1.Status !== "Waived") {
+            const newAmountDue = Math.max(parseFloat(a.BookingAmount), Number(m1.AmountPaid || 0));
+            const bkTotals = await pool.request().input("bid", sql.Int, booking.id)
+              .query("SELECT GrandTotal, TotalValue FROM dbo.CrmBooking WHERE Id = @bid");
+            const grandTotal = Number(bkTotals.recordset[0]?.GrandTotal || bkTotals.recordset[0]?.TotalValue || 0);
+            const newPercent = grandTotal > 0 ? Math.round((newAmountDue / grandTotal) * 10000) / 100 : 0;
+            await pool.request()
+              .input("id", sql.Int, m1.Id)
+              .input("amt", sql.Decimal(18, 2), newAmountDue)
+              .input("pct", sql.Decimal(5, 2), newPercent)
+              .query(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = @amt, [Percent] = @pct,
+                Status = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
+                UpdatedAt = SYSDATETIME() WHERE Id = @id`);
+            await recalculateRemainingMilestones(pool, booking.id, { fixedMilestoneId: m1.Id });
+          }
+        } catch (msErr) {
+          console.error("[crm-applications] milestone resync on edit-submit failed:", msErr.message);
+        }
+      }
+
+      await pool.request().input("bid", sql.Int, booking.id).input("aid", sql.Int, id).query(`
+        UPDATE dbo.CrmBookingDocument
+        SET BookingId = @bid
+        WHERE ApplicationId = @aid AND BookingId IS NULL
+      `);
     } else {
+      // If no booking exists yet, place a hold and create one.
+      try {
+        const app = await pool.request().input("id", sql.Int, id)
+          .query("SELECT PreferredUnitId FROM dbo.CrmApplication WHERE Id = @id");
+        const unitId = app.recordset[0]?.PreferredUnitId;
+        if (unitId) {
+          await placeHoldIfNeeded(pool, {
+            entityType: "Unit", entityId: unitId, applicationId: id, holdDays: 3,
+            reason: "Application submitted — auto-hold", userId: actor,
+          });
+        }
+      } catch (holdErr) {
+        if (holdErr.status) {
+          console.error("[crm-applications] auto-hold on submit blocked:", holdErr.message);
+          return res.status(holdErr.status).json({ error: holdErr.message });
+        }
+        console.error("[crm-applications] auto-hold on submit failed:", holdErr.message);
+      }
       const app = await pool.request().input("id", sql.Int, id).query(`
         SELECT PreferredUnitId, RatePerSqFt, PaymentPlanId, DateOfApply,
                TokenType, TokenValue, BookingAmount, PaymentMode, DepositBankId,
@@ -588,6 +655,11 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
           await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id)
             .query(`UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${CrmStatus.BOOKED}', UpdatedAt = SYSDATETIME()
                     WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @aid)`);
+          await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id).query(`
+            UPDATE dbo.CrmBookingDocument
+            SET BookingId = @bid
+            WHERE ApplicationId = @aid AND BookingId IS NULL
+          `);
         } catch (bkErr) {
           console.error("[crm-applications] auto-create-booking on submit failed:", bkErr.message);
           bookingError = bkErr.message;
@@ -651,6 +723,11 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
         UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${CrmStatus.BOOKED}', UpdatedAt = SYSDATETIME()
         WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @id)
       `);
+    await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id).query(`
+      UPDATE dbo.CrmBookingDocument
+      SET BookingId = @bid
+      WHERE ApplicationId = @aid AND BookingId IS NULL
+    `);
 
     res.json({ success: true, booking: created });
   } catch (e) {
@@ -714,6 +791,71 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
     res.json({ success: true, status: result.to });
   } catch (e) {
     console.error("[crm-applications] cancel error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /:id - admin cleanup only. Applications that already have a live
+// booking must be handled from the booking side; this endpoint is only for
+// pre-booking mistakes/noise that should disappear from the active lists.
+router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const appRes = await pool.request().input("id", sql.Int, id).query(`
+      SELECT Id, ApplicationNo, Status, IsActive
+      FROM dbo.CrmApplication
+      WHERE Id = @id AND IsActive = 1
+    `);
+    const app = appRes.recordset[0];
+    if (!app) return res.status(404).json({ error: "Application not found" });
+
+    const activeBooking = await pool.request().input("id", sql.Int, id).query(`
+      SELECT TOP 1 Id, BookingNo, Status
+      FROM dbo.CrmBooking
+      WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')
+    `);
+    if (activeBooking.recordset.length) {
+      const b = activeBooking.recordset[0];
+      return res.status(400).json({
+        error: `Cannot delete application ${app.ApplicationNo} because it has an active booking (${b.BookingNo}, ${b.Status}). Delete the unprogressed booking first, or use Cancellation Request if it has progressed.`,
+      });
+    }
+
+    const progressed = await pool.request().input("aid", sql.Int, id).query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.CrmBooking WHERE ApplicationId = @aid AND Status = 'Approved') AS ApprovedBookings,
+        (SELECT COUNT(*) FROM dbo.CrmBooking b JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id WHERE b.ApplicationId = @aid) AS Agreements,
+        (SELECT COUNT(*) FROM dbo.CrmBooking b JOIN dbo.CrmInvoice inv ON inv.BookingId = b.Id WHERE b.ApplicationId = @aid AND inv.Status <> 'Void') AS Invoices,
+        (SELECT COUNT(*) FROM dbo.CrmBooking b JOIN dbo.CrmMoneyReceipt mr ON mr.BookingId = b.Id WHERE b.ApplicationId = @aid AND mr.Status <> 'Rejected') AS MoneyReceipts
+    `);
+    const p = progressed.recordset[0] || {};
+    const blockers = Object.entries(p).filter(([, count]) => Number(count) > 0).map(([label]) => label);
+    if (blockers.length) {
+      return res.status(400).json({
+        error: `Cannot delete application ${app.ApplicationNo} because downstream activity exists: ${blockers.join(", ")}.`,
+      });
+    }
+
+    const actor = actorId(req);
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("ub", sql.Int, actor)
+      .query(`
+        UPDATE dbo.CrmApplication
+        SET IsActive = 0, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    try { await releaseAllHoldsForApplication(pool, id, actor); }
+    catch (holdErr) { console.error("[crm-applications] hold release on delete failed:", holdErr.message); }
+    try { await releaseAllParkingForApplication(pool, id); }
+    catch (parkErr) { console.error("[crm-applications] parking release on delete failed:", parkErr.message); }
+
+    await logStatusChange(pool, id, app.Status, app.Status, "AdminDelete", "Application soft-deleted by admin", actor);
+    res.json({ success: true, message: `Application ${app.ApplicationNo} deleted` });
+  } catch (e) {
+    console.error("[crm-applications] DELETE error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

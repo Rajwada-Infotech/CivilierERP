@@ -4,7 +4,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 
 router.use(authMiddleware);
@@ -34,6 +34,9 @@ router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"),
   try {
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId);
+    // Include docs uploaded at the Application stage (ApplicationId set, BookingId NULL)
+    // by joining through CrmBooking → CrmApplication — so files collected during
+    // the application wizard appear here without any data migration.
     const result = await pool.request().input("bid", sql.Int, bookingId).query(`
       SELECT d.Id, d.BookingId, d.ApplicationId, d.DocumentType, d.DocumentUrl, d.FileName,
              d.IsVerified, d.VerifiedBy, d.VerifiedAt, d.Notes, d.CreatedBy, d.CreatedAt,
@@ -43,6 +46,9 @@ router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"),
       FROM dbo.CrmBookingDocument d
       LEFT JOIN dbo.Users u ON u.id = d.VerifiedBy
       WHERE d.BookingId = @bid
+         OR (d.ApplicationId IS NOT NULL AND d.BookingId IS NULL AND d.ApplicationId = (
+               SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1
+             ))
       ORDER BY d.CreatedAt
     `);
     res.json({ documents: result.recordset, standardTypes: STANDARD_DOC_TYPES });
@@ -59,20 +65,24 @@ router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit")
   try {
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId);
+    const booking = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
+    const applicationId = booking.recordset[0]?.ApplicationId || null;
     const b = req.body;
     if (!b.DocumentType?.trim()) return res.status(400).json({ error: "DocumentType is required" });
 
     const result = await pool.request()
       .input("bid",  sql.Int, bookingId)
+      .input("aid",  sql.Int, applicationId)
       .input("type", sql.NVarChar(100), b.DocumentType.trim())
       .input("url",  sql.NVarChar(2000), b.DocumentUrl || null)
       .input("fn",   sql.NVarChar(300), b.FileName || null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cb",   sql.Int, actorId(req))
       .query(`
-        INSERT INTO dbo.CrmBookingDocument (BookingId, DocumentType, DocumentUrl, FileName, Notes, CreatedBy, CreatedAt)
+        INSERT INTO dbo.CrmBookingDocument (BookingId, ApplicationId, DocumentType, DocumentUrl, FileName, Notes, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@bid, @type, @url, @fn, @note, @cb, SYSDATETIME())
+        VALUES (@bid, @aid, @type, @url, @fn, @note, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
@@ -92,11 +102,15 @@ router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", 
       const docType = req.body?.DocumentType?.trim();
       if (!docType) return res.status(400).json({ error: "DocumentType is required" });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
+      const booking = await pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
+      const applicationId = booking.recordset[0]?.ApplicationId || null;
 
       const inserted = [];
       for (const file of req.files) {
         const result = await pool.request()
           .input("bid",  sql.Int, bookingId)
+          .input("aid",  sql.Int, applicationId)
           .input("type", sql.NVarChar(100), docType)
           .input("fn",   sql.NVarChar(300), file.originalname)
           .input("fb64", sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
@@ -104,9 +118,9 @@ router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", 
           .input("mt",   sql.NVarChar(150), file.mimetype)
           .input("cb",   sql.Int, actorId(req))
           .query(`
-            INSERT INTO dbo.CrmBookingDocument (BookingId, DocumentType, FileName, FileBase64, FileSize, MimeType, CreatedBy, CreatedAt)
+            INSERT INTO dbo.CrmBookingDocument (BookingId, ApplicationId, DocumentType, FileName, FileBase64, FileSize, MimeType, CreatedBy, CreatedAt)
             OUTPUT INSERTED.Id
-            VALUES (@bid, @type, @fn, @fb64, @fs, @mt, @cb, SYSDATETIME())
+            VALUES (@bid, @aid, @type, @fn, @fb64, @fs, @mt, @cb, SYSDATETIME())
           `);
         inserted.push(result.recordset[0].Id);
       }
@@ -153,11 +167,15 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
       const docType = req.body?.DocumentType?.trim();
       if (!docType) return res.status(400).json({ error: "DocumentType is required" });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
+      const booking = await pool.request().input("aid", sql.Int, applicationId)
+        .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1 ORDER BY Id DESC");
+      const bookingId = booking.recordset[0]?.Id || null;
 
       const inserted = [];
       for (const file of req.files) {
         const result = await pool.request()
           .input("aid",  sql.Int, applicationId)
+          .input("bid",  sql.Int, bookingId)
           .input("type", sql.NVarChar(100), docType)
           .input("fn",   sql.NVarChar(300), file.originalname)
           .input("fb64", sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
@@ -165,9 +183,9 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
           .input("mt",   sql.NVarChar(150), file.mimetype)
           .input("cb",   sql.Int, actorId(req))
           .query(`
-            INSERT INTO dbo.CrmBookingDocument (ApplicationId, DocumentType, FileName, FileBase64, FileSize, MimeType, CreatedBy, CreatedAt)
+            INSERT INTO dbo.CrmBookingDocument (BookingId, ApplicationId, DocumentType, FileName, FileBase64, FileSize, MimeType, CreatedBy, CreatedAt)
             OUTPUT INSERTED.Id
-            VALUES (@aid, @type, @fn, @fb64, @fs, @mt, @cb, SYSDATETIME())
+            VALUES (@bid, @aid, @type, @fn, @fb64, @fs, @mt, @cb, SYSDATETIME())
           `);
         inserted.push(result.recordset[0].Id);
       }
@@ -180,7 +198,7 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
 });
 
 // GET /file/:id — stream a document's file for inline preview/download
-router.get("/file/:id", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
+router.get("/file/:id", requireAnyPageRight(["crm-applications", "crm-welcome-calls", "crm-bookings"], "view"), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const result = await getPool().request().input("id", sql.Int, id)
@@ -220,7 +238,7 @@ router.put("/:id/verify", requirePageRight("crm-welcome-calls", "edit"), async (
 });
 
 // DELETE /:id
-router.delete("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
+router.delete("/:id", requireAnyPageRight(["crm-applications", "crm-welcome-calls"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
