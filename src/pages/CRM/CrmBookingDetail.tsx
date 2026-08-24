@@ -1197,12 +1197,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             {/* ── Financial Status Bar ── always visible across all tabs ── */}
             {(() => {
               const mrReceived = (moneyReceipts as any[]).filter((r: any) => r.Status !== "Bounced").reduce((s: number, r: any) => s + Number(r.Amount || 0), 0);
+              const approvedOnAcc = Number(onAccountData?.availableBalance || 0);
               return (
                 <FinancialStatusBar
                   grandTotal={grandTotal}
                   cleared={totalCleared}
-                  pendingReceipts={Math.max(0, mrReceived - totalCleared)}
-                  approvedOnAccount={Number(onAccountData?.availableBalance || 0)}
+                  pendingReceipts={Math.max(0, mrReceived - totalCleared - approvedOnAcc)}
+                  approvedOnAccount={approvedOnAcc}
                   overdueCount={milestoneList.filter((m: any) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date()).length}
                 />
               );
@@ -1502,7 +1503,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   if (!milestoneList.length) return null;
                   const totalDue = milestoneList.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
                   const totalPaid = milestoneList.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
-                  const mrOnAccount = Math.max(0, (moneyReceipts as any[]).filter((r: any) => r.Status !== "Bounced").reduce((s: number, r: any) => s + Number(r.Amount || 0), 0) - totalPaid);
+                  // Use the real on-account pool balance (not MR-total minus paid, which double-counts deposits)
+                  const mrOnAccount = Number(onAccountData?.availableBalance || 0);
                   const firstUnpaidId = milestoneList.find((m: any) => m.Status !== CrmStatus.PAID && m.Status !== "Waived")?.Id;
 
                   const renderGroupRows = (label: string, rows: any[]) => rows.length > 0 && (

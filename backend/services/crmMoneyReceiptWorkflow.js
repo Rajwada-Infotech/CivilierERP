@@ -355,11 +355,21 @@ async function ensureMoneyReceiptForApprovedPayment(pool, receivedPaymentId, act
   const row = cur.recordset[0];
   if (!row || !row.CrmBookingId) return { existing: false, skipped: true };
 
+  // Derive GST split from booking's overall ratio (same logic as crmPayments.js getGstSplit)
+  const gstR = await pool.request().input("bid", sql.Int, row.CrmBookingId)
+    .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal FROM dbo.CrmBooking WHERE Id = @bid");
+  const bkGst = gstR.recordset[0] || {};
+  const gstRatio = Number(bkGst.GrandTotal) > 0 ? Number(bkGst.TotalGstAmount) / Number(bkGst.GrandTotal) : 0;
+  const gstAmt  = Math.round(Number(row.RPAmount) * gstRatio * 100) / 100;
+  const baseAmt = Math.round((Number(row.RPAmount) - gstAmt) * 100) / 100;
+
   const receiptNo = await getNextDocNumber(pool, "MR", "MR");
   const result = await pool.request()
     .input("no",   sql.NVarChar(30),  receiptNo)
     .input("bid",  sql.Int,           row.CrmBookingId)
     .input("amt",  sql.Decimal(18, 2), row.RPAmount)
+    .input("base", sql.Decimal(18, 2), baseAmt)
+    .input("gst",  sql.Decimal(18, 2), gstAmt)
     .input("mode", sql.NVarChar(30),  row.RPMode || "Other")
     .input("chq",  sql.NVarChar(50),  row.RPMode === "Cheque" ? row.RPCheckNumber : null)
     .input("chqDt", sql.Date,         row.RPMode === "Cheque" ? row.RPChequeDate : null)
@@ -371,12 +381,12 @@ async function ensureMoneyReceiptForApprovedPayment(pool, receivedPaymentId, act
     .input("rpid", sql.Int,           receivedPaymentId)
     .query(`
       INSERT INTO dbo.CrmMoneyReceipt
-        (ReceiptNo, BookingId, Amount, PaymentMode, ChequeNo, ChequeDate, BankName,
+        (ReceiptNo, BookingId, Amount, BaseAmount, GSTAmount, PaymentMode, ChequeNo, ChequeDate, BankName,
          TransactionRef, ReceivedDate, Remarks, Status, ReceivedPaymentId, CreatedBy,
          CreatedAt, UpdatedAt, ApprovedBy, ApprovedAt)
       OUTPUT INSERTED.Id
       VALUES
-        (@no, @bid, @amt, @mode, @chq, @chqDt, @bank,
+        (@no, @bid, @amt, @base, @gst, @mode, @chq, @chqDt, @bank,
          @ref, ISNULL(@rcvd, CAST(SYSDATETIME() AS DATE)), @rem, 'Approved', @rpid, @cb,
          SYSDATETIME(), SYSDATETIME(), @cb, SYSDATETIME())
     `);

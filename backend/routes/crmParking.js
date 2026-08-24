@@ -321,6 +321,12 @@ async function releaseAllParkingForBooking(pool, bookingId) {
         .query("DELETE FROM dbo.CrmPaymentMilestone WHERE Id = @mid");
     }
   }
+  // Recalculate booking totals so GrandTotal and remaining milestones reflect
+  // the released parking — important for accurate refund figures in the
+  // cancellation UI and for audit records.
+  if (rows.recordset.length > 0) {
+    await rollupBookingTotals(pool, bookingId);
+  }
   return { released: rows.recordset.length };
 }
 

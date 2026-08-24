@@ -23,7 +23,7 @@ const { recalculateBookingGst } = require("../services/crmGst");
 // the Admin Approval Inbox, same as every other CRM approval flow.
 const { transition: approvalTransition } = require("../services/approvalService");
 const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
-const { logStatusChange } = require("../services/crmApplicationWorkflow");
+const { logStatusChange, syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
 const {
   getStageState,
   submitForApproval,
@@ -877,7 +877,8 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
         (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Rejected') AS MoneyReceipts,
         (SELECT COUNT(*) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS OnAccountPayments,
         (SELECT COUNT(*) FROM dbo.CrmPaymentReceipt r JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid) AS PaymentReceipts,
-        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))) AS PaidMilestones
+        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))) AS PaidMilestones,
+        (SELECT COUNT(*) FROM dbo.CrmCancellation WHERE BookingId = @bid AND Status IN ('Pending', 'FinancePending')) AS ActiveCancellations
     `);
     const d = downstream.recordset[0] || {};
     for (const [label, count] of Object.entries(d)) {
@@ -901,13 +902,35 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
 
     // Revert Application-stage rows so the application can be corrected and
     // re-booked without stale child rows remaining pinned to the deleted booking.
+    // Parking allotments are fully deactivated (IsActive = 0) rather than just
+    // orphaned (BookingId = NULL) — a NULL-BookingId row with IsActive = 1
+    // permanently blocks the slot in the availability matrix for everyone.
     await pool.request().input("bid", sql.Int, id).input("aid", sql.Int, booking.ApplicationId).query(`
       UPDATE dbo.CrmCustomerBankDetail SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
       UPDATE dbo.CrmBookingDocument SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
-      UPDATE dbo.CrmParkingAllotment SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+      UPDATE dbo.CrmParkingAllotment SET BookingId = NULL, IsActive = 0 WHERE BookingId = @bid AND ApplicationId = @aid;
       UPDATE dbo.CrmCoApplicant SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
       UPDATE dbo.CrmExtraCharge SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
     `);
+
+    // Void any pending brokerage tranches — orphaned Pending tranches would
+    // inflate the brokerage liability reports and confuse clawback tracking
+    // if the application is later re-booked with fresh brokerage.
+    await pool.request().input("bid", sql.Int, id).query(`
+      UPDATE dbo.CrmBrokerageMaster
+      SET Status = 'Voided', UpdatedAt = SYSDATETIME(),
+          Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided — booking deleted by admin.'
+      WHERE BookingId = @bid AND Status = 'Pending'
+    `);
+
+    // Revert the Application from Approved → back to a cancellable/re-bookable
+    // state. createCrmBookingRecord force-advanced Application to Approved when
+    // the booking was created; without this call the Application stays at
+    // Approved forever with no live booking behind it — it can't be cancelled
+    // through the normal UI (APPLICATION_TRANSITIONS['Approved'] = []) and
+    // can't be re-booked, leaving the Application orphaned with no recovery path.
+    await syncApplicationOnBookingTerminal(pool, id, CrmStatus.CANCELLED,
+      "BookingAdminDelete", "Booking deleted by admin", actor);
 
     if (booking.UnitId) {
       try {
@@ -988,6 +1011,11 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmUnitChangeLog WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.ApprovalAuditLog WHERE TableName = 'CrmBooking' AND RecordId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmAuditLog WHERE EntityType = 'Booking' AND EntityId = @bid");
+      // CrmBrokerageMaster rows must be removed before the parent CrmBooking
+      // row to avoid FK constraint violations. At this point the booking is
+      // already soft-deleted and its Pending tranches were voided at that
+      // time — any remaining rows here are Voided/Clawback records.
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBooking WHERE Id = @bid");
       await tx.commit();
     } catch (txErr) {

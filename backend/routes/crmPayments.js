@@ -90,7 +90,9 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
     .query(`
       SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
+      WHERE BookingId = @bid AND MilestoneNo < @mno
+        AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
+        AND AmountDue > 0
       ORDER BY MilestoneNo
     `);
   if (earlier.recordset.length) {
@@ -239,7 +241,12 @@ async function autoApplyOnAccount(pool, bookingId, actorUserId, actorEmail) {
       onAccountId: deposit.recordset[0].Id, milestoneId: milestone.recordset[0].Id,
       amount: null, actorUserId, actorEmail,
     });
-    if (outcome.error || !outcome.applied) break;
+    if (outcome.error) {
+      console.error("[crm-payments] autoApplyOnAccount: applyOnAccountToMilestone failed —", outcome.error,
+        `| onAccountId=${deposit.recordset[0].Id} milestoneId=${milestone.recordset[0].Id} bookingId=${bookingId}`);
+      continue; // skip this pair, try remaining deposit/milestone combinations
+    }
+    if (!outcome.applied) break;
     results.push(outcome);
   }
   return results;
@@ -865,7 +872,16 @@ async function applyCrmOnAccountPaymentApproval(pool, rp, actorUserId, actorEmai
     `);
   const onAccountId = result.recordset[0].Id;
 
-  const outcome = await postCrmOnAccountToGL(pool, onAccountId, actorEmail);
+  // GL posting is best-effort — same pattern as applyCrmMilestonePaymentApproval.
+  // A GL failure must not abort the auto-sweep or MR generation that follow.
+  let glOutcome;
+  try {
+    glOutcome = await postCrmOnAccountToGL(pool, onAccountId, actorEmail);
+    await recordGLPosting("crm-on-account-payment", onAccountId, glOutcome, actorEmail);
+  } catch (glErr) {
+    await recordGLPosting("crm-on-account-payment", onAccountId, { failed: true, reason: glErr.message }, actorEmail);
+    glOutcome = {};
+  }
 
   // Same auto-sweep a milestone overflow already gets — the deposit
   // shouldn't sit unapplied any more than an overpayment's overflow does.
@@ -881,7 +897,7 @@ async function applyCrmOnAccountPaymentApproval(pool, rp, actorUserId, actorEmai
     console.error("[crm-payments] Money Receipt generation on approval failed:", mrErr.message);
   }
 
-  return { ...outcome, onAccountId, ReceiptNo: receiptNo };
+  return { ...glOutcome, onAccountId, ReceiptNo: receiptNo };
 }
 
 // POST /:id/receipts — record a receipt against a milestone (supports partial/installment receipts)
@@ -931,7 +947,18 @@ router.post("/escalate-overdue", requirePageRight("crm-payments", "edit"), async
       .map((u) => u.id);
 
     let notified = 0;
+    let skipped = 0;
     for (const m of overdue.recordset) {
+      // De-dup: skip milestones already escalated today (CrmSlaEscalationLog, migration 171)
+      const alreadyEscalated = await pool.request()
+        .input("eid", sql.Int, m.Id)
+        .query(`
+          SELECT TOP 1 Id FROM dbo.CrmSlaEscalationLog
+          WHERE EntityType = 'crm-payment-milestone' AND EntityId = @eid
+            AND CAST(EscalatedAt AS DATE) = CAST(SYSDATETIME() AS DATE)
+        `);
+      if (alreadyEscalated.recordset.length) { skipped++; continue; }
+
       const balance = (m.AmountDue || 0) - (m.AmountPaid || 0);
       const msg = `${m.ApplicantName} · ${m.BookingNo} — ${m.MilestoneName} overdue (₹${balance.toLocaleString("en-IN")} pending)`;
       if (m.AssignedTo) {
@@ -944,13 +971,11 @@ router.post("/escalate-overdue", requirePageRight("crm-payments", "edit"), async
           notified++;
         }
       }
+      // Record escalation so a second trigger today is a no-op for this milestone
+      await pool.request().input("eid", sql.Int, m.Id)
+        .query("INSERT INTO dbo.CrmSlaEscalationLog (EntityType, EntityId) VALUES ('crm-payment-milestone', @eid)");
     }
-    // NOTE: still no de-dup tracking — running this twice in the same day
-    // re-notifies every still-overdue milestone again. Doing this properly
-    // needs a DemandEscalatedAt (or similar) column on CrmPaymentMilestone
-    // to check/stamp here; flagging rather than guessing at a column that
-    // may not exist in this schema yet.
-    res.json({ success: true, overdueCount: overdue.recordset.length, notified });
+    res.json({ success: true, overdueCount: overdue.recordset.length, notified, skipped });
   } catch (e) {
     console.error("[crm-payments] POST /escalate-overdue error:", e.message);
     res.status(500).json({ error: e.message });
@@ -1221,12 +1246,18 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
       .query(`
         UPDATE dbo.CrmPaymentMilestone SET
           Status = 'Waived', Remarks = @rem, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        OUTPUT INSERTED.BookingId
+        OUTPUT INSERTED.BookingId, INSERTED.MilestoneNo
         WHERE Id = @id
       `);
 
+    const { BookingId: waivedBookingId, MilestoneNo: waivedMilestoneNo } = result.recordset[0];
     // Auto-flow: a waived milestone can also be the last one outstanding.
-    await maybeAutoCreateSalesDeed(pool, result.recordset[0].BookingId, actorId(req));
+    await maybeAutoCreateSalesDeed(pool, waivedBookingId, actorId(req));
+    // Milestone #1 waive must also trigger brokerage auto-create — same gate
+    // as handleMilestoneBecamePaid, which only fires on payment, not waive.
+    if (Number(waivedMilestoneNo) === 1) {
+      await maybeAutoCreateBrokerage(pool, waivedBookingId, actorId(req));
+    }
 
     res.json({ success: true, status: "Waived" });
   } catch (e) {

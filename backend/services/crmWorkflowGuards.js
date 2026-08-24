@@ -772,14 +772,20 @@ async function recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilest
 // before this change) keep using that milestone's own Status instead — see
 // the ParkingAllotmentId/ExtraChargeId lookup each caller does first.
 async function isBookingFullySettled(pool, bookingId) {
+  // Count milestones that are neither Paid nor Waived — zero means fully
+  // settled. Using a count (same gate as maybeAutoCreateSalesDeed) instead
+  // of SUM(AmountPaid) >= GrandTotal so that Waived milestones (AmountPaid=0
+  // but excluded from the obligation) don't permanently prevent settlement.
   const r = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT
-      (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid) AS TotalPaid,
-      (SELECT GrandTotal FROM dbo.CrmBooking WHERE Id = @bid) AS GrandTotal
+      COUNT(*) AS Total,
+      SUM(CASE WHEN Status IN ('Paid', 'Waived') THEN 1 ELSE 0 END) AS SettledCount
+    FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid
   `);
   const row = r.recordset[0];
-  if (!row || !row.GrandTotal) return false;
-  return Number(row.TotalPaid) + 0.01 >= Number(row.GrandTotal);
+  if (!row || !row.Total) return false;
+  return Number(row.Total) === Number(row.SettledCount);
 }
 
 // Keeps CrmParkingAllotment.PaymentStatus (the column the Parking Matrix /
