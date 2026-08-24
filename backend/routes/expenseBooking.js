@@ -3143,10 +3143,11 @@ router.put(
     let wasApproved = false;
     let beforeSnapshot = null;
     try {
+      // A Pending record is freely editable — it hasn't been approved yet,
+      // so there's nothing for an edit to conflict with. Only an Approved
+      // record's edits need to be tracked, which is what the amendment log
+      // below is for; Pending never reaches that path.
       const currentStatus = await getRecordStatus("expense-booking", numericId);
-      if (currentStatus === "Pending") {
-        return res.status(400).json({ error: "Cannot edit a record that is pending approval. Reject it first." });
-      }
       wasApproved = currentStatus === "Approved";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.ExpenseBooking", "Eid", numericId);
