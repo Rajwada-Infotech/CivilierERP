@@ -521,10 +521,14 @@ const CrmApplication: React.FC = () => {
   // in crmApplications.js) and is the actual source of truth here.
   // Draft (mid-fill, paused before full submission) — no booking yet.
   const isResumable = (app: any) => !!app && app.Stage !== "Converted" && app.Status === CrmStatus.DRAFT;
-  // Submitted (Pending) — booking may already exist, but L1 hasn't approved yet.
-  // Stage can be "Converted" (booking auto-created on submit) — that's fine; we
-  // still let staff correct mistakes before the first approval happens.
-  const isEditableApplication = (app: any) => !!app && app.Status === CrmStatus.PENDING && !["Approved", "Cancelled", "Expired"].includes(app.Status);
+  // Submitted (Pending) or reverted (Rejected) — booking may already exist, but
+  // no approval has been granted yet (or it was explicitly reverted for re-work).
+  // Backend PUT /:id allows edits for Draft/Pending/Rejected; Rejected is the
+  // "sent back for correction" state — the verifier flagged something and the
+  // preparer must fix it before resubmitting. Approved/Cancelled/Expired are
+  // terminal and block all edits server-side too.
+  const isEditableApplication = (app: any) =>
+    !!app && [CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.Status);
   // Kept for any callers that still reference it (row-level canResume).
   const isResumeEditable = (app: any) => isResumable(app) || isEditableApplication(app);
 
@@ -539,7 +543,7 @@ const CrmApplication: React.FC = () => {
   // anymore; see the comment on APPLICATION_TRANSITIONS in
   // crmApplicationWorkflow.js for why Cancel-and-redo isn't the answer
   // either at that point.
-  const canEditUnitSelection = wizardAppStatus === null || wizardAppStatus === CrmStatus.DRAFT || wizardAppStatus === CrmStatus.PENDING;
+  const canEditUnitSelection = wizardAppStatus === null || wizardAppStatus === CrmStatus.DRAFT || wizardAppStatus === CrmStatus.PENDING || wizardAppStatus === CrmStatus.REJECTED;
 
   // Mirrors APPLICATION_TRANSITIONS in crmApplicationWorkflow.js: Cancel is a
   // business action any editor can take pre-approval — accidental filing or a
@@ -951,10 +955,6 @@ const CrmApplication: React.FC = () => {
     // if the project has tagged banks (or even just the open bank list is
     // non-empty), a bank must be picked before this can go through — only
     // gated when a real token amount is actually being captured.
-    if (form.TokenValue && bankOptions.length > 0 && !form.DepositBankId) {
-      toast.error("Select which company bank this application's token payment landed in");
-      return;
-    }
     setSaving(true);
     try {
       await saveApplicationFields({
@@ -1232,7 +1232,7 @@ const CrmApplication: React.FC = () => {
                       disabled={loadingApplication}
                       className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-primary/20 bg-primary/5 text-primary font-medium hover:bg-primary/10 disabled:opacity-40 transition-colors"
                     >
-                      <PlayCircle size={12} /> {loadingApplication ? "Loading..." : isResumable(a) ? "Resume" : "Edit"}
+                      <PlayCircle size={12} /> {loadingApplication ? "Loading..." : isResumable(a) ? "Resume" : a.Status === CrmStatus.REJECTED ? "Fix & Resubmit" : "Edit"}
                     </button>
                   )}
                   {/* There is no Application-level Approve/Reject anymore —
@@ -2016,19 +2016,6 @@ const CrmApplication: React.FC = () => {
                         className={inputCls} />
                     </div>
                   )}
-                  <div>
-                    <label className={labelCls}>
-                      Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}{bankOptions.length > 0 ? " *" : ""}
-                    </label>
-                    <select value={form.DepositBankId} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
-                      onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
-                      className={inputCls}>
-                      <option value="">— Select company bank —</option>
-                      {(bankOptions as any[]).map((b: any) => (
-                        <option key={b.BId} value={String(b.BId)}>{b.BName}</option>
-                      ))}
-                    </select>
-                  </div>
                 </div>
               </div>
 
@@ -2129,247 +2116,268 @@ const CrmApplication: React.FC = () => {
           ) : (() => {
             const a = viewingAppDetail.application;
             const booking = (viewingAppDetail.bookings || [])[0];
-            // Unit price — same Area × Rate math as the wizard's own
-            // computedTotal, computed here straight off the fetched
-            // application/unit fields rather than wizard state (this dialog
-            // is a separate read-only view, never inside the wizard).
             const unitArea = Number(a.UnitAreaSqFt) || 0;
             const unitRate = Number(a.RatePerSqFt) || 0;
             const unitTotal = unitArea && unitRate ? Math.round(unitArea * unitRate) : 0;
             const parkingRows = viewingAppParking as any[];
             const parkingBase = parkingRows.reduce((s, p) => s + (Number(p.RateSnapshot) || 0) * (Number(p.Quantity) || 1), 0);
             const unitParkingGst = crmGstRates ? computeUnitParkingGst(unitTotal, parkingBase, crmGstRates) : null;
-            // Same plan lookup + milestone math as the wizard's step-1 plan
-            // preview (selectedPaymentPlan/selectedPlanMilestones) — reused
-            // here against the already-cached payment-plans list instead of
-            // a second fetch, keyed off this application's own PaymentPlanId.
             const plan = (paymentPlans as any[]).find((p: any) => String(p.Id) === String(a.PaymentPlanId)) || null;
             const planMilestones = parseMilestones(plan?.MilestonesJson);
             const planBookingAmount = Number(plan?.BookingAmount || 0);
             const extraChargeRows = viewingAppExtraCharges as any[];
             const extraChargesTotal = extraChargeRows.reduce((s, c) => s + (Number(c.TotalAmount) || 0), 0);
-            // Extra Work's own GST-inclusive total folds into GrandTotal
-            // exactly like Parking — same reasoning as selectedPlanRemainder
-            // in the live wizard.
             const grandTotal = (unitParkingGst?.total ?? (unitTotal + parkingBase)) + extraChargesTotal;
             const planRemainder = Math.max(0, grandTotal - planBookingAmount);
+
+            // reusable mini row helper
+            const Row = ({ label, value, full }: { label: string; value: React.ReactNode; full?: boolean }) => (
+              <div className={full ? "col-span-2" : ""}>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">{label}</p>
+                <p className="text-xs font-medium text-foreground leading-snug">{value || <span className="text-muted-foreground/60 font-normal">—</span>}</p>
+              </div>
+            );
+
             return (
-              <div className="space-y-4">
-                <div className="rounded-xl border border-border p-4 space-y-2">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><User size={14} className="text-primary" /> Applicant</h3>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                    <div className="flex items-center gap-1.5"><Phone size={12} className="text-muted-foreground" /> {a.Mobile}{a.AltMobile ? ` / ${a.AltMobile}` : ""}</div>
-                    <div className="flex items-center gap-1.5"><Mail size={12} className="text-muted-foreground" /> {a.Email || "—"}</div>
-                    <div className="flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" /> PAN: {a.PanNo || "—"}</div>
-                    <div className="flex items-center gap-1.5"><FileBadge size={12} className="text-muted-foreground" /> {a.CustomerNo || "—"}</div>
-                    <div className="col-span-2 flex items-start gap-1.5"><MapPin size={12} className="text-muted-foreground mt-0.5" />
-                      {[a.CustomerAddress, a.CustomerCity, a.CustomerState, a.CustomerPincode].filter(Boolean).join(", ") || "—"}
-                    </div>
+              <div className="space-y-3 text-sm">
+
+                {/* ── 1. Applicant ── */}
+                <section className="rounded-xl border border-border overflow-hidden">
+                  <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
+                    <User size={13} className="text-primary shrink-0" />
+                    <span className="text-xs font-semibold uppercase tracking-wide">Applicant</span>
+                    <span className="ml-auto font-mono text-[11px] text-muted-foreground">{a.CustomerNo || ""}</span>
+                  </div>
+                  <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                    <Row label="Name" value={a.ApplicantName} />
+                    <Row label="PAN" value={a.PanNo} />
+                    <Row label="Mobile" value={<>{a.Mobile}{a.AltMobile ? <span className="text-muted-foreground"> / {a.AltMobile}</span> : null}</>} />
+                    <Row label="Email" value={a.Email} />
+                    <Row label="Address" full value={[a.CustomerAddress, a.CustomerCity, a.CustomerState, a.CustomerPincode].filter(Boolean).join(", ") || null} />
                   </div>
                   {(viewingAppCoApplicants as any[]).length > 0 && (
-                    <div className="pt-2 border-t border-border space-y-1.5">
+                    <div className="px-4 pb-3 pt-0 flex flex-wrap gap-2">
                       {(viewingAppCoApplicants as any[]).map((co: any) => (
-                        <div key={co.Id} className="flex items-center gap-1.5 text-xs">
-                          <Users2 size={12} className="text-muted-foreground shrink-0" />
+                        <div key={co.Id} className="flex items-center gap-1.5 text-[11px] bg-muted/60 rounded-full px-2.5 py-1">
+                          <Users2 size={11} className="text-muted-foreground shrink-0" />
                           <span className="font-medium">{co.Name}</span>
-                          {co.Relation && <span className="text-muted-foreground">({co.Relation})</span>}
-                          {co.Mobile && <span className="text-muted-foreground">— {co.Mobile}</span>}
+                          {co.Relation && <span className="text-muted-foreground">· {co.Relation}</span>}
+                          {co.Mobile && <span className="text-muted-foreground">· {co.Mobile}</span>}
                         </div>
                       ))}
                     </div>
                   )}
-                </div>
+                </section>
 
-                <div className="rounded-xl border border-border p-4 space-y-2">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><Building2 size={14} className="text-primary" /> Project & Unit</h3>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                    <div><span className="text-muted-foreground">Company:</span> {a.CompanyName || "—"}</div>
-                    <div><span className="text-muted-foreground">Project:</span> {a.ProjectMasterName || a.InterestedProject || "—"}</div>
-                    <div><span className="text-muted-foreground">Preferred Unit:</span> {a.PreferredUnitName || a.InterestedUnit || "—"}</div>
-                    <div><span className="text-muted-foreground">Type:</span> {
-                      [a.PropertyType, a.BhkPreference].filter(Boolean).join(" · ")
-                      || [a.UnitTypeFromMaster, a.UnitAreaSqFt ? `${a.UnitAreaSqFt} sqft` : null].filter(Boolean).join(" · ")
-                      || "—"
-                    }</div>
-                  </div>
-                  {!!a.UnitUnavailableForBooking && (
-                    <div className="flex items-center gap-1.5 text-xs text-red-600 pt-2 border-t border-border">
-                      <XCircle size={12} /> This unit is currently booked or held by a different application — a booking can't be created until it's re-picked.
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-border p-4 space-y-2">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={14} className="text-primary" /> Financials</h3>
-
-                  {/* Price breakdown FIRST (Unit, Parking, then the fixed
-                      HSN GST -> Amount -> Total Amount), Payment Plan
-                      breakdown AFTER it — the plan literally splits that
-                      same Total Amount across milestones, so it has to be
-                      shown once the figure it's dividing up already exists
-                      on screen, not before. */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">Unit Price</span>
-                    <span className="font-medium text-foreground">
-                      {unitArea && unitRate
-                        ? `${unitArea} sqft × ₹${unitRate.toLocaleString("en-IN")}/sqft = ₹${unitTotal.toLocaleString("en-IN")}`
-                        : "—"}
-                    </span>
-                  </div>
-
-                  {parkingRows.length > 0 && (
-                    <div className="pt-2 border-t border-border space-y-1">
-                      {parkingRows.map((p: any) => (
-                        <div key={p.Id} className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>Parking — {p.CurrentParkingType}{p.SlotNo ? ` (Slot ${p.SlotNo})` : ` × ${p.Quantity}`}{p.Kind === "Hold" ? " (Held)" : ""}</span>
-                          <span className="font-medium text-foreground">₹{((Number(p.RateSnapshot) || 0) * (Number(p.Quantity) || 1)).toLocaleString("en-IN")}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {(unitTotal > 0 || parkingBase > 0) && (
-                    <div className="pt-2 border-t border-border">
-                      <GstBreakdownBox unitValue={unitTotal} parkingBase={parkingBase} />
-                    </div>
-                  )}
-
-                  {/* Extra Work — its own fixed 18% HSN rate, separate from
-                      the Unit+Parking bracket, so its own summary. */}
-                  {extraChargeRows.length > 0 && (
-                    <div className="pt-2 border-t border-border space-y-1">
-                      <p className="text-xs font-medium text-foreground">Extra Work</p>
-                      {extraChargeRows.map((c: any) => (
-                        <div key={c.Id} className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span className="truncate pr-2">{c.Description} <span className="text-[10px]">(GST {c.GstRate}%)</span></span>
-                          <span className="font-medium text-foreground shrink-0">₹{Number(c.TotalAmount).toLocaleString("en-IN")}</span>
-                        </div>
-                      ))}
-                      <div className="flex items-center justify-between font-medium text-foreground">
-                        <span>Extra Work Total</span>
-                        <span>₹{extraChargesTotal.toLocaleString("en-IN")}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="pt-2 border-t border-border space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">Payment Plan</span>
-                      <span className="font-medium text-foreground">{a.PaymentPlanName || "—"}</span>
-                    </div>
-                    {plan && planMilestones.length > 0 ? (
-                      <>
-                        <p className="text-[10px] text-muted-foreground pl-2">Split of the Total Amount above (₹{grandTotal.toLocaleString("en-IN")}, GST included) — Booking is the plan's own fixed figure, everything after it divides the remainder by %.</p>
-                        <div className="flex items-center justify-between text-[11px] text-muted-foreground pl-2">
-                          <span>Booking</span>
-                          <span className="font-medium text-foreground">₹{planBookingAmount.toLocaleString("en-IN")}</span>
-                        </div>
-                        {planMilestones.slice(1).map((m, i) => (
-                          <div key={i} className="flex items-center justify-between text-[11px] text-muted-foreground pl-2">
-                            <span className="truncate pr-2">{m.name} <span className="text-[10px]">({m.pct}%)</span></span>
-                            <span className="font-medium text-foreground shrink-0">
-                              {unitTotal ? `₹${Math.round((planRemainder * m.pct) / 100).toLocaleString("en-IN")}` : "—"}
-                            </span>
-                          </div>
-                        ))}
-                      </>
-                    ) : (
-                      <p className="text-[11px] text-muted-foreground pl-2">{a.PaymentPlanName ? "No milestone breakdown set on this plan." : "Set once a Payment Plan is picked."}</p>
+                {/* ── 2. Property ── */}
+                <section className="rounded-xl border border-border overflow-hidden">
+                  <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
+                    <Building2 size={13} className="text-primary shrink-0" />
+                    <span className="text-xs font-semibold uppercase tracking-wide">Property</span>
+                    {!!a.UnitUnavailableForBooking && (
+                      <span className="ml-auto flex items-center gap-1 text-[11px] text-red-500"><XCircle size={11} /> Unit unavailable</span>
                     )}
                   </div>
-
-                  {a.BrokerName && (
-                    <div className="pt-2 border-t border-border text-xs">
-                      <span className="text-muted-foreground">Broker:</span> {a.BrokerName} {a.BrokerageRatePercent != null && `(${a.BrokerageRatePercent}%)`}
-                      {a.BrokeragePaymentPlan && a.BrokeragePaymentPlan !== "OneTime" && (
-                        <span className="text-muted-foreground"> · {a.BrokeragePaymentPlan === "TwoPart" ? "Two-part payout" : "Agreement-only payout"}</span>
-                      )}
+                  <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                    <Row label="Company" value={a.CompanyName} />
+                    <Row label="Project" value={a.ProjectMasterName || a.InterestedProject} />
+                    <Row label="Unit" value={a.PreferredUnitName || a.InterestedUnit} />
+                    <Row label="Type / Area" value={
+                      [a.PropertyType || a.BhkPreference || a.UnitTypeFromMaster, a.UnitAreaSqFt ? `${a.UnitAreaSqFt} sqft` : null].filter(Boolean).join(" · ") || null
+                    } />
+                    <Row label="Rate" value={unitRate ? `₹${unitRate.toLocaleString("en-IN")}/sqft` : null} />
+                    <Row label="Payment Plan" value={a.PaymentPlanName} />
+                  </div>
+                  {/* Parking */}
+                  {parkingRows.length > 0 && (
+                    <div className="px-4 pb-3 flex flex-wrap gap-2">
+                      {parkingRows.map((p: any) => (
+                        <span key={p.Id} className="text-[11px] bg-muted/60 rounded-full px-2.5 py-1 font-medium">
+                          {p.CurrentParkingType}{p.SlotNo ? ` — Slot ${p.SlotNo}` : p.Quantity > 1 ? ` ×${p.Quantity}` : ""}
+                          {" · "}₹{((Number(p.RateSnapshot) || 0) * (Number(p.Quantity) || 1)).toLocaleString("en-IN")}
+                        </span>
+                      ))}
                     </div>
                   )}
-                </div>
+                </section>
 
-                {(a.TokenValue != null || a.PaymentMode) && (
-                  <div className="rounded-xl border border-border p-4 space-y-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={14} className="text-primary" /> Payment Details</h3>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                      {a.TokenType && a.TokenValue != null && (
-                        <div>
-                          <span className="text-muted-foreground">Token:</span>{" "}
-                          {a.TokenType === "Percentage"
-                            ? `${a.TokenValue}% of deal value`
-                            : `₹${Number(a.TokenValue).toLocaleString("en-IN")} (Fixed)`}
-                          {a.BookingAmount != null && (
-                            <span className="text-muted-foreground"> = ₹{Number(a.BookingAmount).toLocaleString("en-IN")}</span>
-                          )}
+                {/* ── 3. Financials (compact) ── */}
+                <section className="rounded-xl border border-border overflow-hidden">
+                  <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
+                    <IndianRupee size={13} className="text-primary shrink-0" />
+                    <span className="text-xs font-semibold uppercase tracking-wide">Financials</span>
+                    {grandTotal > 0 && (
+                      <span className="ml-auto text-xs font-bold text-foreground">₹{grandTotal.toLocaleString("en-IN")}</span>
+                    )}
+                  </div>
+                  <div className="px-4 py-3 space-y-1.5">
+                    {unitTotal > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-muted-foreground">Unit ({unitArea} sqft)</span>
+                        <span className="font-medium">₹{unitTotal.toLocaleString("en-IN")}</span>
+                      </div>
+                    )}
+                    {parkingBase > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-muted-foreground">Parking</span>
+                        <span className="font-medium">₹{parkingBase.toLocaleString("en-IN")}</span>
+                      </div>
+                    )}
+                    {extraChargesTotal > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-muted-foreground">Extra Work</span>
+                        <span className="font-medium">₹{extraChargesTotal.toLocaleString("en-IN")}</span>
+                      </div>
+                    )}
+                    {unitParkingGst && (
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>GST</span>
+                        <span>₹{(unitParkingGst.total - unitTotal - parkingBase).toLocaleString("en-IN")}</span>
+                      </div>
+                    )}
+                    {grandTotal > 0 && (
+                      <div className="flex justify-between text-xs font-semibold border-t border-border pt-1.5 mt-0.5">
+                        <span>Total</span>
+                        <span>₹{grandTotal.toLocaleString("en-IN")}</span>
+                      </div>
+                    )}
+                    {/* Payment plan milestone strip */}
+                    {plan && planMilestones.length > 0 && grandTotal > 0 && (
+                      <div className="pt-2 border-t border-border space-y-1">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Payment Schedule</p>
+                        <div className="flex justify-between text-[11px]">
+                          <span className="text-muted-foreground">Booking (fixed)</span>
+                          <span className="font-medium">₹{planBookingAmount.toLocaleString("en-IN")}</span>
                         </div>
-                      )}
-                      {a.PaymentMode && (
-                        <div><span className="text-muted-foreground">Mode:</span> {a.PaymentMode}</div>
-                      )}
-                      {a.DateOfApply && (
-                        <div><span className="text-muted-foreground">Date:</span> {String(a.DateOfApply).slice(0, 10)}</div>
+                        {planMilestones.slice(1).map((m, i) => (
+                          <div key={i} className="flex justify-between text-[11px]">
+                            <span className="text-muted-foreground truncate pr-2">{m.name} ({m.pct}%)</span>
+                            <span className="font-medium shrink-0">₹{Math.round((planRemainder * m.pct) / 100).toLocaleString("en-IN")}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Extra work detail */}
+                    {extraChargeRows.length > 0 && (
+                      <div className="pt-2 border-t border-border space-y-1">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Extra Work</p>
+                        {extraChargeRows.map((c: any) => (
+                          <div key={c.Id} className="flex justify-between text-[11px]">
+                            <span className="text-muted-foreground truncate pr-2">{c.Description}</span>
+                            <span className="font-medium shrink-0">₹{Number(c.TotalAmount).toLocaleString("en-IN")}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                {/* ── 4. Payment + Source in a 2-col row ── */}
+                <div className="grid grid-cols-2 gap-3">
+                  <section className="rounded-xl border border-border overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border">
+                      <Wallet size={12} className="text-primary shrink-0" />
+                      <span className="text-[11px] font-semibold uppercase tracking-wide">Token Payment</span>
+                    </div>
+                    <div className="px-3 py-2.5 space-y-2">
+                      <Row label="Token" value={
+                        a.TokenValue != null
+                          ? a.TokenType === "Percentage"
+                            ? `${a.TokenValue}% = ₹${Number(a.BookingAmount || 0).toLocaleString("en-IN")}`
+                            : `₹${Number(a.TokenValue).toLocaleString("en-IN")} (Fixed)`
+                          : null
+                      } />
+                      <Row label="Mode" value={a.PaymentMode} />
+                      <Row label="Date" value={a.DateOfApply ? String(a.DateOfApply).slice(0, 10) : null} />
+                    </div>
+                  </section>
+
+                  <section className="rounded-xl border border-border overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border">
+                      <Briefcase size={12} className="text-primary shrink-0" />
+                      <span className="text-[11px] font-semibold uppercase tracking-wide">Source</span>
+                    </div>
+                    <div className="px-3 py-2.5 space-y-2">
+                      <Row label="Source" value={a.Source} />
+                      <Row label="Assigned To" value={a.AssigneeName} />
+                      {(a.PlatformName || a.CampaignName || a.ChannelPartnerName) && (
+                        <Row label="Channel" value={[a.PlatformName, a.CampaignName, a.AdName].filter(Boolean).join(" › ") || a.ChannelPartnerName} />
                       )}
                     </div>
-                  </div>
+                  </section>
+                </div>
+
+                {/* ── 5. Broker (only if present) ── */}
+                {a.BrokerName && (
+                  <section className="rounded-xl border border-border overflow-hidden">
+                    <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
+                      <Users2 size={13} className="text-primary shrink-0" />
+                      <span className="text-xs font-semibold uppercase tracking-wide">Broker</span>
+                    </div>
+                    <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                      <Row label="Broker" value={a.BrokerName} />
+                      <Row label="Rate" value={a.BrokerageRatePercent != null ? `${a.BrokerageRatePercent}%` : null} />
+                      {a.BrokeragePaymentPlan && a.BrokeragePaymentPlan !== "OneTime" && (
+                        <Row label="Payout" value={a.BrokeragePaymentPlan === "TwoPart" ? "Two-part" : "Agreement-only"} />
+                      )}
+                    </div>
+                  </section>
                 )}
 
-                <div className="rounded-xl border border-border p-4 space-y-2">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><Briefcase size={14} className="text-primary" /> Source & Assignment</h3>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                    <div><span className="text-muted-foreground">Source:</span> {a.Source || "—"}</div>
-                    <div><span className="text-muted-foreground">Assigned To:</span> {a.AssigneeName || "—"}</div>
-                    <div className="col-span-2 text-muted-foreground">
-                      {[a.PlatformName, a.CampaignName, a.AdName].filter(Boolean).join(" › ") || a.ChannelPartnerName || ""}
-                    </div>
-                  </div>
-                </div>
-
-                {/* No separate Application-level verification anymore — the
-                    Application's own checklist merged into its Booking's
-                    "Review" workflow stage (see CrmBookingDetail.tsx). The
-                    "Linked Booking" card below is where that now lives. */}
-
+                {/* ── 6. Linked Booking ── */}
                 {booking && (
-                  <div className="rounded-xl border border-border p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={14} className="text-primary" /> Linked Booking</h3>
+                  <section className="rounded-xl border border-border overflow-hidden">
+                    <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
+                      <FileText size={13} className="text-primary shrink-0" />
+                      <span className="text-xs font-semibold uppercase tracking-wide">Linked Booking</span>
                       <button onClick={() => { setViewingAppId(null); navigate(`/crm/bookings?applicationId=${a.Id}`); }}
-                        className="text-xs text-primary hover:underline flex items-center gap-1">
-                        View Booking <ChevronRight size={12} />
+                        className="ml-auto text-[11px] text-primary hover:underline flex items-center gap-0.5">
+                        Open <ChevronRight size={11} />
                       </button>
                     </div>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                      <div><span className="text-muted-foreground">Booking No:</span> {booking.BookingNo}</div>
-                      <div><span className="text-muted-foreground">Status:</span> {booking.Status}</div>
-                      <div><span className="text-muted-foreground">Unit:</span> {[booking.ProjectName, booking.UnitNo].filter(Boolean).join(" · ") || "—"}</div>
-                      <div><span className="text-muted-foreground">Value:</span> {booking.TotalValue ? `₹${Number(booking.TotalValue).toLocaleString("en-IN")}` : "—"}</div>
+                    <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                      <Row label="Booking No" value={<span className="font-mono">{booking.BookingNo}</span>} />
+                      <Row label="Status" value={booking.Status} />
+                      <Row label="Unit" value={[booking.ProjectName, booking.UnitNo].filter(Boolean).join(" · ")} />
+                      <Row label="Value" value={booking.TotalValue ? `₹${Number(booking.TotalValue).toLocaleString("en-IN")}` : null} />
                     </div>
-                  </div>
+                  </section>
                 )}
 
+                {/* ── 7. Notes ── */}
                 {a.Notes && (
-                  <div className="rounded-xl border border-border p-4 space-y-1">
-                    <h3 className="text-sm font-semibold">Notes</h3>
-                    <p className="text-xs text-muted-foreground whitespace-pre-wrap">{a.Notes}</p>
-                  </div>
+                  <section className="rounded-xl border border-border overflow-hidden">
+                    <div className="px-4 py-2.5 bg-muted/40 border-b border-border">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide">Notes</span>
+                    </div>
+                    <p className="px-4 py-3 text-xs text-muted-foreground whitespace-pre-wrap">{a.Notes}</p>
+                  </section>
                 )}
 
+                {/* ── 8. Status timeline ── */}
                 {(viewingAppDetail.statusLog || []).length > 0 && (
-                  <div className="rounded-xl border border-border p-4 space-y-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Clock size={14} className="text-primary" /> Status History</h3>
-                    <div className="space-y-1.5">
-                      {viewingAppDetail.statusLog.map((s: any) => (
-                        <div key={s.Id} className="flex items-center justify-between text-xs">
-                          <span>
-                            <span className="font-medium">{s.FromStatus ? `${s.FromStatus} → ${s.ToStatus}` : s.ToStatus}</span>
-                            {s.ActorName && <span className="text-muted-foreground"> by {s.ActorName}</span>}
+                  <section className="rounded-xl border border-border overflow-hidden">
+                    <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
+                      <Clock size={13} className="text-primary shrink-0" />
+                      <span className="text-xs font-semibold uppercase tracking-wide">Timeline</span>
+                    </div>
+                    <div className="px-4 py-3 space-y-2">
+                      {viewingAppDetail.statusLog.map((s: any, idx: number) => (
+                        <div key={s.Id} className="flex items-start gap-2.5">
+                          <div className="mt-1 shrink-0 w-1.5 h-1.5 rounded-full bg-primary/60" />
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs font-medium">{s.FromStatus ? `${s.FromStatus} → ${s.ToStatus}` : s.ToStatus}</span>
+                            {s.ActorName && <span className="text-[11px] text-muted-foreground"> · {s.ActorName}</span>}
+                          </div>
+                          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                            {s.CreatedAt ? String(s.CreatedAt).slice(0, 16).replace("T", " ") : ""}
                           </span>
-                          <span className="text-muted-foreground">{s.CreatedAt ? String(s.CreatedAt).slice(0, 16).replace("T", " ") : ""}</span>
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </section>
                 )}
+
               </div>
             );
           })()}
@@ -2395,7 +2403,9 @@ const CrmApplication: React.FC = () => {
                   ? "Loading..."
                   : isResumable(viewingAppDetail.application)
                     ? "Resume"
-                    : "Edit Application"}
+                    : viewingAppDetail.application.Status === CrmStatus.REJECTED
+                      ? "Fix & Resubmit"
+                      : "Edit Application"}
               </button>
             )}
           </div>
