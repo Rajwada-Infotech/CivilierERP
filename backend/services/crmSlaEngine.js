@@ -301,9 +301,10 @@ const REGISTRY = [
     async fetch(pool) {
       const r = await pool.request().query(`
         SELECT pn.Id, pn.NoticeNo, pn.BookingId, pn.ResponseDeadline,
-               b.ApplicantName, b.AssignedTo
+               b.BookingNo, b.AssignedTo, a.ApplicantName
         FROM dbo.CrmPossessionNotice pn
-        JOIN dbo.CrmBookings b ON b.Id = pn.BookingId
+        JOIN dbo.CrmBooking b ON b.Id = pn.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         WHERE pn.Status = 'Sent'
           AND pn.ResponseDeadline < CAST(GETDATE() AS DATE)
           AND b.IsActive = 1
@@ -312,17 +313,14 @@ const REGISTRY = [
       return r.recordset;
     },
     async notify(pool, row) {
+      if (!row.AssignedTo) return false;
       const deadline = row.ResponseDeadline
         ? new Date(row.ResponseDeadline).toLocaleDateString("en-IN")
-        : "N/A";
-      await emitNotification(pool, {
-        userId: row.AssignedTo,
-        type: "sla_possession_response_overdue",
-        message: `Possession notice ${row.NoticeNo} (Booking ${row.BookingId} — ${row.ApplicantName}) has passed its response deadline of ${deadline} without acknowledgement or dispute.`,
-        entityId: row.BookingId,
-        entityType: "crm_possession_notice",
-      });
-      await logEscalation(pool, "crm-possession-response-overdue", row.Id);
+        : "—";
+      await emitNotification(pool, row.AssignedTo, "sla_possession_response_overdue",
+        "Possession Notice Response Overdue",
+        `${row.NoticeNo} (${row.BookingNo} · ${row.ApplicantName}) — response deadline was ${deadline} and the customer has neither acknowledged nor disputed.`,
+        row.Id, "crm_possession_notice");
       return true;
     },
   },

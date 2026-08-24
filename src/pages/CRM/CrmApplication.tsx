@@ -519,7 +519,14 @@ const CrmApplication: React.FC = () => {
   // button should never have been offered in the first place. Stage is
   // computed server-side from whether a live Booking exists (see APP_SELECT
   // in crmApplications.js) and is the actual source of truth here.
-  const isResumeEditable = (app: any) => !!app && app.Stage !== "Converted" && (app.Status === CrmStatus.DRAFT || app.Status === CrmStatus.PENDING);
+  // Draft (mid-fill, paused before full submission) — no booking yet.
+  const isResumable = (app: any) => !!app && app.Stage !== "Converted" && app.Status === CrmStatus.DRAFT;
+  // Submitted (Pending) — booking may already exist, but L1 hasn't approved yet.
+  // Stage can be "Converted" (booking auto-created on submit) — that's fine; we
+  // still let staff correct mistakes before the first approval happens.
+  const isEditableApplication = (app: any) => !!app && app.Status === CrmStatus.PENDING && !["Approved", "Cancelled", "Expired"].includes(app.Status);
+  // Kept for any callers that still reference it (row-level canResume).
+  const isResumeEditable = (app: any) => isResumable(app) || isEditableApplication(app);
 
   // Same Draft/Pending gate as isResumeEditable, applied inside the open
   // wizard rather than at the Resume button: null status means a brand-new
@@ -1225,7 +1232,7 @@ const CrmApplication: React.FC = () => {
                       disabled={loadingApplication}
                       className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-primary/20 bg-primary/5 text-primary font-medium hover:bg-primary/10 disabled:opacity-40 transition-colors"
                     >
-                      <PlayCircle size={12} /> {loadingApplication ? "Loading..." : "Resume"}
+                      <PlayCircle size={12} /> {loadingApplication ? "Loading..." : isResumable(a) ? "Resume" : "Edit"}
                     </button>
                   )}
                   {/* There is no Application-level Approve/Reject anymore —
@@ -2281,6 +2288,31 @@ const CrmApplication: React.FC = () => {
                   )}
                 </div>
 
+                {(a.TokenValue != null || a.PaymentMode) && (
+                  <div className="rounded-xl border border-border p-4 space-y-2">
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={14} className="text-primary" /> Payment Details</h3>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                      {a.TokenType && a.TokenValue != null && (
+                        <div>
+                          <span className="text-muted-foreground">Token:</span>{" "}
+                          {a.TokenType === "Percentage"
+                            ? `${a.TokenValue}% of deal value`
+                            : `₹${Number(a.TokenValue).toLocaleString("en-IN")} (Fixed)`}
+                          {a.BookingAmount != null && (
+                            <span className="text-muted-foreground"> = ₹{Number(a.BookingAmount).toLocaleString("en-IN")}</span>
+                          )}
+                        </div>
+                      )}
+                      {a.PaymentMode && (
+                        <div><span className="text-muted-foreground">Mode:</span> {a.PaymentMode}</div>
+                      )}
+                      {a.DateOfApply && (
+                        <div><span className="text-muted-foreground">Date:</span> {String(a.DateOfApply).slice(0, 10)}</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5"><Briefcase size={14} className="text-primary" /> Source & Assignment</h3>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
@@ -2353,13 +2385,17 @@ const CrmApplication: React.FC = () => {
                 Cancel Application
               </button>
             )}
-            {viewingAppDetail && isResumeEditable(viewingAppDetail.application) && (
+            {viewingAppDetail && (isResumable(viewingAppDetail.application) || isEditableApplication(viewingAppDetail.application)) && (
               <button
                 onClick={() => { const id = viewingAppDetail.application.Id; setViewingAppId(null); loadApplicationIntoWizard(id); }}
                 disabled={loadingApplication}
                 className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40"
               >
-                {loadingApplication ? "Loading..." : "Resume"}
+                {loadingApplication
+                  ? "Loading..."
+                  : isResumable(viewingAppDetail.application)
+                    ? "Resume"
+                    : "Edit Application"}
               </button>
             )}
           </div>
