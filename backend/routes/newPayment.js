@@ -2302,7 +2302,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const { postVoucher, resolvePaymentSupplierHeadId, getGLHeadId, GL_ACCOUNTS } = require("../services/generalLedger");
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
-      SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
+      SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
              np.PBankID, np.PBankName, np.ContractId, np.PPartyId,
              ISNULL(np.TDSAmount, 0) AS TDSAmount,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
@@ -2379,7 +2379,9 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     await postVoucher(pool, {
       voucherNo: finalDocNo || `JV-PMT${pmtId}`,
-      voucherDate: new Date(),
+      // The payment's own date, not the date it happened to get posted —
+      // same fix as Invoice/GRN/Loan posting.
+      voucherDate: pmt.PDate,
       sourceType: "PaymentPosting",
       sourceId: pmtId,
       companyId: pmt.CompanyId ?? null,

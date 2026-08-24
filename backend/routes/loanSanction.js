@@ -1224,7 +1224,10 @@ async function postLoanToGLInternal(pool, loanId, userEmail) {
     ];
     await postVoucher(pool, {
       voucherNo: loan.LoanNo,
-      voucherDate: new Date(),
+      // The loan's own date, not the date it happened to get posted —
+      // matches the Inter-Company branch above, which already got this
+      // right.
+      voucherDate: loan.LoanDate,
       sourceType: "LoanPosting",
       sourceId: loanId,
       companyId: loan.LenderCompanyId || loan.BorrowerCompanyId || null,
