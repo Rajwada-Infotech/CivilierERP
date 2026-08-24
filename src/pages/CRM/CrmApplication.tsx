@@ -951,10 +951,6 @@ const CrmApplication: React.FC = () => {
     // if the project has tagged banks (or even just the open bank list is
     // non-empty), a bank must be picked before this can go through — only
     // gated when a real token amount is actually being captured.
-    if (form.TokenValue && bankOptions.length > 0 && !form.DepositBankId) {
-      toast.error("Select which company bank this application's token payment landed in");
-      return;
-    }
     setSaving(true);
     try {
       await saveApplicationFields({
@@ -2016,19 +2012,6 @@ const CrmApplication: React.FC = () => {
                         className={inputCls} />
                     </div>
                   )}
-                  <div>
-                    <label className={labelCls}>
-                      Deposited To (Company Bank){projectBanks.length > 0 ? " — scoped to this project" : ""}{bankOptions.length > 0 ? " *" : ""}
-                    </label>
-                    <select value={form.DepositBankId} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
-                      onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
-                      className={inputCls}>
-                      <option value="">— Select company bank —</option>
-                      {(bankOptions as any[]).map((b: any) => (
-                        <option key={b.BId} value={String(b.BId)}>{b.BName}</option>
-                      ))}
-                    </select>
-                  </div>
                 </div>
               </div>
 
