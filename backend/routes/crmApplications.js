@@ -526,46 +526,38 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
     // already reads as "taken") and add nothing.
     const pool = getPool();
     const actor = actorId(req);
-    try {
-      const app = await pool.request().input("id", sql.Int, id)
-        .query("SELECT PreferredUnitId FROM dbo.CrmApplication WHERE Id = @id");
-      const unitId = app.recordset[0]?.PreferredUnitId;
-      if (unitId) {
-        await placeHoldIfNeeded(pool, {
-          entityType: "Unit", entityId: unitId, applicationId: id, holdDays: 3,
-          reason: "Application submitted — auto-hold", userId: actor,
-        });
-      }
-    } catch (holdErr) {
-      // A deliberate business-rule throw (unit already held by another
-      // application, unit already booked, project mismatch, etc.) always
-      // carries an explicit .status — that's this codebase's own convention
-      // (CrmCreationError, and crmHoldService.js's manually-set e.status).
-      // Those must block the submit, not be treated as tolerable infra noise
-      // — otherwise a second application for the same unit sails into the
-      // approval queue with no hold protecting it. Only a truly unexpected
-      // error (driver timeout, connection reset — no .status) stays
-      // non-blocking, matching the tolerance this comment originally intended.
-      if (holdErr.status) {
-        console.error("[crm-applications] auto-hold on submit blocked:", holdErr.message);
-        return res.status(holdErr.status).json({ error: holdErr.message });
-      }
-      console.error("[crm-applications] auto-hold on submit failed:", holdErr.message);
-    }
 
-    // Auto-create the Booking the moment submit succeeds — no separate
-    // "wait for Application approval, then click Create Booking" step
-    // anymore. Best-effort: a real conflict here (unit taken in the
-    // interim, no payment plan resolvable, etc.) is reported back but
-    // never fails the submit itself — staff retry via the "Create Booking"
-    // fallback button, same as before.
+    // First check if it already has a booking (it was already submitted once).
     let booking = null;
     let bookingError = null;
     const already = await pool.request().input("aid", sql.Int, id)
       .query("SELECT TOP 1 Id, BookingNo FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1");
     if (already.recordset.length) {
-      booking = { id: already.recordset[0].Id, BookingNo: already.recordset[0].BookingNo };
+      booking = { id: already.recordset[0].Id, BookingNo: already.recordset[0].BookingNo, alreadyExists: true };
+      await pool.request().input("bid", sql.Int, booking.id).input("aid", sql.Int, id).query(`
+        UPDATE dbo.CrmBookingDocument
+        SET BookingId = @bid
+        WHERE ApplicationId = @aid AND BookingId IS NULL
+      `);
     } else {
+      // If no booking exists yet, place a hold and create one.
+      try {
+        const app = await pool.request().input("id", sql.Int, id)
+          .query("SELECT PreferredUnitId FROM dbo.CrmApplication WHERE Id = @id");
+        const unitId = app.recordset[0]?.PreferredUnitId;
+        if (unitId) {
+          await placeHoldIfNeeded(pool, {
+            entityType: "Unit", entityId: unitId, applicationId: id, holdDays: 3,
+            reason: "Application submitted — auto-hold", userId: actor,
+          });
+        }
+      } catch (holdErr) {
+        if (holdErr.status) {
+          console.error("[crm-applications] auto-hold on submit blocked:", holdErr.message);
+          return res.status(holdErr.status).json({ error: holdErr.message });
+        }
+        console.error("[crm-applications] auto-hold on submit failed:", holdErr.message);
+      }
       const app = await pool.request().input("id", sql.Int, id).query(`
         SELECT PreferredUnitId, RatePerSqFt, PaymentPlanId, DateOfApply,
                TokenType, TokenValue, BookingAmount, PaymentMode, DepositBankId,
@@ -588,6 +580,11 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
           await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id)
             .query(`UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${CrmStatus.BOOKED}', UpdatedAt = SYSDATETIME()
                     WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @aid)`);
+          await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id).query(`
+            UPDATE dbo.CrmBookingDocument
+            SET BookingId = @bid
+            WHERE ApplicationId = @aid AND BookingId IS NULL
+          `);
         } catch (bkErr) {
           console.error("[crm-applications] auto-create-booking on submit failed:", bkErr.message);
           bookingError = bkErr.message;
@@ -651,6 +648,11 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
         UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${CrmStatus.BOOKED}', UpdatedAt = SYSDATETIME()
         WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @id)
       `);
+    await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id).query(`
+      UPDATE dbo.CrmBookingDocument
+      SET BookingId = @bid
+      WHERE ApplicationId = @aid AND BookingId IS NULL
+    `);
 
     res.json({ success: true, booking: created });
   } catch (e) {

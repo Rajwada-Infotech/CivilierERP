@@ -13,7 +13,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
-  Mail, MapPin, IndianRupee, Users2, Briefcase, X, PlayCircle, Ban, Lock, Wallet,
+  Mail, MapPin, IndianRupee, Users2, Briefcase, X, PlayCircle, Ban, Lock, Wallet, Eye, Download,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -274,6 +274,7 @@ const CrmApplication: React.FC = () => {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [loadingApplication, setLoadingApplication] = useState(false);
+  const [hasBooking, setHasBooking] = useState(false);
   const [applicationId, setApplicationId] = useState<number | null>(null);
   const [applicationNo, setApplicationNo] = useState<string | null>(null);
   // Status of the application currently open in the wizard, as loaded from
@@ -718,6 +719,7 @@ const CrmApplication: React.FC = () => {
     // A brand-new application starts with no status of its own.
     setWizardAppStatus(null);
     setUnitLocked(false);
+    setHasBooking(false);
     setPaymentLocked(false);
   };
 
@@ -744,6 +746,7 @@ const CrmApplication: React.FC = () => {
       const body = await res.json();
       const app = body.application;
       if (!app) throw new Error("Application record missing from response");
+      setHasBooking((body.bookings || []).length > 0);
 
       // ChequeNo/ChequeDate/TransactionRef live on CrmCustomerBankDetail
       // (keyed by ApplicationId), not on CrmApplication itself — same table
@@ -888,6 +891,7 @@ const CrmApplication: React.FC = () => {
       if (!res.ok) throw new Error(data.error || "Failed to create application");
       setApplicationId(data.id);
       setApplicationNo(data.ApplicationNo);
+      setHasBooking(false);
       // Freshly created — always Draft, and stays unlocked since this is the
       // same step-1 pick that was just made, not yet a saved value to guard.
       setWizardAppStatus("Draft");
@@ -997,12 +1001,11 @@ const CrmApplication: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["parking-matrix"] });
       qc.invalidateQueries({ queryKey: ["unit-master"] });
       if (subData.booking?.BookingNo) {
-        // Booking is auto-created server-side on submit, but we deliberately
-        // do NOT navigate there — Application and Booking are meant to be
-        // handled by two different users/steps (no enforced user-gate yet,
-        // that's a separate future change), so staff stay on this page
-        // instead of being forced onto the booking they didn't create.
-        toast.success(`Booking ${subData.booking.BookingNo} created — payment milestones auto-generated`);
+          if (subData.booking.alreadyExists) {
+            toast.success("Application edits submitted successfully");
+          } else {
+            toast.success(`Booking ${subData.booking.BookingNo} created — payment milestones auto-generated`);
+          }
       } else if (subData.bookingError) {
         // Auto-create failed (e.g. a unit-hold conflict in the interim) —
         // the Application itself still submitted fine; staff can retry via
@@ -2084,7 +2087,7 @@ const CrmApplication: React.FC = () => {
               {step === 7 && (
                 <button onClick={handleFinalSave} disabled={saving}
                   className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
-                  {saving ? "Submitting..." : "Submit Application"}
+                  {saving ? "Submitting..." : hasBooking ? "Submit Edits" : "Submit Application"}
                 </button>
               )}
             </div>
@@ -2105,7 +2108,7 @@ const CrmApplication: React.FC = () => {
                   <span className="font-mono text-primary">{viewingAppDetail.application.ApplicationNo}</span>
                   <span>— {viewingAppDetail.application.ApplicantName}</span>
                   <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[viewingAppDetail.application.Status] || ""}`}>
-                    {viewingAppDetail.application.Status}
+                    {viewingAppDetail.bookings && viewingAppDetail.bookings.length > 0 ? "Submitted" : viewingAppDetail.application.Status}
                   </span>
                 </>
               ) : "Application Details"}
@@ -3431,12 +3434,28 @@ const AttachmentsStep: React.FC<{
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleUploadFiles(e.target.files)} />
         </div>
         <div className="space-y-1">
-          {(docData?.documents || []).map((d: any) => (
-            <div key={d.Id} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
-              <span className="truncate">{d.DocumentType} — {d.FileName}</span>
-              <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-red-600 shrink-0"><Trash2 size={12} /></button>
-            </div>
-          ))}
+          {(docData?.documents || []).map((d: any) => {
+            const fileUrl = `${DOC_API}/file/${d.Id}`;
+            const previewable = /\.(jpe?g|png|gif|webp|bmp|svg|pdf)$/i.test(d.FileName || "");
+            return (
+              <div key={d.Id} className="flex items-center justify-between gap-2 text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
+                <span className="truncate flex-1">{d.DocumentType} — {d.FileName}</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  {previewable && (
+                    <a href={fileUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
+                      <Eye size={12} />
+                    </a>
+                  )}
+                  <a href={fileUrl} download={d.FileName}
+                    className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
+                    <Download size={12} />
+                  </a>
+                  <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+                </div>
+              </div>
+            );
+          })}
           {(!docData?.documents || docData.documents.length === 0) && (
             <p className="text-xs text-muted-foreground">No documents uploaded yet.</p>
           )}

@@ -1289,12 +1289,30 @@ router.get("/:id/attachments", requirePageRight("crm-bookings", "view"), async (
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
+    // Return both booking-level attachments AND application-level KYC documents
+    // (uploaded during the Application wizard) in one unified list, so staff
+    // see everything in one place without re-uploading.
     const result = await pool.request().input("id", sql.Int, id).query(`
-      SELECT a.Id, a.Label, a.FileName, a.FileSize, a.MimeType, a.UploadedAt, u.name AS UploadedByName
+      SELECT a.Id, a.Label, a.FileName, a.FileSize, a.MimeType,
+             a.UploadedAt AS CreatedAt, u.name AS UploaderName,
+             'booking' AS Source, NULL AS DocumentType
       FROM dbo.CrmBookingAttachment a
       LEFT JOIN dbo.Users u ON u.id = a.UploadedBy
       WHERE a.BookingId = @id
-      ORDER BY a.UploadedAt DESC
+
+      UNION ALL
+
+      SELECT d.Id, d.DocumentType AS Label, d.FileName, d.FileSize, d.MimeType,
+             d.CreatedAt, cu.name AS UploaderName,
+             'application' AS Source, d.DocumentType
+      FROM dbo.CrmBookingDocument d
+      LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy
+      WHERE d.BookingId = @id
+         OR (d.ApplicationId = (
+              SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1
+            ) AND d.BookingId IS NULL)
+
+      ORDER BY CreatedAt DESC
     `);
     res.json(result.recordset);
   } catch (e) {

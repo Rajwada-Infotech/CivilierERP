@@ -2359,33 +2359,51 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           </tr>
                         </thead>
                         <tbody>
-                          {(attachments as any[]).map((a: any) => (
-                            <tr key={a.Id} className="border-b border-border hover:bg-muted/30">
-                              <td className="px-2.5 py-2 flex items-center gap-1.5">
-                                <Paperclip size={12} className="text-muted-foreground shrink-0" />
-                                <span className="truncate max-w-[200px] sm:max-w-[300px]">{a.FileName}</span>
+                          {(attachments as any[]).map((a: any) => {
+                            // Booking-level attachments use the booking's own file endpoint;
+                            // Application-level KYC docs use the booking-documents file endpoint.
+                            const fileUrl = a.Source === "application"
+                              ? `/api/crm/booking-documents/file/${a.Id}`
+                              : `${API}/${bookingId}/attachments/file/${a.Id}`;
+                            const previewable = /\.(jpe?g|png|gif|webp|bmp|svg|pdf)$/i.test(a.FileName || "");
+                            return (
+                            <tr key={`${a.Source}-${a.Id}`} className="border-b border-border hover:bg-muted/30">
+                              <td className="px-2.5 py-2">
+                                <div className="flex items-center gap-1.5">
+                                  <Paperclip size={12} className="text-muted-foreground shrink-0" />
+                                  <span className="truncate max-w-[200px] sm:max-w-[300px]">{a.FileName}</span>
+                                  {a.Source === "application" && (
+                                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">From Application</span>
+                                  )}
+                                </div>
+                                {a.DocumentType && a.DocumentType !== a.Label && (
+                                  <p className="text-[11px] text-muted-foreground pl-5">{a.DocumentType}</p>
+                                )}
                               </td>
                               <td className="px-2.5 py-2 text-xs text-muted-foreground">{a.CreatedAt ? new Date(a.CreatedAt).toLocaleDateString("en-IN") : "—"}</td>
-                              <td className="px-2.5 py-2 text-right flex items-center justify-end gap-1 flex-wrap">
-                                {/\.(jpe?g|png|gif|webp|bmp|svg|pdf)$/i.test(a.FileName || "") && (
-                                  <button onClick={() => setPreviewAttachment(a)}
+                              <td className="px-2.5 py-2 text-right">
+                                <div className="flex items-center justify-end gap-1 flex-wrap">
+                                  {previewable && (
+                                    <button onClick={() => setPreviewAttachment({ ...a, fileUrl })}
+                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border rounded hover:bg-muted">
+                                      <Eye size={11} /> Preview
+                                    </button>
+                                  )}
+                                  <a href={fileUrl} target="_blank" rel="noopener noreferrer" download={a.FileName}
                                     className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border rounded hover:bg-muted">
-                                    <Eye size={11} /> Preview
-                                  </button>
-                                )}
-                                <a href={a.FileUrl} target="_blank" rel="noopener noreferrer" download={a.FileName}
-                                  className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border rounded hover:bg-muted">
-                                  <Download size={11} /> Download
-                                </a>
-                                {canEdit && booking.Status !== CrmStatus.APPROVED && (
-                                  <button onClick={() => handleDeleteAttachment(a.Id)}
-                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded ml-1">
-                                    <Trash2 size={11} /> Delete
-                                  </button>
-                                )}
+                                    <Download size={11} /> Download
+                                  </a>
+                                  {canEdit && booking.Status !== CrmStatus.APPROVED && a.Source !== "application" && (
+                                    <button onClick={() => handleDeleteAttachment(a.Id)}
+                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded ml-1">
+                                      <Trash2 size={11} /> Delete
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -2655,7 +2673,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 <Paperclip size={14} className="text-primary shrink-0" />
                 <span className="truncate">{previewAttachment.FileName}</span>
               </DialogTitle>
-              <a href={previewAttachment.FileUrl} target="_blank" rel="noopener noreferrer" download={previewAttachment.FileName}
+              <a href={previewAttachment.fileUrl} target="_blank" rel="noopener noreferrer" download={previewAttachment.FileName}
                 className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted font-medium">
                 <Download size={13} /> Download
               </a>
@@ -2663,9 +2681,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           </DialogHeader>
           <div className="flex items-center justify-center min-h-[300px] max-h-[65vh] bg-muted/20 rounded-lg overflow-hidden border border-border">
             {/\.pdf$/i.test(previewAttachment.FileName || "") ? (
-              <iframe src={previewAttachment.FileUrl} title={previewAttachment.FileName} className="w-full h-[65vh] border-0" />
+              <iframe src={previewAttachment.fileUrl} title={previewAttachment.FileName} className="w-full h-[65vh] border-0" />
             ) : (
-              <img src={previewAttachment.FileUrl} alt={previewAttachment.FileName} className="max-w-full max-h-[65vh] object-contain" />
+              <img src={previewAttachment.fileUrl} alt={previewAttachment.FileName} className="max-w-full max-h-[65vh] object-contain" />
             )}
           </div>
           {previewAttachment.CreatedAt && (
