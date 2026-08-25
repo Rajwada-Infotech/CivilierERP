@@ -38,7 +38,7 @@ const EMPTY_BANK = {
 // frontend-side permission preview.
 const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
-const TABS = ["Booking", "Parking & Extra Work", "Payment Plan", "Bank Details", "Customer Portal", "Attachments", "Payment & Invoice"] as const;
+const TABS = ["Booking", "Parking & Extra Charges", "Payment Plan", "Bank Details", "Customer Portal", "Attachments", "Payment & Invoice"] as const;
 type Tab = typeof TABS[number];
 
 const fmt = (n: number | null | undefined) =>
@@ -114,7 +114,7 @@ async function fetchPendingAmendments(bookingId: number): Promise<any[]> {
 }
 
 // Live "what will this actually cost" preview for the Extra Charge add
-// form — 18% is fixed from the HSN Master "Extra Work" row (useGstRates
+// form — 18% is fixed from the HSN Master "Extra Charges" row (useGstRates
 // fetches it live, never hardcoded), matching exactly what the backend will
 // charge once submitted.
 function ExtraWorkGstPreview({ amount }: { amount: number }) {
@@ -190,12 +190,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [invoiceDialog, setInvoiceDialog] = useState(false);
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
   const [previewReceipt, setPreviewReceipt] = useState<any | null>(null);
+  const [previewApplicationForm, setPreviewApplicationForm] = useState<{ id: number; no: string } | null>(null);
   const [previewAttachment, setPreviewAttachment] = useState<any | null>(null);
   const [previewAttachmentBlobUrl, setPreviewAttachmentBlobUrl] = useState<string | null>(null);
   const [previewAttachmentLoading, setPreviewAttachmentLoading] = useState(false);
   const [previewAttachmentError, setPreviewAttachmentError] = useState<string | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ InvoiceType: "Booking", Amount: "", InvoiceDate: "", Description: "", MilestoneId: "", OnAccountPaymentId: "" });
-  const [parkingForm, setParkingForm] = useState({ Quantity: "1" });
+  const [parkingForm, setParkingForm] = useState({ Quantity: "1", RateOverride: "" });
   const [discountForm, setDiscountForm] = useState({ Amount: "", Note: "" });
 
   useEffect(() => {
@@ -400,23 +401,23 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const { data: parking = [] } = useQuery({
     queryKey: ["crm-parking", bookingId],
     queryFn: () => fetchParkingAllotments(bookingId),
-    enabled: tab === "Parking & Extra Work",
+    enabled: tab === "Parking & Extra Charges",
   });
   const { data: extras = [] } = useQuery({
     queryKey: ["crm-extra-charges", bookingId],
     queryFn: () => fetchExtraCharges(bookingId),
-    enabled: tab === "Parking & Extra Work",
+    enabled: tab === "Parking & Extra Charges",
   });
   const { data: chargeTypes = [] } = useQuery({
     queryKey: ["extra-charge-master-all"],
     queryFn: fetchExtraChargeTypes,
-    enabled: tab === "Parking & Extra Work",
+    enabled: tab === "Parking & Extra Charges",
     staleTime: 5 * 60_000,
   });
   const { data: pendingAmendments = [] } = useQuery({
     queryKey: ["crm-booking-amendments", bookingId],
     queryFn: () => fetchPendingAmendments(bookingId),
-    enabled: tab === "Parking & Extra Work",
+    enabled: tab === "Parking & Extra Charges",
     staleTime: 15_000,
   });
   const { data: availableParking = { rates: [], unratedTypesWithInventory: [] } } = useQuery({
@@ -428,7 +429,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const r = await fetchWithAuth(`/api/crm/parking/available?${params}`);
       return r.json();
     },
-    enabled: tab === "Parking & Extra Work" && addingParking && !!booking?.ProjectId,
+    enabled: tab === "Parking & Extra Charges" && addingParking && !!booking?.ProjectId,
     staleTime: 30_000,
   });
   const [reviewingAmendmentId, setReviewingAmendmentId] = useState<number | null>(null);
@@ -591,13 +592,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const res = await fetchWithAuth(`/api/crm/parking/${editingParkingId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Quantity: parseInt(parkingForm.Quantity) || 1, Reason: legalWorkStarted ? parkingReason.trim() : undefined }),
+        body: JSON.stringify({ Quantity: parseInt(parkingForm.Quantity) || 1, ...(parkingForm.RateOverride ? { RateOverride: parkingForm.RateOverride } : {}), Reason: legalWorkStarted ? parkingReason.trim() : undefined }),
       });
       const resData = await res.json();
       if (!res.ok) throw new Error(resData.error);
       toast.success(resData.pending ? "Amendment request submitted — pending approval" : `Parking updated — ₹${Number(resData.TotalAmount).toLocaleString("en-IN")}`);
       setEditingParkingId(null);
-      setParkingForm({ Quantity: "1" });
+      setParkingForm({ Quantity: "1", RateOverride: "" });
       setParkingReason("");
       invalidateCharges();
     } catch (e: any) {
@@ -609,11 +610,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
   const startEditParking = (p: any) => {
     setEditingParkingId(p.Id);
-    setParkingForm({ Quantity: String(p.Quantity) });
+    setParkingForm({ Quantity: String(p.Quantity), RateOverride: String(p.RateSnapshot ?? "") });
   };
   const cancelEditParking = () => {
     setEditingParkingId(null);
-    setParkingForm({ Quantity: "1" });
+    setParkingForm({ Quantity: "1", RateOverride: "" });
     setParkingReason("");
   };
 
@@ -1182,7 +1183,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         {isLoading || !booking ? (
           <div className="py-16 text-center text-muted-foreground text-sm">Loading...</div>
         ) : (
-          <>
+          <div className="min-w-0">
             <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Current Stage</div>
@@ -1341,7 +1342,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
                 {/* GST is fixed, HSN-Master-driven — never a per-booking
                     input anywhere in this app. Unit+Parking picks 1% or 5%
-                    off the Rs. 45L bracket automatically; Extra Work is
+                    off the Rs. 45L bracket automatically; Extra Charges is
                     always 18%. The only way to change a rate is editing the
                     HSN Master row itself (9954AFH/9954OTH/9954EXW). */}
                 <div className="rounded-lg border border-border p-3 space-y-1.5 text-xs">
@@ -1352,7 +1353,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
                   {/* Same explicit sequence everywhere this is shown (see
                       GstBreakdownBox in CrmApplication.tsx): Unit (+ its own
-                      GST), Parking (+ its own GST), Extra Work (+ its own
+                      GST), Parking (+ its own GST), Extra Charges (+ its own
                       GST) -> Amount (all three bases combined) -> GST
                       (combined) -> Total Amount. Unit and Parking share the
                       same HSN-resolved rate (the Rs. 45L bracket); Extra
@@ -1380,11 +1381,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   {Number(booking.ExtraChargesTotal) > 0 && (
                     <>
                       <div className="flex items-center justify-between text-muted-foreground">
-                        <span>Extra Work</span>
+                        <span>Extra Charges</span>
                         <span>{fmt(Number(booking.ExtraChargesTotal) - Number(booking.ExtraWorkGstAmount || 0))}</span>
                       </div>
                       <div className="flex items-center justify-between text-muted-foreground pl-2">
-                        <span>Extra Work GST (18%)</span>
+                        <span>Extra Charges GST (18%)</span>
                         <span>{fmt(booking.ExtraWorkGstAmount)}</span>
                       </div>
                     </>
@@ -1457,7 +1458,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
                 {/* Where the Grand Total actually comes from — base Unit
                     Value plus whatever Parking/Extra Charges have been
-                    added on the Parking & Extra Work tab. Pulled straight
+                    added on the Parking & Extra Charges tab. Pulled straight
                     from the CrmBooking row's own TotalValue/ParkingTotal/
                     ExtraChargesTotal/GrandTotal columns (GrandTotal is kept
                     in sync with these server-side on every update — see
@@ -1871,7 +1872,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               </div>
             )}
 
-            {tab === "Parking & Extra Work" && (
+            {tab === "Parking & Extra Charges" && (
               <div className="space-y-4 pt-2">
                 {/* Pending amendments banner */}
                 {isAmendmentApprover && (pendingAmendments as any[]).length > 0 && (
@@ -1979,24 +1980,46 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           </select>
                         ) : null;
                       })()}
-                      <div className="flex items-center gap-2">
-                        <label className="text-xs text-muted-foreground shrink-0">Qty</label>
-                        <input type="number" min="1" value={addParkingForm.Quantity}
-                          onChange={(e) => setAddParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
-                          className="w-16 text-xs border border-border rounded px-1.5 py-1 bg-background" />
-                      </div>
-                      {/* Defaults to the master rate above — only overtype
-                          for a genuine one-off negotiated price. */}
                       {addParkingForm.ParkingMasterId && (() => {
                         const rate = (availableParking.rates as any[]).find((r: any) => String(r.ParkingMasterId) === addParkingForm.ParkingMasterId);
+                        const effectiveRate = addParkingForm.RateOverride ? Number(addParkingForm.RateOverride) : (rate ? Number(rate.Charge) : 0);
+                        const gst = rate ? Math.round(effectiveRate * Number(rate.GstRate) / 100 * 100) / 100 : 0;
                         return (
-                          <div className="flex items-center gap-2">
-                            <label className="text-xs text-muted-foreground shrink-0">Rate (₹)</label>
-                            <input type="number" min={0} value={addParkingForm.RateOverride}
-                              onChange={(e) => setAddParkingForm((f) => ({ ...f, RateOverride: e.target.value }))}
-                              placeholder={rate ? String(rate.Charge) : undefined}
-                              className="w-28 text-xs border border-border rounded px-1.5 py-1 bg-background" />
-                          </div>
+                          <>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-xs font-medium text-foreground block mb-1">Rate (₹)</label>
+                                <input type="number" min={0} value={addParkingForm.RateOverride}
+                                  onChange={(e) => setAddParkingForm((f) => ({ ...f, RateOverride: e.target.value }))}
+                                  placeholder={rate ? String(rate.Charge) : undefined}
+                                  className="w-full text-xs border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                                {rate && <p className="text-[10px] text-muted-foreground mt-0.5">Master: {fmt(rate.Charge)}</p>}
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-foreground block mb-1">Qty</label>
+                                <input type="number" min="1" value={addParkingForm.Quantity}
+                                  onChange={(e) => setAddParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
+                                  className="w-full text-xs border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                              </div>
+                            </div>
+                            {/* Live total preview */}
+                            {effectiveRate > 0 && Number(addParkingForm.Quantity) > 0 && rate && (
+                              <div className="rounded-md bg-background border border-border px-3 py-2 text-xs space-y-0.5">
+                                <div className="flex justify-between text-muted-foreground">
+                                  <span>Base ({addParkingForm.Quantity} × {fmt(effectiveRate)})</span>
+                                  <span>{fmt(effectiveRate * Number(addParkingForm.Quantity))}</span>
+                                </div>
+                                <div className="flex justify-between text-muted-foreground">
+                                  <span>GST ({rate.GstRate}%)</span>
+                                  <span>{fmt(gst * Number(addParkingForm.Quantity))}</span>
+                                </div>
+                                <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
+                                  <span>Total payable</span>
+                                  <span>{fmt((effectiveRate + gst) * Number(addParkingForm.Quantity))}</span>
+                                </div>
+                              </div>
+                            )}
+                          </>
                         );
                       })()}
                       {legalWorkStarted && (
@@ -2040,30 +2063,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               </div>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
-                              {editingParkingId === p.Id ? (
-                                <>
-                                  <input type="number" min="1" value={parkingForm.Quantity}
-                                    onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
-                                    className="w-16 text-sm border border-border rounded px-1.5 py-1 bg-background" />
-                                  {/* Approximate preview at the booking's CURRENT bracket
-                                      rate — if this quantity change itself crosses the
-                                      Rs. 45L bracket, the confirmed rate/amount (possibly
-                                      different) is what actually saves. */}
-                                  {parkingForm.Quantity && Number(parkingForm.Quantity) > 0 && booking.UnitParkingGstRate != null && (
-                                    <span className="text-[11px] text-sky-700 whitespace-nowrap">
-                                      ≈ {fmtInr(Number(p.RateSnapshot) * Number(parkingForm.Quantity) * (1 + Number(booking.UnitParkingGstRate) / 100))} incl. GST
-                                    </span>
-                                  )}
-                                  <button onClick={handleAddParking} disabled={chargesSaving}
-                                    className="px-2 py-1 text-xs text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded font-medium disabled:opacity-40">
-                                    Save
-                                  </button>
-                                  <button onClick={cancelEditParking}
-                                    className="px-2 py-1 text-xs border border-border rounded text-muted-foreground hover:bg-muted">
-                                    Cancel
-                                  </button>
-                                </>
-                              ) : canEdit ? (
+                              {editingParkingId !== p.Id && canEdit ? (
                                 <>
                                   <button onClick={() => startEditParking(p)}
                                     className="px-2 py-1 text-xs border border-border rounded text-muted-foreground hover:bg-muted">
@@ -2077,6 +2077,77 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               ) : null}
                             </div>
                           </div>
+
+                          {/* Inline edit form — expands below the header row */}
+                          {editingParkingId === p.Id ? (
+                            <div className="rounded-lg border border-amber-200 bg-amber-50/40 dark:bg-amber-950/20 p-3 space-y-3 mt-1">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <label className="text-xs font-medium text-foreground block mb-1">Rate (₹)</label>
+                                  <input
+                                    type="number" min={0}
+                                    value={parkingForm.RateOverride}
+                                    onChange={(e) => setParkingForm((f) => ({ ...f, RateOverride: e.target.value }))}
+                                    placeholder={String(p.RateSnapshot ?? "")}
+                                    className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-400"
+                                  />
+                                  <p className="text-[10px] text-muted-foreground mt-0.5">Master rate: {fmt(p.RateSnapshot)}</p>
+                                </div>
+                                <div>
+                                  <label className="text-xs font-medium text-foreground block mb-1">Qty</label>
+                                  <input
+                                    type="number" min="1"
+                                    value={parkingForm.Quantity}
+                                    onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
+                                    className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-400"
+                                  />
+                                </div>
+                              </div>
+                              {/* Live total preview */}
+                              {parkingForm.RateOverride && Number(parkingForm.Quantity) > 0 && (
+                                (() => {
+                                  const rate = parkingForm.RateOverride ? Number(parkingForm.RateOverride) : Number(p.RateSnapshot);
+                                  const gstRate = p.GstRateSnapshot != null ? Number(p.GstRateSnapshot) : (booking.UnitParkingGstRate != null ? Number(booking.UnitParkingGstRate) : 0);
+                                  const base = rate * Number(parkingForm.Quantity);
+                                  const gst = Math.round(base * gstRate / 100 * 100) / 100;
+                                  return (
+                                    <div className="rounded-md bg-background border border-border px-3 py-2 text-xs space-y-0.5">
+                                      <div className="flex justify-between text-muted-foreground">
+                                        <span>Base ({parkingForm.Quantity} × {fmt(rate)})</span>
+                                        <span>{fmt(base)}</span>
+                                      </div>
+                                      <div className="flex justify-between text-muted-foreground">
+                                        <span>GST ({gstRate}%)</span>
+                                        <span>{fmt(gst)}</span>
+                                      </div>
+                                      <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
+                                        <span>Total</span>
+                                        <span className="text-amber-700 dark:text-amber-400">{fmt(base + gst)}</span>
+                                      </div>
+                                    </div>
+                                  );
+                                })()
+                              )}
+                              {legalWorkStarted && (
+                                <input
+                                  placeholder="Reason for amendment (required)"
+                                  value={parkingReason}
+                                  onChange={(e) => setParkingReason(e.target.value)}
+                                  className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                                />
+                              )}
+                              <div className="flex gap-2">
+                                <button onClick={handleAddParking} disabled={chargesSaving}
+                                  className="px-3 py-1.5 text-xs text-white bg-amber-500 hover:bg-amber-600 rounded-lg font-medium disabled:opacity-40 transition-colors">
+                                  Save changes
+                                </button>
+                                <button onClick={cancelEditParking}
+                                  className="px-3 py-1.5 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
                           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
                             <div><span className="text-muted-foreground block">Qty</span><span className="font-medium">{p.Quantity}</span></div>
                             <div><span className="text-muted-foreground block">Rate</span><span className="font-medium">{fmt(p.RateSnapshot)}</span></div>
@@ -2084,6 +2155,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             <div><span className="text-muted-foreground block">Total</span><span className="font-semibold text-foreground">{fmt(p.TotalAmount)}</span></div>
                             <div><span className="text-muted-foreground block">Receipt</span><span className="font-medium">{p.ReceiptNo || "—"}</span></div>
                           </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -2181,7 +2253,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         </button>
                       </div>
                       {/* Live GST preview — 18% is fixed from the HSN Master
-                          "Extra Work" row; there's no rate to pick anymore. */}
+                          "Extra Charges" row; there's no rate to pick anymore. */}
                       {extraForm.Amount && Number(extraForm.Amount) > 0 && (
                         <ExtraWorkGstPreview amount={Number(extraForm.Amount)} />
                       )}
@@ -2487,9 +2559,26 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-4 pt-4 mt-1 border-t border-border">
                 {/* Money Receipt — inline card with View + Download, no page navigation */}
                 <div className="rounded-xl border border-border p-4 space-y-3">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                    <FileText size={15} className="text-primary" /> Money Receipt
-                  </h3>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                      <FileText size={15} className="text-primary" /> Money Receipt
+                    </h3>
+                    {/* Same document, same "give it to the customer" purpose
+                        as the Money Receipt PDFs right below — surfaced here
+                        too so both are downloadable from one place. */}
+                    {booking?.ApplicationId && (
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => setPreviewApplicationForm({ id: booking.ApplicationId, no: booking.ApplicationNo })}
+                          className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border rounded-lg hover:bg-muted font-medium">
+                          <Eye size={11} /> View Application Form
+                        </button>
+                        <button onClick={() => downloadPdf(`/api/crm/applications/${booking.ApplicationId}/pdf`, `${booking.ApplicationNo}-ApplicationForm.pdf`)}
+                          className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border rounded-lg hover:bg-muted font-medium">
+                          <Download size={11} /> Download Application Form
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
                   {(moneyReceipts as any[]).length === 0 ? (
                     <p className="text-xs text-muted-foreground">
@@ -2732,7 +2821,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 ) : null}
               </div>
             </div>
-          </>
+          </div>
         )}
       </DialogContent>
     </Dialog>
@@ -2743,6 +2832,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         subtitle={[previewReceipt.BookingNo, previewReceipt.Amount != null ? `₹${Number(previewReceipt.Amount).toLocaleString("en-IN")}` : null, previewReceipt.Status].filter(Boolean).join(" · ")}
         filename={`${previewReceipt.ReceiptNo}.pdf`}
         onClose={() => setPreviewReceipt(null)}
+      />
+    )}
+    {previewApplicationForm && (
+      <PdfPreviewDialog
+        pdfUrl={`/api/crm/applications/${previewApplicationForm.id}/pdf`}
+        title={`Application Form — ${previewApplicationForm.no}`}
+        subtitle={booking?.BookingNo}
+        filename={`${previewApplicationForm.no}-ApplicationForm.pdf`}
+        onClose={() => setPreviewApplicationForm(null)}
       />
     )}
     {previewAttachment && (

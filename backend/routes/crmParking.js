@@ -220,19 +220,33 @@ async function applyEditParking(pool, id, b) {
     throw parkingError("This parking charge has already been paid and cannot be edited", 409);
   }
 
-  const lineAmount = Number(RateSnapshot) * qty;
+  // If the caller supplies a RateOverride, validate it and use it as the new
+  // effective per-unit rate; otherwise fall back to the existing RateSnapshot.
+  let effectiveRate = Number(RateSnapshot);
+  let newRateSnapshot = null; // null means "no change to RateSnapshot column"
+  if (b.RateOverride != null && b.RateOverride !== "") {
+    const override = parseFloat(b.RateOverride);
+    if (isNaN(override) || override < 0) throw parkingError("RateOverride must be a non-negative number");
+    effectiveRate = override;
+    newRateSnapshot = override;
+  }
+
+  const lineAmount = effectiveRate * qty;
   const gstAmount = Math.round((lineAmount * Number(GstRateSnapshot)) / 100 * 100) / 100;
   const totalAmount = lineAmount + gstAmount;
 
   await pool.request()
     .input("id",   sql.Int, id)
     .input("qty",  sql.Int, qty)
+    .input("rate", sql.Decimal(18, 2), newRateSnapshot)
     .input("gsta", sql.Decimal(18, 2), gstAmount)
     .input("tot",  sql.Decimal(18, 2), totalAmount)
     .input("note", sql.NVarChar(sql.MAX), b.Notes !== undefined ? (b.Notes || null) : undefined)
     .query(`
       UPDATE dbo.CrmParkingAllotment SET
-        Quantity = @qty, GstAmount = @gsta, TotalAmount = @tot,
+        Quantity = @qty,
+        RateSnapshot = ISNULL(@rate, RateSnapshot),
+        GstAmount = @gsta, TotalAmount = @tot,
         Notes = ISNULL(@note, Notes)
       WHERE Id = @id
     `);
@@ -248,8 +262,9 @@ async function applyEditParking(pool, id, b) {
     await rollupBookingTotals(pool, BookingId);
     await syncParkingPaymentStatus(pool, BookingId);
   }
-  return { TotalAmount: totalAmount };
+  return { TotalAmount: totalAmount, RateSnapshot: effectiveRate };
 }
+
 
 // actorUserId/reason are optional so the internal cancellation-cascade
 // callers below (releaseAllParkingForApplication) keep working unchanged —

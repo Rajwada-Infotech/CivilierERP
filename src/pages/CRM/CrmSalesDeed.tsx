@@ -95,8 +95,10 @@ async function fetchBookingContext(bookingId: string): Promise<any> {
 const CrmSalesDeed: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
+  const deedIdFilter = sp.get("deedId");
+  const [deedDeepLinkOpened, setDeedDeepLinkOpened] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
@@ -153,6 +155,21 @@ const CrmSalesDeed: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkBookingId, deeds.length, bookings.length]);
 
+  // Row clicks (openDetail below) only ever set local state — the URL
+  // stayed plain /crm/sales-deed, so a refresh lost the open detail dialog
+  // and there was nothing to copy/bookmark/share to jump straight back to
+  // this deed. This is the read side: ?deedId=X on load opens it once the
+  // list has loaded far enough to find the matching row.
+  useEffect(() => {
+    if (!deedIdFilter || deedDeepLinkOpened || !(deeds as any[]).length) return;
+    const match = (deeds as any[]).find((d: any) => String(d.Id) === deedIdFilter);
+    if (match) {
+      setDeedDeepLinkOpened(true);
+      openDetail(match);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deedIdFilter, deedDeepLinkOpened, deeds]);
+
   const handleCreate = async () => {
     if (!form.BookingId) { toast.error("Booking is required"); return; }
     if (!canCreate) { toast.error("This booking isn't eligible for a sale deed yet"); return; }
@@ -195,6 +212,12 @@ const CrmSalesDeed: React.FC = () => {
     });
     setDeedFormEditing(false);
     setDetailId(d.Id);
+    setSp((p) => { p.set("deedId", String(d.Id)); return p; }, { replace: true });
+  };
+
+  const closeDetail = () => {
+    setDetailId(null);
+    setSp((p) => { p.delete("deedId"); return p; }, { replace: true });
   };
 
   const handleSaveDeedFields = async () => {
@@ -456,7 +479,7 @@ const CrmSalesDeed: React.FC = () => {
       {/* -- Deed detail � the single place to view AND act on a deed: core
           deed fields (editable until sent to customer), execution/
           registration progress, and the approval chain. --------------- */}
-      <Dialog open={!!detailId} onOpenChange={(o) => { if (!o) setDetailId(null); }}>
+      <Dialog open={!!detailId} onOpenChange={(o) => { if (!o) closeDetail(); }}>
         <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden">
           {detail && (
             <>
@@ -615,7 +638,7 @@ const CrmSalesDeed: React.FC = () => {
                               endpoint={API}
                               actionPathSuffix="director"
                               approverRoles={["super_admin"]}
-                              onSuccess={() => { qc.invalidateQueries({ queryKey: ["crm-sales-deed"] }); setDetailId(null); }}
+                              onSuccess={() => { qc.invalidateQueries({ queryKey: ["crm-sales-deed"] }); closeDetail(); }}
                             />
                           )}
                         </div>
@@ -626,7 +649,7 @@ const CrmSalesDeed: React.FC = () => {
               </div>
 
               <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20">
-                <button onClick={() => setDetailId(null)} className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors">Close</button>
+                <button onClick={closeDetail} className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors">Close</button>
               </DialogFooter>
             </>
           )}

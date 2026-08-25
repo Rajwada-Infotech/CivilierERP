@@ -1,5 +1,6 @@
 const PDFDocument = require("pdfkit");
 const { sql } = require("../db");
+const { drawFinancialBreakdown } = require("./pdfFinancials");
 
 function money(n) {
   const num = Number(n || 0);
@@ -210,36 +211,16 @@ function renderInvoicePdfBuffer(d) {
       doc.y = panelTop + panelH + 14;
     }
 
-    // ── Line item table ───────────────────────────────────────────────────────
-    const tableTop = doc.y;
-    const col1 = left, col1W = pageWidth * 0.12;
-    const col2 = col1 + col1W, col2W = pageWidth * 0.58;
-    const col3 = col2 + col2W, col3W = pageWidth - col1W - col2W;
-
-    doc.rect(left, tableTop, pageWidth, 22).fill("#f1f5f9");
-    doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(9)
-      .text("#", col1 + 6, tableTop + 6, { width: col1W - 6 })
-      .text("Description", col2 + 6, tableTop + 6, { width: col2W - 6 })
-      .text("Amount (Rs.)", col3, tableTop + 6, { width: col3W - 6, align: "right" });
-
-    const rowY = tableTop + 22;
-    const description = d.Description || `${INVOICE_TYPE_LABEL[d.InvoiceType] || d.InvoiceType} — ${d.BookingNo}`;
-    doc.font("Helvetica").fontSize(9.5).fillColor("#000000")
-      .text("1", col1 + 6, rowY + 8, { width: col1W - 6 })
-      .text(description, col2 + 6, rowY + 8, { width: col2W - 6 })
-      .text(money(d.Amount), col3, rowY + 8, { width: col3W - 6, align: "right" });
-    const rowH = Math.max(28, doc.heightOfString(description, { width: col2W - 6 }) + 16);
-    doc.rect(left, tableTop, pageWidth, 22 + rowH).strokeColor("#cbd5e1").stroke();
-    doc.moveTo(col2, tableTop).lineTo(col2, tableTop + 22 + rowH).strokeColor("#cbd5e1").stroke();
-    doc.moveTo(col3, tableTop).lineTo(col3, tableTop + 22 + rowH).strokeColor("#cbd5e1").stroke();
-    doc.moveTo(left, tableTop + 22).lineTo(left + pageWidth, tableTop + 22).strokeColor("#cbd5e1").stroke();
-
-    doc.y = tableTop + 22 + rowH + 10;
-
-    // ── GST breakdown ──────────────────────────────────────────────────────
-    // Derive the GST split for this invoice amount from the booking-level
-    // effective rate (TotalGstAmount / GrandTotal). The rate is the combined
-    // CGST+SGST rate (e.g. 5% → CGST 2.5% + SGST 2.5%).
+    // ── Financial breakdown ────────────────────────────────────────────────
+    // One consolidated GST tax-computation matrix (Particulars, HSN/SAC,
+    // Taxable Value, CGST, SGST, Amount) — the SAME shared component the
+    // Application Form and Money Receipt use, so every customer-facing
+    // document reads identically. The invoice bills a single amount (a
+    // milestone / booking / on-account payment), so it's a single row.
+    //
+    // GST split for this invoice's amount is derived from the booking-level
+    // effective rate (TotalGstAmount / GrandTotal); the combined rate is
+    // CGST + SGST (e.g. 5% → 2.5% + 2.5%).
     const invAmt = Number(d.Amount || 0);
     const grandTotal = Number(d.GrandTotal || 1);
     const totalGstAmt = Number(d.TotalGstAmount || 0);
@@ -247,39 +228,22 @@ function renderInvoicePdfBuffer(d) {
     const invGst = Math.round(invAmt * gstRatio * 100) / 100;
     const invBase = Math.round((invAmt - invGst) * 100) / 100;
     const combinedRate = Number(d.UnitParkingGstRate || 0);
-    const halfRate = combinedRate / 2;
-    const halfGst = Math.round(invGst / 2 * 100) / 100;
-
-    const taxBreakX = left + pageWidth * 0.55;
-    const taxBreakW = pageWidth * 0.45;
-    let ty2 = doc.y;
-
-    const taxRow = (label, val) => {
+    const particulars = d.MilestoneName || INVOICE_TYPE_LABEL[d.InvoiceType] || d.InvoiceType || "Payment";
+    const freeDescription = d.Description && d.Description !== particulars ? d.Description : null;
+    if (freeDescription) {
       doc.font("Helvetica").fontSize(9).fillColor("#475569")
-        .text(label, taxBreakX, ty2, { width: taxBreakW * 0.65, continued: false });
-      doc.font("Helvetica").fontSize(9).fillColor("#000000")
-        .text(val, taxBreakX + taxBreakW * 0.65, ty2, { width: taxBreakW * 0.35, align: "right" });
-      ty2 = doc.y + 2;
-    };
-
-    if (d.HsnCode) taxRow(`HSN/SAC Code`, d.HsnCode);
-    taxRow(`Taxable Value (Base)`, `Rs. ${money(invBase)}`);
-    taxRow(`CGST @ ${halfRate}%`, `Rs. ${money(halfGst)}`);
-    taxRow(`SGST @ ${halfRate}%`, `Rs. ${money(invGst - halfGst)}`);
-
-    doc.moveTo(taxBreakX, ty2 + 2).lineTo(taxBreakX + taxBreakW, ty2 + 2).strokeColor("#cbd5e1").stroke();
-    ty2 += 6;
-    doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f172a")
-      .text("Total Amount", taxBreakX, ty2, { width: taxBreakW * 0.65 });
-    doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f172a")
-      .text(`Rs. ${money(invAmt)}`, taxBreakX + taxBreakW * 0.65, ty2, { width: taxBreakW * 0.35, align: "right" });
-
-    doc.y = ty2 + 16;
-    doc.fillColor("#000000");
-    doc.font("Helvetica-Oblique").fontSize(8.5).fillColor("#475569")
-      .text(`Amount in words: ${numberToWordsIndian(invAmt)}`, left, doc.y, { width: pageWidth, align: "right" });
-    doc.fillColor("#000000");
-    doc.moveDown(1.2);
+        .text(freeDescription, left, doc.y, { width: pageWidth });
+      doc.fillColor("#000000");
+      doc.y += 6;
+    }
+    drawFinancialBreakdown(doc, [
+      { label: particulars, hsn: d.HsnCode || "-", taxable: invBase, gstAmount: invGst, total: invAmt, ratePct: combinedRate },
+    ], {
+      left, width: pageWidth,
+      grandTotal: invAmt, grandTotalLabel: "Total Amount",
+      note: `Amount in words: ${numberToWordsIndian(invAmt)}`,
+    });
+    doc.moveDown(0.6);
 
     // ── Terms & signature block ──────────────────────────────────────────
     const termsTop = doc.y;

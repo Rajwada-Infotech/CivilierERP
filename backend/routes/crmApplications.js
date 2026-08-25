@@ -18,6 +18,7 @@ const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releas
 const { recalculateRemainingMilestones, requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { releaseAllParkingForApplication } = require("../routes/crmParking");
 const { ensureBrokerForChannelPartner } = require("../services/channelPartnerBrokerBridge");
+const { getApplicationFormPdfBuffer } = require("../services/applicationFormPdf");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -202,6 +203,28 @@ router.get("/:id", requirePageRight("crm-applications", "view"), async (req, res
     res.json({ application: appRes.recordset[0], bookings: bookRes.recordset, statusLog: logRes.recordset });
   } catch (e) {
     console.error("[crm-applications] GET /:id error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/pdf — the customer-facing Application Form, same "download and
+// hand to the customer" pattern as crm-money-receipts' own GET /:id/pdf.
+// Always regenerated fresh (not cached) — unlike a Money Receipt, an
+// Application's own data (pricing, co-applicants, plan) can keep changing
+// right up to Approval, so a stale cached copy would drift from reality.
+router.get("/:id/pdf", requirePageRight("crm-applications", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const appRow = await pool.request().input("id", sql.Int, id)
+      .query("SELECT ApplicationNo FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+    if (!appRow.recordset.length) return res.status(404).json({ error: "Application not found" });
+    const buffer = await getApplicationFormPdfBuffer(pool, id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${appRow.recordset[0].ApplicationNo}-ApplicationForm.pdf"`);
+    res.send(buffer);
+  } catch (e) {
+    console.error("[crm-applications] GET /:id/pdf error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -703,6 +726,11 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
     `);
     if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
     const a = app.recordset[0];
+    // Only Pending applications can have a booking created — Draft means the
+    // wizard was never submitted, so the form data may be incomplete.
+    if (a.Status !== "Pending") {
+      return res.status(400).json({ error: `Cannot create a booking for a ${a.Status} application — the application must be submitted first` });
+    }
     if (!a.PreferredUnitId) {
       return res.status(400).json({ error: "This application has no preferred unit selected" });
     }

@@ -412,11 +412,19 @@ async function fetchBookings(): Promise<any[]> {
 const CrmAgreement: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const bkgFilter = sp.get("bookingId") || "";
   const idFilter = sp.get("id") ? parseInt(sp.get("id")!, 10) : null;
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(idFilter);
+  // Selecting a row only ever set local state — the URL stayed at whatever
+  // it loaded with, so a refresh or shared link lost track of which
+  // agreement was open. Keeps ?id= in sync with the actual selection,
+  // matching the read side above (idFilter).
+  const selectAgreement = (id: number) => {
+    setSelectedId(id);
+    setSp((p) => { p.set("id", String(id)); return p; }, { replace: true });
+  };
   const [agrDialog, setAgrDialog] = useState(false);
   const [docDialog, setDocDialog] = useState(false);
   const [docRequestDialog, setDocRequestDialog] = useState(false);
@@ -824,7 +832,7 @@ const CrmAgreement: React.FC = () => {
             ) : filtered.length === 0 ? (
               <div className="p-4 text-center text-muted-foreground text-sm">No agreements found</div>
             ) : (filtered as any[]).map((a: any) => (
-              <button key={a.Id} onClick={() => setSelectedId(a.Id)}
+              <button key={a.Id} onClick={() => selectAgreement(a.Id)}
                 className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedId === a.Id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/20"}`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium truncate">{a.ApplicantName}</span>
@@ -1066,8 +1074,8 @@ const CrmAgreement: React.FC = () => {
                       component GrandTotal is actually built from (Unit + its
                       GST, Parking as a tax-inclusive lump since Parking's own
                       GST is baked into ParkingTotal rather than split out as
-                      its own column, Extra Work if any) — a plain "Base +
-                      GST" summary silently dropped Parking/Extra Work, which
+                      its own column, Extra Charges if any) — a plain "Base +
+                      GST" summary silently dropped Parking/Extra Charges, which
                       made the numbers not add up to GrandTotal at all. */}
                   <div>
                     <span className="text-xs text-muted-foreground">Total Value (incl. GST): </span>
@@ -1079,7 +1087,7 @@ const CrmAgreement: React.FC = () => {
                         Unit ₹{Number(detail.agreement.TotalValue).toLocaleString("en-IN")}
                         {detail.agreement?.UnitGstAmount > 0 && ` + Unit GST ₹${Number(detail.agreement.UnitGstAmount).toLocaleString("en-IN")}`}
                         {detail.agreement?.ParkingTotal > 0 && ` + Parking ₹${Number(detail.agreement.ParkingTotal).toLocaleString("en-IN")}${detail.agreement?.ParkingGstAmount > 0 ? ` (incl. GST ₹${Number(detail.agreement.ParkingGstAmount).toLocaleString("en-IN")})` : ""}`}
-                        {detail.agreement?.ExtraChargesTotal > 0 && ` + Extra Work ₹${Number(detail.agreement.ExtraChargesTotal).toLocaleString("en-IN")}${detail.agreement?.ExtraWorkGstAmount > 0 ? ` (incl. GST ₹${Number(detail.agreement.ExtraWorkGstAmount).toLocaleString("en-IN")})` : ""}`}
+                        {detail.agreement?.ExtraChargesTotal > 0 && ` + Extra Charges ₹${Number(detail.agreement.ExtraChargesTotal).toLocaleString("en-IN")}${detail.agreement?.ExtraWorkGstAmount > 0 ? ` (incl. GST ₹${Number(detail.agreement.ExtraWorkGstAmount).toLocaleString("en-IN")})` : ""}`}
                       </span>
                     )}
                   </div>

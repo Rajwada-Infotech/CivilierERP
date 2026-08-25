@@ -212,6 +212,20 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
 router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) => {
   try {
     const pool = getPool();
+    // If this booking is being created from an application, verify the
+    // application has been submitted (Pending). Draft = wizard not complete.
+    if (req.body.ApplicationId) {
+      const appRow = await pool.request()
+        .input("aid", sql.Int, parseInt(req.body.ApplicationId))
+        .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+      if (!appRow.recordset.length) return res.status(404).json({ error: "Application not found" });
+      const appStatus = appRow.recordset[0].Status;
+      if (appStatus !== "Pending") {
+        return res.status(400).json({
+          error: `Cannot create a booking for a ${appStatus} application — the application must be submitted first`,
+        });
+      }
+    }
     const { id: bookingId, BookingNo: bookingNo, tokenWarning } = await createCrmBookingRecord(pool, req.body, actorId(req));
     res.status(201).json({ success: true, id: bookingId, BookingNo: bookingNo, tokenWarning });
   } catch (e) {
@@ -1811,7 +1825,10 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Application",
         status: "done",
         date: d(bk.BookingDate),
-        link: bk.ApplicationId ? `/crm/applications` : null,
+        // ?id= opens CrmApplication.tsx's detail dialog directly for this
+        // application (see its openApplication/?id= deep link) — was a bare
+        // `/crm/applications` with no id at all before.
+        link: bk.ApplicationId ? `/crm/applications?id=${bk.ApplicationId}` : null,
         blockedBy: null,
       },
       {
@@ -1819,7 +1836,11 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Booking",
         status: "done",
         date: d(bk.BookingDate),
-        link: "/crm/booking",
+        // Was "/crm/booking" (singular) — not a real route (the actual
+        // route is "/crm/bookings"), so this 404'd. Now also opens this
+        // exact booking directly via CrmBooking.tsx's ?view= deep link
+        // instead of landing on the bare, unfiltered list.
+        link: `/crm/bookings?view=${id}`,
         blockedBy: null,
       },
       {
@@ -1827,16 +1848,24 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Welcome Call",
         status: wc ? "done" : "active",
         date: wc ? d(wc.CallDate) : null,
-        link: "/crm/welcome-call",
+        // Was "/crm/welcome-call" (singular) — not a real route (the actual
+        // route is "/crm/welcome-calls"), so this 404'd too.
+        link: `/crm/welcome-calls?bookingId=${id}`,
         blockedBy: null,
       },
       {
         key: "agreement",
         label: "Agreement",
-        status: agDone ? "done" : ag ? "active" : "active",
+        // Was `ag ? "active" : "active"` — both branches identical, so this
+        // step showed as the current one from the moment the Booking was
+        // created, regardless of Welcome Call state. Every other step here
+        // gates on its real predecessor; this one didn't, which is why it
+        // and Welcome Call both rendered as "active" (pulsing/highlighted)
+        // at once — looked like two simultaneous "current" steps.
+        status: agDone ? "done" : ag ? "active" : wc ? "active" : "locked",
         date: agDone ? d(ag.AgreementDate || ag.CreatedAt) : ag ? d(ag.CreatedAt) : null,
-        link: "/crm/agreements",
-        blockedBy: null,
+        link: `/crm/agreements?bookingId=${id}`,
+        blockedBy: wc ? null : "Welcome Call must be completed first",
       },
       {
         key: "legal_milestones",
@@ -1854,7 +1883,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Sales Deed",
         status: sdDone ? "done" : sd ? "active" : agDone ? "active" : "locked",
         date: sd ? d(sd.CreatedAt) : null,
-        link: "/crm/sales-deed",
+        link: `/crm/sales-deed?bookingId=${id}`,
         blockedBy: agDone ? null : "Agreement must be Executed first",
       },
       {
@@ -1865,7 +1894,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
                : agDone ? "active"
                : "locked",
         date: noc ? d(noc.CreatedAt) : null,
-        link: "/crm/noc",
+        link: `/crm/noc?bookingId=${id}`,
         blockedBy: agDone ? null : "Agreement must be Executed first",
       },
       {
@@ -1873,7 +1902,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Query Payment",
         status: qpDone ? "done" : qp ? "active" : sd ? "active" : "locked",
         date: qp ? d(qp.CreatedAt) : null,
-        link: "/crm/query-payment",
+        link: `/crm/query-payment?bookingId=${id}`,
         blockedBy: sd ? null : "Sales Deed must be created first",
       },
       {
@@ -1884,7 +1913,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
                : qpDone ? "active"
                : "locked",
         date: reg ? d(reg.CompletedDate || reg.ScheduledDate || reg.CreatedAt) : null,
-        link: "/crm/registry",
+        link: `/crm/registry?bookingId=${id}`,
         blockedBy: qpDone ? null : "Query Payment must be Confirmed first",
       },
       {
