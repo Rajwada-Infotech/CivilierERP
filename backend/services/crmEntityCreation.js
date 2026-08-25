@@ -804,7 +804,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // of this function; the slot just goes back to Available and staff can
   // re-add it manually from the Booking's own Parking tab.
   const parkingHolds = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId)).query(`
-    SELECT h.Id, h.EntityId AS ParkingSlotId
+    SELECT h.Id, h.EntityId AS ParkingSlotId, h.RateOverride
     FROM dbo.CrmInventoryHold h
     WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
   `);
@@ -822,7 +822,10 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
           ORDER BY CASE WHEN BlockId = @bid2 THEN 0 ELSE 1 END
         `);
       if (!rate.recordset.length) continue;
-      await applyAddParking(pool, bookingId, { ParkingMasterId: rate.recordset[0].Id, ParkingSlotId: hold.ParkingSlotId, Quantity: 1 }, actorUserId);
+      await applyAddParking(pool, bookingId, {
+        ParkingMasterId: rate.recordset[0].Id, ParkingSlotId: hold.ParkingSlotId, Quantity: 1,
+        RateOverride: hold.RateOverride,
+      }, actorUserId);
     } catch (parkErr) {
       console.error("[crm-entity-creation] parking hold conversion failed:", parkErr.message);
     }

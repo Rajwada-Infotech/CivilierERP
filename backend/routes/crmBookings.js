@@ -1767,7 +1767,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         .query("SELECT TOP 1 Id, Status, CreatedAt FROM dbo.CrmQueryPayment WHERE BookingId = @id ORDER BY CreatedAt DESC"),
       // registry
       pool.request().input("id", sql.Int, id)
-        .query("SELECT TOP 1 Id, Status, AppointmentDate, CreatedAt FROM dbo.CrmRegistry WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+        .query("SELECT TOP 1 Id, Status, ScheduledDate, CompletedDate, CreatedAt FROM dbo.CrmRegistry WHERE BookingId = @id ORDER BY CreatedAt DESC"),
       // NOC
       pool.request().input("id", sql.Int, id)
         .query("SELECT TOP 1 Id, Status, NocType, CreatedAt FROM dbo.CrmNoc WHERE BookingId = @id ORDER BY CreatedAt DESC"),
@@ -1883,7 +1883,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
                : reg ? "active"
                : qpDone ? "active"
                : "locked",
-        date: reg ? d(reg.AppointmentDate || reg.CreatedAt) : null,
+        date: reg ? d(reg.CompletedDate || reg.ScheduledDate || reg.CreatedAt) : null,
         link: "/crm/registry",
         blockedBy: qpDone ? null : "Query Payment must be Confirmed first",
       },

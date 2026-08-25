@@ -25,7 +25,7 @@ const API = "/api/crm/parking";
 const APP_API = "/api/crm/applications";
 const EMPTY_FORM = {
   ApplicationId: "", ProjectId: "", BlockId: "",
-  ParkingMasterId: "", ParkingSlotId: "", Notes: "",
+  ParkingMasterId: "", ParkingSlotId: "", Notes: "", RateOverride: "",
 };
 const PAYMENT_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Bank Transfer", "DD"];
 const RELEASE_ROLES = ["super_admin"];
@@ -440,6 +440,7 @@ const CrmParkingBooking: React.FC = () => {
           Quantity: 1,
           Notes: form.Notes || null,
           Immediate: true,
+          ...(form.RateOverride ? { RateOverride: form.RateOverride } : {}),
         }),
       });
       const data = await res.json();
@@ -784,7 +785,7 @@ const CrmParkingBooking: React.FC = () => {
               <div>
                 <label className="text-sm font-medium block mb-1.5">Parking Type / Rate <span className="text-red-500">*</span></label>
                 <select value={form.ParkingMasterId}
-                  onChange={(e) => setForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "" }))}
+                  onChange={(e) => setForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "", RateOverride: "" }))}
                   className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary">
                   <option value="">Select type</option>
                   {ratesForScope.map((r: any) => (
@@ -815,22 +816,38 @@ const CrmParkingBooking: React.FC = () => {
                 No parking rates configured for this project/block. Set them up in Parking Master before selling.
               </p>
             )}
-            {selectedRate && (
-              <div className="rounded-lg bg-muted/30 border border-border px-3 py-2.5 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Base amount</span>
-                  <span>{inr(selectedRate.Charge)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">GST ({selectedRate.GstRate}%)</span>
-                  <span>{inr(Math.round(selectedRate.Charge * selectedRate.GstRate / 100 * 100) / 100)}</span>
-                </div>
-                <div className="flex justify-between font-semibold border-t border-border mt-1.5 pt-1.5">
-                  <span>Total payable</span>
-                  <span>{inr(selectedRate.Charge + Math.round(selectedRate.Charge * selectedRate.GstRate / 100 * 100) / 100)}</span>
-                </div>
-              </div>
-            )}
+            {selectedRate && (() => {
+              const effectiveRate = form.RateOverride ? Number(form.RateOverride) : Number(selectedRate.Charge);
+              const gst = Math.round(effectiveRate * selectedRate.GstRate / 100 * 100) / 100;
+              return (
+                <>
+                  <div>
+                    <label className="text-sm font-medium block mb-1.5">Rate (₹)</label>
+                    <input type="number" min={0} value={form.RateOverride}
+                      onChange={(e) => setForm((f) => ({ ...f, RateOverride: e.target.value }))}
+                      placeholder={String(selectedRate.Charge)}
+                      className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Defaults to {inr(selectedRate.Charge)} — change this only if this customer negotiated a different parking price.
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-muted/30 border border-border px-3 py-2.5 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Base amount</span>
+                      <span>{inr(effectiveRate)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">GST ({selectedRate.GstRate}%)</span>
+                      <span>{inr(gst)}</span>
+                    </div>
+                    <div className="flex justify-between font-semibold border-t border-border mt-1.5 pt-1.5">
+                      <span>Total payable</span>
+                      <span>{inr(effectiveRate + gst)}</span>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
             <div>
               <label className="text-sm font-medium block mb-1.5">Notes</label>
               <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}

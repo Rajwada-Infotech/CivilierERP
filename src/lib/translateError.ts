@@ -110,7 +110,16 @@ const ERROR_MAP: [RegExp, string][] = [
   [/database.*error|sql.*error|DB error/i,
     "A database error occurred. Please try again or contact IT support."],
 
+  // ── Payments / banking ──────────────────────────────────────────────────
+  [/deposit bank.*required|bank.*required.*project/i,
+    "Select which company bank this payment landed in (Deposited To) before submitting."],
+
   // ── Generic validation ────────────────────────────────────────────────────
+  // Kept last among "required" patterns on purpose — anything more specific
+  // above (e.g. "Deposit bank is required...") must get its own real,
+  // actionable message; this catch-all was flattening those into a vague
+  // "fill in all required fields" toast that pointed at nothing (e.g. the
+  // Application wizard's Deposited To field, which had no way to fix it).
   [/required|cannot be empty|must be provided/i,
     "Please fill in all required fields before submitting."],
   [/invalid.*date|date.*invalid/i,

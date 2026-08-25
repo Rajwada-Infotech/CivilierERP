@@ -126,7 +126,17 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
     .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
   if (!rate.recordset.length) throw parkingError("Selected parking rate is not active");
-  const { Charge, GstRate, ParkingType } = rate.recordset[0];
+  const { GstRate, ParkingType } = rate.recordset[0];
+  // Staff can override the Parking Rate Master's default figure for a
+  // genuine one-off negotiated price — validated the same way an amount
+  // typed anywhere else in CRM is (finite, positive). Falls back to the
+  // master rate when omitted, exactly as before this existed.
+  let Charge = rate.recordset[0].Charge;
+  if (b.RateOverride != null && b.RateOverride !== "") {
+    const override = parseFloat(b.RateOverride);
+    if (!Number.isFinite(override) || override <= 0) throw parkingError("Rate override must be a positive number");
+    Charge = override;
+  }
 
   // Same rule already enforced for standalone parking sales (POST
   // /standalone below) and hold placement (crmHoldService.js placeHold) —
@@ -500,7 +510,7 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
     const allotments = result.recordset.map((r) => ({ ...r, Kind: "Allotment" }));
 
     const holdRows = await pool.request().input("aid", sql.Int, applicationId).query(`
-      SELECT h.Id, h.EntityId AS ParkingSlotId, h.HoldUntil, s.SlotNo, s.ParkingType, s.ProjectId, s.BlockId
+      SELECT h.Id, h.EntityId AS ParkingSlotId, h.HoldUntil, h.RateOverride, s.SlotNo, s.ParkingType, s.ProjectId, s.BlockId
       FROM dbo.CrmInventoryHold h
       JOIN dbo.ParkingSlot s ON s.Id = h.EntityId
       WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
@@ -508,12 +518,16 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
     const holds = [];
     for (const h of holdRows.recordset) {
       const rate = await resolveParkingRateForSlot(pool, h.ParkingSlotId);
-      const lineAmount = rate ? rate.Charge : 0;
-      const gstAmount = rate ? Math.round((lineAmount * rate.GstRate) / 100 * 100) / 100 : 0;
+      // A staff-typed RateOverride (see POST /standalone) always wins over
+      // the master rate — same "defaults but overridable" figure the real
+      // allotment will snapshot once this hold converts at booking creation.
+      const lineAmount = h.RateOverride != null ? Number(h.RateOverride) : (rate ? rate.Charge : 0);
+      const gstRate = rate ? rate.GstRate : 0;
+      const gstAmount = Math.round((lineAmount * gstRate) / 100 * 100) / 100;
       holds.push({
         Id: h.Id, Kind: "Hold", ParkingSlotId: h.ParkingSlotId, SlotNo: h.SlotNo,
         CurrentParkingType: h.ParkingType, Quantity: 1,
-        RateSnapshot: lineAmount,
+        RateSnapshot: lineAmount, DefaultRate: rate ? rate.Charge : 0,
         TotalAmount: lineAmount + gstAmount, HoldUntil: h.HoldUntil,
       });
     }
@@ -545,7 +559,16 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
       .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
     if (!rate.recordset.length) return res.status(400).json({ error: "Selected parking rate is not active" });
-    const { Charge, GstRate, ParkingType } = rate.recordset[0];
+    const { GstRate, ParkingType } = rate.recordset[0];
+    // Defaults to the Parking Rate Master's own figure — staff can type a
+    // different amount for a genuine one-off negotiated price, same
+    // "defaults but overridable" pattern as Token Amount elsewhere in CRM.
+    let Charge = rate.recordset[0].Charge;
+    if (b.RateOverride != null && b.RateOverride !== "") {
+      const override = parseFloat(b.RateOverride);
+      if (!Number.isFinite(override) || override <= 0) return res.status(400).json({ error: "Rate override must be a positive number" });
+      Charge = override;
+    }
 
     if (rate.recordset[0].ProjectId !== application.recordset[0].ProjectId) {
       return res.status(400).json({ error: "This Application is for a different project than the selected parking rate/slot" });
@@ -574,6 +597,16 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
         entityType: "Parking", entityId: parkingSlotId, applicationId: parseInt(b.ApplicationId),
         holdDays: 3, reason: "Application — parking slot selected", userId: actorId(req),
       });
+
+      // placeHold's own INSERT is shared with Unit holds (no rate concept
+      // there), so the override is stamped on afterward rather than
+      // threaded through it — has to survive on the hold row until the
+      // Booking is created, where crmEntityCreation.js reads it back to
+      // carry the same figure into the real CrmParkingAllotment.
+      if (b.RateOverride != null && b.RateOverride !== "") {
+        await pool.request().input("id", sql.Int, hold.id).input("ov", sql.Decimal(18, 2), Charge)
+          .query("UPDATE dbo.CrmInventoryHold SET RateOverride = @ov WHERE Id = @id");
+      }
 
       await logCrmAudit(pool, "Application", parseInt(b.ApplicationId), actorId(req), [
         { field: "ParkingHold", oldVal: null, newVal: `${ParkingType} ${slotNo} held until ${hold.holdUntil}` },

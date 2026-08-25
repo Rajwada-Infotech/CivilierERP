@@ -726,7 +726,7 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
   // existed. Never allowed to fail the approval itself; outcome logged the
   // same way GL posting failures already are everywhere else.
   if (crmRow?.CrmMilestoneId) {
-    let brokerWarning = null;
+    let brokerWarning = null, crmWarning = null;
     try {
       const { applyCrmMilestonePaymentApproval } = require("./crmPayments");
       const outcome = await applyCrmMilestonePaymentApproval(pool, crmRow, actorUserId, actor);
@@ -734,9 +734,13 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
       await recordGLPosting("crm-received-payment", pid, outcome, actor);
     } catch (crmErr) {
       await recordGLPosting("crm-received-payment", pid, { failed: true, reason: crmErr.message }, actor);
+      // CRM side-effects failed (milestone not updated, no receipt row, no GL).
+      // Finance approval is committed; surface as warning so staff can investigate.
+      crmWarning = `CRM payment side-effects failed: ${crmErr.message}. Please notify admin to reconcile.`;
+      console.error("[receivedPayment] CRM milestone approval side-effects failed for RP", pid, "—", crmErr.message);
     }
     await invalidateReceivedPaymentWorkflowCaches();
-    return res.json({ success: true, brokerWarning });
+    return res.json({ success: true, brokerWarning, crmWarning });
   }
 
   // CrmBookingId set but no CrmMilestoneId — a manual on-account deposit
@@ -745,15 +749,18 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
   // CrmOnAccountPayment insert/GL/auto-sweep only happens here, once
   // approved, instead of when it was originally submitted.
   if (crmRow?.CrmBookingId) {
+    let crmWarning = null;
     try {
       const { applyCrmOnAccountPaymentApproval } = require("./crmPayments");
       const outcome = await applyCrmOnAccountPaymentApproval(pool, crmRow, actorUserId, actor);
       await recordGLPosting("crm-received-payment", pid, outcome, actor);
     } catch (crmErr) {
       await recordGLPosting("crm-received-payment", pid, { failed: true, reason: crmErr.message }, actor);
+      crmWarning = `CRM on-account deposit side-effects failed: ${crmErr.message}. Please notify admin to reconcile.`;
+      console.error("[receivedPayment] CRM on-account approval side-effects failed for RP", pid, "—", crmErr.message);
     }
     await invalidateReceivedPaymentWorkflowCaches();
-    return res.json({ success: true });
+    return res.json({ success: true, crmWarning });
   }
 
   // GL posting AFTER the status commit (postVoucher has its own transaction),
@@ -845,3 +852,4 @@ router.put("/:id/reject", allowRoles(...APPROVER_ROLES), async (req, res) => {
 
 module.exports = router;
 module.exports.createReceivedPaymentInternal = createReceivedPaymentInternal;
+module.exports.invalidateReceivedPaymentWorkflowCaches = invalidateReceivedPaymentWorkflowCaches;

@@ -263,7 +263,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [editingExtraId, setEditingExtraId] = useState<number | null>(null);
   const [editingParkingId, setEditingParkingId] = useState<number | null>(null);
   const [addingParking, setAddingParking] = useState(false);
-  const [addParkingForm, setAddParkingForm] = useState({ ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "" });
+  const [addParkingForm, setAddParkingForm] = useState({ ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "", RateOverride: "" });
   const [extraReason, setExtraReason] = useState("");
   const [parkingReason, setParkingReason] = useState("");
   // eslint-disable-next-line @typescript-eslint/no-unused-vars — kept only if discount feature ships later
@@ -564,6 +564,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       };
       if (addParkingForm.ParkingSlotId) payload.ParkingSlotId = parseInt(addParkingForm.ParkingSlotId);
       if (addParkingForm.Reason.trim()) payload.Reason = addParkingForm.Reason.trim();
+      if (addParkingForm.RateOverride) payload.RateOverride = addParkingForm.RateOverride;
       const res = await fetchWithAuth(`/api/crm/parking/${bookingId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -573,7 +574,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       if (!res.ok) throw new Error(resData.error);
       toast.success(resData.pending ? "Amendment request submitted — pending approval" : "Parking allotment added");
       setAddingParking(false);
-      setAddParkingForm({ ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "" });
+      setAddParkingForm({ ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "", RateOverride: "" });
       invalidateCharges();
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -1984,6 +1985,20 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           onChange={(e) => setAddParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
                           className="w-16 text-xs border border-border rounded px-1.5 py-1 bg-background" />
                       </div>
+                      {/* Defaults to the master rate above — only overtype
+                          for a genuine one-off negotiated price. */}
+                      {addParkingForm.ParkingMasterId && (() => {
+                        const rate = (availableParking.rates as any[]).find((r: any) => String(r.ParkingMasterId) === addParkingForm.ParkingMasterId);
+                        return (
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs text-muted-foreground shrink-0">Rate (₹)</label>
+                            <input type="number" min={0} value={addParkingForm.RateOverride}
+                              onChange={(e) => setAddParkingForm((f) => ({ ...f, RateOverride: e.target.value }))}
+                              placeholder={rate ? String(rate.Charge) : undefined}
+                              className="w-28 text-xs border border-border rounded px-1.5 py-1 bg-background" />
+                          </div>
+                        );
+                      })()}
                       {legalWorkStarted && (
                         <input placeholder="Reason for amendment (required)" value={addParkingForm.Reason}
                           onChange={(e) => setAddParkingForm((f) => ({ ...f, Reason: e.target.value }))}
@@ -1994,7 +2009,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           className="px-2.5 py-1 text-xs text-white bg-amber-500 hover:bg-amber-600 rounded font-medium disabled:opacity-40">
                           Save
                         </button>
-                        <button onClick={() => { setAddingParking(false); setAddParkingForm({ ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "" }); }}
+                        <button onClick={() => { setAddingParking(false); setAddParkingForm({ ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "", RateOverride: "" }); }}
                           className="px-2.5 py-1 text-xs border border-border rounded text-muted-foreground hover:bg-muted">
                           Cancel
                         </button>

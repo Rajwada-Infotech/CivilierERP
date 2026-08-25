@@ -198,4 +198,37 @@ router.get("/:id/pdf", requirePageRight("crm-money-receipts", "view"), async (re
   }
 });
 
+// POST /sweep-pending — admin backfill for already-confirmed bookings whose
+// MRs are stuck in Pending with ReceivedPaymentId = NULL (created before the
+// on-confirm auto-sweep was wired up). Safe to run multiple times — approveMoneyReceipt
+// guards against double-processing with its own Status and ReceivedPaymentId checks.
+router.post("/sweep-pending", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    if (!isMoneyReceiptApprover(req.user?.roleName)) {
+      return res.status(403).json({ error: "Accounts Head or Admin access required" });
+    }
+    const stuckMrs = await pool.request().query(`
+      SELECT mr.Id
+      FROM dbo.CrmMoneyReceipt mr
+      JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
+      WHERE mr.Status = 'Pending' AND mr.ReceivedPaymentId IS NULL
+        AND b.WorkflowStage = 'Confirmed' AND b.IsActive = 1
+    `);
+    let processed = 0, failed = 0, errors = [];
+    for (const row of stuckMrs.recordset) {
+      try {
+        await approveMoneyReceipt(pool, row.Id, actorId(req), actorEmail(req));
+        processed++;
+      } catch (e) {
+        failed++;
+        errors.push({ id: row.Id, error: e.message });
+      }
+    }
+    res.json({ success: true, total: stuckMrs.recordset.length, processed, failed, errors });
+  } catch (e) {
+    handleError(res, e, "POST /sweep-pending");
+  }
+});
+
 module.exports = router;

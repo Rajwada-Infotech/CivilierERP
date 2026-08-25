@@ -86,6 +86,7 @@ export const crmNavItems: NavItem[] = [
       { label: "Home Loan Tracking", path: "/crm/loan-details",   pageKey: "crm-loan-details"  },
       { label: "Demands",            path: "/crm/demands",        pageKey: "crm-payments"      },
       { label: "Money Receipts",     path: "/crm/money-receipts", pageKey: "crm-money-receipts" },
+      { label: "On Account",         path: "/crm/on-account",     pageKey: "crm-payments"      },
       { label: "Invoices",           path: "/crm/invoices",       pageKey: "crm-invoices"      },
       { label: "Parking Booking",    path: "/crm/parking-booking",pageKey: "crm-parking-booking" },
       { label: "Brokerage",          path: "/crm/brokerage",      pageKey: "crm-brokerage"     },
