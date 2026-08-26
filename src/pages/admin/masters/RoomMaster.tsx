@@ -120,7 +120,7 @@ function BlueprintUploadField({
 async function fetchRooms(): Promise<any[]> {
   const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch rooms");
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 }
 
 async function fetchProjectOptions(): Promise<
@@ -128,7 +128,7 @@ async function fetchProjectOptions(): Promise<
 > {
   const res = await fetchWithAuth(`${API}/projects`);
   if (!res.ok) throw new Error("Failed to fetch projects");
-  const data: { Id: number; Name: string }[] = await res.json().catch(() => ({}));
+  const data: { Id: number; Name: string }[] = await res.json().catch(() => []);
   return data.map((p) => ({ value: String(p.Id), label: p.Name }));
 }
 

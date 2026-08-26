@@ -60,8 +60,19 @@ const upload = multer({
 // to jump ahead to a later step than the record has actually reached.
 const BOOKING_SELECT = `
   SELECT
-    b.Id, b.BookingNo, b.ApplicationId, b.UnitId, b.ProjectId, b.ProjectName, b.CompanyId,
-    b.UnitNo, b.BlockName, um.BlockId, b.FloorName, b.UnitType, b.AreaSqFt,
+    b.Id, b.BookingNo, b.ApplicationId, b.UnitId, b.ProjectId,
+    -- Display names: always read from master tables so a rename in Block/Project
+    -- Master is immediately reflected on every booking without a data migration.
+    -- The stored snapshot column is the COALESCE fallback for legacy rows only.
+    COALESCE(proj.name,     b.ProjectName) AS ProjectName,
+    b.CompanyId,
+    COALESCE(um.UnitName,   b.UnitNo)    AS UnitNo,
+    COALESCE(blk.BlockName, b.BlockName) AS BlockName,
+    um.BlockId,
+    b.FloorName,
+    COALESCE(um.UnitType,   b.UnitType)  AS UnitType,
+    b.AreaSqFt,
+    b.CarpetAreaSqFt, b.BuiltUpAreaSqFt, b.SuperBuiltUpAreaSqFt, b.OpenTerraceAreaSqFt,
     b.RatePerSqFt, b.TotalValue, b.BookingAmount, b.TokenType, b.TokenValue,
     b.PaymentPlanId, b.BookingDate, b.HsnCode,
     b.PaymentMode, b.AssignedTo, b.Status, b.Notes, b.IsActive,
@@ -104,7 +115,9 @@ const BOOKING_SELECT = `
     (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmMoneyReceipt WHERE BookingId = b.Id AND Status IN ('${CrmStatus.PENDING}','${CrmStatus.APPROVED}')) AS MRReceivedTotal
   FROM dbo.CrmBooking b
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
-  LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+  LEFT JOIN dbo.UnitMaster um   ON um.Id   = b.UnitId
+  LEFT JOIN dbo.BlockMaster blk ON blk.Id  = um.BlockId
+  LEFT JOIN dbo.enterprise  proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
   LEFT JOIN dbo.Users u  ON u.id  = b.AssignedTo
   LEFT JOIN dbo.Users cu ON cu.id = b.CreatedBy
   LEFT JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = b.PaymentPlanId
@@ -397,6 +410,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     // must be real, active, and not already locked by another booking.
     const unit = await pool.request().input("uid", sql.Int, newUnitId).query(`
       SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
+             u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
              proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
@@ -433,7 +447,9 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
         newPlanId = null;
       }
     }
-    const rate = oldRow.RatePerSqFt != null ? Number(oldRow.RatePerSqFt) : null;
+    // Keep existing rate if the booking already has one; fall back to new unit's master rate.
+    const rate = oldRow.RatePerSqFt != null ? Number(oldRow.RatePerSqFt)
+               : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
     const area = unitRow.AreaSqFt != null ? Number(unitRow.AreaSqFt) : null;
     const total = area && rate ? Math.round(area * rate) : oldRow.TotalValue;
     await pool.request()
@@ -445,7 +461,12 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
       .input("unit",  sql.NVarChar(100), unitRow.UnitName)
       .input("blk",   sql.NVarChar(100), unitRow.BlockName || null)
       .input("utype", sql.NVarChar(100), unitRow.UnitType || null)
-      .input("area",  sql.Decimal(18,2), unitRow.AreaSqFt || null)
+      .input("area",  sql.Decimal(18,2), area)
+      .input("carpetArea",       sql.Decimal(18,2), unitRow.CarpetAreaSqFt != null ? Number(unitRow.CarpetAreaSqFt) : null)
+      .input("builtUpArea",      sql.Decimal(18,2), unitRow.BuiltUpAreaSqFt != null ? Number(unitRow.BuiltUpAreaSqFt) : null)
+      .input("superBuiltUpArea", sql.Decimal(18,2), unitRow.SuperBuiltUpAreaSqFt != null ? Number(unitRow.SuperBuiltUpAreaSqFt) : null)
+      .input("openTerraceArea",  sql.Decimal(18,2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
+      .input("rate",             sql.Decimal(18,2), rate)
       .input("tot",   sql.Decimal(18,2), total)
       .input("ppid",  sql.Int, newPlanId)
       .input("ub",    sql.Int, actor)
@@ -453,6 +474,8 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
         UPDATE dbo.CrmBooking SET
           UnitId = @uid, ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
           CompanyId = @cid, UnitNo = @unit, BlockName = @blk, UnitType = @utype, AreaSqFt = @area,
+          CarpetAreaSqFt = @carpetArea, BuiltUpAreaSqFt = @builtUpArea, SuperBuiltUpAreaSqFt = @superBuiltUpArea, OpenTerraceAreaSqFt = @openTerraceArea,
+          RatePerSqFt = ISNULL(@rate, RatePerSqFt),
           TotalValue = @tot,
           PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
           GrandTotal = @tot + ParkingTotal + ExtraChargesTotal,
