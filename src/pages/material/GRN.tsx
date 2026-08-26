@@ -373,9 +373,6 @@ const inp =
 const inpSel =
   "w-full px-3 py-2 pr-8 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 text-foreground appearance-none";
 
-// Quick-fill chips for GRN.DirectEntryReason — a GRN with no Vehicle
-// In/Out linked skipped the gate control, worth a short explanation.
-const DIRECT_ENTRY_REASONS = ["Local Supplier", "Emergency Procurement", "Same-day Site Delivery"];
 
 // ─── Linked Expense Bookings ──────────────────────────────────────────────────
 interface LinkedBooking {
@@ -545,7 +542,11 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-400/20 w-fit">
               <ArrowLeftRight size={8} /> Transfer GRN
             </span>
-          ) : grn.POType ? (
+          ) : grn.POType && grn.POType !== "Direct" ? (
+            // POType "Direct" is skipped here — a GRN off a Direct PO
+            // already gets the "Direct Entry" badge below whenever it also
+            // has no Vehicle In/Out (the common case), and the two badges
+            // read as the same thing side by side.
             <span
               className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border w-fit ${
                 grn.POType === "Normal"
@@ -2258,43 +2259,6 @@ export default function GRN() {
                     </div>
                   )}
                 </div>
-
-                {/* Direct Entry Reason — only when this GRN has no Vehicle
-                    In/Out linked (raised straight from remaining PO
-                    items). Skipping the gate is an exception path, worth
-                    a short note for audit/reporting. Quick-fill chips for
-                    the common cases, but always a free-text field — no
-                    hidden state toggle between "preset" and "custom" to
-                    desync. */}
-                {formData.grnSourceMode === "remaining" && (
-                  <div>
-                    <FieldLabel>Reason for Direct Entry (no vehicle gate)</FieldLabel>
-                    <div className="flex flex-wrap gap-1.5 mb-1.5">
-                      {DIRECT_ENTRY_REASONS.map((r) => (
-                        <button
-                          key={r}
-                          type="button"
-                          onClick={() => setFormData((prev) => ({ ...prev, directEntryReason: r }))}
-                          className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
-                            formData.directEntryReason === r
-                              ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                              : "border-border text-muted-foreground hover:border-emerald-500/40"
-                          }`}
-                        >
-                          {r}
-                        </button>
-                      ))}
-                    </div>
-                    <input
-                      type="text"
-                      className={inpSel}
-                      placeholder="e.g. Local Supplier, Emergency Procurement… (optional)"
-                      value={formData.directEntryReason}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, directEntryReason: e.target.value }))}
-                      maxLength={200}
-                    />
-                  </div>
-                )}
 
                 {/* Remaining PO Items — the second way to raise a GRN
                     against this PO, grouped alongside the linked PO

@@ -6,6 +6,7 @@
  */
 const { sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
+const { getIo } = require("../socket");
 
 const ENTITY_TYPES = ["Unit", "Parking"];
 const MAX_HOLD_DAYS = 90;
@@ -16,7 +17,7 @@ const MAX_HOLD_DAYS = 90;
 async function assertEntityNotTaken(pool, entityType, entityId) {
   if (entityType === "Unit") {
     const taken = await pool.request().input("uid", sql.Int, entityId)
-      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
+      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())");
     if (taken.recordset.length) { const e = new Error("This unit is already booked"); e.status = 409; throw e; }
   } else {
     const taken = await pool.request().input("sid", sql.Int, entityId)
@@ -102,7 +103,7 @@ async function placeHold(pool, { entityType, entityId, applicationId, holdDays, 
   if (entityType === "Unit") {
     bumpCacheVersion("unit-master").catch(() => {});
   }
-
+  try { getIo().emit("matrix:update", {}); } catch(e) {}
   return { id: result.recordset[0].Id, holdUntil: result.recordset[0].HoldUntil, applicantName: app.recordset[0].ApplicantName };
 }
 
@@ -141,6 +142,7 @@ async function releaseHold(pool, holdId, userId) {
   if (row.recordset[0].EntityType === "Unit") {
     bumpCacheVersion("unit-master").catch(() => {});
   }
+  try { getIo().emit("matrix:update", {}); } catch(e) {}
 }
 
 // Called from booking/parking-allotment creation. If the entity has an
@@ -161,6 +163,7 @@ async function guardAndConvertHold(pool, entityType, entityId, applicationId) {
   if (entityType === "Unit") {
     bumpCacheVersion("unit-master").catch(() => {});
   }
+  try { getIo().emit("matrix:update", {}); } catch(e) {}
 }
 
 // Releases every still-Active hold (Unit and/or Parking) tied to an

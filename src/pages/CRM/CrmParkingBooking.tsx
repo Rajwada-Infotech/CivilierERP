@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import { CrmStatus } from "@/constants/crmStatuses";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
@@ -24,7 +25,7 @@ const API = "/api/crm/parking";
 const APP_API = "/api/crm/applications";
 const EMPTY_FORM = {
   ApplicationId: "", ProjectId: "", BlockId: "",
-  ParkingMasterId: "", ParkingSlotId: "", Notes: "",
+  ParkingMasterId: "", ParkingSlotId: "", Notes: "", RateOverride: "",
 };
 const PAYMENT_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Bank Transfer", "DD"];
 const RELEASE_ROLES = ["super_admin"];
@@ -50,7 +51,7 @@ interface Allotment {
   GstRateSnapshot: number | null;
   GstAmount: number | null;
   TotalAmount: number;
-  PaymentStatus: "Pending" | "Paid";
+  PaymentStatus: typeof CrmStatus.PENDING | typeof CrmStatus.PAID;
   ReceiptNo: string | null;
   PaymentMode: string | null;
   PaymentReceivedDate: string | null;
@@ -140,8 +141,8 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                 Unit Booking
               </span>
             ) : (
-              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === "Paid" ? "text-green-700 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
-                {a.PaymentStatus === "Paid" ? "Paid" : "Payment Pending"}
+              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+                {a.PaymentStatus === CrmStatus.PAID ? "Paid" : "Payment Pending"}
               </span>
             )}
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1 rounded">
@@ -242,7 +243,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                 <span className="flex items-center gap-1.5"><CreditCard size={12} /> Payment</span>
               </h3>
               <div className="rounded-xl border border-border divide-y divide-border">
-                {a.PaymentStatus === "Paid" ? (
+                {a.PaymentStatus === CrmStatus.PAID ? (
                   <>
                     <div className="px-4 py-3 flex items-center gap-2">
                       <CheckCircle2 size={14} className="text-green-500 shrink-0" />
@@ -308,9 +309,9 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                 <p className="text-xs text-red-600 leading-relaxed">
                   Releasing this allotment will free the slot back to available inventory.
                   {isLinked && " The linked booking's grand total and payment milestones will be recalculated."}
-                  {a.PaymentStatus === "Paid" && " This allotment has already been paid — release is blocked."}
+                  {a.PaymentStatus === CrmStatus.PAID && " This allotment has already been paid — release is blocked."}
                 </p>
-                {a.PaymentStatus !== "Paid" && (
+                {a.PaymentStatus !== CrmStatus.PAID && (
                   <button
                     onClick={() => onRequestRelease(a)}
                     className="w-full px-4 py-2 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-100 transition-colors"
@@ -343,6 +344,9 @@ const CrmParkingBooking: React.FC = () => {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [selectedAllotment, setSelectedAllotment] = useState<Allotment | null>(null);
+  const [sp, setSp] = useSearchParams();
+  const allotmentIdFilter = sp.get("allotmentId");
+  const [allotmentDeepLinkOpened, setAllotmentDeepLinkOpened] = useState(false);
   // Release dialog — super admin only; requires a written reason
   const [releaseTarget, setReleaseTarget] = useState<Allotment | null>(null);
   const [releaseReason, setReleaseReason] = useState("");
@@ -352,6 +356,28 @@ const CrmParkingBooking: React.FC = () => {
   const { data: allotments = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-parking-all"], queryFn: fetchAllotments, staleTime: 30_000,
   });
+
+  // Row clicks only ever set local state — the URL stayed plain
+  // /crm/parking-booking, so a refresh lost the open detail drawer and
+  // there was nothing to copy/bookmark/share to jump straight back to this
+  // allotment. Had neither a read nor write side before (unlike this same
+  // file's own outbound ?view= links to CrmBooking.tsx).
+  const openAllotment = (a: Allotment) => {
+    setSelectedAllotment(a);
+    setSp((p) => { p.set("allotmentId", String(a.Id)); return p; }, { replace: true });
+  };
+  const closeAllotment = () => {
+    setSelectedAllotment(null);
+    setSp((p) => { p.delete("allotmentId"); return p; }, { replace: true });
+  };
+  useEffect(() => {
+    if (!allotmentIdFilter || allotmentDeepLinkOpened || !(allotments as Allotment[]).length) return;
+    const match = (allotments as Allotment[]).find((a) => String(a.Id) === allotmentIdFilter);
+    if (match) {
+      setAllotmentDeepLinkOpened(true);
+      setSelectedAllotment(match);
+    }
+  }, [allotmentIdFilter, allotmentDeepLinkOpened, allotments]);
   const { data: applications = [] } = useQuery({
     queryKey: ["crm-applications-dropdown"], queryFn: fetchApplications, staleTime: 60_000,
   });
@@ -414,11 +440,11 @@ const CrmParkingBooking: React.FC = () => {
     }), [allotments, search, statusFilter, linkFilter]);
 
   const standalonePending = filtered
-    .filter((a) => !a.BookingId && a.PaymentStatus !== "Paid")
+    .filter((a) => !a.BookingId && a.PaymentStatus !== CrmStatus.PAID)
     .reduce((s, a) => s + Number(a.TotalAmount || 0), 0);
 
   const standalonePaid = filtered
-    .filter((a) => !a.BookingId && a.PaymentStatus === "Paid")
+    .filter((a) => !a.BookingId && a.PaymentStatus === CrmStatus.PAID)
     .reduce((s, a) => s + Number(a.TotalAmount || 0), 0);
 
   const resetForm = () => { setForm({ ...EMPTY_FORM }); setNewDialogOpen(false); };
@@ -439,6 +465,7 @@ const CrmParkingBooking: React.FC = () => {
           Quantity: 1,
           Notes: form.Notes || null,
           Immediate: true,
+          ...(form.RateOverride ? { RateOverride: form.RateOverride } : {}),
         }),
       });
       const data = await res.json();
@@ -464,7 +491,7 @@ const CrmParkingBooking: React.FC = () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     toast.success(`Payment recorded — Receipt ${data.ReceiptNo}`);
-    setSelectedAllotment(null);
+    closeAllotment();
     qc.invalidateQueries({ queryKey: ["crm-parking-all"] });
   };
 
@@ -487,7 +514,7 @@ const CrmParkingBooking: React.FC = () => {
       setReleaseTarget(null);
       setReleaseReason("");
       setReleaseConfirmText("");
-      setSelectedAllotment(null);
+      closeAllotment();
       qc.invalidateQueries({ queryKey: ["crm-parking-all"] });
     } catch (e: any) {
       toast.error(e.message || "Network error");
@@ -500,7 +527,7 @@ const CrmParkingBooking: React.FC = () => {
     {
       accessorKey: "ApplicantName", header: "Customer", size: 180,
       cell: (i) => (
-        <button onClick={() => setSelectedAllotment(i.row.original)} className="text-left group">
+        <button onClick={() => openAllotment(i.row.original)} className="text-left group">
           <div className="font-medium group-hover:text-primary transition-colors">{i.row.original.ApplicantName || "—"}</div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile || "—"}</div>
         </button>
@@ -564,8 +591,8 @@ const CrmParkingBooking: React.FC = () => {
           );
         }
         return (
-          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === "Paid" ? "text-green-700 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
-            {a.PaymentStatus === "Paid" ? "Paid" : "Pending"}
+          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+            {a.PaymentStatus === CrmStatus.PAID ? "Paid" : "Pending"}
           </span>
         );
       },
@@ -578,7 +605,7 @@ const CrmParkingBooking: React.FC = () => {
       id: "view", header: "", size: 70, enableSorting: false,
       cell: (i) => (
         <button
-          onClick={() => setSelectedAllotment(i.row.original)}
+          onClick={() => openAllotment(i.row.original)}
           className="text-xs font-medium text-muted-foreground hover:text-primary transition-colors"
         >
           View
@@ -674,9 +701,9 @@ const CrmParkingBooking: React.FC = () => {
         <DetailPanel
           allotment={selectedAllotment}
           canRelease={canRelease}
-          onClose={() => setSelectedAllotment(null)}
+          onClose={closeAllotment}
           onMarkPaid={handleMarkPaid}
-          onRequestRelease={(a) => { setReleaseTarget(a); setSelectedAllotment(null); }}
+          onRequestRelease={(a) => { setReleaseTarget(a); closeAllotment(); }}
           navigate={navigate}
         />
       )}
@@ -783,7 +810,15 @@ const CrmParkingBooking: React.FC = () => {
               <div>
                 <label className="text-sm font-medium block mb-1.5">Parking Type / Rate <span className="text-red-500">*</span></label>
                 <select value={form.ParkingMasterId}
-                  onChange={(e) => setForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "" }))}
+                  onChange={(e) => {
+                    const selected = (ratesForScope as any[]).find((r: any) => String(r.Id) === e.target.value);
+                    setForm((f) => ({
+                      ...f,
+                      ParkingMasterId: e.target.value,
+                      ParkingSlotId: "",
+                      RateOverride: selected ? String(selected.Charge) : "",
+                    }));
+                  }}
                   className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary">
                   <option value="">Select type</option>
                   {ratesForScope.map((r: any) => (
@@ -814,22 +849,38 @@ const CrmParkingBooking: React.FC = () => {
                 No parking rates configured for this project/block. Set them up in Parking Master before selling.
               </p>
             )}
-            {selectedRate && (
-              <div className="rounded-lg bg-muted/30 border border-border px-3 py-2.5 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Base amount</span>
-                  <span>{inr(selectedRate.Charge)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">GST ({selectedRate.GstRate}%)</span>
-                  <span>{inr(Math.round(selectedRate.Charge * selectedRate.GstRate / 100 * 100) / 100)}</span>
-                </div>
-                <div className="flex justify-between font-semibold border-t border-border mt-1.5 pt-1.5">
-                  <span>Total payable</span>
-                  <span>{inr(selectedRate.Charge + Math.round(selectedRate.Charge * selectedRate.GstRate / 100 * 100) / 100)}</span>
-                </div>
-              </div>
-            )}
+            {selectedRate && (() => {
+              const effectiveRate = form.RateOverride ? Number(form.RateOverride) : Number(selectedRate.Charge);
+              const gst = Math.round(effectiveRate * selectedRate.GstRate / 100 * 100) / 100;
+              return (
+                <>
+                  <div>
+                    <label className="text-sm font-medium block mb-1.5">Rate (₹)</label>
+                    <input type="number" min={0} value={form.RateOverride}
+                      onChange={(e) => setForm((f) => ({ ...f, RateOverride: e.target.value }))}
+                      placeholder={String(selectedRate.Charge)}
+                      className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Pre-filled with the master rate ({inr(selectedRate.Charge)}). Edit only if a different price was negotiated with this customer.
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-muted/30 border border-border px-3 py-2.5 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Base amount</span>
+                      <span>{inr(effectiveRate)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">GST ({selectedRate.GstRate}%)</span>
+                      <span>{inr(gst)}</span>
+                    </div>
+                    <div className="flex justify-between font-semibold border-t border-border mt-1.5 pt-1.5">
+                      <span>Total payable</span>
+                      <span>{inr(effectiveRate + gst)}</span>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
             <div>
               <label className="text-sm font-medium block mb-1.5">Notes</label>
               <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}

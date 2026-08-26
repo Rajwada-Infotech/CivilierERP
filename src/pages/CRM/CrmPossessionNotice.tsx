@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -163,7 +164,7 @@ const CrmPossessionNotice: React.FC = () => {
         const n = i.row.original;
         return (
           <div className="flex items-center gap-2 flex-wrap">
-            {n.Status === "Draft" && (
+            {n.Status === CrmStatus.DRAFT && (
               <button onClick={() => handleMarkSent(n.Id)} className="text-xs text-primary hover:underline">Mark Sent</button>
             )}
             {n.Status === "Sent" && (

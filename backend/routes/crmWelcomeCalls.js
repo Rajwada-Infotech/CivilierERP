@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -59,7 +60,7 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
         ) recent
         WHERE recent.Outcome IN ('NotReachable','Busy','SwitchedOff','VoiceMail')
       ) streak
-      WHERE b.Status = 'Approved' AND b.IsActive = 1
+      WHERE b.Status = '${CrmStatus.APPROVED}' AND b.IsActive = 1
         AND (
           last.Id IS NULL
           OR (last.Outcome <> 'Welcomed' AND (last.NextCallDate IS NULL OR last.NextCallDate <= CAST(SYSDATETIME() AS DATE)))
@@ -87,7 +88,14 @@ router.get("/:bookingId/checklist", requirePageRight("crm-welcome-calls", "view"
       pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmWelcomeCall WHERE BookingId = @bid"),
       pool.request().input("bid", sql.Int, bookingId)
-        .query("SELECT COUNT(*) AS Total, SUM(CASE WHEN IsVerified = 1 THEN 1 ELSE 0 END) AS Verified FROM dbo.CrmBookingDocument WHERE BookingId = @bid"),
+        .query(`
+          SELECT COUNT(*) AS Total, SUM(CASE WHEN IsVerified = 1 THEN 1 ELSE 0 END) AS Verified
+          FROM dbo.CrmBookingDocument
+          WHERE BookingId = @bid
+             OR (ApplicationId = (
+                  SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1
+                ) AND BookingId IS NULL)
+        `),
       pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmCoApplicant WHERE BookingId = @bid AND IsActive = 1"),
       pool.request().input("bid", sql.Int, bookingId).query(`

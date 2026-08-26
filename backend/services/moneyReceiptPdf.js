@@ -1,5 +1,6 @@
 const PDFDocument = require("pdfkit");
 const { sql } = require("../db");
+const { drawFinancialBreakdown } = require("./pdfFinancials");
 
 function money(n) {
   const num = Number(n || 0);
@@ -81,6 +82,7 @@ async function fetchMoneyReceiptData(pool, receiptId) {
       mr.*,
       rp.RPStatus, rp.RPRejectionNote,
       b.BookingNo, b.UnitNo, b.BlockName, b.ProjectName,
+      b.TotalValue, b.TotalGstAmount, b.GrandTotal, b.UnitParkingGstRate, b.HsnCode,
       a.ApplicationNo, a.ApplicantName, a.Mobile, a.Email,
       comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2,
       comp.city AS CompanyCity, comp.state AS CompanyState, comp.pincode AS CompanyPincode,
@@ -137,16 +139,15 @@ function drawWatermark(doc, text, color) {
 
 // Renders the receipt to an in-memory PDF buffer — a compact, single-page,
 // certificate-style layout: thin brand accent rule, centered logo + company
-// identity, a large diagonal PENDING APPROVAL / BOUNCED watermark for
-// anything short of a clean Approved document, and one hero amount panel
-// rather than a dense table — brief and presentable enough to hand straight
-// to a customer.
+// identity, a large diagonal PROVISIONAL / BOUNCED watermark for anything
+// short of a clean Approved document, and one hero amount panel rather than
+// a dense table — brief and presentable enough to hand straight to a customer.
 function renderMoneyReceiptPdfBuffer(d) {
   return new Promise((resolve, reject) => {
     // A brief, single-panel document doesn't need a full A4 sheet — a
     // shorter custom page (A4 width, ~46% of its height) keeps the receipt
     // looking deliberately sized rather than a mostly-blank full page.
-    const doc = new PDFDocument({ size: [595.28, 560], margin: 40 });
+    const doc = new PDFDocument({ size: [595.28, 610], margin: 40 });
     const chunks = [];
     doc.on("data", (c) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -157,7 +158,7 @@ function renderMoneyReceiptPdfBuffer(d) {
     const logoBuf = decodeLogo(d.CompanyLogo);
 
     const accent = d.Status === "Approved" ? "#15803d" : d.Status === "Bounced" ? "#b91c1c" : "#b45309";
-    const statusLabel = d.Status === "Approved" ? "APPROVED" : d.Status === "Bounced" ? "BOUNCED" : "PENDING APPROVAL";
+    const statusLabel = d.Status === "Approved" ? "APPROVED" : d.Status === "Bounced" ? "BOUNCED" : "PROVISIONAL";
 
     if (d.Status !== "Approved") {
       drawWatermark(doc, statusLabel, accent);
@@ -227,19 +228,45 @@ function renderMoneyReceiptPdfBuffer(d) {
     doc.y = Math.max(doc.y, blockTop + 62) + 16;
     doc.fillColor("#000000");
 
-    // ── Hero amount panel ─────────────────────────────────────────────────
-    const heroTop = doc.y;
-    const heroH = 62;
-    doc.roundedRect(left, heroTop, pageWidth, heroH, 8).fillColor("#f8fafc").fill();
-    doc.roundedRect(left, heroTop, pageWidth, heroH, 8).strokeColor("#e2e8f0").lineWidth(0.75).stroke();
-    doc.font("Helvetica").fontSize(8).fillColor("#64748b")
-      .text("AMOUNT RECEIVED", left, heroTop + 12, { width: pageWidth, align: "center", characterSpacing: 0.5 });
-    doc.font("Helvetica-Bold").fontSize(24).fillColor("#0f172a")
-      .text(`Rs. ${money(d.Amount)}`, left, heroTop + 22, { width: pageWidth, align: "center" });
-    doc.font("Helvetica-Oblique").fontSize(8).fillColor("#64748b")
-      .text(numberToWordsIndian(d.Amount), left, heroTop + 47, { width: pageWidth, align: "center" });
-    doc.fillColor("#000000");
-    doc.y = heroTop + heroH + 16;
+    // ── Amount received — the shared GST tax-computation matrix ────────────
+    // Same component the Application Form and Tax Invoice use, so the money
+    // received is shown with the identical professional Taxable / CGST / SGST
+    // breakdown rather than a bare number with a small separated split line.
+    //
+    // Use the stored snapshot if available (set at receipt creation time via
+    // migration 357); fall back to deriving from the booking's own GST rate
+    // for older receipts. Formula: gst = amount × rate/100, principal =
+    // amount − gst (rate/100 not rate/(100+rate) — the receipt amount is the
+    // agreed booking amount on which GST is levied; the customer pays
+    // principal + GST separately).
+    const amount = Number(d.Amount || 0);
+    let amountGst, amountPrin;
+    if (d.BaseAmount != null && d.GSTAmount != null) {
+      amountGst = Number(d.GSTAmount);
+      amountPrin = Number(d.BaseAmount);
+    } else {
+      const rate = Number(d.UnitParkingGstRate || 0);
+      if (rate > 0) {
+        amountGst = Math.round(amount * rate / 100 * 100) / 100;
+        amountPrin = Math.round((amount - amountGst) * 100) / 100;
+      } else {
+        const grandTotal = Number(d.GrandTotal || 1);
+        const gstRatio = Number(d.TotalGstAmount || 0) / grandTotal;
+        amountGst = Math.round(amount * gstRatio * 100) / 100;
+        amountPrin = Math.round((amount - amountGst) * 100) / 100;
+      }
+    }
+    const effRate = amountPrin > 0
+      ? Math.round((amountGst / amountPrin) * 10000) / 100
+      : Number(d.UnitParkingGstRate || 0);
+
+    drawFinancialBreakdown(doc, [
+      { label: "Payment Received", hsn: d.HsnCode || "-", taxable: amountPrin, gstAmount: amountGst, total: amount, ratePct: effRate },
+    ], {
+      left, width: pageWidth,
+      grandTotal: amount, grandTotalLabel: "Amount Received",
+      note: numberToWordsIndian(amount),
+    });
 
     // ── Payment details strip ─────────────────────────────────────────────
     const stripTop = doc.y;
@@ -282,7 +309,7 @@ function renderMoneyReceiptPdfBuffer(d) {
       ? "This receipt confirms an approved payment against the booking referenced above. Please retain it for your records."
       : d.Status === "Bounced"
       ? "This instrument did not clear and this receipt is void. A fresh payment will generate a new receipt."
-      : "Acknowledges the amount/instrument noted above, pending internal finance approval. If it does not clear, this receipt will be marked Bounced.";
+      : "This is a provisional receipt acknowledging the amount/instrument noted above. It becomes an approved receipt upon clearance by internal finance. If the instrument does not clear, this receipt will be marked Bounced.";
     doc.font("Helvetica").fontSize(7.75).fillColor("#64748b")
       .text(note, left, noteTop, { width: noteColW });
 

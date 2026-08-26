@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -15,7 +16,7 @@ router.use(apiRateLimit);
 // by hand (no shared module for it there either) so a type picked in the
 // Parking Template here always lands as a valid ParkingType on the real
 // dbo.ParkingSlot row.
-const PARKING_TYPES = ["Open", "Covered", "Stack", "Basement"];
+const PARKING_TYPES = [CrmStatus.OPEN, "Covered", "Stack", "Basement"];
 
 async function getProject(pool, projectId) {
   const r = await pool.request().input("id", sql.Int, projectId).query(`
@@ -490,7 +491,7 @@ router.get("/blocks/:id/parking-slots", requirePageRight("crm-auto-project-setup
       LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
       LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
       LEFT JOIN dbo.CrmInventoryHold h
-        ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+        ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
       WHERE s.BlockId = @bid AND s.IsActive = 1
       ORDER BY s.SlotNo
     `);
@@ -661,9 +662,9 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
         FROM dbo.CrmUnitPaymentPlan upp
         WHERE upp.UnitId = u.Id AND upp.IsActive = 1
       ) tags
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
-      LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
-      LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('Cancelled', 'Rejected')
+      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+      LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
+      LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
       WHERE u.BlockId = @bid AND u.FloorNo = @fno AND u.IsActive = 1
       ORDER BY u.UnitName
     `);

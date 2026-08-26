@@ -1,5 +1,6 @@
 import React from "react";
 import { useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
@@ -30,6 +31,7 @@ import {
 } from "lucide-react";
 import {
   getJournalVouchers,
+  getJournalVoucher,
   createJournalVoucher,
   approveJournalVoucher,
   rejectJournalVoucher,
@@ -37,15 +39,24 @@ import {
   type JournalVoucherSummary,
   type JournalVoucherLine,
   type JournalVoucherLedgerOption,
+  type JournalVoucherDetail,
 } from "@/api/journalVoucherApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
 
+// Matches the real LHeadType convention used everywhere else account heads
+// are created (see CustomerMaster/ContractorMaster/SupplierMaster/
+// CrmBrokerMaster's own CUSTOMER_TYPE/CONTRACTOR_TYPE/SUPPLIER_TYPE
+// constants) — this map previously had "C" labeled "Customer", which is
+// actually Contractor; Customer is "A". Left the group header showing the
+// wrong name for every Contractor head in the picker.
 const LHEAD_TYPE_LABEL: Record<string, string> = {
   GL: "General Ledger",
-  C: "Customer",
+  A: "Customer",
+  C: "Contractor",
   S: "Supplier",
+  BR: "Broker",
   B: "Bank",
 };
 
@@ -120,6 +131,33 @@ export default function JournalVoucher() {
   const [projectId, setProjectId] = useState<string>("");
 
   const [acting, setActing] = useState<{ id: number; action: "approve" | "reject" } | null>(null);
+
+  // Detail view — clicking a row, or a deep link from elsewhere (Trial
+  // Balance's ledger drill-down navigates here as /journal-voucher?view=<JVID>)
+  // opens this exact voucher's real detail, not just the plain list.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [viewingJV, setViewingJV] = useState<JournalVoucherDetail | null>(null);
+  const [viewingJVLoading, setViewingJVLoading] = useState(false);
+
+  const openJVDetail = async (id: number) => {
+    setViewingJVLoading(true);
+    try {
+      setViewingJV(await getJournalVoucher(id));
+    } catch (err: any) {
+      toast.error(err?.message || `Journal Voucher #${id} not found`);
+    } finally {
+      setViewingJVLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    openJVDetail(Number(viewId));
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -511,7 +549,11 @@ export default function JournalVoucher() {
                 </tr>
               ) : (
                 filtered.map((v) => (
-                  <tr key={v.JVID} className="hover:bg-muted/30 transition-colors group">
+                  <tr
+                    key={v.JVID}
+                    onClick={() => openJVDetail(v.JVID)}
+                    className="hover:bg-muted/30 transition-colors group cursor-pointer"
+                  >
                     <td className="px-4 py-3">
                       <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
                         {v.JVNo || `JV-${v.JVID}`}
@@ -547,7 +589,7 @@ export default function JournalVoucher() {
                         <div className="flex justify-end gap-1">
                           <button
                             disabled={acting?.id === v.JVID}
-                            onClick={() => handleApprove(v.JVID)}
+                            onClick={(e) => { e.stopPropagation(); handleApprove(v.JVID); }}
                             title="Approve"
                             className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
                           >
@@ -559,7 +601,7 @@ export default function JournalVoucher() {
                           </button>
                           <button
                             disabled={acting?.id === v.JVID}
-                            onClick={() => handleReject(v.JVID)}
+                            onClick={(e) => { e.stopPropagation(); handleReject(v.JVID); }}
                             title="Reject"
                             className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
                           >
@@ -682,7 +724,12 @@ export default function JournalVoucher() {
                                     {LHEAD_TYPE_LABEL[type] || type}
                                   </SelectLabel>
                                   {opts.map((opt) => (
-                                    <SelectItem key={opt.id} value={String(opt.id)} className="text-xs">{opt.label}</SelectItem>
+                                    <SelectItem key={opt.id} value={String(opt.id)} className="text-xs">
+                                      {opt.label}
+                                      {opt.accountNoLast4 && (
+                                        <span className="text-muted-foreground"> •••{opt.accountNoLast4}</span>
+                                      )}
+                                    </SelectItem>
                                   ))}
                                 </SelectGroup>
                               ))}
@@ -780,6 +827,90 @@ export default function JournalVoucher() {
               {saving ? "Saving…" : "Save & Submit"}
             </button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Voucher detail ── */}
+      <Dialog open={viewingJVLoading || !!viewingJV} onOpenChange={(o) => { if (!o) setViewingJV(null); }}>
+        <DialogContent className="max-w-lg p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden">
+          {viewingJVLoading ? (
+            <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground text-sm">
+              <Loader2 size={16} className="animate-spin" /> Loading voucher…
+            </div>
+          ) : viewingJV ? (
+            <>
+              <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-border bg-gradient-to-br from-primary/5 via-transparent to-transparent">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
+                    {viewingJV.JVNo || `JV-${viewingJV.JVID}`}
+                  </span>
+                  <StatusBadge status={viewingJV.Status} />
+                  <GLBadge status={viewingJV.Status} postedToGL={viewingJV.PostedToGL} />
+                </div>
+                <DialogTitle className="text-sm font-semibold mt-1.5">Journal Voucher</DialogTitle>
+                <DialogDescription className="text-[11px] mt-0.5">
+                  {fmtDate(viewingJV.JVDate)}
+                  {viewingJV.CompanyName ? ` · ${viewingJV.CompanyName}` : ""}
+                  {viewingJV.ProjectName ? ` · ${viewingJV.ProjectName}` : ""}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-4">
+                {viewingJV.Narration && (
+                  <p className="text-sm text-foreground">{viewingJV.Narration}</p>
+                )}
+                <div className="rounded-lg border border-border overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-muted/50 border-b border-border text-left text-muted-foreground">
+                        <th className="px-3 py-2 font-medium">Ledger</th>
+                        <th className="px-3 py-2 font-medium text-right">Debit</th>
+                        <th className="px-3 py-2 font-medium text-right">Credit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {viewingJV.lines.map((l) => (
+                        <tr key={l.LineID} className="border-b border-border/50 last:border-0">
+                          <td className="px-3 py-2">
+                            <p className="text-foreground">{l.LHeadName || "—"}</p>
+                            {l.Narration && (
+                              <p className="text-[10px] text-muted-foreground mt-0.5">{l.Narration}</p>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-foreground">
+                            {l.DebitAmount ? formatINR(l.DebitAmount) : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-foreground">
+                            {l.CreditAmount ? formatINR(l.CreditAmount) : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-muted/30 font-semibold">
+                        <td className="px-3 py-2 text-foreground">Total</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-foreground">
+                          {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.DebitAmount) || 0), 0))}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-foreground">
+                          {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.CreditAmount) || 0), 0))}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              <DialogFooter className="shrink-0 px-4 sm:px-5 py-3.5 border-t border-border bg-muted/20">
+                <button
+                  onClick={() => setViewingJV(null)}
+                  className="w-full sm:w-auto px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
+                >
+                  Close
+                </button>
+              </DialogFooter>
+            </>
+          ) : null}
         </DialogContent>
       </Dialog>
     </>

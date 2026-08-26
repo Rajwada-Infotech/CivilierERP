@@ -21,6 +21,7 @@ import {
   Package,
   UserRound,
   CalendarDays,
+  RotateCcw,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -47,6 +48,13 @@ const TAG_META: Record<PhotoPhase, { label: string; icon: LucideIcon; color: str
   after: { label: "After", icon: CheckCircle2, color: "#22c55e" },
 };
 const TAG_ORDER: PhotoPhase[] = ["before", "after"];
+
+// Shared between the carry-forward upload call and PhotoThumb's badge check
+// below — a Before photo tagged with exactly this note is one the system
+// cloned automatically from the previous After, not one the field engineer
+// actually took, and the gallery should say so visibly rather than only in
+// the lightbox's fine print.
+const CARRIED_FORWARD_NOTE = "Carried forward from previous After";
 
 function fmtDateTime(iso: string | null) {
   if (!iso) return "—";
@@ -91,6 +99,7 @@ function PhotoThumb({
     staleTime: 5 * 60_000,
   });
   const [deleting, setDeleting] = useState(false);
+  const carriedForward = photo.phase === "before" && photo.note === CARRIED_FORWARD_NOTE;
 
   const handleDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -121,6 +130,14 @@ function PhotoThumb({
           </div>
         )}
       </button>
+      {carriedForward && (
+        <div
+          title={CARRIED_FORWARD_NOTE}
+          className="absolute bottom-1 left-1 w-4 h-4 rounded-full bg-black/70 text-amber-400 flex items-center justify-center"
+        >
+          <RotateCcw size={9} />
+        </div>
+      )}
       <button
         type="button"
         onClick={handleDelete}
@@ -192,13 +209,12 @@ function PhotosTab({ rungId }: { rungId: number }) {
   // A new "After" shot marks one work cycle done — the field engineer
   // shouldn't have to separately re-photograph "Before" for the next
   // cycle when it's just whatever the site looked like a moment ago,
-  // i.e. the After that was just superseded. So the first time a new
-  // After comes in since the last one was captured, clone that previous
-  // After into Before automatically. Guarded by comparing timestamps
-  // (not just "any before exists") so multiple After shots in a row each
-  // still carry forward exactly once, right when the next one lands.
+  // i.e. the After that was just superseded. So the moment there's an
+  // After newer than the current Before, clone that After into Before
+  // automatically. Guarded by comparing timestamps (not just "any before
+  // exists") so this stays idempotent — safe to call on every load, not
+  // just right before a new capture.
   const carryForwardBeforeIfNeeded = async () => {
-    if (activeTag !== "after") return;
     try {
       const current = await getActivityPhotos(rungId);
       const lastAfter = current.after[0]; // ORDER BY CapturedAt DESC
@@ -209,11 +225,22 @@ function PhotosTab({ rungId }: { rungId: number }) {
       const raw = await getActivityPhoto(rungId, lastAfter.id);
       const blob = await (await fetch(`data:${raw.mimeType};base64,${raw.dataBase64}`)).blob();
       const file = new File([blob], `before-carried-${Date.now()}.jpg`, { type: raw.mimeType });
-      await uploadActivityPhoto(rungId, "before", file, "Carried forward from previous After");
+      await uploadActivityPhoto(rungId, "before", file, CARRIED_FORWARD_NOTE);
+      refresh();
     } catch {
       // Best-effort — a failed carry-forward should never block the new capture.
     }
   };
+
+  // Reconciles on every load too, not just right before a new capture —
+  // otherwise a Before that should already reflect yesterday's After only
+  // ever shows up the next time someone happens to take a new After photo,
+  // which could be days later. Keyed on the latest After's own id so this
+  // re-checks whenever a new After actually lands, not on every re-render.
+  useEffect(() => {
+    if (data?.after?.[0]) carryForwardBeforeIfNeeded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.after?.[0]?.id]);
 
   const addPhoto = async (blob: Blob) => {
     setUploading(true);
@@ -347,10 +374,16 @@ function PhotosTab({ rungId }: { rungId: number }) {
             const meta = TAG_META[tag];
             const Icon = meta.icon;
             const photos = data?.[tag] ?? [];
+            const carriedCount = photos.filter((p) => p.note === CARRIED_FORWARD_NOTE).length;
             return (
               <div key={tag} className="pl-3 border-l-2" style={{ borderColor: `${meta.color}45` }}>
                 <p className="flex items-center gap-1 text-[10px] font-heading font-semibold uppercase tracking-wide mb-2" style={{ color: meta.color }}>
                   <Icon size={10} /> {meta.label} · {photos.length}
+                  {carriedCount > 0 && (
+                    <span className="normal-case font-normal text-muted-foreground flex items-center gap-0.5 ml-0.5">
+                      (<RotateCcw size={9} /> {carriedCount} carried forward)
+                    </span>
+                  )}
                 </p>
                 {photos.length === 0 ? (
                   <p className="text-[11px] text-muted-foreground/70 flex items-center gap-1">

@@ -82,7 +82,7 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
       FROM dbo.ParkingSlot s
       LEFT JOIN dbo.BlockMaster blk ON blk.Id = s.BlockId
       LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
-      LEFT JOIN dbo.CrmBooking b ON b.Id = pa.BookingId AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired')
+      LEFT JOIN dbo.CrmBooking b ON b.Id = pa.BookingId AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME())
       LEFT JOIN dbo.CrmApplication a ON a.Id = ISNULL(pa.ApplicationId, b.ApplicationId)
       LEFT JOIN dbo.users assn ON assn.id = a.AssignedTo
       LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()

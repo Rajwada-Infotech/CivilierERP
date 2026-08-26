@@ -318,10 +318,27 @@ export function dbToRecord(row: any): ExpenseRecord {
   try {
     if (row.EEmiData) {
       const parsed = JSON.parse(row.EEmiData);
+      // A legit EMI config's own keys are always named fields (enabled,
+      // installmentCount, ...) — never a numeric string like "0". A "0" key
+      // means this JSON was, at some point, produced by spreading a STRING
+      // instead of an object (JS spreads a string into {"0":"c","1":"h",...}),
+      // which then got saved right back through this form's own save flow,
+      // re-corrupting itself every edit cycle. Recover the real fields (they
+      // usually still sit after the garbage keys) instead of spreading the
+      // garbage forward again.
+      const clean = Object.prototype.hasOwnProperty.call(parsed, "0")
+        ? {
+            enabled: !!parsed.enabled,
+            installmentCount: parsed.installmentCount || 0,
+            emiAmount: parsed.emiAmount || 0,
+            startDate: parsed.startDate || "",
+            schedule: Array.isArray(parsed.schedule) ? parsed.schedule : [],
+          }
+        : parsed;
       emi = {
         ...defaultEmi(),
-        ...parsed,
-        schedule: Array.isArray(parsed.schedule) ? parsed.schedule : [],
+        ...clean,
+        schedule: Array.isArray(clean.schedule) ? clean.schedule : [],
       };
     } else if (row.EEmiPayment) {
       emi = {

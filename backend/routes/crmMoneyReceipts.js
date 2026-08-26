@@ -5,6 +5,7 @@
 // -> Finance approves/bounces the Money Receipt -> ReceivedPayment lands in
 // Finance's queue Pending for bank/ledger confirmation.
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -46,20 +47,24 @@ function requireMoneyReceiptApprover(req, res) {
 router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { bookingId, status } = req.query;
+    const { bookingId, status, companyId } = req.query;
     const req0 = pool.request();
     const conds = [];
     if (bookingId) {
       req0.input("bid", sql.Int, parseInt(bookingId, 10));
       conds.push("mr.BookingId = @bid");
     }
-    if (status && ["Pending", "Approved", "Bounced"].includes(status)) {
+    if (status && [CrmStatus.PENDING, CrmStatus.APPROVED, "Bounced"].includes(status)) {
       req0.input("st", sql.NVarChar(20), status);
       conds.push("mr.Status = @st");
     }
+    if (companyId) {
+      req0.input("companyId", sql.Int, parseInt(companyId, 10));
+      conds.push("b.CompanyId = @companyId");
+    }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`
-      SELECT mr.Id, mr.ReceiptNo, mr.BookingId, mr.Amount, mr.PaymentMode, mr.ChequeNo, mr.ChequeDate,
+      SELECT mr.Id, mr.ReceiptNo, mr.BookingId, mr.Amount, mr.BaseAmount, mr.GSTAmount, mr.PaymentMode, mr.ChequeNo, mr.ChequeDate,
              mr.TransactionRef, mr.ReceivedDate, mr.CreatedAt, mr.ReceivedPaymentId, mr.Status AS MoneyReceiptStatus,
              mr.BouncedReason, mr.ApprovedAt,
              rp.RPStatus, rp.RPDocNo, rp.RPRejectionNote,
@@ -75,7 +80,7 @@ router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res)
     res.json(result.recordset.map((r) => ({
       ...r,
       Status: deriveStatus(r.MoneyReceiptStatus, r.RPStatus),
-      BouncedReason: r.BouncedReason || (r.RPStatus === "Rejected" ? r.RPRejectionNote : null),
+      BouncedReason: r.BouncedReason || (r.RPStatus === CrmStatus.REJECTED ? r.RPRejectionNote : null),
     })));
   } catch (e) {
     handleError(res, e, "GET /");
@@ -112,7 +117,7 @@ router.get("/:id", requirePageRight("crm-money-receipts", "view"), async (req, r
     if (!result.recordset.length) return res.status(404).json({ error: "Money receipt not found" });
     const row = result.recordset[0];
     row.Status = deriveStatus(row.MoneyReceiptStatus, row.RPStatus);
-    row.BouncedReason = row.BouncedReason || (row.RPStatus === "Rejected" ? row.RPRejectionNote : null);
+    row.BouncedReason = row.BouncedReason || (row.RPStatus === CrmStatus.REJECTED ? row.RPRejectionNote : null);
     res.json(row);
   } catch (e) {
     handleError(res, e, "GET /:id");
@@ -190,6 +195,39 @@ router.get("/:id/pdf", requirePageRight("crm-money-receipts", "view"), async (re
     res.send(buffer);
   } catch (e) {
     handleError(res, e, "GET /:id/pdf");
+  }
+});
+
+// POST /sweep-pending — admin backfill for already-confirmed bookings whose
+// MRs are stuck in Pending with ReceivedPaymentId = NULL (created before the
+// on-confirm auto-sweep was wired up). Safe to run multiple times — approveMoneyReceipt
+// guards against double-processing with its own Status and ReceivedPaymentId checks.
+router.post("/sweep-pending", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    if (!isMoneyReceiptApprover(req.user?.roleName)) {
+      return res.status(403).json({ error: "Accounts Head or Admin access required" });
+    }
+    const stuckMrs = await pool.request().query(`
+      SELECT mr.Id
+      FROM dbo.CrmMoneyReceipt mr
+      JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
+      WHERE mr.Status = 'Pending' AND mr.ReceivedPaymentId IS NULL
+        AND b.WorkflowStage = 'Confirmed' AND b.IsActive = 1
+    `);
+    let processed = 0, failed = 0, errors = [];
+    for (const row of stuckMrs.recordset) {
+      try {
+        await approveMoneyReceipt(pool, row.Id, actorId(req), actorEmail(req));
+        processed++;
+      } catch (e) {
+        failed++;
+        errors.push({ id: row.Id, error: e.message });
+      }
+    }
+    res.json({ success: true, total: stuckMrs.recordset.length, processed, failed, errors });
+  } catch (e) {
+    handleError(res, e, "POST /sweep-pending");
   }
 });
 

@@ -900,6 +900,13 @@ const ApprovalInbox: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ["approval-inbox"] });
     queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
     queryClient.invalidateQueries({ queryKey: ["boqs"], exact: false });
+    // CRM booking financial data — milestone AmountPaid, money receipts, and
+    // on-account balance all update when Finance approves a Received Payment
+    // or Money Receipt. Without these, a booking detail open in another tab
+    // shows stale figures (e.g. milestone still showing balance after payment clears).
+    queryClient.invalidateQueries({ queryKey: ["crm-booking-detail"], exact: false });
+    queryClient.invalidateQueries({ queryKey: ["crm-booking-money-receipts"], exact: false });
+    queryClient.invalidateQueries({ queryKey: ["crm-booking-on-account"], exact: false });
     // Signal sidebar to immediately re-poll the pending-count badge.
     window.dispatchEvent(new CustomEvent("approval-action"));
   };

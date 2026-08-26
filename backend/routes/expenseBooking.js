@@ -30,6 +30,39 @@ const { buildDirectExpenseBooking } = require("../services/directExpenseBooking"
 const { computeMultiGRNInvoice } = require("../services/invoiceLinking");
 const { syncBillStatus } = require("../utils/syncBillStatus");
 
+// Defends against a corrupted EEmiData blob perpetuating itself. A legit EMI
+// config's own keys are always named fields (enabled, installmentCount, ...)
+// — never a numeric string like "0". A "0" key means this JSON was, at some
+// point, produced by spreading a STRING instead of an object (JS spreads a
+// string into {"0":"c","1":"h",...}), which then got parsed-merged-and-saved
+// right back through one of this route's own read-modify-write paths
+// (EMI-pay, EMI-toggle), re-corrupting it every cycle. Every JSON.parse of a
+// stored EEmiData value in this file goes through here so a corrupted blob
+// gets its real fields recovered (they're usually still sitting after the
+// garbage keys, since the write paths only ever add/overwrite named fields)
+// and the garbage keys dropped, instead of being merged forward again.
+function sanitizeEmiJson(raw) {
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if (Object.prototype.hasOwnProperty.call(parsed, "0")) {
+    const { enabled, installmentCount, emiAmount, startDate, schedule } = parsed;
+    return {
+      enabled: !!enabled,
+      installmentCount: installmentCount || 0,
+      emiAmount: emiAmount || 0,
+      startDate: startDate || "",
+      schedule: Array.isArray(schedule) ? schedule : [],
+    };
+  }
+  return parsed;
+}
+
 // Base/GST for a single GRN's item lines.
 async function computeSingleGrnBaseTax(pool, grnId) {
   const itemsRes = await pool.request().input("GRNID", sql.Int, grnId)
@@ -958,7 +991,11 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           AND (@DateFrom IS NULL OR eb.EDocDate >= @DateFrom)
           AND (@DateTo IS NULL OR eb.EDocDate <= @DateTo)
           AND (@CompanyId IS NULL OR eb.ECompanyId = @CompanyId)
-          AND (@ProjectName IS NULL OR eb.EProjectName = @ProjectName)
+          -- EProjectName is a misnomer — it stores the enterprise ID as text,
+          -- not the name (see ExpenseBooking/helpers.ts). The frontend filter
+          -- sends the project's actual name, so this has to match against the
+          -- already-joined ep.name, not the raw id column.
+          AND (@ProjectName IS NULL OR ep.name = @ProjectName)
           AND (@DocNo IS NULL OR eb.EDocNo LIKE @DocNo)
           AND (@SupplierId IS NULL OR (${ebSupplierList.idExpr}) = @SupplierId)
         ORDER BY eb.Eid DESC
@@ -2670,14 +2707,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     }
 
     if (EEmiPayment && EEmiData && newExpenseId) {
-      let schedule = [];
-      try {
-        const parsed =
-          typeof EEmiData === "string" ? JSON.parse(EEmiData) : EEmiData;
-        schedule = parsed?.schedule ?? [];
-      } catch (e) {
-        console.warn("Failed to parse EMI data");
-      }
+      const parsed = sanitizeEmiJson(EEmiData);
+      const schedule = parsed?.schedule ?? [];
 
       for (const row of schedule) {
         try {
@@ -2811,10 +2842,7 @@ router.put(
         .input("Eid", sql.Int, id)
         .query("SELECT EEmiData FROM dbo.ExpenseBooking WHERE Eid = @Eid");
 
-      let emiData = {};
-      try {
-        emiData = JSON.parse(existing.recordset[0]?.EEmiData || "{}");
-      } catch {}
+      const emiData = sanitizeEmiJson(existing.recordset[0]?.EEmiData) || {};
 
       emiData.schedule = schedule;
 
@@ -2887,10 +2915,7 @@ router.put(
           FROM dbo.ExpenseBooking WHERE Eid = @Eid
         `);
         const parentRow = existingRes.recordset[0] || {};
-        let emiData = {};
-        try {
-          emiData = JSON.parse(parentRow.EEmiData || "{}");
-        } catch {}
+        const emiData = sanitizeEmiJson(parentRow.EEmiData) || {};
         emiData.enabled = false;
         if (deleteUnpaid && Array.isArray(emiData.schedule)) {
           emiData.schedule = emiData.schedule.filter(
@@ -3122,10 +3147,11 @@ router.put(
     let wasApproved = false;
     let beforeSnapshot = null;
     try {
+      // A Pending record is freely editable — it hasn't been approved yet,
+      // so there's nothing for an edit to conflict with. Only an Approved
+      // record's edits need to be tracked, which is what the amendment log
+      // below is for; Pending never reaches that path.
       const currentStatus = await getRecordStatus("expense-booking", numericId);
-      if (currentStatus === "Pending") {
-        return res.status(400).json({ error: "Cannot edit a record that is pending approval. Reject it first." });
-      }
       wasApproved = currentStatus === "Approved";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.ExpenseBooking", "Eid", numericId);
@@ -3424,14 +3450,8 @@ router.put(
       // If EMI is being enabled and a schedule is provided, sync EmiInstallments.
       // Only insert rows that don't already exist (idempotent — safe to call on re-save).
       if (EEmiPayment && EEmiData) {
-        let schedule = [];
-        try {
-          const parsed =
-            typeof EEmiData === "string" ? JSON.parse(EEmiData) : EEmiData;
-          schedule = parsed?.schedule ?? [];
-        } catch (e) {
-          console.warn("Failed to parse EMI data on update");
-        }
+        const parsed = sanitizeEmiJson(EEmiData);
+        const schedule = parsed?.schedule ?? [];
 
         for (const row of schedule) {
           try {
@@ -3472,11 +3492,24 @@ router.put(
       if (wasApproved && beforeSnapshot) {
         try {
           const afterSnapshot = await snapshotRow(pool, "dbo.ExpenseBooking", "Eid", numericId);
+          // EProjectName is a misnomer — it actually stores the enterprise
+          // ID as text (see ExpenseBooking/helpers.ts), resolved to a real
+          // name via a JOIN everywhere else this booking is displayed. The
+          // Amendment log's "Project" field needs the same resolution,
+          // otherwise it shows the raw id (e.g. "1023") instead of the
+          // project's actual name.
+          const rawProjectId = afterSnapshot?.EProjectName || beforeSnapshot.EProjectName;
+          let projectName = rawProjectId;
+          if (rawProjectId) {
+            const projRes = await pool.request().input("pid", sql.NVarChar(50), rawProjectId)
+              .query("SELECT name FROM dbo.enterprise WHERE id = TRY_CAST(@pid AS INT)");
+            if (projRes.recordset.length) projectName = projRes.recordset[0].name;
+          }
           await recordAmendment({
             refDocType: "expense-booking",
             refDocId: numericId,
             refDocNo: afterSnapshot?.EDocNo || beforeSnapshot.EDocNo,
-            projectName: afterSnapshot?.EProjectName || beforeSnapshot.EProjectName,
+            projectName,
             companyName: null,
             changedBy: req.user?.email || req.user?.name || null,
             before: beforeSnapshot,
@@ -4020,7 +4053,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     const ebSupplierPost2 = expenseBookingSupplierSql("eb", "postgl");
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
-      SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
+      SELECT eb.Eid, eb.EDocNo, eb.EDocDate, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
              eb.ELinkedGrnIds, eb.EGLAccountId, eb.TDSAmount, eb.TDSId,
              eb.ECgstRate, eb.ESgstRate, eb.EIgstRate,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
@@ -4274,7 +4307,11 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     await postVoucher(pool, {
       voucherNo: finalDocNo || `GL-EXB${ebId}`,
-      voucherDate: new Date(),
+      // The invoice's own document date, not the date it happened to get
+      // posted to GL — an invoice dated 8 June logged/posted on 10 Aug must
+      // still show 8 June in the ledger and Trial Balance, not the posting
+      // date.
+      voucherDate: eb.EDocDate,
       sourceType: "InvoicePosting",
       sourceId: ebId,
       companyId: eb.CompanyId ?? null,

@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -12,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Plus, Search, ChevronRight, MoreHorizontal, CheckCircle2,
   Eye, Phone, MessageSquare, Landmark, FileSignature, IndianRupee, Repeat, Building2,
+  AlertTriangle, Trash2,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -135,26 +137,28 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 const fmt = (n: number | null | undefined) =>
   n != null ? `₹${(n / 1e5).toFixed(2)}L` : "—";
 
+const normalizeRole = (role?: string) => String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+
 // The real workflow gate: Welcome Call -> Bank Details -> Agreement (both
 // approvals) -> Payments. Only ever surface the ONE step the booking is
 // actually sitting at right now — never let staff jump ahead to a later
 // step a record hasn't reached yet.
 type NextStep = { label: string; color: string; path: string } | null;
 function getNextStep(b: any): NextStep {
-  if (b.Status !== "Approved") return null; // Pending/Rejected/Cancelled have no forward step
+  if (b.Status !== CrmStatus.APPROVED) return null; // Pending/Rejected/Cancelled have no forward step
   // HasWelcomeCall means Outcome = 'Welcomed' specifically (see crmBookings.js
   // BOOKING_SELECT) -- a logged call with any other outcome must NOT satisfy
   // this, since that's not what unblocks Agreement auto-creation either.
   if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-amber-500 border-amber-200 bg-amber-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
   if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-amber-600 border-amber-200 bg-amber-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
   // Agreement sub-stages: draft → senior approval → customer approval → date negotiation → date approval → executed
-  if (!b.AgreementId || b.SeniorApprovalStatus !== "Approved" || b.CustomerApprovalStatus !== "Approved") {
+  if (!b.AgreementId || b.SeniorApprovalStatus !== CrmStatus.APPROVED || b.CustomerApprovalStatus !== CrmStatus.APPROVED) {
     return { label: "Agreement", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
   if (!b.AgreementDate) {
     return { label: "Agreement Date", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
-  if (b.DateApprovalStatus !== "Approved") {
+  if (b.DateApprovalStatus !== CrmStatus.APPROVED) {
     return { label: "Date Approval", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
 if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
@@ -163,12 +167,14 @@ if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-
 
 const CrmBooking: React.FC = () => {
   const qc = useQueryClient();
-  const { canDoAction } = useAuth();
+  const { canDoAction, currentUser } = useAuth();
   // Bookings mainly auto-create on Application approval, with this dialog
   // as the manual fallback (e.g. an Application with no unit preselected).
   // canEdit gates both this and the other mutating actions on this review
   // page (see CrmBookingDetail.tsx).
   const canEdit = canDoAction("crm-bookings", "edit");
+  const canRequestCancellation = canDoAction("crm-cancellations", "create");
+  const isAdmin = ["admin", "super_admin"].includes(normalizeRole(currentUser?.role));
   const { theme } = useTheme();
   const isDark = theme !== "light";
   const navigate = useNavigate();
@@ -183,6 +189,16 @@ const CrmBooking: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [viewingBookingId, setViewingBookingId] = useState<number | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
+
+  // Row clicks only ever set local state — the URL stayed plain
+  // /crm/bookings, so a refresh lost the open card and there was nothing to
+  // copy/bookmark/share to jump straight back to this booking. The read
+  // side (?view=X on load, above) already existed; this is the missing
+  // write side, kept in sync with it via the same param name.
+  const openBooking = (id: number) => {
+    setViewingBookingId(id);
+    navigate(`/crm/bookings?view=${id}`, { replace: true });
+  };
 
   const { data: bookings = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-bookings", appFilter],
@@ -440,16 +456,43 @@ const CrmBooking: React.FC = () => {
     }
   };
 
+  const canDeleteBooking = (b: any) =>
+    isAdmin
+    && b.Status !== CrmStatus.APPROVED
+    && b.WorkflowStage === "Review"
+    && !b.ReadyForApprovalAt
+    && !b.AgreementId
+    && Number(b.TotalCleared || 0) <= 0
+    && Number(b.MRReceivedTotal || 0) <= 0
+    && Number(b.ApprovedOnAccount || 0) <= 0;
+
+  const handleDeleteBooking = async (b: any) => {
+    if (!window.confirm(`Delete booking ${b.BookingNo}? This is only allowed before approval/progress and will return the application to the pre-booking list.`)) return;
+    try {
+      const res = await fetchWithAuth(`${API}/${b.Id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to delete booking");
+      toast.success(data.message || "Booking deleted");
+      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
+      qc.invalidateQueries({ queryKey: ["crm-apps"] });
+      qc.invalidateQueries({ queryKey: ["unit-master"] });
+      qc.invalidateQueries({ queryKey: ["unit-matrix"] });
+      if (viewingBookingId === b.Id) setViewingBookingId(null);
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    }
+  };
+
   const bookingColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "BookingNo", header: "Booking No", size: 115,
       cell: (i) => (
-        <button onClick={() => setViewingBookingId(i.row.original.Id)} className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
+        <button onClick={() => openBooking(i.row.original.Id)} className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
           {i.row.original.BookingNo}
         </button>
       ) },
     { accessorKey: "ApplicantName", header: "Customer", size: 160,
       cell: (i) => (
-        <div onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer">
+        <div onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium">{i.row.original.ApplicantName}</div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
@@ -458,7 +501,7 @@ const CrmBooking: React.FC = () => {
       cell: (i) => {
         const b = i.row.original;
         return (
-          <div onClick={() => setViewingBookingId(b.Id)} className="cursor-pointer">
+          <div onClick={() => openBooking(b.Id)} className="cursor-pointer">
             <div>{b.ProjectName || "—"}</div>
             <div className="text-xs text-muted-foreground">{[b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / ")}</div>
             {b.CompanyName && <div className="text-xs text-muted-foreground">{b.CompanyName}</div>}
@@ -466,7 +509,7 @@ const CrmBooking: React.FC = () => {
         );
       } },
     { accessorKey: "AreaSqFt", header: "Area", size: 90,
-      cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer text-sm">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sqft` : "—"}</span> },
+      cell: (i) => <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer text-sm">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sqft` : "—"}</span> },
     { id: "value", header: "Value / Financial", size: 185, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
@@ -479,7 +522,7 @@ const CrmBooking: React.FC = () => {
         const clearedPct = grand > 0 ? Math.min(100, Math.round((cleared / grand) * 100)) : 0;
         const onAccPct = grand > 0 ? Math.min(100 - clearedPct, Math.round((onAcc / grand) * 100)) : 0;
         return (
-          <div onClick={() => setViewingBookingId(b.Id)} className="cursor-pointer space-y-1">
+          <div onClick={() => openBooking(b.Id)} className="cursor-pointer space-y-1">
             <div className="font-semibold">{fmt(grand)}</div>
             {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
               <div className="text-[10px] text-muted-foreground">
@@ -506,12 +549,12 @@ const CrmBooking: React.FC = () => {
         );
       } },
     { accessorKey: "BookingAmount", header: "Booking Amt", size: 110,
-      cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer">{fmt(i.row.original.BookingAmount)}</span> },
+      cell: (i) => <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer">{fmt(i.row.original.BookingAmount)}</span> },
     { accessorKey: "Status", header: "Status", size: 100,
-      cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+      cell: (i) => <span onClick={() => openBooking(i.row.original.Id)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
     { accessorKey: "BookingDate", header: "Date", size: 95,
       cell: (i) => (
-        <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
+        <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
           {i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}
         </span>
       ) },
@@ -523,12 +566,12 @@ const CrmBooking: React.FC = () => {
         // step button — a stage is only reachable once every stage
         // before it is actually done, so "Jump to Stage" can't be used
         // to route around the gate the button itself respects.
-        const approved = b.Status === "Approved";
+        const approved = b.Status === CrmStatus.APPROVED;
         const welcomeCallReached = approved;
         const bankDetailsReached = approved && b.HasWelcomeCall;
         const agreementReached = bankDetailsReached && b.BankDetailsComplete;
         const paymentsReached = agreementReached && !!b.AgreementId
-          && b.SeniorApprovalStatus === "Approved" && b.CustomerApprovalStatus === "Approved";
+          && b.SeniorApprovalStatus === CrmStatus.APPROVED && b.CustomerApprovalStatus === CrmStatus.APPROVED;
         return (
           <div className="flex items-center gap-2 flex-wrap">
             {/* submitOnly: Approve/Reject only ever happen from the
@@ -540,13 +583,13 @@ const CrmBooking: React.FC = () => {
               submitOnly
               onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })}
             />
-            {b.Status === "Pending" && (
+            {b.Status === CrmStatus.PENDING && (
               b.WorkflowStage && b.WorkflowStage !== "Review" ? (
                 <span className="text-xs text-muted-foreground">Pending {workflowStageLabel[b.WorkflowStage] || "Approval"}</span>
               ) : b.ReadyForApprovalAt ? (
                 <span className="text-xs text-muted-foreground">Ready for Marketing Head Approval</span>
               ) : (
-                <button onClick={() => setViewingBookingId(b.Id)}
+                <button onClick={() => openBooking(b.Id)}
                   className="text-xs px-2 py-1 rounded-md border text-amber-600 border-amber-200 bg-amber-50 font-medium flex items-center gap-1">
                   Review Checklist Incomplete <ChevronRight size={12} />
                 </button>
@@ -557,7 +600,7 @@ const CrmBooking: React.FC = () => {
                 className={`text-xs px-2 py-1 rounded-md border font-medium flex items-center gap-1 ${step.color}`}>
                 {step.label} <ChevronRight size={12} />
               </button>
-            ) : b.Status === "Approved" ? (
+            ) : b.Status === CrmStatus.APPROVED ? (
               <span className="text-xs px-2 py-1 rounded-md border text-emerald-600 border-emerald-200 bg-emerald-50 font-medium flex items-center gap-1">
                 <CheckCircle2 size={12} /> All Steps Complete
               </span>
@@ -572,7 +615,7 @@ const CrmBooking: React.FC = () => {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem onClick={() => setViewingBookingId(b.Id)} className="gap-2">
+                <DropdownMenuItem onClick={() => openBooking(b.Id)} className="gap-2">
                   <Eye size={14} className="text-muted-foreground" /> View Details / Invoice / Attachments
                 </DropdownMenuItem>
                 {(welcomeCallReached || bankDetailsReached || agreementReached || paymentsReached) && (
@@ -604,11 +647,26 @@ const CrmBooking: React.FC = () => {
                 <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)} className="gap-2">
                   <MessageSquare size={14} className="text-amber-700 dark:text-amber-400" /> Communication
                 </DropdownMenuItem>
-                {b.Status !== "Cancelled" && canEdit && (
+                {b.Status !== CrmStatus.CANCELLED && (canRequestCancellation || canEdit) && (
                   <>
                     <DropdownMenuSeparator />
+                    {(canRequestCancellation || canEdit) && (
+                      <DropdownMenuItem onClick={() => navigate(`/crm/cancellations?bookingId=${b.Id}`)} className="gap-2 text-rose-600 focus:text-rose-600">
+                        <AlertTriangle size={14} /> Request Cancellation
+                      </DropdownMenuItem>
+                    )}
+                    {canEdit && (
                     <DropdownMenuItem onClick={() => { setUnitChangeBooking(b); setUnitChangeNewId(""); setUnitChangeReason(""); }} className="gap-2 text-rose-600 focus:text-rose-600">
                       <Repeat size={14} /> Change Unit
+                    </DropdownMenuItem>
+                    )}
+                  </>
+                )}
+                {canDeleteBooking(b) && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handleDeleteBooking(b)} className="gap-2 text-red-600 focus:text-red-600">
+                      <Trash2 size={14} /> Delete Booking
                     </DropdownMenuItem>
                   </>
                 )}
@@ -940,7 +998,11 @@ const CrmBooking: React.FC = () => {
           bookingId={viewingBookingId}
           onClose={() => {
             setViewingBookingId(null);
-            if (appFilter) navigate("/crm/bookings", { replace: true });
+            // Previously only cleared ?applicationId= — a booking opened via
+            // ?view=X (row click, or a shared link) left that param stuck in
+            // the address bar after closing, silently reopening the same
+            // card on the next visit/refresh.
+            if (appFilter || viewFilter) navigate("/crm/bookings", { replace: true });
           }}
         />
       )}

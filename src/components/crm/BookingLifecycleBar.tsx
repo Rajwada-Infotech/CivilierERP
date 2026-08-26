@@ -2,7 +2,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { CheckCircle2, Circle, Lock, Loader2 } from "lucide-react";
+import { CheckCircle2, Circle, Lock } from "lucide-react";
 
 type StepStatus = "done" | "active" | "locked";
 
@@ -20,58 +20,15 @@ async function fetchLifecycle(bookingId: number): Promise<{ steps: Step[] } | nu
   return r.ok ? r.json() : null;
 }
 
-const STATUS_STYLES: Record<StepStatus, { node: string; label: string; line: string }> = {
-  done:   { node: "text-green-600 dark:text-green-400", label: "text-green-700 dark:text-green-400 font-medium", line: "bg-green-400" },
-  active: { node: "text-primary", label: "text-foreground font-semibold", line: "bg-muted-foreground/30" },
-  locked: { node: "text-muted-foreground/40", label: "text-muted-foreground/60", line: "bg-muted-foreground/20" },
-};
-
-const StepNode: React.FC<{ step: Step; isLast: boolean; onClick: () => void }> = ({ step, isLast, onClick }) => {
-  const s = STATUS_STYLES[step.status];
-  const clickable = step.status !== "locked" && !!step.link;
-
-  return (
-    <div className="flex items-start group">
-      {/* node + connector */}
-      <div className="flex flex-col items-center">
-        <button
-          onClick={clickable ? onClick : undefined}
-          disabled={!clickable}
-          title={step.blockedBy ?? step.label}
-          className={`flex items-center justify-center w-7 h-7 rounded-full border-2 transition-all
-            ${step.status === "done" ? "border-green-400 dark:border-green-600 bg-green-50 dark:bg-green-950/30" : ""}
-            ${step.status === "active" ? "border-primary bg-primary/10 ring-2 ring-primary/20" : ""}
-            ${step.status === "locked" ? "border-muted-foreground/25 bg-muted/40 cursor-not-allowed" : ""}
-            ${clickable ? "hover:shadow-md cursor-pointer" : ""}
-          `}
-        >
-          {step.status === "done"   && <CheckCircle2 size={14} className={s.node} />}
-          {step.status === "active" && <Circle size={10} className="fill-primary text-primary animate-pulse" />}
-          {step.status === "locked" && <Lock size={10} className={s.node} />}
-        </button>
-        {!isLast && (
-          <div className={`w-0.5 h-6 mt-1 ${s.line}`} />
-        )}
-      </div>
-
-      {/* label */}
-      <div className="ml-2.5 pb-5 min-w-0">
-        <div className={`text-xs leading-tight ${s.label}`}>{step.label}</div>
-        {step.date && (
-          <div className="text-[10px] text-muted-foreground mt-0.5">{step.date}</div>
-        )}
-        {step.blockedBy && step.status === "locked" && (
-          <div className="text-[10px] text-muted-foreground/60 mt-0.5 max-w-[110px] leading-tight">{step.blockedBy}</div>
-        )}
-      </div>
-    </div>
-  );
-};
-
 interface BookingLifecycleBarProps {
   bookingId: number;
 }
 
+// Compact chip stepper — replaces the old fixed-90px-column horizontal
+// layout that forced a scrollbar for all 12 steps. Chips wrap naturally
+// (flex-wrap) so nothing ever needs to scroll, and each chip is a single
+// inline row (icon + label) instead of a tall icon-over-label-over-date
+// stack, so the whole thing takes a fraction of the vertical space.
 export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookingId }) => {
   const navigate = useNavigate();
 
@@ -84,9 +41,9 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-4 text-muted-foreground/50">
-        <Loader2 size={14} className="animate-spin mr-2" />
-        <span className="text-xs">Loading lifecycle…</span>
+      <div className="rounded-lg border border-border bg-card px-3 py-2 flex items-center gap-2 text-muted-foreground/60">
+        <div className="h-3 w-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
+        <span className="text-[11px]">Loading lifecycle…</span>
       </div>
     );
   }
@@ -95,82 +52,61 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
 
   const doneCount = data.steps.filter((s) => s.status === "done").length;
   const pct = Math.round((doneCount / data.steps.length) * 100);
+  const nextLocked = data.steps.find((s) => s.status === "locked" && s.blockedBy);
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      {/* header */}
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Booking Lifecycle
+    <div className="rounded-lg border border-border bg-card px-3 py-2.5">
+      {/* header + inline progress bar share one row */}
+      <div className="flex items-center gap-3 mb-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+          Lifecycle
         </span>
-        <span className="text-xs font-medium text-muted-foreground">
-          {doneCount}/{data.steps.length} steps · {pct}% complete
-        </span>
-      </div>
-
-      {/* horizontal progress bar */}
-      <div className="h-1.5 rounded-full bg-muted mb-5 overflow-hidden">
-        <div
-          className="h-full rounded-full bg-green-500 transition-all duration-500"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-
-      {/* steps — horizontal scrollable row on mobile, wrapping grid on desktop */}
-      <div className="overflow-x-auto">
-        <div className="flex gap-0 min-w-max">
-          {data.steps.map((step, i) => (
-            <div key={step.key} className="flex items-start">
-              {/* step node */}
-              <div className="flex flex-col items-center w-[90px]">
-                <button
-                  onClick={step.link && step.status !== "locked" ? () => navigate(step.link!) : undefined}
-                  disabled={!step.link || step.status === "locked"}
-                  title={step.blockedBy ?? step.label}
-                  className={`flex items-center justify-center w-7 h-7 rounded-full border-2 transition-all
-                    ${step.status === "done"   ? "border-green-400 dark:border-green-600 bg-green-50 dark:bg-green-950/30 hover:shadow-md cursor-pointer" : ""}
-                    ${step.status === "active" ? "border-primary bg-primary/10 ring-2 ring-primary/20 hover:shadow-md cursor-pointer" : ""}
-                    ${step.status === "locked" ? "border-muted-foreground/25 bg-muted/40 cursor-not-allowed" : ""}
-                  `}
-                >
-                  {step.status === "done"   && <CheckCircle2 size={14} className="text-green-600 dark:text-green-400" />}
-                  {step.status === "active" && <Circle size={10} className="fill-primary text-primary animate-pulse" />}
-                  {step.status === "locked" && <Lock size={10} className="text-muted-foreground/40" />}
-                </button>
-                <div className={`mt-1.5 text-center px-1 text-[10px] leading-tight
-                  ${step.status === "done"   ? "text-green-700 dark:text-green-400 font-medium" : ""}
-                  ${step.status === "active" ? "text-foreground font-semibold" : ""}
-                  ${step.status === "locked" ? "text-muted-foreground/50" : ""}
-                `}>
-                  {step.label}
-                </div>
-                {step.date && (
-                  <div className="text-[9px] text-muted-foreground/60 text-center">{step.date}</div>
-                )}
-              </div>
-
-              {/* connector line between steps */}
-              {i < data.steps.length - 1 && (
-                <div className={`mt-3 h-0.5 w-4 shrink-0 self-start
-                  ${step.status === "done" ? "bg-green-400" : "bg-muted-foreground/20"}
-                `} />
-              )}
-            </div>
-          ))}
+        <div className="h-1 flex-1 rounded-full bg-muted overflow-hidden">
+          <div
+            className="h-full rounded-full bg-green-500 transition-all duration-500"
+            style={{ width: `${pct}%` }}
+          />
         </div>
+        <span className="text-[10px] font-medium text-muted-foreground shrink-0">
+          {doneCount}/{data.steps.length} · {pct}%
+        </span>
       </div>
 
-      {/* blocked tooltip for the first active locked step */}
-      {(() => {
-        const nextLocked = data.steps.find((s) => s.status === "locked" && s.blockedBy);
-        if (!nextLocked) return null;
-        return (
-          <div className="mt-3 text-[11px] text-muted-foreground bg-muted/40 rounded-lg px-3 py-1.5 border border-border">
-            <span className="font-medium text-foreground">Next: </span>
-            {nextLocked.label} — {nextLocked.blockedBy}
-          </div>
-        );
-      })()}
+      {/* steps — wraps freely, never scrolls */}
+      <div className="flex flex-wrap items-center gap-1">
+        {data.steps.map((step, i) => {
+          const clickable = !!step.link && step.status !== "locked";
+          const isLastInGroup = i === data.steps.length - 1;
+          return (
+            <React.Fragment key={step.key}>
+              <button
+                onClick={clickable ? () => navigate(step.link!) : undefined}
+                disabled={!clickable}
+                title={step.blockedBy ?? (step.date ? `${step.label} — ${step.date}` : step.label)}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] leading-none transition-colors
+                  ${step.status === "done" ? "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-400" : ""}
+                  ${step.status === "active" ? "border-primary/40 bg-primary/10 text-foreground font-semibold" : ""}
+                  ${step.status === "locked" ? "border-transparent bg-muted/50 text-muted-foreground/50" : ""}
+                  ${clickable ? "hover:shadow-sm cursor-pointer" : step.status === "locked" ? "cursor-not-allowed" : ""}
+                `}
+              >
+                {step.status === "done" && <CheckCircle2 size={11} className="shrink-0" />}
+                {step.status === "active" && <Circle size={7} className="fill-primary text-primary shrink-0 animate-pulse" />}
+                {step.status === "locked" && <Lock size={9} className="shrink-0" />}
+                {step.label}
+              </button>
+              {!isLastInGroup && <span className="text-muted-foreground/25 text-[10px] select-none">—</span>}
+            </React.Fragment>
+          );
+        })}
+      </div>
+
+      {/* single-line "what's next" hint, only when something is actually blocked */}
+      {nextLocked && (
+        <div className="mt-2 text-[10px] text-muted-foreground truncate">
+          <span className="font-medium text-foreground">Next:</span> {nextLocked.label} — {nextLocked.blockedBy}
+        </div>
+      )}
     </div>
   );
 };

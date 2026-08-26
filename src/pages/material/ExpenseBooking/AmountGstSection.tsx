@@ -33,6 +33,7 @@ interface AmountGstSectionProps {
   onChangeIgstRate: (val: number) => void;
   onToggleGstEnabled: (enabled: boolean) => void;
   onChangeGstMode: (mode: DirectGstMode) => void;
+  tdsAmount?: number;
 }
 
 export function AmountGstSection({
@@ -55,6 +56,7 @@ export function AmountGstSection({
   onChangeIgstRate,
   onToggleGstEnabled,
   onChangeGstMode,
+  tdsAmount = 0,
 }: AmountGstSectionProps) {
   const isDirect = !isGRN && !isPOorWO;
   // Direct/manual bookings gate IGST on the user's CGST+SGST / IGST toggle.
@@ -244,6 +246,7 @@ export function AmountGstSection({
         <>
           <PriceBreakdownPanel
             bd={bd}
+            tdsAmount={tdsAmount}
             cgstRate={
               isGRN
                 ? gstBreakdown?.totals.totalBase
@@ -275,16 +278,23 @@ export function AmountGstSection({
                 : discount.applicable
             }
           />
-          <div className="flex items-center justify-between rounded-xl bg-emerald-500/[0.08] border border-emerald-500/20 px-5 py-4">
-            <div className="flex items-center gap-2">
-              <TrendingUp size={15} className="text-emerald-500" />
-              <span className="text-sm font-heading font-semibold text-foreground">
-                Net Payable Amount
+          <div className="rounded-xl bg-emerald-500/[0.08] border border-emerald-500/20 px-5 py-4 space-y-1">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <TrendingUp size={15} className="text-emerald-500" />
+                <span className="text-sm font-heading font-semibold text-foreground">
+                  Net Payable Amount
+                </span>
+              </div>
+              <span className="font-mono text-xl font-bold text-emerald-600 dark:text-emerald-400">
+                ₹{fmt(Math.max(0, bd.netAmount - tdsAmount))}
               </span>
             </div>
-            <span className="font-mono text-xl font-bold text-emerald-600 dark:text-emerald-400">
-              ₹{fmt(bd.netAmount)}
-            </span>
+            {tdsAmount > 0 && (
+              <div className="flex items-center justify-between text-xs text-muted-foreground pl-5">
+                <span>Gross ₹{fmt(bd.netAmount)} — TDS withheld ₹{fmt(tdsAmount)}</span>
+              </div>
+            )}
           </div>
         </>
       )}

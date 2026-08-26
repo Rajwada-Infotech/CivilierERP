@@ -1302,6 +1302,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
     const brokerageGate = await pool.request().input("PPaymentID", sql.Int, id).query(`
       SELECT np.PPaymentID, np.PAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmBrokerageId,
              br.ComputedAmount,
+             ISNULL(br.NetPayable, br.ComputedAmount) AS NetPayable,
              (SELECT ISNULL(SUM(Amount),0)
               FROM dbo.CrmBrokerPayment
               WHERE BrokerageId = np.SourceCrmBrokerageId) AS TotalPaid,
@@ -1321,10 +1322,14 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
           error: "Complete brokerage payment date, payment mode, and bank before approval.",
         });
       }
-      const remaining = Number(gateRow.ComputedAmount || 0) - Number(gateRow.TotalPaid || 0) - Number(gateRow.OtherSubmitted || 0);
+      // Cap against NetPayable (gross minus TDS) — Finance only disburses the
+      // net amount; using ComputedAmount (gross) would allow over-payment and
+      // prevent the record from ever flipping to Paid when TDS is deducted.
+      const netPayable = Number(gateRow.NetPayable || gateRow.ComputedAmount || 0);
+      const remaining = netPayable - Number(gateRow.TotalPaid || 0) - Number(gateRow.OtherSubmitted || 0);
       if (Number(gateRow.PAmount || 0) > remaining + 0.01) {
         return res.status(400).json({
-          error: `Brokerage payment exceeds the remaining approved brokerage balance of ₹${remaining.toLocaleString("en-IN")}`,
+          error: `Brokerage payment exceeds the remaining net payable balance of ₹${remaining.toLocaleString("en-IN")}`,
         });
       }
     }
@@ -1449,7 +1454,8 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
             .query(`
               UPDATE br SET
                 Status = CASE
-                  WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id) >= ISNULL(br.ComputedAmount,0)
+                  WHEN (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id)
+                       >= ISNULL(br.NetPayable, br.ComputedAmount)
                   THEN 'Paid' ELSE br.Status END,
                 UpdatedAt = SYSDATETIME()
               FROM dbo.CrmBrokerageMaster br
@@ -2302,7 +2308,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const { postVoucher, resolvePaymentSupplierHeadId, getGLHeadId, GL_ACCOUNTS } = require("../services/generalLedger");
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
-      SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
+      SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
              np.PBankID, np.PBankName, np.ContractId, np.PPartyId,
              ISNULL(np.TDSAmount, 0) AS TDSAmount,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
@@ -2379,7 +2385,9 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     await postVoucher(pool, {
       voucherNo: finalDocNo || `JV-PMT${pmtId}`,
-      voucherDate: new Date(),
+      // The payment's own date, not the date it happened to get posted —
+      // same fix as Invoice/GRN/Loan posting.
+      voucherDate: pmt.PDate,
       sourceType: "PaymentPosting",
       sourceId: pmtId,
       companyId: pmt.CompanyId ?? null,

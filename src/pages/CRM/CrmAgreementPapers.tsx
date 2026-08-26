@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -82,12 +83,12 @@ function ageDays(d: any): number {
 const MINI_STEPS = ["Prepared", "Senior", "Sent", "Cust. Approval", "Dated", "Executed", "Registered"];
 function miniStepStates(docs: any[]): { label: string; done: boolean; current: boolean }[] {
   const a = docs[0] || {};
-  const senior = a.SeniorApprovalStatus === "Approved";
+  const senior = a.SeniorApprovalStatus === CrmStatus.APPROVED;
   const sent = !!a.SentToCustomerAt;
-  const custApproved = a.CustomerApprovalStatus === "Approved";
+  const custApproved = a.CustomerApprovalStatus === CrmStatus.APPROVED;
   const dated = !!a.AgreementDate;
-  const executed = a.AgreementStatus === "Executed" || a.AgreementStatus === "Registered";
-  const registered = a.AgreementStatus === "Registered";
+  const executed = a.AgreementStatus === CrmStatus.EXECUTED || a.AgreementStatus === CrmStatus.REGISTERED;
+  const registered = a.AgreementStatus === CrmStatus.REGISTERED;
   const flags = [true, senior, sent, custApproved, dated, executed, registered];
   return MINI_STEPS.map((label, i) => ({
     label, done: flags[i],
@@ -304,11 +305,11 @@ function ReviewDialog({ doc, onClose, onReviewed }: { doc: any; onClose: () => v
               <button onClick={() => setStatus("Verified")} disabled={saving}
                 className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-40">Verify</button>
             )}
-            {!!doc.FilePath && doc.Status !== "Rejected" && (
+            {!!doc.FilePath && doc.Status !== CrmStatus.REJECTED && (
               <button onClick={() => { if (!remarks.trim()) { toast.error("Remarks are required to reject"); return; } setStatus("Rejected"); }}
                 disabled={saving} className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">Reject</button>
             )}
-            {!!doc.FilePath && (doc.Status === "Verified" || doc.Status === "Rejected") && (
+            {!!doc.FilePath && (doc.Status === "Verified" || doc.Status === CrmStatus.REJECTED) && (
               <button onClick={() => setStatus("Submitted")} disabled={saving}
                 className="px-3 py-1.5 text-xs border border-amber-300 text-amber-600 rounded-lg font-medium hover:bg-amber-50 disabled:opacity-40">
                 Revert to Review
@@ -414,7 +415,7 @@ const CrmAgreementPapers: React.FC = () => {
   const overdueCount = (documents as any[]).filter((d) => {
     const days = ageDays(d);
     const awaitingUpload = d.Status === "Requested" && !d.FilePath;
-    return days >= (awaitingUpload ? 5 : 3) && d.Status !== "Verified" && d.Status !== "Rejected";
+    return days >= (awaitingUpload ? 5 : 3) && d.Status !== "Verified" && d.Status !== CrmStatus.REJECTED;
   }).length;
 
   const groups = useMemo(() => {
@@ -492,7 +493,7 @@ const CrmAgreementPapers: React.FC = () => {
   const renderRow = (d: any) => {
     const awaiting = d.Status === "Requested" && !d.FilePath;
     const canQuickReview = !!d.FilePath && d.Status !== "Verified";
-    const canRevert = !!d.FilePath && (d.Status === "Verified" || d.Status === "Rejected");
+    const canRevert = !!d.FilePath && (d.Status === "Verified" || d.Status === CrmStatus.REJECTED);
     const days = ageDays(d);
     return (
       <div key={d.Id}
@@ -504,7 +505,7 @@ const CrmAgreementPapers: React.FC = () => {
           )}
           <button onClick={() => setReviewDoc(d)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
             {awaiting ? <Clock size={16} className="text-amber-500 shrink-0" />
-              : d.Status === "Rejected" ? <XCircle size={16} className="text-red-500 shrink-0" />
+              : d.Status === CrmStatus.REJECTED ? <XCircle size={16} className="text-red-500 shrink-0" />
               : mimeIcon(d.MimeType)}
             <div className="min-w-0">
               <div className="text-sm font-medium flex items-center gap-1.5">

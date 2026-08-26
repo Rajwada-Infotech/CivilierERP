@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -29,13 +30,13 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
         c.Id, c.CustomerNo, c.CustomerName, c.Mobile, c.City, c.State,
         (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AS ApplicationCount,
         (SELECT COUNT(*) FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('Cancelled', 'Rejected')) AS ActiveBookingCount,
+          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS ActiveBookingCount,
         (SELECT ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0)
           FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('Cancelled', 'Rejected')) AS TotalPaid,
-        (SELECT ISNULL(SUM(CASE WHEN m.Status NOT IN ('Paid', 'Waived') THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE 0 END), 0)
+          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS TotalPaid,
+        (SELECT ISNULL(SUM(CASE WHEN m.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE 0 END), 0)
           FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('Cancelled', 'Rejected')) AS TotalOutstanding
+          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS TotalOutstanding
       FROM dbo.CrmCustomer c
       ${where}
       ORDER BY c.CreatedAt DESC
@@ -90,11 +91,11 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
                (SELECT COUNT(*) FROM dbo.CrmNoc n WHERE n.BookingId = b.Id) AS NocTotalCount,
                (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalPaid,
                (SELECT ISNULL(SUM(AmountDue),0)  FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalDue,
-               CASE WHEN b.Status IN ('Cancelled', 'Rejected') THEN 0 ELSE
-                 (SELECT ISNULL(SUM(CASE WHEN m2.Status NOT IN ('Paid', 'Waived') THEN m2.AmountDue - ISNULL(m2.AmountPaid, 0) ELSE 0 END), 0)
+               CASE WHEN b.Status IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') THEN 0 ELSE
+                 (SELECT ISNULL(SUM(CASE WHEN m2.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m2.AmountDue - ISNULL(m2.AmountPaid, 0) ELSE 0 END), 0)
                   FROM dbo.CrmPaymentMilestone m2 WHERE m2.BookingId = b.Id)
                END AS TotalOutstanding,
-               (SELECT COUNT(*) FROM dbo.CrmCancellation WHERE BookingId = b.Id AND Status IN ('Requested','Approved')) AS HasCancellation
+               (SELECT COUNT(*) FROM dbo.CrmCancellation WHERE BookingId = b.Id AND Status IN ('Requested','${CrmStatus.APPROVED}')) AS HasCancellation
         FROM dbo.CrmBooking b
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
@@ -207,7 +208,7 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
     // Customer-level summary rolls up every non-Cancelled/Rejected booking's
     // figures — same exclusion rule as the per-booking TotalOutstanding above,
     // so the top-of-page tiles and the drill-down numbers always agree.
-    const liveBookings = enrichedBookings.filter((b) => !["Cancelled", "Rejected"].includes(b.Status));
+    const liveBookings = enrichedBookings.filter((b) => ![CrmStatus.CANCELLED, CrmStatus.REJECTED].includes(b.Status));
     const summary = {
       totalInvoiced: liveBookings.reduce((s, b) => s + b.invoices.reduce((si, i) => si + Number(i.Amount || 0), 0), 0),
       totalPaid: liveBookings.reduce((s, b) => s + Number(b.TotalPaid || 0), 0),

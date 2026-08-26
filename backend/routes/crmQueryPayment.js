@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -172,7 +173,7 @@ router.post("/:id/info", requirePageRight("crm-query-payment", "edit"), async (r
         `);
     }
 
-    if (row.Status === "Pending") {
+    if (row.Status === CrmStatus.PENDING) {
       await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actor).query(`
         UPDATE dbo.CrmQueryPayment SET Status = 'InfoSent', InfoSentAt = SYSDATETIME(), InfoSentBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id

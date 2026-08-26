@@ -1,4 +1,5 @@
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -17,12 +18,14 @@ const { bumpCacheVersion } = require("../redis");
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
+const { calculateTds } = require("../services/tds");
+
 const BROKERAGE_SELECT = `
   SELECT br.*, b.BookingNo, b.UnitNo, b.TotalValue, a.ApplicantName,
          ahm.LHeadName AS BrokerMasterName, ahm.LHeadPhone AS BrokerMasterPhone,
          m.MilestoneName,
          ISNULL((SELECT SUM(Amount) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id), 0) AS TotalPaid,
-         ISNULL((SELECT SUM(PAmount) FROM dbo.NewPayment WHERE SourceCrmBrokerageId = br.Id AND Status IN ('Draft','Pending','Approved')), 0) AS TotalSubmitted,
+         ISNULL((SELECT SUM(PAmount) FROM dbo.NewPayment WHERE SourceCrmBrokerageId = br.Id AND Status IN ('${CrmStatus.DRAFT}','${CrmStatus.PENDING}','${CrmStatus.APPROVED}')), 0) AS TotalSubmitted,
          fp.PPaymentID AS FinancePaymentId,
          fp.DocNo AS FinancePaymentDocNo,
          fp.Status AS FinancePaymentStatus
@@ -34,7 +37,7 @@ const BROKERAGE_SELECT = `
   OUTER APPLY (
     SELECT TOP 1 np.PPaymentID, np.DocNo, np.Status
     FROM dbo.NewPayment np
-    WHERE np.SourceCrmBrokerageId = br.Id AND np.Status NOT IN ('Rejected','Deleted')
+    WHERE np.SourceCrmBrokerageId = br.Id AND np.Status NOT IN ('${CrmStatus.REJECTED}','Deleted')
     ORDER BY np.PPaymentID DESC
   ) fp
 `;
@@ -90,7 +93,7 @@ router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, r
       JOIN dbo.CrmBrokerageMaster br ON br.Id = np.SourceCrmBrokerageId
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE np.Status IN ('Draft','Pending','Approved') ${status ? "AND br.Status = @st" : ""}
+      WHERE np.Status IN ('${CrmStatus.DRAFT}','${CrmStatus.PENDING}','${CrmStatus.APPROVED}') ${status ? "AND br.Status = @st" : ""}
       ORDER BY PaidDate DESC, CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -121,25 +124,29 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
   const existing = await pool.request().input("id", sql.Int, brokerageId).query(`
     SELECT TOP 1 PPaymentID, DocNo, Status
     FROM dbo.NewPayment
-    WHERE SourceCrmBrokerageId = @id AND Status NOT IN ('Rejected','Deleted')
+    WHERE SourceCrmBrokerageId = @id AND Status NOT IN ('${CrmStatus.REJECTED}','Deleted')
     ORDER BY PPaymentID DESC
   `);
   if (existing.recordset.length) return { existing: true, ...existing.recordset[0] };
 
   const br = await pool.request().input("id", sql.Int, brokerageId).query(`
-    SELECT br.Id, br.Status, br.ComputedAmount, br.BrokerId, br.BrokerName,
-           br.TrancheLabel, b.BookingNo, b.CompanyId, b.ProjectId
+    SELECT br.Id, br.Status, br.ComputedAmount, br.TDSId, br.TDSNature, br.TDSName,
+           br.TDSPercentage, br.TDSAmount, br.NetPayable,
+           br.BrokerId, br.BrokerName, br.TrancheLabel, b.BookingNo, b.CompanyId, b.ProjectId
     FROM dbo.CrmBrokerageMaster br
     JOIN dbo.CrmBooking b ON b.Id = br.BookingId
     WHERE br.Id = @id
   `);
   const row = br.recordset[0];
   if (!row) throw new Error("Brokerage record not found");
-  if (row.Status !== "Approved") throw new Error(`Brokerage must be Approved before finance handoff (currently ${row.Status})`);
+  if (row.Status !== CrmStatus.APPROVED) throw new Error(`Brokerage must be Approved before finance handoff (currently ${row.Status})`);
   if (!row.BrokerId) throw new Error("Brokerage has no broker ledger head");
 
-  const amount = Number(row.ComputedAmount) || 0;
-  if (amount <= 0) throw new Error("Approved brokerage amount must be greater than 0");
+  // Finance disburses net-of-TDS — the TDS portion is remitted to the government
+  // separately by the company. Using NetPayable (gross minus TDS) ensures Finance
+  // only pays out what's legally due to the broker.
+  const amount = Number(row.NetPayable ?? row.ComputedAmount) || 0;
+  if (amount <= 0) throw new Error("Approved brokerage net payable amount must be greater than 0");
 
   const actorEmail = req.user?.email || req.user?.name || null;
   const docTypeId = await resolveDocTypeId(pool, sql, "PAY");
@@ -164,7 +171,7 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
 
   const result = await pool.request()
     .input("name", sql.VarChar, "Brokerage Payment")
-    .input("remarks", sql.NVarChar(1000), `Approved brokerage for ${row.BookingNo} (${milestoneText}) - finance to complete payment details`)
+    .input("remarks", sql.NVarChar(1000), `Approved brokerage for ${row.BookingNo} (${milestoneText}) — gross ₹${Number(row.ComputedAmount).toLocaleString("en-IN")}, TDS ${row.TDSPercentage ?? 0}% (₹${Number(row.TDSAmount ?? 0).toLocaleString("en-IN")}), net payable ₹${amount.toLocaleString("en-IN")} — finance to complete payment details`)
     .input("amt", sql.Decimal(18,2), amount)
     .input("dt", sql.Date, today)
     .input("project", sql.VarChar, row.ProjectId != null ? String(row.ProjectId) : "")
@@ -177,12 +184,18 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
     .input("finYearId", sql.Int, pFinYearId)
     .input("sourceBrokerageId", sql.Int, brokerageId)
     .input("createdBy", sql.NVarChar(100), actorEmail || String(actorId(req)))
+    .input("tdsId",     sql.Int,           row.TDSId ?? null)
+    .input("tdsNature", sql.NVarChar(200), row.TDSNature ?? null)
+    .input("tdsName",   sql.NVarChar(200), row.TDSName ?? null)
+    .input("tdsPct",    sql.Decimal(5,2),  Number(row.TDSPercentage) || 0)
+    .input("tdsAmt",    sql.Decimal(18,2), Number(row.TDSAmount) || 0)
     .query(`
       INSERT INTO dbo.NewPayment (
         PPaymentName, PRemarks, PMode, PBankName, PAmount, PDocType, PDate,
         PProject, PCompany, PPartyId,
         DocNo, DocTypeId, DocYear, DocSerial, PFinYearId,
         SourceCrmBrokerageId,
+        TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount,
         PCreatedAt, PCreatedBy, PApprovedBy, Status
       )
       OUTPUT INSERTED.PPaymentID
@@ -191,13 +204,14 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
         @project, @company, @partyId,
         @docNo, @docTypeId, @docYear, @docSerial, @finYearId,
         @sourceBrokerageId,
+        @tdsId, @tdsNature, @tdsName, @tdsPct, @tdsAmt,
         SYSDATETIME(), @createdBy, NULL, 'Pending'
       )
     `);
 
   const newPaymentId = result.recordset[0].PPaymentID;
   await backPatchRecordId(pool, sql, finalDocNo, "NewPayment", newPaymentId);
-  return { existing: false, PPaymentID: newPaymentId, DocNo: finalDocNo, Status: "Pending" };
+  return { existing: false, PPaymentID: newPaymentId, DocNo: finalDocNo, Status: CrmStatus.PENDING };
 }
 
 router.get("/:id", requirePageRight("crm-brokerage", "view"), async (req, res) => {
@@ -252,46 +266,91 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
 
     const agr = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
       .query("SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
-    if (!agr.recordset.length || !["Executed", "Registered"].includes(agr.recordset[0].Status)) {
+    if (!agr.recordset.length || ![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.recordset[0].Status)) {
       return res.status(400).json({ error: "Brokerage requires the agreement to be Executed first" });
     }
 
     const broker = await pool.request().input("bid", sql.Int, parseInt(b.BrokerId))
-      .query("SELECT LHeadId, LHeadName, LHeadPhone FROM dbo.AccountHeadMaster WHERE LHeadId = @bid AND LHeadType = 'BR' AND LHeadStatus = 1");
+      .query("SELECT LHeadId, LHeadName, LHeadPhone, ISNULL(IsTdsApplicable,1) AS IsTdsApplicable, ISNULL(TdsLimitApplicable,1) AS TdsLimitApplicable FROM dbo.AccountHeadMaster WHERE LHeadId = @bid AND LHeadType = 'BR' AND LHeadStatus = 1");
     if (!broker.recordset.length) return res.status(400).json({ error: "Selected broker does not exist or is inactive" });
+
+    const brokerRow = broker.recordset[0];
+    // Enforce TDS flag from Broker Master — if broker is marked non-applicable,
+    // silently clear any submitted TDSId; if applicable and TDSId omitted,
+    // warn but allow (threshold enforcement would need cumulative lookup).
+    if (!brokerRow.IsTdsApplicable && b.TDSId) {
+      b.TDSId = null; // Broker marked TDS not applicable — ignore submitted TDS
+    }
 
     const rateType = b.RateType === "Amount" ? "Amount" : "Percentage";
     const rateValue = parseFloat(b.RateValue);
     if (!rateValue || rateValue <= 0) return res.status(400).json({ error: "RateValue must be greater than 0" });
+    const bk = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
+      .query("SELECT TotalValue, ParkingTotal, CompanyId FROM dbo.CrmBooking WHERE Id = @bid");
+    const bkRow = bk.recordset[0] || {};
+    const dealValue = Number(bkRow.TotalValue || 0) + Number(bkRow.ParkingTotal || 0);
+
     try {
-      assertSanePercentRate(rateType, rateValue);
+      assertSanePercentRate(rateType, rateValue, dealValue);
     } catch (e) {
       return res.status(400).json({ error: e.message });
     }
-
-    // Same deal-value base the auto-engine uses (maybeAutoCreateBrokerage in
-    // crmWorkflowGuards.js) — unit price + parking + extras, GST excluded.
-    const bk = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
-      .query("SELECT TotalValue, ParkingTotal FROM dbo.CrmBooking WHERE Id = @bid");
-    const dealValue = Number(bk.recordset[0]?.TotalValue || 0) + Number(bk.recordset[0]?.ParkingTotal || 0);
     const computedAmount = rateType === "Percentage" ? Math.round(dealValue * rateValue) / 100 : rateValue;
+
+    // Resolve TDS via the shared tds.js pipeline (same as ExpenseBooking /
+    // NewPayment direct-payment path) — this enforces IsTdsApplicable,
+    // evaluates the TdsLimitApplicable threshold (₹30k single / ₹1L
+    // cumulative per company per FY), and validates the selected TDS record.
+    const { resolveTds } = require("../services/tds");
+    let tdsSnapshot;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const finYearId = await resolveFinYearId(pool, today);
+      tdsSnapshot = await resolveTds(pool, sql, {
+        partyHeadId: brokerRow.LHeadId,
+        tdsApplicableFlag: !!brokerRow.IsTdsApplicable,
+        tdsLimitApplicable: !!brokerRow.TdsLimitApplicable,
+        billAmount: computedAmount,
+        companyId: bkRow.CompanyId ? parseInt(bkRow.CompanyId, 10) : null,
+        finYearId,
+        selectedTdsId: b.TDSId ? parseInt(b.TDSId, 10) : null,
+      });
+    } catch (tdsErr) {
+      return res.status(tdsErr.status || 400).json({ error: tdsErr.message });
+    }
+    const tdsId = tdsSnapshot.tdsId;
+    const tdsNature = tdsSnapshot.tdsNature;
+    const tdsName = tdsSnapshot.tdsName;
+    const tdsPercentage = tdsSnapshot.tdsPercentage || 0;
+    const tdsAmount = tdsSnapshot.tdsAmount || 0;
+    const netPayable = Math.round((computedAmount - tdsAmount) * 100) / 100;
 
     const result = await pool.request()
       .input("bid",   sql.Int,           parseInt(b.BookingId))
-      .input("brid",  sql.Int,           broker.recordset[0].LHeadId)
-      .input("name",  sql.NVarChar(200), broker.recordset[0].LHeadName)
+      .input("brid",  sql.Int,           brokerRow.LHeadId)
+      .input("name",  sql.NVarChar(200), brokerRow.LHeadName)
       .input("firm",  sql.NVarChar(200), b.BrokerFirm || null)
-      .input("con",   sql.NVarChar(20),  broker.recordset[0].LHeadPhone || null)
+      .input("con",   sql.NVarChar(20),  brokerRow.LHeadPhone || null)
       .input("rt",    sql.NVarChar(20),  rateType)
-      .input("rv",    sql.Decimal(18,2),rateValue)
-      .input("camt",  sql.Decimal(18,2),computedAmount)
+      .input("rv",    sql.Decimal(18,2), rateValue)
+      .input("camt",  sql.Decimal(18,2), computedAmount)
+      .input("tdsid", sql.Int,           tdsId)
+      .input("tdsnature", sql.NVarChar(200), tdsNature)
+      .input("tdsname",   sql.NVarChar(200), tdsName)
+      .input("tdspct",sql.Decimal(5,2),  tdsPercentage)
+      .input("tdsamt",sql.Decimal(18,2), tdsAmount)
+      .input("net",   sql.Decimal(18,2), netPayable)
       .input("notes", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cb",    sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmBrokerageMaster
-          (BookingId, BrokerId, BrokerName, BrokerFirm, BrokerContact, RateType, RateValue, ComputedAmount, Status, Notes, CreatedBy, CreatedAt)
+          (BookingId, BrokerId, BrokerName, BrokerFirm, BrokerContact, RateType, RateValue,
+           ComputedAmount, TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount, NetPayable,
+           Status, Notes, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@bid, @brid, @name, @firm, @con, @rt, @rv, @camt, 'Pending', @notes, @cb, SYSDATETIME())
+        VALUES (@bid, @brid, @name, @firm, @con, @rt, @rv, @camt,
+                @tdsid, @tdsnature, @tdsname, @tdspct, @tdsamt, @net,
+                'Pending', @notes, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
@@ -312,34 +371,35 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
     const b = req.body;
     const cur = await pool.request().input("id", sql.Int, id).query(`
       SELECT br.Status, br.RateType, br.RateValue,
-             b.TotalValue, b.ParkingTotal
+             br.TDSId, br.TDSNature, br.TDSName, br.TDSPercentage,
+             br.BrokerId,
+             b.TotalValue, b.ParkingTotal, b.CompanyId,
+             ISNULL(ahm.IsTdsApplicable,1)    AS BrokerIsTdsApplicable,
+             ISNULL(ahm.TdsLimitApplicable,1) AS BrokerTdsLimitApplicable
       FROM dbo.CrmBrokerageMaster br
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = br.BrokerId
       WHERE br.Id = @id
     `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Brokerage record not found" });
     const row = cur.recordset[0];
-    if (row.Status === "Approved" || row.Status === "Paid") {
+    if (row.Status === CrmStatus.APPROVED || row.Status === CrmStatus.PAID) {
       return res.status(400).json({ error: "Brokerage can only be customized before approval" });
+    }
+    // If broker is marked TDS not applicable, ignore any submitted TDSId
+    if (!row.BrokerIsTdsApplicable && b.TDSId) {
+      b.TDSId = "";
     }
 
     const rateType = b.RateType === "Amount" ? "Amount" : (b.RateType === "Percentage" ? "Percentage" : row.RateType);
     const rateValue = b.RateValue != null && b.RateValue !== "" ? Number(b.RateValue) : Number(row.RateValue);
     if (!Number.isFinite(rateValue) || rateValue <= 0) return res.status(400).json({ error: "RateValue must be greater than 0" });
+    const baseAmount = Number(row.TotalValue || 0) + Number(row.ParkingTotal || 0);
     try {
-      assertSanePercentRate(rateType, rateValue);
+      assertSanePercentRate(rateType, rateValue, baseAmount);
     } catch (e) {
       return res.status(400).json({ error: e.message });
     }
-    // Same base the auto-engine uses (maybeAutoCreateBrokerage in
-    // crmWorkflowGuards.js) — unit price + parking + extras, GST excluded
-    // since it's a statutory pass-through, not deal revenue. This used to
-    // read row.MilestoneId ? row.AmountDue : row.TotalValue, but
-    // MilestoneId is never populated under the current tranche-plan design
-    // (see buildBrokerageTranches), so that branch always fell through to
-    // TotalValue alone — silently under-basing a customized amount on any
-    // booking with parking or extra charges.
-    const baseAmount = Number(row.TotalValue || 0) + Number(row.ParkingTotal || 0);
     const computedAmount = b.ComputedAmount != null && b.ComputedAmount !== ""
       ? Math.round(Number(b.ComputedAmount) * 100) / 100
       : computeBrokerageAmount(rateType, rateValue, baseAmount);
@@ -347,12 +407,50 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
       return res.status(400).json({ error: "ComputedAmount must be greater than 0" });
     }
 
+    // Re-resolve TDS via the shared pipeline — enforces IsTdsApplicable and
+    // TdsLimitApplicable threshold (₹30k / ₹1L) exactly like the POST path.
+    // The caller may pass a new TDSId, clear it (""/0), or omit it (null),
+    // in which case we keep what is already stored on the record.
+    const selectedTdsId =
+      b.TDSId === "" || b.TDSId === 0 ? null
+      : b.TDSId != null               ? parseInt(b.TDSId, 10)
+      :                                  row.TDSId ?? null;
+    const { resolveTds: resolveTdsPut } = require("../services/tds");
+    let putTdsSnapshot;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const finYearId = await resolveFinYearId(pool, today);
+      putTdsSnapshot = await resolveTdsPut(pool, sql, {
+        partyHeadId: parseInt(row.BrokerId, 10),
+        tdsApplicableFlag: !!row.BrokerIsTdsApplicable,
+        tdsLimitApplicable: !!row.BrokerTdsLimitApplicable,
+        billAmount: computedAmount,
+        companyId: row.CompanyId ? parseInt(row.CompanyId, 10) : null,
+        finYearId,
+        selectedTdsId,
+      });
+    } catch (tdsErr) {
+      return res.status(tdsErr.status || 400).json({ error: tdsErr.message });
+    }
+    const putTdsId  = putTdsSnapshot.tdsId;
+    const putTdsNature = putTdsSnapshot.tdsNature;
+    const putTdsName   = putTdsSnapshot.tdsName;
+    const putTdsPct    = putTdsSnapshot.tdsPercentage || 0;
+    const putTdsAmt    = putTdsSnapshot.tdsAmount || 0;
+    const putNet = Math.round((computedAmount - putTdsAmt) * 100) / 100;
+
     await pool.request()
       .input("id", sql.Int, id)
       .input("firm", sql.NVarChar(200), b.BrokerFirm || null)
       .input("rt", sql.NVarChar(20), rateType)
       .input("rv", sql.Decimal(18,2), rateValue)
       .input("camt", sql.Decimal(18,2), computedAmount)
+      .input("tdsid",    sql.Int,            putTdsId)
+      .input("tdsnature",sql.NVarChar(200),  putTdsNature)
+      .input("tdsname",  sql.NVarChar(200),  putTdsName)
+      .input("tdspct",   sql.Decimal(5,2),   putTdsPct)
+      .input("tdsamt",   sql.Decimal(18,2),  putTdsAmt)
+      .input("net",      sql.Decimal(18,2),  putNet)
       .input("notes", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub", sql.Int, actorId(req))
       .query(`
@@ -361,6 +459,12 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
           RateType = @rt,
           RateValue = @rv,
           ComputedAmount = @camt,
+          TDSId = @tdsid,
+          TDSNature = @tdsnature,
+          TDSName = @tdsname,
+          TDSPercentage = @tdspct,
+          TDSAmount = @tdsamt,
+          NetPayable = @net,
           Notes = @notes,
           UpdatedBy = @ub,
           UpdatedAt = SYSDATETIME()
@@ -382,7 +486,7 @@ router.put("/:id/submit", requirePageRight("crm-brokerage", "edit"), async (req,
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-brokerage", id, "Pending", userEmail, req.user?.role);
+    const result = await approvalTransition("crm-brokerage", id, CrmStatus.PENDING, userEmail, req.user?.role);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-brokerage] submit error:", e.message);
@@ -409,7 +513,7 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
       return res.status(400).json({ error: msg });
     }
 
-    const result = await approvalTransition("crm-brokerage", id, "Approved", userEmail, req.user?.role);
+    const result = await approvalTransition("crm-brokerage", id, CrmStatus.APPROVED, userEmail, req.user?.role);
     // approvalTransition() manages its own internal transaction and commits
     // before returning, so by this point the Approved status is already
     // permanent — it can't be rolled back if the Finance handoff below
@@ -419,7 +523,7 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
     // not a generic 400 that reads as "the approval failed" when it didn't —
     // and let PUT /:id/retry-finance-handoff pick up exactly this case.
     let financePayment = null;
-    if (result.newStatus === "Approved") {
+    if (result.newStatus === CrmStatus.APPROVED) {
       try {
         financePayment = await createFinancePaymentForBrokerage(pool, id, req);
         await Promise.all([bumpCacheVersion("crm-brokerage"), bumpCacheVersion("new-payment")]);
@@ -462,7 +566,7 @@ router.put("/:id/reject", requirePageRight("crm-brokerage", "edit"), async (req,
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await approvalTransition("crm-brokerage", id, "Rejected", userEmail, req.user?.role, req.body?.note || null);
+    const result = await approvalTransition("crm-brokerage", id, CrmStatus.REJECTED, userEmail, req.user?.role, req.body?.note || null);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-brokerage] reject error:", e.message);

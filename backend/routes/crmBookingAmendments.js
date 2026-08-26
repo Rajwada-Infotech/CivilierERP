@@ -5,6 +5,7 @@
 // queued change by replaying it through the exact same apply* functions the
 // direct (pre-legal) path uses — never duplicated logic.
 const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -59,7 +60,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-bookings", "view"), asyn
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId);
     const result = await pool.request().input("bid", sql.Int, bookingId)
-      .query(`${LIST_SELECT} WHERE r.BookingId = @bid AND r.Status = 'Pending' ORDER BY r.RequestedAt DESC`);
+      .query(`${LIST_SELECT} WHERE r.BookingId = @bid AND r.Status = '${CrmStatus.PENDING}' ORDER BY r.RequestedAt DESC`);
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-booking-amendments] GET /booking error:", e.message);
@@ -83,7 +84,7 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
       .query("SELECT * FROM dbo.CrmBookingAmendmentRequest WHERE Id = @id");
     if (!row.recordset.length) return res.status(404).json({ error: "Amendment request not found" });
     const reqRow = row.recordset[0];
-    if (reqRow.Status !== "Pending") return res.status(400).json({ error: `This request is already ${reqRow.Status}` });
+    if (reqRow.Status !== CrmStatus.PENDING) return res.status(400).json({ error: `This request is already ${reqRow.Status}` });
 
     const proposedChange = JSON.parse(reqRow.ProposedChange || "{}");
     const actor = actorId(req);
@@ -114,7 +115,7 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
       .input("notes", sql.NVarChar(500), notes)
       .query(`
         UPDATE dbo.CrmBookingAmendmentRequest SET
-          Status = 'Approved', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(), ReviewNotes = @notes
+          Status = '${CrmStatus.APPROVED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(), ReviewNotes = @notes
         WHERE Id = @id
       `);
 
@@ -148,7 +149,7 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
     const row = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status, RequestedBy FROM dbo.CrmBookingAmendmentRequest WHERE Id = @id");
     if (!row.recordset.length) return res.status(404).json({ error: "Amendment request not found" });
-    if (row.recordset[0].Status !== "Pending") return res.status(400).json({ error: `This request is already ${row.recordset[0].Status}` });
+    if (row.recordset[0].Status !== CrmStatus.PENDING) return res.status(400).json({ error: `This request is already ${row.recordset[0].Status}` });
 
     await pool.request()
       .input("id", sql.Int, id)
@@ -156,7 +157,7 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
       .input("notes", sql.NVarChar(500), notes)
       .query(`
         UPDATE dbo.CrmBookingAmendmentRequest SET
-          Status = 'Rejected', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(), ReviewNotes = @notes
+          Status = '${CrmStatus.REJECTED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(), ReviewNotes = @notes
         WHERE Id = @id
       `);
 

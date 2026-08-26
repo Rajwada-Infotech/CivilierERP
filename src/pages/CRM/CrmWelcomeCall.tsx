@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -135,7 +136,7 @@ async function fetchExtraCharges(bookingId: number): Promise<any[]> {
 type VcItem = {
   Section: string; SectionLabel: string; ItemKey: string; Label: string;
   IsChecked: boolean; Remarks: string;
-  RecheckStatus: "Open" | "Resolved" | null; RecheckReason: string | null;
+  RecheckStatus: typeof CrmStatus.OPEN | typeof CrmStatus.RESOLVED | null; RecheckReason: string | null;
   RecheckRequestedAt: string | null; ResolvedAt: string | null;
 };
 type VcSection = { section: string; label: string; items: VcItem[]; complete: boolean; hasOpenRecheck: boolean };
@@ -273,7 +274,7 @@ const ChecklistItemRow: React.FC<{
   const [showRecheckBox, setShowRecheckBox] = useState(false);
   const [showRemarksBox, setShowRemarksBox] = useState(false);
   const dirty = checked !== item.IsChecked || remarks !== (item.Remarks || "");
-  const isOpenRecheck = item.RecheckStatus === "Open";
+  const isOpenRecheck = item.RecheckStatus === CrmStatus.OPEN;
 
   useEffect(() => { setChecked(item.IsChecked); setRemarks(item.Remarks || ""); }, [item.IsChecked, item.Remarks]);
 
@@ -430,7 +431,7 @@ const InlineVerify: React.FC<{
   useEffect(() => { setRemarks(item?.Remarks || ""); }, [item?.Remarks]);
 
   if (!item) return null;
-  const isOpenRecheck = item.RecheckStatus === "Open";
+  const isOpenRecheck = item.RecheckStatus === CrmStatus.OPEN;
 
   const handleToggleChecked = async () => {
     if (locked || isOpenRecheck || saving) return;
@@ -1345,7 +1346,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                     cleared={cleared}
                     pendingReceipts={Math.max(0, mrReceived - cleared)}
                     approvedOnAccount={Number(callContext?.onAccount?.availableBalance ?? 0)}
-                    overdueCount={milestones.filter((m: any) => m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date()).length}
+                    overdueCount={milestones.filter((m: any) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date()).length}
                     compact
                   />
                 );
@@ -1382,7 +1383,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                       const due = Number(m.AmountDue || 0);
                       const paid = Number(m.AmountPaid || 0);
                       const balance = Math.max(0, due - paid);
-                      const isDone = m.Status === "Paid" || m.Status === "Waived";
+                      const isDone = m.Status === CrmStatus.PAID || m.Status === "Waived";
                       const label = m.Status === "Waived" ? "Waived" : isDone ? "Paid" : paid > 0 ? "Partially Paid" : "Pending";
                       return (
                         <div key={m.Id} className="text-[11px] space-y-0.5">
@@ -1519,7 +1520,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                       { label: "Co-Applicant Added", state: checklist.coApplicants.count > 0 ? "done" : "blank" },
                       { label: "Bank & Nominee", state: checklist.bankDetails.complete ? "done" : checklist.bankDetails.started ? "progress" : "blank" },
                       { label: "NOC Issued", state: nocIssued ? "done" : hasNoc ? "progress" : "blank" },
-                      { label: "Agreement", state: checklist.agreement?.Status === "Executed" ? "done" : checklist.agreement ? "progress" : "blank" },
+                      { label: "Agreement", state: checklist.agreement?.Status === CrmStatus.EXECUTED ? "done" : checklist.agreement ? "progress" : "blank" },
                     ];
                     return steps.map((s) => (
                       <div key={s.label} className="flex items-center gap-1.5 text-xs">
@@ -2048,6 +2049,17 @@ const CrmWelcomeCall: React.FC = () => {
   const [editingCall, setEditingCall] = useState<any | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
 
+  // Opening from a row click used to only ever set local state — the URL
+  // stayed plain /crm/welcome-calls, so refreshing lost the open dialog and
+  // there was nothing to copy/bookmark/share to jump straight back to this
+  // customer's call. The deep-link *read* side (?bookingId=X on page load,
+  // below) already existed; this is the missing write side, keeping the URL
+  // in sync the same way closing the dialog already does.
+  const openBooking = (row: any) => {
+    setActiveBooking(row);
+    if (row?.BookingId) navigate(`/crm/welcome-calls?bookingId=${row.BookingId}`, { replace: true });
+  };
+
   const { data: queue = [], isLoading: queueLoading } = useQuery({
     queryKey: ["crm-welcome-queue"],
     queryFn: fetchQueue,
@@ -2101,23 +2113,23 @@ const CrmWelcomeCall: React.FC = () => {
 
   const recheckColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "BookingNo", header: "Booking No", size: 110,
-      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">{i.getValue() as string}</span> },
+      cell: (i) => <span onClick={() => openBooking(i.row.original)} className="cursor-pointer font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">{i.getValue() as string}</span> },
     { accessorKey: "ApplicantName", header: "Customer", size: 140,
       cell: (i) => (
-        <div onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer">
+        <div onClick={() => openBooking(i.row.original)} className="cursor-pointer">
           <div className="font-medium">{i.row.original.ApplicantName}</div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
       ) },
     { id: "projectUnit", header: "Project / Unit", size: 130, enableSorting: false,
-      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer text-xs">{i.row.original.ProjectName || "—"} · {i.row.original.UnitNo}</span> },
+      cell: (i) => <span onClick={() => openBooking(i.row.original)} className="cursor-pointer text-xs">{i.row.original.ProjectName || "—"} · {i.row.original.UnitNo}</span> },
     { accessorKey: "OpenRecheckCount", header: "Flagged Items", size: 110,
-      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">{i.row.original.OpenRecheckCount}</span> },
+      cell: (i) => <span onClick={() => openBooking(i.row.original)} className="cursor-pointer text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">{i.row.original.OpenRecheckCount}</span> },
     { accessorKey: "OldestFlaggedAt", header: "Flagged Since", size: 110,
-      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer text-xs text-muted-foreground">{i.row.original.OldestFlaggedAt ? String(i.row.original.OldestFlaggedAt).slice(0, 10) : "—"}</span> },
+      cell: (i) => <span onClick={() => openBooking(i.row.original)} className="cursor-pointer text-xs text-muted-foreground">{i.row.original.OldestFlaggedAt ? String(i.row.original.OldestFlaggedAt).slice(0, 10) : "—"}</span> },
     { id: "actions", header: "Action", size: 100, enableSorting: false,
       cell: (i) => (
-        <button onClick={() => setActiveBooking(i.row.original)}
+        <button onClick={() => openBooking(i.row.original)}
           className="flex items-center gap-1 text-xs px-2.5 py-1 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600">
           <ShieldAlert size={12} /> Resolve
         </button>
@@ -2126,29 +2138,29 @@ const CrmWelcomeCall: React.FC = () => {
 
   const queueColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "BookingNo", header: "Booking No", size: 110,
-      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">{i.getValue() as string}</span> },
+      cell: (i) => <span onClick={() => openBooking(i.row.original)} className="cursor-pointer font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">{i.getValue() as string}</span> },
     { accessorKey: "ApplicantName", header: "Customer", size: 140,
       cell: (i) => (
-        <div onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer">
+        <div onClick={() => openBooking(i.row.original)} className="cursor-pointer">
           <div className="font-medium">{i.row.original.ApplicantName}</div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
       ) },
     { id: "projectUnit", header: "Project / Unit", size: 130, enableSorting: false,
-      cell: (i) => <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer text-xs">{i.row.original.ProjectName || "—"} · {i.row.original.UnitNo}</span> },
+      cell: (i) => <span onClick={() => openBooking(i.row.original)} className="cursor-pointer text-xs">{i.row.original.ProjectName || "—"} · {i.row.original.UnitNo}</span> },
     { accessorKey: "LastOutcome", header: "Last Outcome", size: 120,
       cell: (i) => i.row.original.LastOutcome ? (
-        <span onClick={() => setActiveBooking(i.row.original)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${outcomeColor[i.row.original.LastOutcome] || ""}`}>{i.row.original.LastOutcome}</span>
-      ) : <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer text-xs text-muted-foreground">Never called</span> },
+        <span onClick={() => openBooking(i.row.original)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${outcomeColor[i.row.original.LastOutcome] || ""}`}>{i.row.original.LastOutcome}</span>
+      ) : <span onClick={() => openBooking(i.row.original)} className="cursor-pointer text-xs text-muted-foreground">Never called</span> },
     { accessorKey: "NextCallDate", header: "Follow-up Due", size: 110,
       cell: (i) => i.row.original.NextCallDate ? (
-        <span onClick={() => setActiveBooking(i.row.original)} className={`cursor-pointer ${new Date(i.row.original.NextCallDate) <= new Date() ? "text-orange-600 font-medium text-xs" : "text-muted-foreground text-xs"}`}>
+        <span onClick={() => openBooking(i.row.original)} className={`cursor-pointer ${new Date(i.row.original.NextCallDate) <= new Date() ? "text-orange-600 font-medium text-xs" : "text-muted-foreground text-xs"}`}>
           {String(i.row.original.NextCallDate).slice(0, 10)}
         </span>
-      ) : <span onClick={() => setActiveBooking(i.row.original)} className="cursor-pointer text-xs">—</span> },
+      ) : <span onClick={() => openBooking(i.row.original)} className="cursor-pointer text-xs">—</span> },
     { id: "actions", header: "Action", size: 100, enableSorting: false,
       cell: (i) => (
-        <button onClick={() => setActiveBooking(i.row.original)}
+        <button onClick={() => openBooking(i.row.original)}
           className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
           <Phone size={12} /> Call Now
         </button>

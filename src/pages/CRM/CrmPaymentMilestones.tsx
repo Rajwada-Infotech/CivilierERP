@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -7,7 +8,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw, ArrowDownCircle, ArrowUpCircle, AlertTriangle, MessageSquare } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
@@ -34,10 +35,27 @@ const statusIcon: Record<string, React.ReactNode> = {
   Waived:  <CheckCircle2 size={12} />,
 };
 
+const bookingStatusColor: Record<string, string> = {
+  Approved:        "text-green-700 bg-green-50 border-green-200",
+  "Pending Approval": "text-orange-700 bg-orange-50 border-orange-200",
+  Cancelled:       "text-red-700 bg-red-50 border-red-200",
+  Draft:           "text-muted-foreground bg-muted/50 border-border",
+};
+
 const fmt = (n: number | null | undefined) =>
   n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
+
+const fmtDate = (s: string | null | undefined) => {
+  if (!s) return "—";
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return String(s).slice(0, 10);
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+};
+
 const pct = (paid: number, due: number) =>
   due > 0 ? Math.min(100, Math.round((paid / due) * 100)) : 0;
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
 
 async function fetchMilestones(bookingId: string): Promise<any> {
   if (!bookingId) return null;
@@ -59,8 +77,6 @@ async function fetchOnAccount(bookingId: string): Promise<any> {
 async function fetchCompanyBanks(): Promise<any[]> {
   try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
-// Deposit bank, scoped to the booking's project — empty means "nothing
-// linked", so the caller falls back to the full bank list itself.
 async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
   if (!projectId) return [];
   try {
@@ -90,6 +106,8 @@ const CrmPaymentMilestones: React.FC = () => {
   const [onAccountDialog, setOnAccountDialog] = useState(false);
   const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "", DepositBankId: "" });
   const [applyingId, setApplyingId] = useState<number | null>(null);
+  const [waiveDialog, setWaiveDialog] = useState<{ milestone: any; reason: string } | null>(null);
+  const [remarksDialog, setRemarksDialog] = useState<{ milestone: any } | null>(null);
 
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings-dropdown"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: milestoneData, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
@@ -117,6 +135,11 @@ const CrmPaymentMilestones: React.FC = () => {
   const booking = milestoneData?.booking || null;
   const onAccountBalance = onAccountData?.availableBalance || 0;
 
+  // Total pending finance approval across all milestones
+  const totalPendingVerification = milestones.reduce(
+    (s: number, m: any) => s + Number(m.PendingVerificationAmount || 0), 0
+  );
+
   const { data: projectBanks = [] } = useQuery({
     queryKey: ["crm-project-banks-for", booking?.ProjectId],
     queryFn: () => fetchProjectBanks(booking?.ProjectId),
@@ -128,9 +151,7 @@ const CrmPaymentMilestones: React.FC = () => {
   // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
   // the raw list when this booking's Project isn't known yet.
   const bankOptions = booking?.ProjectId ? projectBanks : companyBanks;
-  // Bookings created before the payment-logic fix have Milestone #1 sized
-  // off the payment plan's fixed % instead of the real BookingAmount — flag
-  // that mismatch here so staff can one-click resync the schedule.
+
   const milestone1 = milestones.find((m) => m.MilestoneNo === 1);
   const needsResync = !!(
     booking?.BookingAmount &&
@@ -138,10 +159,7 @@ const CrmPaymentMilestones: React.FC = () => {
     Math.abs(Number(milestone1.AmountDue) - Number(booking.BookingAmount)) >= 1
   );
 
-  // Live preview for the Record Payment dialog — this milestone's own
-  // remaining balance, and (if what's typed in exceeds it) how much of the
-  // entry will be auto-parked to On Account instead of counted against this
-  // milestone. Mirrors the cap the backend applies on save.
+  // Live preview for the Record Payment dialog
   const editingMilestone = milestones.find((m) => m.Id === editingId) || null;
   const editingBalance = editingMilestone
     ? Math.max(0, Number(editingMilestone.AmountDue) - Number(editingMilestone.AmountPaid || 0))
@@ -153,34 +171,39 @@ const CrmPaymentMilestones: React.FC = () => {
 
   const handleOpenPayment = (m: any) => {
     setEditingId(m.Id);
+    const remaining = Math.max(0, Number(m.AmountDue) - Number(m.AmountPaid || 0));
     setPayForm({
-      AmountPaid: m.AmountPaid != null ? String(m.AmountPaid) : "",
-      PaidDate: m.PaidDate ? String(m.PaidDate).slice(0, 10) : "",
+      // Pre-fill with remaining balance if nothing is recorded yet; show existing value otherwise
+      AmountPaid: m.AmountPaid != null && Number(m.AmountPaid) > 0 ? String(m.AmountPaid) : (remaining > 0 ? String(remaining) : ""),
+      PaidDate: m.PaidDate ? String(m.PaidDate).slice(0, 10) : todayStr(),
       PaymentMode: m.PaymentMode || "",
       TransactionRef: m.TransactionRef || "",
       Remarks: m.Remarks || "",
-      // Auto-select if the milestone doesn't already have one recorded and
-      // this project has exactly one bank linked (Setup > Project Bank
-      // Mapping) — otherwise leave it for staff to pick from the dropdown.
       DepositBankId: m.DepositBankId != null ? String(m.DepositBankId)
         : projectBanks.length === 1 ? String(projectBanks[0].BId) : "",
     });
   };
 
-  const handleWaive = async (m: any) => {
-    const reason = window.prompt("Reason for waiving this milestone:");
-    if (!reason) return;
+  const handleWaive = (m: any) => {
+    setWaiveDialog({ milestone: m, reason: "" });
+  };
+
+  const [waiving, setWaiving] = useState(false);
+  const handleWaiveConfirm = async () => {
+    if (!waiveDialog?.reason.trim()) return;
+    setWaiving(true);
     try {
-      const res = await fetchWithAuth(`${API}/${m.Id}/waive`, {
+      const res = await fetchWithAuth(`${API}/${waiveDialog.milestone.Id}/waive`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Reason: reason }),
+        body: JSON.stringify({ Reason: waiveDialog.reason }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success("Milestone waived");
+      setWaiveDialog(null);
 
-      const allOthersCleared = milestones.filter((x) => x.Id !== m.Id).every((x) => ["Paid", "Waived"].includes(x.Status));
+      const allOthersCleared = milestones.filter((x) => x.Id !== waiveDialog.milestone.Id).every((x) => ["Paid", "Waived"].includes(x.Status));
       if (allOthersCleared) {
         promptNextStep(navigate, "All payment milestones are cleared — the Sales Deed is ready to prepare.", "/crm/sales-deed", "Go to Sales Deed");
       }
@@ -188,6 +211,8 @@ const CrmPaymentMilestones: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     } catch (e: any) {
       toast.error(translateError(e.message));
+    } finally {
+      setWaiving(false);
     }
   };
 
@@ -212,16 +237,11 @@ const CrmPaymentMilestones: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      // A payment amount now submits into Finance's Received Payment queue
-      // for approval (Account's Head/admin/super admin) instead of landing
-      // on the milestone immediately — it won't show as Paid, and the
-      // overpayment-cap/On Account split isn't resolved, until approved.
       if (data.submitted) {
         toast.success(`Submitted for Finance approval${data.RPDocNo ? ` — ${data.RPDocNo}` : ""}. It won't count as paid until approved.`);
       } else {
         toast.success("Milestone updated");
       }
-
       setEditingId(null);
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
     } catch (e: any) {
@@ -297,7 +317,7 @@ const CrmPaymentMilestones: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(`On-account deposit ${data.ReceiptNo} recorded`);
+      toast.success(`On-account deposit submitted for Finance approval${data.RPDocNo ? ` — ${data.RPDocNo}` : ""}. It won't appear until approved.`);
       setOnAccountDialog(false);
       setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
@@ -336,91 +356,144 @@ const CrmPaymentMilestones: React.FC = () => {
 
   const milestoneColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "MilestoneNo", header: "#", size: 40,
-      cell: (i) => <span className="text-muted-foreground">{i.getValue() as number}</span> },
+      cell: (i) => <span className="text-muted-foreground text-xs">{i.getValue() as number}</span> },
     { accessorKey: "MilestoneName", header: "Milestone", size: 200,
-      cell: (i) => (
-        <span className="font-medium">
-          {i.row.original.MilestoneName}
-          {i.row.original.RequiredDocuments && (
-            <div className="text-[10px] text-muted-foreground font-normal mt-0.5" title={i.row.original.RequiredDocuments}>
-              Docs: {i.row.original.RequiredDocuments}
-            </div>
-          )}
-        </span>
-      ) },
-    { accessorKey: "ResponsibleDepartment", header: "Dept", size: 100,
+      cell: (i) => {
+        const m = i.row.original;
+        const demandColor =
+          m.DemandStatus === "Demanded" ? "text-blue-700 bg-blue-50 border-blue-200" :
+          m.DemandStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : null;
+        return (
+          <span className="font-medium text-sm">
+            {m.MilestoneName}
+            {m.DemandStatus && m.DemandStatus !== CrmStatus.PENDING && demandColor && (
+              <div className="mt-0.5 flex items-center gap-1">
+                <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${demandColor}`}>
+                  {m.DemandStatus === "Demanded" ? `Demand Raised${m.DemandNo ? ` · ${m.DemandNo}` : ""}` : `Demand ${m.DemandStatus}`}
+                </span>
+                {m.DemandRaisedOn && (
+                  <span className="text-[10px] text-muted-foreground">{fmtDate(m.DemandRaisedOn)}</span>
+                )}
+              </div>
+            )}
+            {m.RequiredDocuments && (
+              <div className="text-[10px] text-muted-foreground font-normal mt-0.5 truncate max-w-[180px]" title={m.RequiredDocuments}>
+                Docs: {m.RequiredDocuments}
+              </div>
+            )}
+          </span>
+        );
+      } },
+    { accessorKey: "ResponsibleDepartment", header: "Dept", size: 90,
       cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.ResponsibleDepartment || "—"}</span> },
     { accessorKey: "DueDate", header: "Due Date", size: 110,
       cell: (i) => {
         const m = i.row.original;
-        const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
+        const isOverdue = m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date();
         return (
-          <span className="text-xs">
-            {m.DueDate ? String(m.DueDate).slice(0, 10) : "—"}
-            {isOverdue && <span className="ml-1 text-red-500 text-[10px]">OVERDUE</span>}
+          <span className={`text-xs ${isOverdue ? "text-red-600 font-medium" : ""}`}>
+            {fmtDate(m.DueDate)}
           </span>
         );
       } },
-    { accessorKey: "AmountDue", header: "Amount Due", size: 120,
+    { accessorKey: "AmountDue", header: "Amount Due", size: 130,
       cell: (i) => (
-        <span className="font-semibold">
+        <span className="font-semibold text-sm">
           {fmt(i.row.original.AmountDue)}
           {i.row.original.Percent != null && (
             <span className="ml-1 text-[10px] font-normal text-muted-foreground">({Number(i.row.original.Percent)}%)</span>
           )}
         </span>
       ) },
-    { accessorKey: "AmountPaid", header: "Amount Paid", size: 100,
-      cell: (i) => (
-        <span className="text-green-600 font-semibold">
-          {fmt(i.row.original.AmountPaid)}
-          {Number(i.row.original.PendingVerificationAmount) > 0 && (
-            <div className="text-[10px] text-amber-700 font-normal">+{fmt(i.row.original.PendingVerificationAmount)} pending verification</div>
-          )}
-        </span>
-      ) },
-    { id: "balance", header: "Balance", size: 100, enableSorting: false,
+    { accessorKey: "AmountPaid", header: "Amount Paid", size: 120,
+      cell: (i) => {
+        const m = i.row.original;
+        return (
+          <span className="text-green-600 font-semibold text-sm">
+            {fmt(m.AmountPaid)}
+            {Number(m.PendingVerificationAmount) > 0 && (
+              <div className="text-[10px] text-amber-700 font-normal">
+                +{fmt(m.PendingVerificationAmount)} pending
+              </div>
+            )}
+          </span>
+        );
+      } },
+    { accessorKey: "PaidDate", header: "Paid On", size: 110,
+      cell: (i) => {
+        const m = i.row.original;
+        if (!m.PaidDate) return <span className="text-xs text-muted-foreground">—</span>;
+        return <span className="text-xs">{fmtDate(m.PaidDate)}</span>;
+      } },
+    { id: "balance", header: "Balance", size: 110, enableSorting: false,
       cell: (i) => {
         const m = i.row.original;
         const balance = (m.AmountDue || 0) - (m.AmountPaid || 0);
+        if (m.Status === "Waived") return <span className="text-xs text-muted-foreground">—</span>;
         return balance > 0
-          ? <span className="text-red-600 font-semibold flex items-center gap-1"><ArrowDownCircle size={12} className="shrink-0" />{fmt(balance)}</span>
-          : <span className="text-emerald-600 font-semibold flex items-center gap-1"><CheckCircle2 size={12} className="shrink-0" />Settled</span>;
+          ? <span className="text-red-600 font-semibold text-sm flex items-center gap-1"><ArrowDownCircle size={12} className="shrink-0" />{fmt(balance)}</span>
+          : <span className="text-emerald-600 font-semibold text-sm flex items-center gap-1"><CheckCircle2 size={12} className="shrink-0" />Settled</span>;
       } },
-    { id: "status", header: "Status", size: 120, enableSorting: false,
+    { id: "status", header: "Status", size: 110, enableSorting: false,
       cell: (i) => {
         const m = i.row.original;
-        const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
-        const displayStatus = isOverdue && m.Status === "Pending" ? "Overdue" : m.Status;
+        const isOverdue = m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date();
+        const displayStatus = isOverdue ? "Overdue" : m.Status;
         return (
           <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium w-fit ${statusColor[displayStatus] || ""}`}>
             {statusIcon[displayStatus]}{displayStatus}
           </span>
         );
       } },
-    { accessorKey: "PaymentMode", header: "Payment Mode", size: 90,
-      cell: (i) => <span className="text-xs">{i.row.original.PaymentMode || "—"}</span> },
-    { accessorKey: "TransactionRef", header: "Ref", size: 90,
-      cell: (i) => <span className="text-xs font-mono">{i.row.original.TransactionRef || "—"}</span> },
-    { id: "actions", header: "", size: 160, enableSorting: false,
+    { accessorKey: "PaymentMode", header: "Payment Mode", size: 120,
       cell: (i) => {
         const m = i.row.original;
         return (
-          <div className="flex items-center gap-2 whitespace-nowrap">
-            {m.Status !== "Paid" && m.Status !== "Waived" && (
+          <span className="text-xs">
+            {m.PaymentMode || "—"}
+            {m.DepositBankName && (
+              <div className="text-[10px] text-muted-foreground font-normal mt-0.5 truncate max-w-[110px]" title={m.DepositBankName}>{m.DepositBankName}</div>
+            )}
+          </span>
+        );
+      } },
+    { accessorKey: "TransactionRef", header: "Ref / Remarks", size: 130,
+      cell: (i) => {
+        const m = i.row.original;
+        return (
+          <span className="text-xs">
+            <span className="font-mono">{m.TransactionRef || "—"}</span>
+            {m.Remarks && (
+              <button
+                onClick={() => setRemarksDialog({ milestone: m })}
+                title={m.Remarks}
+                className="ml-1.5 text-muted-foreground hover:text-foreground align-middle inline-flex"
+              >
+                <MessageSquare size={11} />
+              </button>
+            )}
+          </span>
+        );
+      } },
+    { id: "actions", header: "", size: 150, enableSorting: false,
+      cell: (i) => {
+        const m = i.row.original;
+        return (
+          <div className="flex items-center gap-1.5 whitespace-nowrap">
+            {m.Status !== CrmStatus.PAID && m.Status !== "Waived" && (
               <>
                 <button onClick={() => handleOpenPayment(m)}
-                  className="text-xs text-primary hover:underline">
-                  Submit Payment
+                  className="text-xs px-2 py-1 border border-primary text-primary rounded-md hover:bg-primary hover:text-primary-foreground transition-colors font-medium">
+                  Pay
                 </button>
                 {onAccountBalance > 0 && (
                   <button onClick={() => handleApplyOnAccount(m)} disabled={applyingId === m.Id}
-                    className="text-xs text-blue-600 hover:underline disabled:opacity-40">
-                    {applyingId === m.Id ? "Applying..." : "Apply On-Account"}
+                    className="text-xs px-2 py-1 border border-blue-400 text-blue-600 rounded-md hover:bg-blue-50 transition-colors disabled:opacity-40 font-medium">
+                    {applyingId === m.Id ? "…" : "On A/c"}
                   </button>
                 )}
                 <button onClick={() => handleWaive(m)}
-                  className="text-xs text-muted-foreground hover:underline">
+                  className="text-xs px-2 py-1 border border-border text-muted-foreground rounded-md hover:bg-muted transition-colors font-medium">
                   Waive
                 </button>
               </>
@@ -432,241 +505,424 @@ const CrmPaymentMilestones: React.FC = () => {
 
   usePageRights("crm-payments");
 
+  const collectionPct = pct(summary.totalPaid || 0, summary.totalDue || 0);
+  const pendingPct = summary.totalDue > 0
+    ? Math.min(100 - collectionPct, Math.round((totalPendingVerification / summary.totalDue) * 100))
+    : 0;
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Payments"]} />
       <CrmShell
         title="CRM — Payment Milestones"
-      subtitle="Milestone-wise payment tracking for bookings"
-      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
-    >
-      {/* Booking selector */}
-      <div className="flex gap-3 items-end flex-wrap">
-        <div className="flex-1 min-w-64">
-          <label className="text-xs text-muted-foreground block mb-1">Select Booking</label>
-          <select value={selectedBookingId} onChange={(e) => setSelectedBookingId(e.target.value)}
-            className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
-            <option value="">— Choose a booking —</option>
-            {(bookings as any[]).map((b: any) => (
-              <option key={b.Id} value={String(b.Id)}>
-                {b.BookingNo} — {b.ApplicantName} · {b.UnitNo} {b.ProjectName ? `(${b.ProjectName})` : ""}
-              </option>
-            ))}
-          </select>
-        </div>
-        {selectedBookingId && (
-          <>
-            <button onClick={() => setAddDialog(true)}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
-              <Plus size={14} /> Add Milestone
-            </button>
-            <button onClick={() => {
-              setOnAccountForm((f) => ({ ...f, DepositBankId: projectBanks.length === 1 ? String(projectBanks[0].BId) : f.DepositBankId }));
-              setOnAccountDialog(true);
-            }}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
-              <Wallet size={14} /> Deposit On Account
-            </button>
-            {needsResync && (
-              <button onClick={handleResyncSchedule} disabled={resyncing}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm border border-amber-300 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
-                <RefreshCw size={14} className={resyncing ? "animate-spin" : ""} /> {resyncing ? "Resyncing..." : "Resync Schedule"}
+        subtitle="Milestone-wise payment tracking for bookings"
+        action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
+      >
+        {/* Booking selector */}
+        <div className="flex gap-3 items-end flex-wrap">
+          <div className="flex-1 min-w-64">
+            <label className="text-xs text-muted-foreground block mb-1">Select Booking</label>
+            <select value={selectedBookingId} onChange={(e) => setSelectedBookingId(e.target.value)}
+              className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
+              <option value="">— Choose a booking —</option>
+              {(bookings as any[]).map((b: any) => (
+                <option key={b.Id} value={String(b.Id)}>
+                  {b.BookingNo} — {b.ApplicantName} · {b.UnitNo} {b.ProjectName ? `(${b.ProjectName})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          {selectedBookingId && (
+            <>
+              <button onClick={() => setAddDialog(true)}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
+                <Plus size={14} /> Add Milestone
               </button>
-            )}
-          </>
-        )}
-      </div>
-
-      {needsResync && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm px-4 py-2.5 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
-          Milestone 1's amount (₹{Number(milestone1.AmountDue).toLocaleString("en-IN")}) doesn't match this booking's actual booking amount (₹{Number(booking.BookingAmount).toLocaleString("en-IN")}) — click "Resync Schedule" to fix it and redistribute the remaining milestones.
+              <button onClick={() => {
+                setOnAccountForm((f) => ({ ...f, DepositBankId: projectBanks.length === 1 ? String(projectBanks[0].BId) : f.DepositBankId }));
+                setOnAccountDialog(true);
+              }}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
+                <Wallet size={14} /> Deposit On Account
+              </button>
+              {needsResync && (
+                <button onClick={handleResyncSchedule} disabled={resyncing}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm border border-amber-300 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+                  <RefreshCw size={14} className={resyncing ? "animate-spin" : ""} /> {resyncing ? "Resyncing..." : "Resync Schedule"}
+                </button>
+              )}
+            </>
+          )}
         </div>
-      )}
 
-      {!selectedBookingId ? (
-        <div className="py-16 text-center text-muted-foreground text-sm">Select a booking to view its payment schedule</div>
-      ) : isLoading ? (
-        <div className="py-16 text-center text-muted-foreground text-sm">Loading milestones...</div>
-      ) : !milestoneData ? (
-        <div className="py-16 text-center text-muted-foreground text-sm">No milestone data found</div>
-      ) : (
-        <>
-          {/* Booking summary — "Booking" is the whole deal (unit + parking +
-              extra charges), not just the unit price, so the total shown
-              here must be the same GrandTotal the milestone schedule is
-              actually generated/redistributed against. Showing bare
-              TotalValue here (as before) silently disagreed with what the
-              milestones summed to whenever a booking had parking or extra
-              charges attached. */}
-          {booking && (() => {
-            const grandTotal = Number(booking.GrandTotal ?? booking.TotalValue ?? 0);
-            const parkingTotal = Number(booking.ParkingTotal || 0);
-            const extraTotal = Number(booking.ExtraChargesTotal || 0);
-            const hasExtras = parkingTotal > 0 || extraTotal > 0;
-            return (
-              <div className="rounded-xl border border-border p-4 space-y-4">
-                <div>
-                  <div className="font-semibold text-foreground">{booking.ApplicantName}</div>
-                  <div className="text-xs text-muted-foreground">{booking.BookingNo} · {booking.UnitNo} {booking.ProjectName ? `· ${booking.ProjectName}` : ""}</div>
-                </div>
+        {needsResync && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm px-4 py-2.5 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+            Milestone 1's amount (₹{Number(milestone1.AmountDue).toLocaleString("en-IN")}) doesn't match this booking's actual booking amount (₹{Number(booking.BookingAmount).toLocaleString("en-IN")}) — click "Resync Schedule" to fix it and redistribute the remaining milestones.
+          </div>
+        )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Price breakdown */}
-                  <div className="rounded-lg border border-border bg-muted/20 p-3">
-                    <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Price Breakdown</div>
-                    <div className="space-y-1.5 text-sm">
-                      <div className="flex items-baseline justify-between">
-                        <span className="text-muted-foreground">Unit Value</span>
-                        <span className="font-medium tabular-nums">{fmt(booking.TotalValue)}</span>
+        {!selectedBookingId ? (
+          <div className="py-16 text-center text-muted-foreground text-sm">Select a booking to view its payment schedule</div>
+        ) : isLoading ? (
+          <div className="py-16 text-center text-muted-foreground text-sm flex items-center justify-center gap-2">
+            <RefreshCw size={14} className="animate-spin" /> Loading milestones...
+          </div>
+        ) : !milestoneData ? (
+          <div className="py-16 text-center text-muted-foreground text-sm">No milestone data found</div>
+        ) : (
+          <>
+            {/* Booking summary card */}
+            {booking && (() => {
+              const grandTotal = Number(booking.GrandTotal ?? booking.TotalValue ?? 0);
+              const parkingTotal = Number(booking.ParkingTotal || 0);
+              const extraTotal = Number(booking.ExtraChargesTotal || 0);
+              const hasExtras = parkingTotal > 0 || extraTotal > 0;
+              const bkgStatus = booking.BookingStatus;
+              return (
+                <div className="rounded-xl border border-border p-4 space-y-4">
+                  {/* Header row */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-foreground">{booking.ApplicantName}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {booking.BookingNo} · {booking.UnitNo}{booking.ProjectName ? ` · ${booking.ProjectName}` : ""}
                       </div>
-                      {parkingTotal > 0 && (
-                        <div className="flex items-baseline justify-between">
-                          <span className="text-muted-foreground">+ Parking</span>
-                          <span className="font-medium tabular-nums">{fmt(parkingTotal)}</span>
-                        </div>
-                      )}
-                      {extraTotal > 0 && (
-                        <div className="flex items-baseline justify-between">
-                          <span className="text-muted-foreground">+ Extra Charges</span>
-                          <span className="font-medium tabular-nums">{fmt(extraTotal)}</span>
-                        </div>
-                      )}
-                      <div className={`flex items-baseline justify-between ${hasExtras ? "pt-1.5 mt-0.5 border-t border-border" : ""}`}>
-                        <span className="font-semibold text-foreground">Grand Total</span>
-                        <span className="font-bold text-foreground tabular-nums">{fmt(grandTotal)}</span>
-                      </div>
-                      {booking.BookingAmount > 0 && (
-                        <div className="flex items-baseline justify-between text-xs pt-1">
-                          <span className="text-muted-foreground">Booking Amount (Milestone 1)</span>
-                          <span className="text-muted-foreground tabular-nums">{fmt(booking.BookingAmount)}</span>
-                        </div>
-                      )}
                     </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                    {bkgStatus && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${bookingStatusColor[bkgStatus] || "text-muted-foreground bg-muted/50 border-border"}`}>
+                        {bkgStatus}
+                      </span>
+                    )}
+                    {booking.Mobile && (
+                      <span className="text-xs text-muted-foreground">{booking.Mobile}</span>
+                    )}
+                  </div>
                   </div>
 
-                  {/* Collection summary */}
-                  <div className="rounded-lg border border-border bg-muted/20 p-3">
-                    <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Collection Summary</div>
-                    <div className="space-y-1.5 text-sm">
-                      <div className="flex items-baseline justify-between">
-                        <span className="text-muted-foreground">Total Due</span>
-                        <span className="font-medium tabular-nums">{fmt(summary.totalDue)}</span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Price breakdown */}
+                    <div className="rounded-lg border border-border bg-muted/20 p-3">
+                      <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Price Breakdown</div>
+                      <div className="space-y-1.5 text-sm">
+                        <div className="flex items-baseline justify-between">
+                          <span className="text-muted-foreground">Unit Value</span>
+                          <span className="font-medium tabular-nums">{fmt(booking.TotalValue)}</span>
+                        </div>
+                        {parkingTotal > 0 && (
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-muted-foreground">+ Parking</span>
+                            <span className="font-medium tabular-nums">{fmt(parkingTotal)}</span>
+                          </div>
+                        )}
+                        {extraTotal > 0 && (
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-muted-foreground">+ Extra Charges</span>
+                            <span className="font-medium tabular-nums">{fmt(extraTotal)}</span>
+                          </div>
+                        )}
+                        <div className={`flex items-baseline justify-between ${hasExtras ? "pt-1.5 mt-0.5 border-t border-border" : ""}`}>
+                          <span className="font-semibold text-foreground">Grand Total</span>
+                          <span className="font-bold text-foreground tabular-nums">{fmt(grandTotal)}</span>
+                        </div>
+                        {booking.BookingAmount > 0 && (
+                          <div className="flex items-baseline justify-between text-xs pt-1">
+                            <span className="text-muted-foreground">Booking Amount (M1)</span>
+                            <span className="text-muted-foreground tabular-nums">{fmt(booking.BookingAmount)}</span>
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-baseline justify-between">
-                        <span className="text-muted-foreground">Paid</span>
-                        <span className="font-medium text-green-600 tabular-nums">{fmt(summary.totalPaid)}</span>
+                    </div>
+
+                    {/* Collection summary */}
+                    <div className="rounded-lg border border-border bg-muted/20 p-3">
+                      <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Collection Summary</div>
+                      <div className="space-y-1.5 text-sm">
+                        <div className="flex items-baseline justify-between">
+                          <span className="text-muted-foreground">Total Due</span>
+                          <span className="font-medium tabular-nums">{fmt(summary.totalDue)}</span>
+                        </div>
+                        <div className="flex items-baseline justify-between">
+                          <span className="text-muted-foreground">Collected</span>
+                          <span className="font-medium text-green-600 tabular-nums">{fmt(summary.totalPaid)}</span>
+                        </div>
+                        {totalPendingVerification > 0 && (
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-amber-700 flex items-center gap-1"><Clock size={11} /> Pending Approval</span>
+                            <span className="text-amber-700 font-medium tabular-nums">{fmt(totalPendingVerification)}</span>
+                          </div>
+                        )}
+                        <div className="flex items-baseline justify-between pt-1.5 mt-0.5 border-t border-border">
+                          <span className="font-semibold text-foreground">Balance</span>
+                          <span className={`font-bold tabular-nums flex items-center gap-1 ${summary.balance > 0 ? "text-red-600" : "text-emerald-600"}`}>
+                            {summary.balance > 0 && <ArrowDownCircle size={13} className="shrink-0" />}{fmt(summary.balance)}
+                          </span>
+                        </div>
+                        {summary.overdue > 0 && (
+                          <div className="flex items-baseline justify-between text-xs">
+                            <span className="text-red-600 flex items-center gap-1"><AlertCircle size={11} /> Overdue</span>
+                            <span className="text-red-600 font-medium">{summary.overdue} milestone{summary.overdue > 1 ? "s" : ""}</span>
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-baseline justify-between pt-1.5 mt-0.5 border-t border-border">
-                        <span className="font-semibold text-foreground">Balance (Underpaid)</span>
-                        <span className={`font-bold tabular-nums flex items-center gap-1 ${summary.balance > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                          {summary.balance > 0 && <ArrowDownCircle size={13} className="shrink-0" />}{fmt(summary.balance)}
+                      {/* Segmented progress bar: green = collected, amber = pending approval */}
+                      <div className="mt-3">
+                        <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
+                          <span>Collection Progress</span>
+                          <span>{collectionPct}%{pendingPct > 0 ? ` (+${pendingPct}% pending)` : ""}</span>
+                        </div>
+                        <div className="h-1.5 bg-muted rounded-full overflow-hidden flex">
+                          <div className="h-full bg-green-500 transition-all" style={{ width: `${collectionPct}%` }} />
+                          {pendingPct > 0 && (
+                            <div className="h-full bg-amber-400 transition-all" style={{ width: `${pendingPct}%` }} />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* On-Account balance */}
+            {onAccountData && (onAccountData.payments?.length > 0) && (
+              <div className={`rounded-xl border p-4 ${onAccountBalance > 0 ? "border-emerald-200 bg-emerald-50/40 dark:border-emerald-800 dark:bg-emerald-950/20" : "border-border"}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                    <Wallet size={14} className={onAccountBalance > 0 ? "text-emerald-600" : "text-muted-foreground"} />
+                    On-Account Balance
+                  </h3>
+                  <span className={`text-lg font-bold flex items-center gap-1 ${onAccountBalance > 0 ? "text-emerald-700" : "text-muted-foreground"}`}>
+                    {onAccountBalance > 0 && <ArrowUpCircle size={16} className="shrink-0" />}{fmt(onAccountBalance)}
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {onAccountData.payments.map((p: any) => {
+                    const remaining = Number(p.Amount) - Number(p.AppliedAmount || 0);
+                    return (
+                      <div key={p.Id} className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">
+                          {p.ReceiptNo} · {fmt(p.Amount)}
+                          {p.PaymentMode ? ` · ${p.PaymentMode}` : ""}
+                          {p.ReceivedDate ? ` · ${fmtDate(p.ReceivedDate)}` : ""}
+                          {remaining > 0 && remaining < Number(p.Amount) && (
+                            <span className="text-emerald-700"> · {fmt(remaining)} remaining</span>
+                          )}
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded-full border font-medium ${
+                          p.Status === "Applied" ? "text-green-600 bg-green-50 border-green-200"
+                          : p.Status === "PartiallyApplied" ? "text-blue-600 bg-blue-50 border-blue-200"
+                          : "text-orange-600 bg-orange-50 border-orange-200"
+                        }`}>
+                          {p.Status}
                         </span>
                       </div>
-                      {summary.overdue > 0 && (
-                        <div className="flex items-baseline justify-between text-xs pt-1">
-                          <span className="text-red-600 flex items-center gap-1"><AlertCircle size={11} /> Overdue</span>
-                          <span className="text-red-600 font-medium">{summary.overdue} milestone(s)</span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="mt-3">
-                      <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
-                        <span>Collection Progress</span>
-                        <span>{pct(summary.totalPaid, summary.totalDue)}%</span>
-                      </div>
-                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className="h-full bg-green-500 rounded-full transition-all"
-                          style={{ width: `${pct(summary.totalPaid, summary.totalDue)}%` }} />
-                      </div>
-                    </div>
-                  </div>
+                    );
+                  })}
                 </div>
               </div>
-            );
-          })()}
+            )}
 
-          {/* On-Account balance */}
-          {onAccountData && (onAccountData.payments?.length > 0) && (
-            <div className={`rounded-xl border p-4 ${onAccountBalance > 0 ? "border-emerald-200 bg-emerald-50/40" : "border-border"}`}>
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={14} className={onAccountBalance > 0 ? "text-emerald-600" : "text-muted-foreground"} /> On-Account Balance (Overpaid)</h3>
-                <span className={`text-lg font-bold flex items-center gap-1 ${onAccountBalance > 0 ? "text-emerald-700" : "text-muted-foreground"}`}>
-                  {onAccountBalance > 0 && <ArrowUpCircle size={16} className="shrink-0" />}{fmt(onAccountBalance)}
-                </span>
-              </div>
-              <div className="space-y-1">
-                {onAccountData.payments.map((p: any) => (
-                  <div key={p.Id} className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{p.ReceiptNo} · {fmt(p.Amount)} · {p.PaymentMode || "—"}</span>
-                    <span className={`px-1.5 py-0.5 rounded-full border font-medium ${p.Status === "Applied" ? "text-green-600 bg-green-50 border-green-200" : p.Status === "PartiallyApplied" ? "text-blue-600 bg-blue-50 border-blue-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
-                      {p.Status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+            {/* Milestone table */}
+            <DataTable
+              data={milestones}
+              columns={milestoneColumns}
+              emptyMessage="No milestones found"
+              className="rounded-xl border border-border overflow-hidden bg-card"
+              rowClassName={(row) => {
+                const m = row.original as any;
+                const isOverdue = m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date();
+                return isOverdue ? "bg-red-50/30 dark:bg-red-950/10" : "";
+              }}
+            />
+          </>
+        )}
 
-          {/* Milestone table */}
-          <DataTable
-            data={milestones}
-            columns={milestoneColumns}
-            emptyMessage="No milestones found"
-            className="rounded-xl border border-border overflow-hidden bg-card"
-            rowClassName={(row) => {
-              const m = row.original as any;
-              const isOverdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
-              return isOverdue ? "bg-red-50/30" : "";
-            }}
-          />
-        </>
-      )}
-
-      {/* Record Payment Dialog */}
-      <Dialog open={!!editingId} onOpenChange={(o) => { if (!o) setEditingId(null); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle className="font-heading">Submit Payment for Approval</DialogTitle></DialogHeader>
-          <p className="text-[11px] text-muted-foreground -mt-2">Goes to Finance's Received Payment queue — Account's Head (or admin/super admin) must approve before it counts as paid.</p>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { key: "AmountPaid",    label: "Amount Paid (₹)", type: "number" },
-                { key: "PaidDate",      label: "Payment Date",     type: "date"   },
-                { key: "TransactionRef",label: "Transaction Ref",  type: "text"   },
-              ].map(({ key, label, type }) => (
-                <div key={key} className={key === "TransactionRef" ? "col-span-2" : ""}>
-                  <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                  <input type={type} value={payForm[key as keyof typeof payForm]}
-                    onChange={(e) => setPayForm((f) => ({ ...f, [key]: e.target.value }))}
+        {/* Record Payment Dialog */}
+        <Dialog open={!!editingId} onOpenChange={(o) => { if (!o) setEditingId(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="font-heading">Submit Payment for Approval</DialogTitle>
+              {editingMilestone && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  <span className="font-medium text-foreground">{editingMilestone.MilestoneName}</span>
+                  {" — "}{fmt(editingMilestone.AmountDue)}
+                  {editingBalance > 0 && <span className="text-muted-foreground"> · Balance: {fmt(editingBalance)}</span>}
+                </p>
+              )}
+            </DialogHeader>
+            <p className="text-[11px] text-muted-foreground -mt-2">Goes to Finance's Received Payment queue — Account's Head (or admin/super admin) must approve before it counts as paid.</p>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Amount Paid (₹)</label>
+                  <input type="number" value={payForm.AmountPaid}
+                    onChange={(e) => setPayForm((f) => ({ ...f, AmountPaid: e.target.value }))}
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                 </div>
-              ))}
-              {editingMilestone && (
-                <div className="col-span-2 -mt-1">
-                  <p className="text-[11px] text-muted-foreground">
-                    Due: <span className="font-medium text-foreground">{fmt(editingMilestone.AmountDue)}</span>
-                    {" · "}Balance: <span className="font-medium text-foreground">{fmt(editingBalance)}</span>
-                  </p>
-                  {previewOverflow > 0 && (
-                    <p className="text-[11px] text-blue-600 font-medium mt-0.5 flex items-center gap-1">
-                      <Wallet size={11} /> ₹{previewOverflow.toLocaleString("en-IN")} beyond what's currently due — if still true when this is approved, it'll be parked to On Account instead of counted against this milestone.
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Payment Date</label>
+                  <input type="date" value={payForm.PaidDate}
+                    onChange={(e) => setPayForm((f) => ({ ...f, PaidDate: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                </div>
+                {previewOverflow > 0 && (
+                  <div className="col-span-2 -mt-1">
+                    <p className="text-[11px] text-blue-600 font-medium flex items-center gap-1">
+                      <Wallet size={11} /> ₹{previewOverflow.toLocaleString("en-IN")} beyond what's due — will be parked to On Account if still true when approved.
                     </p>
-                  )}
+                  </div>
+                )}
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
+                  <select value={payForm.PaymentMode} onChange={(e) => setPayForm((f) => ({ ...f, PaymentMode: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                    <option value="">Select mode</option>
+                    {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
+                  <input type="text" value={payForm.TransactionRef}
+                    onChange={(e) => setPayForm((f) => ({ ...f, TransactionRef: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs text-muted-foreground block mb-1">
+                    Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project` : ""}
+                  </label>
+                  <select value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                    <option value="">Select company bank</option>
+                    {(bankOptions as any[]).map((b: any) => (
+                      <option key={b.BId} value={String(b.BId)}>{b.BName}{b.BAccountNumber ? ` — ${b.BAccountNumber}` : ""}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs text-muted-foreground block mb-1">Remarks</label>
+                  <textarea value={payForm.Remarks} onChange={(e) => setPayForm((f) => ({ ...f, Remarks: e.target.value }))}
+                    rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+                </div>
+              </div>
+
+              {customerBank && (customerBank.BankName || customerBank.AccountNo) && (
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Customer's Bank (reference only)</p>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                    <span className="text-muted-foreground">Bank</span>
+                    <span className="font-medium text-right">{customerBank.BankName || "—"}</span>
+                    <span className="text-muted-foreground">A/C No.</span>
+                    <span className="font-medium text-right font-mono">{customerBank.AccountNo || "—"}</span>
+                    <span className="text-muted-foreground">IFSC</span>
+                    <span className="font-medium text-right font-mono">{customerBank.IfscCode || "—"}</span>
+                  </div>
                 </div>
               )}
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-border">
+              <button onClick={() => setEditingId(null)}
+                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              <button onClick={handleRecordPayment}
+                disabled={saving || !!(payForm.AmountPaid && bankOptions.length > 0 && !payForm.DepositBankId)}
+                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                {saving ? "Submitting..." : "Submit for Approval"}
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Milestone Dialog */}
+        <Dialog open={addDialog} onOpenChange={(o) => { if (!o) setAddDialog(false); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader><DialogTitle className="font-heading">Add Custom Milestone</DialogTitle></DialogHeader>
+            <div className="space-y-3">
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
-                <select value={payForm.PaymentMode} onChange={(e) => setPayForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Select mode</option>
-                  {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
-                </select>
+                <label className="text-xs text-muted-foreground block mb-1">Milestone Name *</label>
+                <input type="text" value={addForm.MilestoneName}
+                  onChange={(e) => setAddForm((f) => ({ ...f, MilestoneName: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                  placeholder="e.g. PLC Charges" />
               </div>
-              <div className="col-span-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Due Date</label>
+                  <input type="date" value={addForm.DueDate}
+                    onChange={(e) => setAddForm((f) => ({ ...f, DueDate: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Amount Due (₹)</label>
+                  <input type="number" value={addForm.AmountDue}
+                    onChange={(e) => setAddForm((f) => ({ ...f, AmountDue: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Responsible Department</label>
+                <input type="text" value={addForm.ResponsibleDepartment}
+                  onChange={(e) => setAddForm((f) => ({ ...f, ResponsibleDepartment: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                  placeholder="e.g. Construction, Legal, Sales" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Required Documents</label>
+                <input type="text" value={addForm.RequiredDocuments}
+                  onChange={(e) => setAddForm((f) => ({ ...f, RequiredDocuments: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                  placeholder="e.g. Completion Certificate" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-border">
+              <button onClick={() => setAddDialog(false)}
+                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              <button onClick={handleAddMilestone} disabled={saving || !addForm.MilestoneName.trim()}
+                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                {saving ? "Adding..." : "Add Milestone"}
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Deposit On Account Dialog */}
+        <Dialog open={onAccountDialog} onOpenChange={(o) => { if (!o) setOnAccountDialog(false); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} className="text-blue-600" /> Submit On-Account Deposit</DialogTitle></DialogHeader>
+            <p className="text-xs text-muted-foreground -mt-2">Goes to Finance's Received Payment queue for approval. Once approved, it's held as a credit and auto-applied to the next due milestone in sequence.</p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Amount (₹) *</label>
+                <input type="number" value={onAccountForm.Amount}
+                  onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Received Date</label>
+                  <input type="date" value={onAccountForm.ReceivedDate}
+                    onChange={(e) => setOnAccountForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
+                  <select value={onAccountForm.PaymentMode} onChange={(e) => setOnAccountForm((f) => ({ ...f, PaymentMode: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                    <option value="">Select mode</option>
+                    {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
+                <input type="text" value={onAccountForm.TransactionRef}
+                  onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+              <div>
                 <label className="text-xs text-muted-foreground block mb-1">
-                  Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project${payForm.AmountPaid && bankOptions.length > 0 ? " *" : ""}` : ""}
+                  Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project` : ""}
                 </label>
-                <select value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
+                <select value={onAccountForm.DepositBankId} onChange={(e) => setOnAccountForm((f) => ({ ...f, DepositBankId: e.target.value }))}
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                   <option value="">Select company bank</option>
                   {(bankOptions as any[]).map((b: any) => (
@@ -674,152 +930,83 @@ const CrmPaymentMilestones: React.FC = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-span-2">
-                <label className="text-xs text-muted-foreground block mb-1">Remarks</label>
-                <textarea value={payForm.Remarks} onChange={(e) => setPayForm((f) => ({ ...f, Remarks: e.target.value }))}
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+                <textarea value={onAccountForm.Notes} onChange={(e) => setOnAccountForm((f) => ({ ...f, Notes: e.target.value }))}
                   rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
               </div>
             </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-border">
+              <button onClick={() => setOnAccountDialog(false)}
+                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              <button onClick={handleDepositOnAccount}
+                disabled={saving || !onAccountForm.Amount || (bankOptions.length > 0 && !onAccountForm.DepositBankId)}
+                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                {saving ? "Submitting..." : "Submit for Approval"}
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
-            {customerBank && (customerBank.BankName || customerBank.AccountNo) && (
-              <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Customer's Bank (on file, reference only)</p>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                  <span className="text-muted-foreground">Bank</span>
-                  <span className="font-medium text-right">{customerBank.BankName || "—"}</span>
-                  <span className="text-muted-foreground">A/C No.</span>
-                  <span className="font-medium text-right font-mono">{customerBank.AccountNo || "—"}</span>
-                  <span className="text-muted-foreground">IFSC</span>
-                  <span className="font-medium text-right font-mono">{customerBank.IfscCode || "—"}</span>
+        {/* Waive Dialog */}
+        <Dialog open={!!waiveDialog} onOpenChange={(o) => { if (!o) setWaiveDialog(null); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="font-heading flex items-center gap-1.5 text-amber-700">
+                <AlertTriangle size={16} /> Waive Milestone
+              </DialogTitle>
+            </DialogHeader>
+            {waiveDialog && (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Waiving <span className="font-medium text-foreground">{waiveDialog.milestone.MilestoneName}</span> ({fmt(waiveDialog.milestone.AmountDue)}) marks it as cleared without payment. This cannot be undone.
+                </p>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Reason *</label>
+                  <textarea
+                    value={waiveDialog.reason}
+                    onChange={(e) => setWaiveDialog((d) => d ? { ...d, reason: e.target.value } : d)}
+                    rows={3}
+                    placeholder="e.g. Discount approved by management, PLC waiver agreed in negotiation…"
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none"
+                    autoFocus
+                  />
                 </div>
-              </div>
+                <div className="flex justify-end gap-2 pt-3 border-t border-border">
+                  <button onClick={() => setWaiveDialog(null)}
+                    className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                  <button onClick={handleWaiveConfirm}
+                    disabled={waiving || !waiveDialog.reason.trim()}
+                    className="px-4 py-1.5 text-sm bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-40">
+                    {waiving ? "Waiving..." : "Confirm Waive"}
+                  </button>
+                </div>
+              </>
             )}
-          </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => setEditingId(null)}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleRecordPayment}
-              disabled={saving || !!(payForm.AmountPaid && bankOptions.length > 0 && !payForm.DepositBankId)}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Submitting..." : "Submit for Approval"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
 
-      {/* Add Milestone Dialog */}
-      <Dialog open={addDialog} onOpenChange={(o) => { if (!o) setAddDialog(false); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading">Add Custom Milestone</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Milestone Name *</label>
-              <input type="text" value={addForm.MilestoneName}
-                onChange={(e) => setAddForm((f) => ({ ...f, MilestoneName: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
-                placeholder="e.g. PLC Charges" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Due Date</label>
-              <input type="date" value={addForm.DueDate}
-                onChange={(e) => setAddForm((f) => ({ ...f, DueDate: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Amount Due (₹)</label>
-              <input type="number" value={addForm.AmountDue}
-                onChange={(e) => setAddForm((f) => ({ ...f, AmountDue: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Responsible Department</label>
-              <input type="text" value={addForm.ResponsibleDepartment}
-                onChange={(e) => setAddForm((f) => ({ ...f, ResponsibleDepartment: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
-                placeholder="e.g. Construction, Legal, Sales" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Required Documents</label>
-              <input type="text" value={addForm.RequiredDocuments}
-                onChange={(e) => setAddForm((f) => ({ ...f, RequiredDocuments: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
-                placeholder="e.g. Completion Certificate" />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => setAddDialog(false)}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleAddMilestone} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Adding..." : "Add Milestone"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
-      {/* Deposit On Account Dialog */}
-      <Dialog open={onAccountDialog} onOpenChange={(o) => { if (!o) setOnAccountDialog(false); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} className="text-blue-600" /> Deposit On Account</DialogTitle></DialogHeader>
-          <p className="text-xs text-muted-foreground -mt-2">For a customer paying more than what's currently due — held as a credit and applied to milestones as they come up, in order.</p>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Amount (₹) *</label>
-              <input type="number" value={onAccountForm.Amount}
-                onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Received Date</label>
-                <input type="date" value={onAccountForm.ReceivedDate}
-                  onChange={(e) => setOnAccountForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
-                <select value={onAccountForm.PaymentMode} onChange={(e) => setOnAccountForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Select mode</option>
-                  {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
-              <input type="text" value={onAccountForm.TransactionRef}
-                onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">
-                Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project${bankOptions.length > 0 ? " *" : ""}` : ""}
-              </label>
-              <select value={onAccountForm.DepositBankId} onChange={(e) => setOnAccountForm((f) => ({ ...f, DepositBankId: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select company bank</option>
-                {(bankOptions as any[]).map((b: any) => (
-                  <option key={b.BId} value={String(b.BId)}>{b.BName}{b.BAccountNumber ? ` — ${b.BAccountNumber}` : ""}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-              <textarea value={onAccountForm.Notes} onChange={(e) => setOnAccountForm((f) => ({ ...f, Notes: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => setOnAccountDialog(false)}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleDepositOnAccount}
-              disabled={saving || !onAccountForm.Amount || (bankOptions.length > 0 && !onAccountForm.DepositBankId)}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Recording..." : "Record Deposit"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </CrmShell>
+        {/* Remarks Dialog */}
+        <Dialog open={!!remarksDialog} onOpenChange={(o) => { if (!o) setRemarksDialog(null); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="font-heading flex items-center gap-1.5">
+                <MessageSquare size={15} /> Payment Remarks
+              </DialogTitle>
+            </DialogHeader>
+            {remarksDialog && (
+              <>
+                <p className="text-xs text-muted-foreground">{remarksDialog.milestone.MilestoneName} · {fmtDate(remarksDialog.milestone.PaidDate)}</p>
+                <p className="text-sm text-foreground bg-muted/30 rounded-lg p-3 leading-relaxed">{remarksDialog.milestone.Remarks}</p>
+                <div className="flex justify-end pt-2">
+                  <button onClick={() => setRemarksDialog(null)}
+                    className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+      </CrmShell>
     </>
   );
 };

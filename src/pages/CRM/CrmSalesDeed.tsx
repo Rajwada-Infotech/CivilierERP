@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -73,8 +74,8 @@ function fmtDate(d?: string | null) {
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-const EMPTY_FORM = { BookingId: "", DeedValue: "", StampDuty: "", RegistrationFee: "", SubRegistrarOffice: "", DeedDate: "" };
-const EMPTY_DEED_FORM = { DeedValue: "", StampDuty: "", RegistrationFee: "", SubRegistrarOffice: "", DeedDate: "" };
+const EMPTY_FORM = { BookingId: "", DeedValue: "", StampDuty: "", RegistrationFee: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "" };
+const EMPTY_DEED_FORM = { DeedValue: "", StampDuty: "", RegistrationFee: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "" };
 const EMPTY_PROGRESS_FORM = { ExecutedBy: "", RegistrationNo: "", BookNo: "", PartNo: "", RegistrationDate: "", PossessionDate: "" };
 
 async function fetchAll(): Promise<any[]> {
@@ -94,8 +95,10 @@ async function fetchBookingContext(bookingId: string): Promise<any> {
 const CrmSalesDeed: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
+  const deedIdFilter = sp.get("deedId");
+  const [deedDeepLinkOpened, setDeedDeepLinkOpened] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
@@ -119,7 +122,7 @@ const CrmSalesDeed: React.FC = () => {
   const trackedBookingIds = new Set((deeds as any[]).map((d: any) => d.BookingId));
   const eligibleBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
 
-  const agreementExecuted = context?.agreement?.Status === "Executed";
+  const agreementExecuted = context?.agreement?.Status === CrmStatus.EXECUTED;
   // Loan Processing only exists as a gate at all for a booking explicitly
   // marked Loan-Financed � Self-Funded and undeclared bookings never had a
   // loan to process, so they clear immediately (see
@@ -138,7 +141,7 @@ const CrmSalesDeed: React.FC = () => {
   // also feed Query Payment's live-computed amount (see crmSalesDeed.js
   // PUT /:id for the matching server-side guard).
   const deedFieldsLocked = !!detail?.SentToCustomerAt;
-  const progressLocked = detail && (detail.Status === "Registered" || detail.Status === "Cancelled");
+  const progressLocked = detail && (detail.Status === CrmStatus.REGISTERED || detail.Status === CrmStatus.CANCELLED);
 
   // Deep-link from Legal Milestones: pre-fill New Deed with this booking if
   // it doesn't have one yet.
@@ -151,6 +154,21 @@ const CrmSalesDeed: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkBookingId, deeds.length, bookings.length]);
+
+  // Row clicks (openDetail below) only ever set local state — the URL
+  // stayed plain /crm/sales-deed, so a refresh lost the open detail dialog
+  // and there was nothing to copy/bookmark/share to jump straight back to
+  // this deed. This is the read side: ?deedId=X on load opens it once the
+  // list has loaded far enough to find the matching row.
+  useEffect(() => {
+    if (!deedIdFilter || deedDeepLinkOpened || !(deeds as any[]).length) return;
+    const match = (deeds as any[]).find((d: any) => String(d.Id) === deedIdFilter);
+    if (match) {
+      setDeedDeepLinkOpened(true);
+      openDetail(match);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deedIdFilter, deedDeepLinkOpened, deeds]);
 
   const handleCreate = async () => {
     if (!form.BookingId) { toast.error("Booking is required"); return; }
@@ -184,6 +202,7 @@ const CrmSalesDeed: React.FC = () => {
       RegistrationFee: d.RegistrationFee != null ? String(d.RegistrationFee) : "",
       SubRegistrarOffice: d.SubRegistrarOffice || "",
       DeedDate: d.DeedDate ? String(d.DeedDate).slice(0, 10) : "",
+      RegistrationDeadline: d.RegistrationDeadline ? String(d.RegistrationDeadline).slice(0, 10) : "",
     });
     setProgressForm({
       ExecutedBy: d.ExecutedBy || "", RegistrationNo: d.RegistrationNo || "",
@@ -193,6 +212,12 @@ const CrmSalesDeed: React.FC = () => {
     });
     setDeedFormEditing(false);
     setDetailId(d.Id);
+    setSp((p) => { p.set("deedId", String(d.Id)); return p; }, { replace: true });
+  };
+
+  const closeDetail = () => {
+    setDetailId(null);
+    setSp((p) => { p.delete("deedId"); return p; }, { replace: true });
   };
 
   const handleSaveDeedFields = async () => {
@@ -433,6 +458,11 @@ const CrmSalesDeed: React.FC = () => {
               <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Sub-Registrar Office</label>
               <Input className="h-10" value={form.SubRegistrarOffice} onChange={(e) => setForm((f) => ({ ...f, SubRegistrarOffice: e.target.value }))} />
             </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Registration Deadline (RERA)</label>
+              <Input type="date" className="h-10" value={form.RegistrationDeadline} onChange={(e) => setForm((f) => ({ ...f, RegistrationDeadline: e.target.value }))} />
+              <p className="text-[10px] text-muted-foreground">SLA engine alerts when this passes without a Registration No. being recorded.</p>
+            </div>
           </div>
 
           <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20">
@@ -449,7 +479,7 @@ const CrmSalesDeed: React.FC = () => {
       {/* -- Deed detail � the single place to view AND act on a deed: core
           deed fields (editable until sent to customer), execution/
           registration progress, and the approval chain. --------------- */}
-      <Dialog open={!!detailId} onOpenChange={(o) => { if (!o) setDetailId(null); }}>
+      <Dialog open={!!detailId} onOpenChange={(o) => { if (!o) closeDetail(); }}>
         <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden">
           {detail && (
             <>
@@ -506,6 +536,10 @@ const CrmSalesDeed: React.FC = () => {
                           <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Deed Date</label>
                           <Input type="date" className="h-10" value={deedForm.DeedDate} onChange={(e) => setDeedForm((f) => ({ ...f, DeedDate: e.target.value }))} />
                         </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Registration Deadline</label>
+                          <Input type="date" className="h-10" value={deedForm.RegistrationDeadline} onChange={(e) => setDeedForm((f) => ({ ...f, RegistrationDeadline: e.target.value }))} />
+                        </div>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Sub-Registrar Office</label>
@@ -525,6 +559,7 @@ const CrmSalesDeed: React.FC = () => {
                       <DetailRow label="Stamp Duty" value={detail.StampDuty ? formatINR(detail.StampDuty) : "�"} mono />
                       <DetailRow label="Registration Fee" value={detail.RegistrationFee ? formatINR(detail.RegistrationFee) : "�"} mono />
                       <DetailRow label="Deed Date" value={fmtDate(detail.DeedDate)} />
+                      <DetailRow label="Registration Deadline" value={fmtDate(detail.RegistrationDeadline)} />
                       <DetailRow label="Sub-Registrar Office" value={detail.SubRegistrarOffice || "�"} />
                     </div>
                   )}
@@ -582,7 +617,7 @@ const CrmSalesDeed: React.FC = () => {
                 <div>
                   <SectionLabel>Approvals</SectionLabel>
                   <DetailRow label="Customer Approval" value={<StatusBadge status={detail.CustomerApprovalStatus || "NotSent"} cfg={APPROVAL_CFG} />} />
-                  {!detail.SentToCustomerAt && detail.Status !== "Registered" && (
+                  {!detail.SentToCustomerAt && detail.Status !== CrmStatus.REGISTERED && (
                     <div className="flex justify-end pb-2">
                       <button onClick={handleSendToCustomer} disabled={sendingToCustomer}
                         className="px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted disabled:opacity-40 transition-colors">
@@ -596,14 +631,14 @@ const CrmSalesDeed: React.FC = () => {
                       value={
                         <div className="flex items-center gap-2 justify-end">
                           <StatusBadge status={detail.DirectorApprovalStatus} cfg={APPROVAL_CFG} />
-                          {detail.DirectorApprovalStatus === "Pending" && (
+                          {detail.DirectorApprovalStatus === CrmStatus.PENDING && (
                             <ApprovalActions
                               status={detail.DirectorApprovalStatus}
                               recordId={detail.Id}
                               endpoint={API}
                               actionPathSuffix="director"
                               approverRoles={["super_admin"]}
-                              onSuccess={() => { qc.invalidateQueries({ queryKey: ["crm-sales-deed"] }); setDetailId(null); }}
+                              onSuccess={() => { qc.invalidateQueries({ queryKey: ["crm-sales-deed"] }); closeDetail(); }}
                             />
                           )}
                         </div>
@@ -614,7 +649,7 @@ const CrmSalesDeed: React.FC = () => {
               </div>
 
               <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20">
-                <button onClick={() => setDetailId(null)} className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors">Close</button>
+                <button onClick={closeDetail} className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors">Close</button>
               </DialogFooter>
             </>
           )}

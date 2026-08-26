@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -375,14 +376,14 @@ const CrmNoc: React.FC = () => {
                     <div className="flex items-center gap-1.5 text-sm font-medium text-emerald-700">
                       <CheckCircle2 size={16} /> Issued on {fmtDate(detail.IssuedDate)} — no further action needed
                     </div>
-                  ) : detail.Status === "Pending" ? (
+                  ) : detail.Status === CrmStatus.PENDING ? (
                     <div className="text-xs text-muted-foreground">Pending admin approval</div>
-                  ) : detail.Status === "Approved" ? (
+                  ) : detail.Status === CrmStatus.APPROVED ? (
                     <button onClick={handleMarkIssued} disabled={markingIssued}
                       className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 transition-colors">
                       {markingIssued ? "Marking..." : "Mark Issued"}
                     </button>
-                  ) : detail.Status === "Rejected" ? (
+                  ) : detail.Status === CrmStatus.REJECTED ? (
                     <ApprovalActions
                       status={detail.Status}
                       recordId={detail.Id}

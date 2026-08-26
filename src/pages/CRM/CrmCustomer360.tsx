@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -247,8 +248,8 @@ const CrmCustomer360: React.FC = () => {
                     const expanded = expandedBookingId === b.Id;
                     const milestones = b.milestones || [];
                     const today = new Date();
-                    const overdueCount = milestones.filter((m: any) => m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < today).length;
-                    const pendingCount = milestones.filter((m: any) => m.Status !== "Paid" && m.Status !== "Waived").length;
+                    const overdueCount = milestones.filter((m: any) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < today).length;
+                    const pendingCount = milestones.filter((m: any) => m.Status !== CrmStatus.PAID && m.Status !== "Waived").length;
                     const ledgerCount = (b.receipts?.length || 0) + (b.invoices?.length || 0) + (b.onAccount?.length || 0) + (b.brokerage?.length || 0);
                     return (
                       <div key={b.Id} className="rounded-lg border border-border overflow-hidden">
@@ -320,14 +321,14 @@ const CrmCustomer360: React.FC = () => {
                             <LedgerSubSection icon={CalendarClock} title="Payment Milestones" rows={milestones} empty="No payment plan on this booking">
                               {(m: any) => {
                                 const balance = Number(m.AmountDue || 0) - Number(m.AmountPaid || 0);
-                                const overdue = m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < today;
+                                const overdue = m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < today;
                                 return (
                                   <Row key={m.Id}>
                                     <span className="text-xs font-medium">#{m.MilestoneNo} {m.MilestoneName}</span>
                                     <span className="text-xs">{fmt(m.AmountDue)}{m.Percent != null ? ` (${m.Percent}%)` : ""}</span>
                                     <span className="text-xs text-green-600">{fmt(m.AmountPaid)} paid</span>
                                     <span className={`text-xs font-medium ${balance > 0 ? "text-orange-600" : "text-muted-foreground"}`}>{fmt(balance)} due</span>
-                                    <span className={`text-xs font-medium ${m.Status === "Paid" ? "text-green-600" : overdue ? "text-red-600" : "text-muted-foreground"}`}>
+                                    <span className={`text-xs font-medium ${m.Status === CrmStatus.PAID ? "text-green-600" : overdue ? "text-red-600" : "text-muted-foreground"}`}>
                                       {overdue ? "Overdue" : m.Status}{m.DueDate ? ` · ${dt(m.DueDate)}` : ""}
                                     </span>
                                   </Row>

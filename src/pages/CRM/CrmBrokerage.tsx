@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -12,6 +13,7 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { useTds } from "@/contexts/TdsContext";
 
 const API = "/api/crm/brokerage";
 const BKG_API = "/api/crm/bookings";
@@ -23,7 +25,7 @@ const statusColor: Record<string, string> = {
   Paid: "text-green-600 bg-green-50 border-green-200",
 };
 
-const EMPTY_FORM = { BookingId: "", BrokerId: "", BrokerFirm: "", RateType: "Percentage", RateValue: "", ComputedAmount: "", Notes: "" };
+const EMPTY_FORM = { BookingId: "", BrokerId: "", BrokerFirm: "", RateType: "Percentage", RateValue: "", ComputedAmount: "", TDSId: "", Notes: "" };
 
 async function fetchAll(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
@@ -48,6 +50,7 @@ const CrmBrokerage: React.FC = () => {
   const { data: records = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-brokerage"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["broker-master"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
+  const { tdsRecords } = useTds();
   // Broker Master is the source of truth for the broker's own identity —
   // once picked, his details are only ever displayed read-only here, never
   // re-typed. Only the Firm/Rate below are genuinely per-deal fields.
@@ -68,6 +71,7 @@ const CrmBrokerage: React.FC = () => {
       RateType: r.RateType || "Percentage",
       RateValue: r.RateValue != null ? String(r.RateValue) : "",
       ComputedAmount: r.ComputedAmount != null ? String(r.ComputedAmount) : "",
+      TDSId: r.TDSId != null ? String(r.TDSId) : "",
       Notes: r.Notes || "",
     });
     setDialogOpen(true);
@@ -102,6 +106,7 @@ const CrmBrokerage: React.FC = () => {
           BrokerId: form.BrokerId ? parseInt(form.BrokerId) : undefined,
           RateValue: form.RateValue ? Number(form.RateValue) : undefined,
           ComputedAmount: form.ComputedAmount ? Number(form.ComputedAmount) : undefined,
+          TDSId: form.TDSId ? parseInt(form.TDSId) : null,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
@@ -151,8 +156,24 @@ const CrmBrokerage: React.FC = () => {
           </span>
         );
       } },
-    { accessorKey: "ComputedAmount", header: "Computed Amount", size: 130,
-      cell: (i) => <span className="font-semibold">₹{Number(i.row.original.ComputedAmount).toLocaleString("en-IN")}</span> },
+    { accessorKey: "ComputedAmount", header: "Amount / TDS / Net", size: 180,
+      cell: (i) => {
+        const r = i.row.original;
+        const gross = Number(r.ComputedAmount || 0);
+        const tds   = Number(r.TDSAmount || 0);
+        const net   = Number(r.NetPayable ?? gross);
+        return (
+          <div className="text-xs space-y-0.5">
+            <div className="font-semibold text-foreground">₹{gross.toLocaleString("en-IN")}</div>
+            {tds > 0 && (
+              <div className="text-orange-600">− TDS {r.TDSPercentage}%: ₹{tds.toLocaleString("en-IN")}</div>
+            )}
+            <div className={`font-bold ${tds > 0 ? "text-green-600" : "text-foreground"}`}>
+              Net: ₹{net.toLocaleString("en-IN")}
+            </div>
+          </div>
+        );
+      } },
     { accessorKey: "Status", header: "Status", size: 100,
       cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
     { id: "actions", header: "Actions", size: 160, enableSorting: false,
@@ -175,15 +196,15 @@ const CrmBrokerage: React.FC = () => {
               submitOnly
               onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-brokerage"] })}
             />
-            {r.Status === "Pending" && (
+            {r.Status === CrmStatus.PENDING && (
               <button onClick={() => openEdit(r)} className="text-xs text-primary hover:underline">Customize amount</button>
             )}
-            {r.Status === "Approved" && (
+            {r.Status === CrmStatus.APPROVED && (
               <button onClick={() => navigate(r.FinancePaymentId ? `/payments?id=${r.FinancePaymentId}` : "/payments")} className="text-xs text-primary hover:underline">
                 {r.FinancePaymentDocNo ? `Finance: ${r.FinancePaymentDocNo}` : "Sent to Finance"}
               </button>
             )}
-            {r.Status === "Paid" && <span className="text-xs text-muted-foreground">Fully paid</span>}
+            {r.Status === CrmStatus.PAID && <span className="text-xs text-muted-foreground">Fully paid</span>}
           </>
         );
       } },
@@ -239,7 +260,16 @@ const CrmBrokerage: React.FC = () => {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Broker * (from Broker Master)</label>
-              <select value={form.BrokerId} disabled={!!editingId} onChange={(e) => setForm((f) => ({ ...f, BrokerId: e.target.value }))}
+              <select value={form.BrokerId} disabled={!!editingId} onChange={(e) => {
+                  const brokerId = e.target.value;
+                  const broker = (brokers as any[]).find((b: any) => String(b.LHeadId) === brokerId);
+                  setForm((f) => ({
+                    ...f,
+                    BrokerId: brokerId,
+                    // Clear TDS if broker is marked TDS not applicable
+                    TDSId: broker && !broker.IsTdsApplicable ? "" : f.TDSId,
+                  }));
+                }}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select broker</option>
                 {(brokers as any[]).map((b: any) => (
@@ -257,6 +287,7 @@ const CrmBrokerage: React.FC = () => {
                 {selectedBroker.LHeadPan && <div><span className="text-muted-foreground">PAN: </span><span className="font-mono font-medium">{selectedBroker.LHeadPan}</span></div>}
                 {selectedBroker.LHeadRera && <div><span className="text-muted-foreground">RERA: </span><span className="font-mono font-medium">{selectedBroker.LHeadRera}</span></div>}
                 {selectedBroker.LHeadPaymentTerms && <div><span className="text-muted-foreground">Terms: </span><span className="font-medium">{selectedBroker.LHeadPaymentTerms}</span></div>}
+                <div><span className="text-muted-foreground">TDS: </span><span className={`font-medium ${selectedBroker.IsTdsApplicable !== false ? "text-amber-600" : "text-muted-foreground"}`}>{selectedBroker.IsTdsApplicable !== false ? "Applicable (Sec. 194H)" : "Not Applicable"}</span></div>
               </div>
             )}
 
@@ -275,10 +306,28 @@ const CrmBrokerage: React.FC = () => {
                 </select>
               </div>
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Rate Value * ({form.RateType === "Percentage" ? "%" : "₹"})</label>
-              <input type="number" value={form.RateValue} onChange={(e) => setForm((f) => ({ ...f, RateValue: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Rate Value * ({form.RateType === "Percentage" ? "%" : "₹"})</label>
+                <input type="number" value={form.RateValue} onChange={(e) => setForm((f) => ({ ...f, RateValue: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  TDS (Sec. 194H)
+                  {selectedBroker && selectedBroker.IsTdsApplicable === false && (
+                    <span className="ml-1.5 text-[10px] text-muted-foreground">· Not applicable per Broker Master</span>
+                  )}
+                </label>
+                <select value={form.TDSId} onChange={(e) => setForm((f) => ({ ...f, TDSId: e.target.value }))}
+                  disabled={selectedBroker?.IsTdsApplicable === false}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background disabled:opacity-50 disabled:cursor-not-allowed">
+                  <option value="">None / Nil certificate</option>
+                  {tdsRecords.filter((t) => t.status).map((t) => (
+                    <option key={t.id} value={t.id}>{t.name} ({t.percentage}%)</option>
+                  ))}
+                </select>
+              </div>
             </div>
             {editingId && (
               <div>

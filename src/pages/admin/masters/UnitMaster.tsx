@@ -14,6 +14,7 @@ import {
 } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
 
 const API = "/api/unit-master";
 const DROPDOWN_API = "/api/business/dropdown";
@@ -130,32 +131,21 @@ const fields: FieldDef[] = [
         plans = allPlans;
       }
 
-      const selected: string[] = (value as string[]) || [];
-      if (!plans.length) {
-        return <p className="text-[11px] text-muted-foreground">No active payment plans exist yet — create one in Payment Plan Master first.</p>;
-      }
+      // Dropdown rather than an inline pill wrap: a project can carry 50+
+      // active plans, and the old wrap grew until it pushed the rest of the
+      // form off screen. Collapsed height is now fixed regardless of count,
+      // and the list is searchable.
       return (
-        <div>
-          {scopeNote && <p className="text-[11px] text-muted-foreground mb-1.5">{scopeNote}</p>}
-          <div className="flex flex-wrap gap-2">
-          {plans.map((p) => {
-            const id = String(p.Id);
-            const isSelected = selected.includes(id);
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() =>
-                  onChange(isSelected ? selected.filter((x) => x !== id) : [...selected, id])
-                }
-                className={`px-3 py-1 rounded-full text-xs font-heading border transition-all ${isSelected ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary"}`}
-              >
-                {p.PlanName}
-              </button>
-            );
-          })}
-          </div>
-        </div>
+        <MultiSelectDropdown
+          options={plans.map((p: any) => ({ id: p.Id, label: p.PlanName }))}
+          value={value}
+          onChange={onChange}
+          itemNoun="payment plan"
+          placeholder="No payment plans tagged — inherits from Block or Project"
+          searchPlaceholder="Search payment plans…"
+          note={scopeNote || undefined}
+          emptyMessage="No active payment plans exist yet — create one in Payment Plan Master first."
+        />
       );
     },
   },

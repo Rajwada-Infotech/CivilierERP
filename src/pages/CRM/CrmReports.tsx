@@ -113,6 +113,41 @@ const CATEGORIES: Category[] = [
 
 const ALL_REPORTS: ReportDef[] = CATEGORIES.flatMap((c) => c.reports);
 
+// ---------- aging summary component ----------
+const AGING_BUCKETS = [
+  { key: "0–30 Days",  color: "#22c55e" },
+  { key: "31–60 Days", color: "#f59e0b" },
+  { key: "61–90 Days", color: "#f97316" },
+  { key: "90+ Days",        color: "#ef4444" },
+];
+
+const AgingSummary: React.FC<{ rows: any[] }> = ({ rows }) => {
+  const buckets = AGING_BUCKETS.map(({ key, color }) => {
+    const group = rows.filter((r) => r.AgingBucket === key);
+    return { key, color, count: group.length, total: group.reduce((s, r) => s + (Number(r.Balance) || 0), 0) };
+  });
+  const grand = rows.reduce((s, r) => s + (Number(r.Balance) || 0), 0);
+  return (
+    <div className="px-4 py-3 border-b border-border bg-muted/20 grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {buckets.map(({ key, color, count, total }) => (
+        <div key={key} className="rounded-lg p-3 border" style={{ borderColor: `${color}30`, background: `${color}08` }}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color }}>{key}</p>
+          <p className="text-lg font-bold tabular-nums text-foreground">{count}</p>
+          <p className="text-xs text-muted-foreground tabular-nums">
+            {`₹${total.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`} overdue
+          </p>
+        </div>
+      ))}
+      <div className="col-span-2 sm:col-span-4 flex items-center justify-between text-xs text-muted-foreground border-t border-border pt-2 mt-1">
+        <span>{rows.length} milestone{rows.length !== 1 ? "s" : ""} overdue</span>
+        <span className="font-semibold text-foreground tabular-nums">
+          Total: {`₹${grand.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}
+        </span>
+      </div>
+    </div>
+  );
+};
+
 // ---------- table component ----------
 const ReportTable: React.FC<{ rows: any[] }> = ({ rows }) => {
   if (!rows.length) return null;
@@ -303,7 +338,10 @@ const CrmReports: React.FC = () => {
                 )}
               </div>
             ) : (
-              <ReportTable rows={data} />
+              <>
+                {activeId === "aging-analysis" && data.length > 0 && <AgingSummary rows={data} />}
+                <ReportTable rows={data} />
+              </>
             )}
           </div>
         </div>

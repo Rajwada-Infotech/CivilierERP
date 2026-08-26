@@ -1,3 +1,4 @@
+import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -99,12 +100,12 @@ function agreementStepStates(a: any, documents: any[] | undefined): { label: str
   const legalAssigned = !!a?.LegalExecutiveId;
   const followup = followupProgress(documents);
   const followupDone = followup.required > 0 && followup.percent === 100;
-  const senior = a?.SeniorApprovalStatus === "Approved";
+  const senior = a?.SeniorApprovalStatus === CrmStatus.APPROVED;
   const sent = !!a?.SentToCustomerAt;
-  const custApproved = a?.CustomerApprovalStatus === "Approved";
+  const custApproved = a?.CustomerApprovalStatus === CrmStatus.APPROVED;
   const dated = !!a?.AgreementDate;
-  const executed = a?.Status === "Executed" || a?.Status === "Registered";
-  const registered = a?.Status === "Registered";
+  const executed = a?.Status === CrmStatus.EXECUTED || a?.Status === CrmStatus.REGISTERED;
+  const registered = a?.Status === CrmStatus.REGISTERED;
   return [
     { label: "Initialisation",       state: "done" as StepState,                                                    tab: "Overview" as AgrTab },
     { label: "Legal Exec. Assigned", state: (legalAssigned ? "done" : "current") as StepState,                      tab: "Legal & Approval" as AgrTab },
@@ -250,7 +251,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
   }, [tab, audit, doc.Id]);
 
   const setStatus = async (status: string) => {
-    if (status === "Rejected" && !remarks.trim()) { toast.error("Remarks are required to reject"); return; }
+    if (status === CrmStatus.REJECTED && !remarks.trim()) { toast.error("Remarks are required to reject"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${agreementId}/documents/${doc.Id}`, {
@@ -372,7 +373,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
             <button onClick={() => setStatus("Verified")} disabled={saving}
               className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-40">Verify</button>
           )}
-          {!!doc.FilePath && doc.Status !== "Rejected" && (
+          {!!doc.FilePath && doc.Status !== CrmStatus.REJECTED && (
             <button onClick={() => setStatus("Rejected")} disabled={saving}
               className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">Reject</button>
           )}
@@ -411,11 +412,19 @@ async function fetchBookings(): Promise<any[]> {
 const CrmAgreement: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const bkgFilter = sp.get("bookingId") || "";
   const idFilter = sp.get("id") ? parseInt(sp.get("id")!, 10) : null;
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(idFilter);
+  // Selecting a row only ever set local state — the URL stayed at whatever
+  // it loaded with, so a refresh or shared link lost track of which
+  // agreement was open. Keeps ?id= in sync with the actual selection,
+  // matching the read side above (idFilter).
+  const selectAgreement = (id: number) => {
+    setSelectedId(id);
+    setSp((p) => { p.set("id", String(id)); return p; }, { replace: true });
+  };
   const [agrDialog, setAgrDialog] = useState(false);
   const [docDialog, setDocDialog] = useState(false);
   const [docRequestDialog, setDocRequestDialog] = useState(false);
@@ -823,7 +832,7 @@ const CrmAgreement: React.FC = () => {
             ) : filtered.length === 0 ? (
               <div className="p-4 text-center text-muted-foreground text-sm">No agreements found</div>
             ) : (filtered as any[]).map((a: any) => (
-              <button key={a.Id} onClick={() => setSelectedId(a.Id)}
+              <button key={a.Id} onClick={() => selectAgreement(a.Id)}
                 className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedId === a.Id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/20"}`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium truncate">{a.ApplicantName}</span>
@@ -856,7 +865,7 @@ const CrmAgreement: React.FC = () => {
               {/* Lifecycle progress + the one thing to actually do right now —
                   replaces staff having to piece the current state together
                   from separate status pills scattered further down. */}
-              {detail.agreement?.Status !== "Cancelled" && (
+              {detail.agreement?.Status !== CrmStatus.CANCELLED && (
                 <div className="rounded-xl border border-border p-4 space-y-3">
                   <AgreementStepper steps={agreementStepStates(detail.agreement, detail.documents)} activeTab={agrTab} onStepClick={setAgrTab} />
                   {(() => {
@@ -867,9 +876,9 @@ const CrmAgreement: React.FC = () => {
                     let cta: { label: string; onClick: () => void } | null = null;
                     if (cancelled) {
                       text = `The underlying booking is ${a?.BookingStatus || "inactive"} — this agreement is locked. Cancel it to close it out.`;
-                    } else if (a?.Status === "Registered") {
+                    } else if (a?.Status === CrmStatus.REGISTERED) {
                       text = "Registered — this agreement is fully complete.";
-                    } else if (a?.Status === "Executed") {
+                    } else if (a?.Status === CrmStatus.EXECUTED) {
                       text = "Executed — mark it Registered once the Sales Deed carries a Registration No.";
                     } else if (!a?.LegalExecutiveId) {
                       // Advisory, not a hard block on this step specifically —
@@ -878,7 +887,7 @@ const CrmAgreement: React.FC = () => {
                       // above and get it assigned early rather than only
                       // being discovered as a blocker at the very last step.
                       text = "Assign a Legal Executive to take ownership of preparing this agreement's paperwork — required before it can be marked executed.";
-                    } else if (a?.SeniorApprovalStatus !== "Approved") {
+                    } else if (a?.SeniorApprovalStatus !== CrmStatus.APPROVED) {
                       text = "Awaiting senior approval — visit the Admin Approval Inbox to approve or reject it.";
                     } else if (!a?.SentToCustomerAt) {
                       text = "Senior-approved — ready to send to the customer for their review.";
@@ -886,12 +895,12 @@ const CrmAgreement: React.FC = () => {
                     } else if (a?.CustomerApprovalStatus === "RecheckRequested") {
                       text = `Customer requested a recheck${a?.LastRecheckRemarks ? `: "${a.LastRecheckRemarks}"` : ""} — address it and resend.`;
                       cta = { label: "Resend After Recheck", onClick: () => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : ""); setSendDialog(true); } };
-                    } else if (a?.CustomerApprovalStatus !== "Approved") {
+                    } else if (a?.CustomerApprovalStatus !== CrmStatus.APPROVED) {
                       text = "Sent to the customer — awaiting their review and approval.";
                     } else if (!a?.AgreementDate) {
-                      if (a?.DateApprovalStatus === "Pending") {
+                      if (a?.DateApprovalStatus === CrmStatus.PENDING) {
                         text = "Both sides agreed on a date — awaiting super admin sign-off.";
-                      } else if (a?.ProposedDateStatus === "PendingCustomerReview") {
+                      } else if (a?.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW) {
                         text = `We proposed ${a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "a date"} — awaiting the customer's response.`;
                       } else if (a?.ProposedDateStatus === "PendingCompanyReview") {
                         text = `Customer ${a?.ProposedDate ? `proposed ${String(a.ProposedDate).slice(0, 10)}` : "revised the date"} — accept it or propose a different one.`;
@@ -946,7 +955,7 @@ const CrmAgreement: React.FC = () => {
                         ⚠ Booking {detail.agreement.BookingStatus || "Inactive"}
                       </span>
                     )}
-                    {detail.agreement?.Status === "Draft" && (
+                    {detail.agreement?.Status === CrmStatus.DRAFT && (
                       isBookingCancelled(detail.agreement) ? (
                         <span title="Booking is cancelled — cannot edit" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
                           Edit Details
@@ -958,7 +967,7 @@ const CrmAgreement: React.FC = () => {
                         </button>
                       )
                     )}
-                    {detail.agreement?.Status === "Draft" && (() => {
+                    {detail.agreement?.Status === CrmStatus.DRAFT && (() => {
                       const pendingDocs = unverifiedMandatoryDocs(detail.documents);
                       if (isBookingCancelled(detail.agreement)) {
                         return (
@@ -967,8 +976,8 @@ const CrmAgreement: React.FC = () => {
                           </span>
                         );
                       }
-                      const approvalsReady = detail.agreement?.SeniorApprovalStatus === "Approved"
-                        && detail.agreement?.CustomerApprovalStatus === "Approved"
+                      const approvalsReady = detail.agreement?.SeniorApprovalStatus === CrmStatus.APPROVED
+                        && detail.agreement?.CustomerApprovalStatus === CrmStatus.APPROVED
                         && detail.agreement?.AgreementDate;
                       if (!approvalsReady) {
                         return (
@@ -1003,7 +1012,7 @@ const CrmAgreement: React.FC = () => {
                         </button>
                       );
                     })()}
-                    {detail.agreement?.Status === "Executed" && (
+                    {detail.agreement?.Status === CrmStatus.EXECUTED && (
                       isBookingCancelled(detail.agreement) ? (
                         <span title="Booking is cancelled — cannot mark registered" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
                           Mark Registered
@@ -1015,7 +1024,7 @@ const CrmAgreement: React.FC = () => {
                         </button>
                       )
                     )}
-                    {(detail.agreement?.Status === "Draft" || detail.agreement?.Status === "Executed") && (
+                    {(detail.agreement?.Status === CrmStatus.DRAFT || detail.agreement?.Status === CrmStatus.EXECUTED) && (
                       <button onClick={() => { if (window.confirm("Cancel this agreement?")) handleAgreementAction("cancel"); }}
                         className="text-xs px-2 py-0.5 border border-border rounded-full text-red-600 hover:bg-red-50">
                         Cancel
@@ -1065,8 +1074,8 @@ const CrmAgreement: React.FC = () => {
                       component GrandTotal is actually built from (Unit + its
                       GST, Parking as a tax-inclusive lump since Parking's own
                       GST is baked into ParkingTotal rather than split out as
-                      its own column, Extra Work if any) — a plain "Base +
-                      GST" summary silently dropped Parking/Extra Work, which
+                      its own column, Extra Charges if any) — a plain "Base +
+                      GST" summary silently dropped Parking/Extra Charges, which
                       made the numbers not add up to GrandTotal at all. */}
                   <div>
                     <span className="text-xs text-muted-foreground">Total Value (incl. GST): </span>
@@ -1078,7 +1087,7 @@ const CrmAgreement: React.FC = () => {
                         Unit ₹{Number(detail.agreement.TotalValue).toLocaleString("en-IN")}
                         {detail.agreement?.UnitGstAmount > 0 && ` + Unit GST ₹${Number(detail.agreement.UnitGstAmount).toLocaleString("en-IN")}`}
                         {detail.agreement?.ParkingTotal > 0 && ` + Parking ₹${Number(detail.agreement.ParkingTotal).toLocaleString("en-IN")}${detail.agreement?.ParkingGstAmount > 0 ? ` (incl. GST ₹${Number(detail.agreement.ParkingGstAmount).toLocaleString("en-IN")})` : ""}`}
-                        {detail.agreement?.ExtraChargesTotal > 0 && ` + Extra Work ₹${Number(detail.agreement.ExtraChargesTotal).toLocaleString("en-IN")}${detail.agreement?.ExtraWorkGstAmount > 0 ? ` (incl. GST ₹${Number(detail.agreement.ExtraWorkGstAmount).toLocaleString("en-IN")})` : ""}`}
+                        {detail.agreement?.ExtraChargesTotal > 0 && ` + Extra Charges ₹${Number(detail.agreement.ExtraChargesTotal).toLocaleString("en-IN")}${detail.agreement?.ExtraWorkGstAmount > 0 ? ` (incl. GST ₹${Number(detail.agreement.ExtraWorkGstAmount).toLocaleString("en-IN")})` : ""}`}
                       </span>
                     )}
                   </div>
@@ -1161,8 +1170,8 @@ const CrmAgreement: React.FC = () => {
                   <div>
                     <span className="text-xs text-muted-foreground block mb-1">Senior Approval</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
-                      detail.agreement?.SeniorApprovalStatus === "Approved" ? "text-green-600 bg-green-50 border-green-200"
-                      : detail.agreement?.SeniorApprovalStatus === "Rejected" ? "text-red-600 bg-red-50 border-red-200"
+                      detail.agreement?.SeniorApprovalStatus === CrmStatus.APPROVED ? "text-green-600 bg-green-50 border-green-200"
+                      : detail.agreement?.SeniorApprovalStatus === CrmStatus.REJECTED ? "text-red-600 bg-red-50 border-red-200"
                       : "text-orange-600 bg-orange-50 border-orange-200"}`}>
                       {detail.agreement?.SeniorApprovalStatus || "Pending"}
                     </span>
@@ -1170,7 +1179,7 @@ const CrmAgreement: React.FC = () => {
                   <div>
                     <span className="text-xs text-muted-foreground block mb-1">Customer Approval</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
-                      detail.agreement?.CustomerApprovalStatus === "Approved" ? "text-green-600 bg-green-50 border-green-200"
+                      detail.agreement?.CustomerApprovalStatus === CrmStatus.APPROVED ? "text-green-600 bg-green-50 border-green-200"
                       : detail.agreement?.CustomerApprovalStatus === "RecheckRequested" ? "text-red-600 bg-red-50 border-red-200"
                       : "text-orange-600 bg-orange-50 border-orange-200"}`}>
                       {detail.agreement?.CustomerApprovalStatus || "Pending"}
@@ -1183,7 +1192,7 @@ const CrmAgreement: React.FC = () => {
                       label={
                         detail.agreement?.AgreementDate ? "Agreed by Both"
                         : detail.agreement?.ProposedDateStatus === "Matched" ? "Matched"
-                        : detail.agreement?.ProposedDateStatus === "PendingCustomerReview" ? "Proposed by Company — awaiting Customer"
+                        : detail.agreement?.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW ? "Proposed by Company — awaiting Customer"
                         : detail.agreement?.ProposedDateStatus === "PendingCompanyReview" ? "Proposed by Customer — awaiting Company"
                         : "Proposed"
                       }
@@ -1232,10 +1241,10 @@ const CrmAgreement: React.FC = () => {
                       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
                     }}
                   />
-                  {detail.agreement?.SeniorApprovalStatus === "Pending" && (
+                  {detail.agreement?.SeniorApprovalStatus === CrmStatus.PENDING && (
                     <span className="text-xs text-muted-foreground">Pending admin approval</span>
                   )}
-                  {detail.agreement?.SeniorApprovalStatus === "Approved" && !detail.agreement?.SentToCustomerAt && (
+                  {detail.agreement?.SeniorApprovalStatus === CrmStatus.APPROVED && !detail.agreement?.SentToCustomerAt && (
                     isBookingCancelled(detail.agreement) ? (
                       <span title="Booking is cancelled — cannot send to customer" className="text-xs px-3 py-1.5 border border-dashed border-border rounded-lg text-muted-foreground/40 cursor-not-allowed">
                         Send to Customer Portal
@@ -1247,7 +1256,7 @@ const CrmAgreement: React.FC = () => {
                       </button>
                     )
                   )}
-                  {detail.agreement?.CustomerApprovalStatus === "RecheckRequested" && detail.agreement?.SeniorApprovalStatus === "Approved" && (
+                  {detail.agreement?.CustomerApprovalStatus === "RecheckRequested" && detail.agreement?.SeniorApprovalStatus === CrmStatus.APPROVED && (
                     isBookingCancelled(detail.agreement) ? (
                       <span title="Booking is cancelled — cannot resend" className="text-xs px-3 py-1.5 border border-dashed border-border rounded-lg text-muted-foreground/40 cursor-not-allowed">
                         Resend After Recheck
@@ -1268,12 +1277,12 @@ const CrmAgreement: React.FC = () => {
                       when ProposedDateStatus shows it's waiting on them
                       ('PendingCompanyReview') or nothing's been proposed
                       yet; while waiting on the customer, no button shows. */}
-                  {detail.agreement?.SentToCustomerAt && detail.agreement?.CustomerApprovalStatus === "Approved" && !detail.agreement?.AgreementDate && (
-                    detail.agreement?.DateApprovalStatus === "Pending" ? (
+                  {detail.agreement?.SentToCustomerAt && detail.agreement?.CustomerApprovalStatus === CrmStatus.APPROVED && !detail.agreement?.AgreementDate && (
+                    detail.agreement?.DateApprovalStatus === CrmStatus.PENDING ? (
                       <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-amber-600 bg-amber-50 border-amber-200">
                         Awaiting Super Admin Approval
                       </span>
-                    ) : detail.agreement?.ProposedDateStatus === "PendingCustomerReview" ? (
+                    ) : detail.agreement?.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW ? (
                       <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">
                         Awaiting customer's response
                       </span>
@@ -1374,7 +1383,7 @@ const CrmAgreement: React.FC = () => {
                           <button title="Quick verify" onClick={() => handleDocStatusChange(d.Id, "Verified")}
                             className="p-1 rounded hover:bg-green-100 text-green-600"><Check size={14} /></button>
                         )}
-                        {!!d.FilePath && d.Status !== "Rejected" && (
+                        {!!d.FilePath && d.Status !== CrmStatus.REJECTED && (
                           <button title="Reject (opens review — a reason is required)" onClick={() => setPreviewDoc(d)}
                             className="p-1 rounded hover:bg-red-100 text-red-600"><X size={14} /></button>
                         )}

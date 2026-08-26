@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -10,7 +10,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Plus, Search, ChevronRight, IdCard, IndianRupee, Lock, Pencil, BookUser,
-  User, MapPin, Briefcase, FileText, UserPlus,
+  User, MapPin, Briefcase, FileText, UserPlus, AlertTriangle,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -325,7 +325,106 @@ const CrmCustomers: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
+
+  // Row clicks only ever set local state — the URL stayed plain
+  // /crm/customers, so a refresh lost the open detail dialog and there was
+  // nothing to copy/bookmark/share to jump straight back to this customer.
+  // Kept in sync with ?customerId= the same way the deep-link read effect
+  // below already reads it, instead of a one-shot self-clearing param.
+  const openCustomer = (id: number) => {
+    setEditingId(id);
+    setSearchParams((sp) => { sp.set("customerId", String(id)); return sp; }, { replace: true });
+  };
+  const closeCustomer = () => {
+    setEditingId(null);
+    setSearchParams((sp) => { sp.delete("customerId"); return sp; }, { replace: true });
+  };
   const [saving, setSaving] = useState(false);
+  // Duplicate detection: populated by the /suggest endpoint when Mobile or
+  // PAN is filled in. Shown as an inline warning card above the form footer.
+  const [dupSuggestions, setDupSuggestions] = useState<any[]>([]);
+  const [dupChecking, setDupChecking] = useState(false);
+  const dupDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Hits the /suggest endpoint with the current Mobile + PAN + Name values.
+  // Debounced 400ms so it doesn't fire on every keystroke.
+  const checkDuplicates = useCallback(async (mobile: string, pan: string, name: string) => {
+    if (dupDebounce.current) clearTimeout(dupDebounce.current);
+    const mob = mobile.trim();
+    const panVal = pan.trim().toUpperCase();
+    const nm = name.trim();
+    if (!mob && !panVal && !nm) { setDupSuggestions([]); return; }
+    dupDebounce.current = setTimeout(async () => {
+      try {
+        setDupChecking(true);
+        const params = new URLSearchParams();
+        if (mob) params.set("mobile", mob);
+        if (panVal) params.set("pan", panVal);
+        if (nm) params.set("name", nm);
+        const res = await fetchWithAuth(`${API}/suggest?${params}`);
+        if (res.ok) setDupSuggestions(await res.json());
+      } catch { /* non-blocking */ }
+      finally { setDupChecking(false); }
+    }, 400);
+  }, []);
+
+  const handleCreate = async () => {
+    if (!form.CustomerName.trim() || !form.Mobile.trim() || !form.PanNo.trim() || !form.PermanentAddress.trim()) {
+      toast.error("Customer Name, Mobile, PAN and Permanent Address are required");
+      return;
+    }
+    if (!/^\d{10}$/.test(form.Mobile.trim())) {
+      toast.error("Mobile must be exactly 10 digits"); return;
+    }
+    if (form.AltMobile.trim() && !/^\d{10}$/.test(form.AltMobile.trim())) {
+      toast.error("Alternate mobile must be exactly 10 digits"); return;
+    }
+    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
+      toast.error("PAN must be in format ABCDE1234F"); return;
+    }
+    if (form.AadhaarNo.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
+      toast.error("Aadhaar must be exactly 12 digits"); return;
+    }
+    if (form.Email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.Email.trim())) {
+      toast.error("Please enter a valid email address"); return;
+    }
+    if (form.PermanentPincode.trim() && !/^\d{6}$/.test(form.PermanentPincode.trim())) {
+      toast.error("Pincode must be exactly 6 digits"); return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, LeadId: form.LeadId || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        // When the backend returns a 409 with an existingCustomerId, surface an
+        // inline warning with a "View Customer" link instead of just a toast —
+        // so staff can open the existing record directly without hunting for it.
+        if (res.status === 409 && data.existingCustomerId) {
+          setDupSuggestions((prev) => {
+            const already = prev.some((d) => d.Id === data.existingCustomerId);
+            if (already) return prev;
+            return [{ Id: data.existingCustomerId, _fromError: true, _errorMsg: data.error }, ...prev];
+          });
+          toast.warning("A matching customer already exists — see the warning below");
+          return;
+        }
+        throw new Error(data.error);
+      }
+      toast.success(`Customer ${data.CustomerNo} registered`);
+      setDialogOpen(false);
+      setDupSuggestions([]);
+      setForm({ ...EMPTY_FORM });
+      qc.invalidateQueries({ queryKey: ["crm-customers"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const { data: customers = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-customers", search],
@@ -352,13 +451,14 @@ const CrmCustomers: React.FC = () => {
   // Deep-link from CrmLeads.tsx's "View Customer" action (a converted lead
   // already linked to a customer) — opens that customer's detail dialog
   // directly instead of the list-only page.
+  const [custDeepLinkOpened, setCustDeepLinkOpened] = useState(false);
   useEffect(() => {
+    if (custDeepLinkOpened) return;
     const customerId = searchParams.get("customerId");
     if (!customerId) return;
+    setCustDeepLinkOpened(true);
     setEditingId(parseInt(customerId));
-    setSearchParams((sp) => { sp.delete("customerId"); return sp; }, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [searchParams, custDeepLinkOpened]);
 
   // Converted leads not yet linked to another (active) customer — the
   // "already used" half of the gate, mirroring the LeadId uniqueness check
@@ -393,48 +493,7 @@ const CrmCustomers: React.FC = () => {
     }
   };
 
-  const handleCreate = async () => {
-    if (!form.CustomerName.trim() || !form.Mobile.trim() || !form.PanNo.trim() || !form.PermanentAddress.trim()) {
-      toast.error("Customer Name, Mobile, PAN and Permanent Address are required");
-      return;
-    }
-    if (!/^\d{10}$/.test(form.Mobile.trim())) {
-      toast.error("Mobile must be exactly 10 digits"); return;
-    }
-    if (form.AltMobile.trim() && !/^\d{10}$/.test(form.AltMobile.trim())) {
-      toast.error("Alternate mobile must be exactly 10 digits"); return;
-    }
-    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
-      toast.error("PAN must be in format ABCDE1234F"); return;
-    }
-    if (form.AadhaarNo.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
-      toast.error("Aadhaar must be exactly 12 digits"); return;
-    }
-    if (form.Email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.Email.trim())) {
-      toast.error("Please enter a valid email address"); return;
-    }
-    if (form.PermanentPincode.trim() && !/^\d{6}$/.test(form.PermanentPincode.trim())) {
-      toast.error("Pincode must be exactly 6 digits"); return;
-    }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, LeadId: form.LeadId || null }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`Customer ${data.CustomerNo} registered`);
-      setDialogOpen(false);
-      setForm({ ...EMPTY_FORM });
-      qc.invalidateQueries({ queryKey: ["crm-customers"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
+
 
   const filtered = useMemo(() => customers as any[], [customers]);
 
@@ -444,44 +503,44 @@ const CrmCustomers: React.FC = () => {
   const customerColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "CustomerNo", header: "Customer No", size: 110,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary">
           {i.getValue() as string}
         </div>
       ) },
     { accessorKey: "CustomerName", header: "Name", size: 160,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium text-foreground">{i.row.original.CustomerName}</div>
           {i.row.original.LeadUid && <div className="text-xs text-muted-foreground">Lead: {i.row.original.LeadUid}</div>}
         </div>
       ) },
     { accessorKey: "Mobile", header: "Mobile", size: 110,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-muted-foreground">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-muted-foreground">
           {i.getValue() as string}
         </div>
       ) },
     { accessorKey: "PanNo", header: "PAN", size: 100,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer font-mono text-xs">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer font-mono text-xs">
           {(i.getValue() as string) || "—"}
         </div>
       ) },
     { id: "location", header: "Address", size: 130, enableSorting: false,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-xs">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-xs">
           {[i.row.original.PermanentCity, i.row.original.PermanentState].filter(Boolean).join(", ") || "—"}
         </div>
       ) },
     { accessorKey: "CoApplicantName", header: "Co-Applicant", size: 120,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-xs">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-xs">
           {(i.getValue() as string) || "—"}
         </div>
       ) },
     { accessorKey: "ApplicationCount", header: "Applications", size: 120,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer">
           <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-blue-600 bg-blue-50 border-blue-200">
             {i.row.original.ApplicationCount} application{i.row.original.ApplicationCount === 1 ? "" : "s"}
           </span>
@@ -489,13 +548,13 @@ const CrmCustomers: React.FC = () => {
       ) },
     { accessorKey: "CreatedAt", header: "Registered", size: 100,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
           {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
         </div>
       ) },
     { id: "chevron", header: "", size: 40, enableSorting: false,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer">
           <ChevronRight size={14} className="text-muted-foreground" />
         </div>
       ) },
@@ -542,7 +601,7 @@ const CrmCustomers: React.FC = () => {
 
       {/* New Customer Dialog — wide two-column layout, compact enough to
           fit the whole field set on one screen without an inner scroller. */}
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
+      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setDupSuggestions([]); } }}>
         <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="font-heading text-base font-bold flex items-center gap-2">
@@ -586,9 +645,17 @@ const CrmCustomers: React.FC = () => {
                     <label className="text-xs text-muted-foreground block mb-0.5">{label}</label>
                     <input type={type} value={(form as any)[key]}
                       onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                      onBlur={() => {
+                        // Trigger duplicate check when Mobile or PAN loses focus —
+                        // these are the two highest-confidence dedup signals.
+                        if (key === "Mobile" || key === "PanNo") {
+                          checkDuplicates(form.Mobile, form.PanNo, form.CustomerName);
+                        }
+                      }}
                       className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
                   </div>
                 ))}
+
               </div>
             </div>
 
@@ -622,8 +689,49 @@ const CrmCustomers: React.FC = () => {
             Name, Mobile, PAN and Permanent Address are required — every Application will auto-fetch its details from this record.
           </p>
 
+          {/* Duplicate warning banner — shown when the /suggest endpoint finds
+              existing customers that match the entered Mobile, PAN, or Name.
+              Each candidate is shown as a compact card; staff can dismiss
+              individual cards or open the existing record directly. */}
+          {(dupChecking || dupSuggestions.length > 0) && (
+            <div className="rounded-xl border border-amber-400/40 bg-amber-50/60 dark:bg-amber-900/10 p-3 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                <AlertTriangle size={13} />
+                {dupChecking ? "Checking for duplicates…" : `${dupSuggestions.length} possible duplicate${dupSuggestions.length > 1 ? "s" : ""} found — verify before registering`}
+              </div>
+              {dupSuggestions.map((d: any) => (
+                <div key={d.Id} className="flex items-start justify-between gap-2 rounded-lg border border-amber-300/50 bg-white dark:bg-card px-3 py-2 text-xs">
+                  <div className="space-y-0.5 min-w-0">
+                    {d._fromError ? (
+                      <p className="font-medium text-red-600">{d._errorMsg}</p>
+                    ) : (
+                      <>
+                        <p className="font-semibold text-foreground truncate">{d.CustomerName} <span className="font-normal text-muted-foreground">· {d.CustomerNo}</span></p>
+                        <p className="text-muted-foreground">{[d.Mobile, d.PanNo, d.PermanentCity].filter(Boolean).join(" · ")}</p>
+                        {d.ApplicationCount > 0 && <p className="text-indigo-600">{d.ApplicationCount} application{d.ApplicationCount > 1 ? "s" : ""}</p>}
+                      </>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => { setDialogOpen(false); setDupSuggestions([]); setForm({ ...EMPTY_FORM }); openCustomer(d.Id); }}
+                      className="px-2 py-1 rounded-md text-xs font-medium border border-amber-400/60 text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/20 transition-colors"
+                    >
+                      View Customer
+                    </button>
+                    <button
+                      onClick={() => setDupSuggestions((p) => p.filter((x) => x.Id !== d.Id))}
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      title="Dismiss"
+                    >✕</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="flex justify-end gap-2 pt-2.5 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }}
+            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setDupSuggestions([]); }}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
               Cancel
             </button>
@@ -632,13 +740,14 @@ const CrmCustomers: React.FC = () => {
               {saving ? "Registering..." : "Register Customer"}
             </button>
           </div>
+
         </DialogContent>
       </Dialog>
 
       {editingId && editingCustomer && (
         <EditCustomerDialog
           customer={editingCustomer}
-          onClose={() => setEditingId(null)}
+          onClose={closeCustomer}
           onSaved={() => qc.invalidateQueries({ queryKey: ["crm-customers"] })}
         />
       )}
