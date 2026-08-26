@@ -45,10 +45,18 @@ import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
 
+// Matches the real LHeadType convention used everywhere else account heads
+// are created (see CustomerMaster/ContractorMaster/SupplierMaster/
+// CrmBrokerMaster's own CUSTOMER_TYPE/CONTRACTOR_TYPE/SUPPLIER_TYPE
+// constants) — this map previously had "C" labeled "Customer", which is
+// actually Contractor; Customer is "A". Left the group header showing the
+// wrong name for every Contractor head in the picker.
 const LHEAD_TYPE_LABEL: Record<string, string> = {
   GL: "General Ledger",
-  C: "Customer",
+  A: "Customer",
+  C: "Contractor",
   S: "Supplier",
+  BR: "Broker",
   B: "Bank",
 };
 

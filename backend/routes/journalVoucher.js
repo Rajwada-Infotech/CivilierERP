@@ -123,10 +123,23 @@ router.get("/ledger-options", authenticateToken, async (req, res) => {
     // A manual JV debiting/crediting one directly would desync that
     // tracking from Trial Balance with no way for the loan module to
     // notice or reconcile it.
+    //
+    // Status = 'Approved' used to be required here, but Status is a
+    // three-valued workflow field (Draft/Approved/Active — not a simple
+    // Draft/Approved toggle), and 'Active' is the normal steady-state value
+    // for most real, everyday heads (every Bank, most Contractors and
+    // Suppliers). Requiring literally 'Approved' silently excluded almost
+    // everything usable (confirmed on dev: 40 Active + 26 Draft heads vs.
+    // only 19 truly Approved) — Customers, Brokers, Contractors, Suppliers,
+    // and most GL heads never showed up in this picker at all. Every other
+    // consumer of account heads (GET /api/account-head, used by the
+    // Invoice/Payment pickers) never filtered by Status in the first
+    // place — LHeadStatus (the real active/inactive toggle) is what
+    // actually governs usability.
     const result = await pool.request().query(`
       SELECT LHeadId AS id, ISNULL(DisplayName, LHeadName) AS label, LHeadCode AS code, LHeadType AS type
       FROM dbo.AccountHeadMaster
-      WHERE Status = 'Approved' AND ISNULL(LHeadStatus, 1) = 1 AND LHeadType <> 'LN'
+      WHERE ISNULL(LHeadStatus, 1) = 1 AND LHeadType <> 'LN'
       ORDER BY LHeadType, LHeadName
     `);
     res.json(result.recordset);
