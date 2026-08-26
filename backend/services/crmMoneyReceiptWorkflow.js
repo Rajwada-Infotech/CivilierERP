@@ -98,7 +98,7 @@ async function createMoneyReceiptForBooking(pool, bookingId, data = {}, actorUse
   const { TotalGstAmount: totalGstAmt, GrandTotal: grandTotal, UnitParkingGstRate: gstRate } = gstRow.recordset[0] || {};
   const rate = Number(gstRate || 0);
   const gstRatio = rate > 0
-    ? rate / 100          // GST = amount × rate/100; base = amount - gstAmount
+    ? rate / (100 + rate) // extract GST from tax-inclusive amount: e.g. 5% → 5/105
     : (grandTotal > 0 ? Number(totalGstAmt) / Number(grandTotal) : 0);
   const gstAmount = Math.round(amount * gstRatio * 100) / 100;
   const baseAmount = Math.round((amount - gstAmount) * 100) / 100;
@@ -256,17 +256,10 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
       throw new MoneyReceiptError("Booking must complete Level 1 and Level 2 approval before payment approval");
     }
 
-    // Pick the first milestone that is NOT yet fully paid — prevents a second
-    // receipt (e.g. after a bounce-and-resubmit) from being linked to an
-    // already-settled milestone and double-counting AmountPaid.
-    const m1 = await tx.request().input("bid", sql.Int, mrRow.BookingId).query(`
-      SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND Status NOT IN ('Paid', 'Waived')
-      ORDER BY MilestoneNo
-    `);
-    const milestoneId = m1.recordset[0]?.Id;
-    if (!milestoneId) throw new MoneyReceiptError("No unpaid milestone found to link this receipt to", 404);
-
+    // Payment goes to On Account — NOT directly to a milestone.
+    // Correct flow: Payment → On Account → Demand → Invoice → On Account Adjustment → Milestone Settled.
+    // CrmMilestoneId is intentionally omitted so receivedPayment.js routes this through
+    // applyCrmOnAccountPaymentApproval (On Account insert) instead of applyCrmMilestonePaymentApproval.
     const { createReceivedPaymentInternal } = require("../routes/receivedPayment");
     rp = await createReceivedPaymentInternal(tx, {
       RPReceivedFrom: mrRow.ApplicantName,
@@ -284,10 +277,19 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
       RPRemarks: mrRow.Remarks || `CRM Money Receipt ${mrRow.ReceiptNo} - ${mrRow.BookingNo}`,
       RPDepositBankId: mrRow.DepositBankId || null,
       RPDepositBankName: mrRow.BankName || null,
-      CrmMilestoneId: milestoneId,
+      CrmMilestoneId: null,
       CrmBookingId: mrRow.BookingId,
       CrmApplicationId: mrRow.ApplicationId,
     }, actorEmail || String(actorUserId));
+
+    // createReceivedPaymentInternal always inserts as 'Draft' (its other
+    // callers deliberately want a manual review/submit step). CRM money has
+    // already been through Booking-stage approval, so it must go straight
+    // into Finance's Approval Inbox — Draft rows are invisible there (it
+    // filters WHERE RPStatus = 'Pending'), so without this the payment would
+    // sit unseen forever and never reach applyCrmOnAccountPaymentApproval.
+    await tx.request().input("rpid", sql.Int, rp.RPPaymentID)
+      .query("UPDATE dbo.ReceivedPayment SET RPStatus = 'Pending' WHERE RPPaymentID = @rpid AND RPStatus = 'Draft'");
 
     await tx.request()
       .input("id", sql.Int, receiptId)
@@ -307,6 +309,11 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
     try { await tx.rollback(); } catch {}
     throw e;
   }
+
+  try {
+    const { invalidateReceivedPaymentWorkflowCaches } = require("../routes/receivedPayment");
+    await invalidateReceivedPaymentWorkflowCaches();
+  } catch (e) { console.error("[crm-money-receipt] cache invalidation failed:", e.message); }
 
   await generateMoneyReceiptPdf(pool, receiptId);
 
@@ -355,11 +362,21 @@ async function ensureMoneyReceiptForApprovedPayment(pool, receivedPaymentId, act
   const row = cur.recordset[0];
   if (!row || !row.CrmBookingId) return { existing: false, skipped: true };
 
+  // Derive GST split from booking's overall ratio (same logic as crmPayments.js getGstSplit)
+  const gstR = await pool.request().input("bid", sql.Int, row.CrmBookingId)
+    .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal FROM dbo.CrmBooking WHERE Id = @bid");
+  const bkGst = gstR.recordset[0] || {};
+  const gstRatio = Number(bkGst.GrandTotal) > 0 ? Number(bkGst.TotalGstAmount) / Number(bkGst.GrandTotal) : 0;
+  const gstAmt  = Math.round(Number(row.RPAmount) * gstRatio * 100) / 100;
+  const baseAmt = Math.round((Number(row.RPAmount) - gstAmt) * 100) / 100;
+
   const receiptNo = await getNextDocNumber(pool, "MR", "MR");
   const result = await pool.request()
     .input("no",   sql.NVarChar(30),  receiptNo)
     .input("bid",  sql.Int,           row.CrmBookingId)
     .input("amt",  sql.Decimal(18, 2), row.RPAmount)
+    .input("base", sql.Decimal(18, 2), baseAmt)
+    .input("gst",  sql.Decimal(18, 2), gstAmt)
     .input("mode", sql.NVarChar(30),  row.RPMode || "Other")
     .input("chq",  sql.NVarChar(50),  row.RPMode === "Cheque" ? row.RPCheckNumber : null)
     .input("chqDt", sql.Date,         row.RPMode === "Cheque" ? row.RPChequeDate : null)
@@ -371,12 +388,12 @@ async function ensureMoneyReceiptForApprovedPayment(pool, receivedPaymentId, act
     .input("rpid", sql.Int,           receivedPaymentId)
     .query(`
       INSERT INTO dbo.CrmMoneyReceipt
-        (ReceiptNo, BookingId, Amount, PaymentMode, ChequeNo, ChequeDate, BankName,
+        (ReceiptNo, BookingId, Amount, BaseAmount, GSTAmount, PaymentMode, ChequeNo, ChequeDate, BankName,
          TransactionRef, ReceivedDate, Remarks, Status, ReceivedPaymentId, CreatedBy,
          CreatedAt, UpdatedAt, ApprovedBy, ApprovedAt)
       OUTPUT INSERTED.Id
       VALUES
-        (@no, @bid, @amt, @mode, @chq, @chqDt, @bank,
+        (@no, @bid, @amt, @base, @gst, @mode, @chq, @chqDt, @bank,
          @ref, ISNULL(@rcvd, CAST(SYSDATETIME() AS DATE)), @rem, 'Approved', @rpid, @cb,
          SYSDATETIME(), SYSDATETIME(), @cb, SYSDATETIME())
     `);

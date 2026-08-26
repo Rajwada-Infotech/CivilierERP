@@ -60,7 +60,7 @@ const SECTION_LABELS = {
   CoApplicant: "Co-Applicant Details",
   PersonalContact: "Customer Personal & Contact Details",
   Parking: "Parking",
-  ExtraCharges: "Extra Work / Additional Charges",
+  ExtraCharges: "Extra Charges",
   Documents: "Documents & Attachments",
 };
 const ITEM_BY_KEY = Object.fromEntries(CHECKLIST_TEMPLATE.map((t) => [t.key, t]));

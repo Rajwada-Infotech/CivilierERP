@@ -153,6 +153,14 @@ router.post("/", requirePageRight("crm-cancellations", "create"), async (req, re
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    // Explicit duplicate guard — clearer error than relying on a DB UNIQUE catch.
+    const existingCancel = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 CancellationNo, Status FROM dbo.CrmCancellation WHERE BookingId = @bid AND Status NOT IN ('Rejected')");
+    if (existingCancel.recordset.length) {
+      const ex = existingCancel.recordset[0];
+      return res.status(409).json({ error: `A cancellation request (${ex.CancellationNo}) already exists for this booking and is currently ${ex.Status}` });
+    }
+
     const deed = await pool.request().input("bid", sql.Int, bookingId)
       .query(`SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
     if (deed.recordset.length && deed.recordset[0].Status === CrmStatus.REGISTERED) {
@@ -373,18 +381,50 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
     await syncApplicationOnBookingTerminal(pool, bookingId, CrmStatus.CANCELLED, "BookingCancelled",
       "Application cancelled — its booking was cancelled", actorId(req));
 
+    // Reject any money receipts still in Pending verification — without this a
+    // bank teller could later verify and credit the payment to a dead booking,
+    // overstating the refund liability and creating a floating unreconciled balance.
+    await pool.request().input("bid", sql.Int, bookingId).query(`
+      UPDATE dbo.CrmMoneyReceipt
+      SET Status = 'Rejected', UpdatedAt = SYSDATETIME()
+      WHERE BookingId = @bid AND Status = 'Pending'
+    `);
+
+    // Reject any Pending ReceivedPayment rows in Finance's queue — without
+    // this a Finance approver can process and post a payment against a
+    // cancelled booking (updates milestone AmountPaid, triggers GL, Sales
+    // Deed, brokerage auto-create — all against a dead record).
+    await pool.request().input("bid", sql.Int, bookingId).query(`
+      UPDATE dbo.ReceivedPayment
+      SET RPStatus = 'Rejected', UpdatedAt = SYSDATETIME()
+      WHERE CrmBookingId = @bid AND RPStatus = 'Pending'
+    `);
+
     await releaseAllParkingForBooking(pool, bookingId);
 
     // Orphaned Brokerage Clawback
     // Void any pending brokerage tranches for this cancelled booking, and flag paid ones for clawback.
     await pool.request().input("bid", sql.Int, bookingId).query(`
-      UPDATE dbo.CrmBrokerageMaster 
+      UPDATE dbo.CrmBrokerageMaster
       SET Status = '${CrmStatus.VOIDED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided due to booking cancellation.'
       WHERE BookingId = @bid AND Status = '${CrmStatus.PENDING}';
-      
-      UPDATE dbo.CrmBrokerageMaster 
+
+      UPDATE dbo.CrmBrokerageMaster
       SET Status = '${CrmStatus.CLAWBACK_REQUIRED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Clawback required due to booking cancellation.'
       WHERE BookingId = @bid AND Status = '${CrmStatus.PAID}';
+    `);
+
+    // Void any finance payment vouchers (NewPayment) linked to brokerage
+    // tranches that were just voided above. Without this, Finance can still
+    // see — and process — a live PAY document for a cancelled deal, which is
+    // a real cash-outflow risk.
+    await pool.request().input("bid", sql.Int, bookingId).query(`
+      UPDATE dbo.NewPayment
+      SET Status = 'Rejected', UpdatedAt = SYSDATETIME()
+      WHERE SourceCrmBrokerageId IN (
+        SELECT Id FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid
+      )
+      AND Status NOT IN ('Paid', 'Rejected', 'Deleted')
     `);
 
     // guardAndConvertHold() closes the Unit's hold to 'Converted' the moment

@@ -104,8 +104,6 @@ async function placeHold(pool, { entityType, entityId, applicationId, holdDays, 
     bumpCacheVersion("unit-master").catch(() => {});
   }
   try { getIo().emit("matrix:update", {}); } catch(e) {}
-
-  try { getIo().emit("matrix:update", {}); } catch(e) {}
   return { id: result.recordset[0].Id, holdUntil: result.recordset[0].HoldUntil, applicantName: app.recordset[0].ApplicantName };
 }
 

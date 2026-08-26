@@ -190,6 +190,16 @@ const CrmBooking: React.FC = () => {
   const [viewingBookingId, setViewingBookingId] = useState<number | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
 
+  // Row clicks only ever set local state — the URL stayed plain
+  // /crm/bookings, so a refresh lost the open card and there was nothing to
+  // copy/bookmark/share to jump straight back to this booking. The read
+  // side (?view=X on load, above) already existed; this is the missing
+  // write side, kept in sync with it via the same param name.
+  const openBooking = (id: number) => {
+    setViewingBookingId(id);
+    navigate(`/crm/bookings?view=${id}`, { replace: true });
+  };
+
   const { data: bookings = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-bookings", appFilter],
     queryFn: () => fetchBookings(appFilter || undefined),
@@ -476,13 +486,13 @@ const CrmBooking: React.FC = () => {
   const bookingColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "BookingNo", header: "Booking No", size: 115,
       cell: (i) => (
-        <button onClick={() => setViewingBookingId(i.row.original.Id)} className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
+        <button onClick={() => openBooking(i.row.original.Id)} className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
           {i.row.original.BookingNo}
         </button>
       ) },
     { accessorKey: "ApplicantName", header: "Customer", size: 160,
       cell: (i) => (
-        <div onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer">
+        <div onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium">{i.row.original.ApplicantName}</div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
@@ -491,7 +501,7 @@ const CrmBooking: React.FC = () => {
       cell: (i) => {
         const b = i.row.original;
         return (
-          <div onClick={() => setViewingBookingId(b.Id)} className="cursor-pointer">
+          <div onClick={() => openBooking(b.Id)} className="cursor-pointer">
             <div>{b.ProjectName || "—"}</div>
             <div className="text-xs text-muted-foreground">{[b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / ")}</div>
             {b.CompanyName && <div className="text-xs text-muted-foreground">{b.CompanyName}</div>}
@@ -499,7 +509,7 @@ const CrmBooking: React.FC = () => {
         );
       } },
     { accessorKey: "AreaSqFt", header: "Area", size: 90,
-      cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer text-sm">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sqft` : "—"}</span> },
+      cell: (i) => <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer text-sm">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sqft` : "—"}</span> },
     { id: "value", header: "Value / Financial", size: 185, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
@@ -512,7 +522,7 @@ const CrmBooking: React.FC = () => {
         const clearedPct = grand > 0 ? Math.min(100, Math.round((cleared / grand) * 100)) : 0;
         const onAccPct = grand > 0 ? Math.min(100 - clearedPct, Math.round((onAcc / grand) * 100)) : 0;
         return (
-          <div onClick={() => setViewingBookingId(b.Id)} className="cursor-pointer space-y-1">
+          <div onClick={() => openBooking(b.Id)} className="cursor-pointer space-y-1">
             <div className="font-semibold">{fmt(grand)}</div>
             {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
               <div className="text-[10px] text-muted-foreground">
@@ -539,12 +549,12 @@ const CrmBooking: React.FC = () => {
         );
       } },
     { accessorKey: "BookingAmount", header: "Booking Amt", size: 110,
-      cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer">{fmt(i.row.original.BookingAmount)}</span> },
+      cell: (i) => <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer">{fmt(i.row.original.BookingAmount)}</span> },
     { accessorKey: "Status", header: "Status", size: 100,
-      cell: (i) => <span onClick={() => setViewingBookingId(i.row.original.Id)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+      cell: (i) => <span onClick={() => openBooking(i.row.original.Id)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
     { accessorKey: "BookingDate", header: "Date", size: 95,
       cell: (i) => (
-        <span onClick={() => setViewingBookingId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
+        <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
           {i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}
         </span>
       ) },
@@ -579,7 +589,7 @@ const CrmBooking: React.FC = () => {
               ) : b.ReadyForApprovalAt ? (
                 <span className="text-xs text-muted-foreground">Ready for Marketing Head Approval</span>
               ) : (
-                <button onClick={() => setViewingBookingId(b.Id)}
+                <button onClick={() => openBooking(b.Id)}
                   className="text-xs px-2 py-1 rounded-md border text-amber-600 border-amber-200 bg-amber-50 font-medium flex items-center gap-1">
                   Review Checklist Incomplete <ChevronRight size={12} />
                 </button>
@@ -605,7 +615,7 @@ const CrmBooking: React.FC = () => {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem onClick={() => setViewingBookingId(b.Id)} className="gap-2">
+                <DropdownMenuItem onClick={() => openBooking(b.Id)} className="gap-2">
                   <Eye size={14} className="text-muted-foreground" /> View Details / Invoice / Attachments
                 </DropdownMenuItem>
                 {(welcomeCallReached || bankDetailsReached || agreementReached || paymentsReached) && (
@@ -988,7 +998,11 @@ const CrmBooking: React.FC = () => {
           bookingId={viewingBookingId}
           onClose={() => {
             setViewingBookingId(null);
-            if (appFilter) navigate("/crm/bookings", { replace: true });
+            // Previously only cleared ?applicationId= — a booking opened via
+            // ?view=X (row click, or a shared link) left that param stuck in
+            // the address bar after closing, silently reopening the same
+            // card on the next visit/refresh.
+            if (appFilter || viewFilter) navigate("/crm/bookings", { replace: true });
           }}
         />
       )}

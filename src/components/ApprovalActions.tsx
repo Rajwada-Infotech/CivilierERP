@@ -160,6 +160,12 @@ export function ApprovalActions({
       if (action === "approve" && data?.bookingError) {
         toast.warning(data.bookingError);
       }
+      if (action === "approve" && data?.crmWarning) {
+        toast.warning(data.crmWarning);
+      }
+      if (action === "approve" && data?.brokerWarning) {
+        toast.warning(data.brokerWarning);
+      }
       if (action === "reject") {
         setRejectOpen(false);
         setRejectNote("");

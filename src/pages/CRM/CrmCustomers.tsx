@@ -325,6 +325,20 @@ const CrmCustomers: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
+
+  // Row clicks only ever set local state — the URL stayed plain
+  // /crm/customers, so a refresh lost the open detail dialog and there was
+  // nothing to copy/bookmark/share to jump straight back to this customer.
+  // Kept in sync with ?customerId= the same way the deep-link read effect
+  // below already reads it, instead of a one-shot self-clearing param.
+  const openCustomer = (id: number) => {
+    setEditingId(id);
+    setSearchParams((sp) => { sp.set("customerId", String(id)); return sp; }, { replace: true });
+  };
+  const closeCustomer = () => {
+    setEditingId(null);
+    setSearchParams((sp) => { sp.delete("customerId"); return sp; }, { replace: true });
+  };
   const [saving, setSaving] = useState(false);
   // Duplicate detection: populated by the /suggest endpoint when Mobile or
   // PAN is filled in. Shown as an inline warning card above the form footer.
@@ -437,13 +451,14 @@ const CrmCustomers: React.FC = () => {
   // Deep-link from CrmLeads.tsx's "View Customer" action (a converted lead
   // already linked to a customer) — opens that customer's detail dialog
   // directly instead of the list-only page.
+  const [custDeepLinkOpened, setCustDeepLinkOpened] = useState(false);
   useEffect(() => {
+    if (custDeepLinkOpened) return;
     const customerId = searchParams.get("customerId");
     if (!customerId) return;
+    setCustDeepLinkOpened(true);
     setEditingId(parseInt(customerId));
-    setSearchParams((sp) => { sp.delete("customerId"); return sp; }, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [searchParams, custDeepLinkOpened]);
 
   // Converted leads not yet linked to another (active) customer — the
   // "already used" half of the gate, mirroring the LeadId uniqueness check
@@ -488,44 +503,44 @@ const CrmCustomers: React.FC = () => {
   const customerColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "CustomerNo", header: "Customer No", size: 110,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary">
           {i.getValue() as string}
         </div>
       ) },
     { accessorKey: "CustomerName", header: "Name", size: 160,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium text-foreground">{i.row.original.CustomerName}</div>
           {i.row.original.LeadUid && <div className="text-xs text-muted-foreground">Lead: {i.row.original.LeadUid}</div>}
         </div>
       ) },
     { accessorKey: "Mobile", header: "Mobile", size: 110,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-muted-foreground">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-muted-foreground">
           {i.getValue() as string}
         </div>
       ) },
     { accessorKey: "PanNo", header: "PAN", size: 100,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer font-mono text-xs">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer font-mono text-xs">
           {(i.getValue() as string) || "—"}
         </div>
       ) },
     { id: "location", header: "Address", size: 130, enableSorting: false,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-xs">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-xs">
           {[i.row.original.PermanentCity, i.row.original.PermanentState].filter(Boolean).join(", ") || "—"}
         </div>
       ) },
     { accessorKey: "CoApplicantName", header: "Co-Applicant", size: 120,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-xs">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-xs">
           {(i.getValue() as string) || "—"}
         </div>
       ) },
     { accessorKey: "ApplicationCount", header: "Applications", size: 120,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer">
           <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-blue-600 bg-blue-50 border-blue-200">
             {i.row.original.ApplicationCount} application{i.row.original.ApplicationCount === 1 ? "" : "s"}
           </span>
@@ -533,13 +548,13 @@ const CrmCustomers: React.FC = () => {
       ) },
     { accessorKey: "CreatedAt", header: "Registered", size: 100,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
           {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
         </div>
       ) },
     { id: "chevron", header: "", size: 40, enableSorting: false,
       cell: (i) => (
-        <div onClick={() => setEditingId(i.row.original.Id)} className="cursor-pointer">
+        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer">
           <ChevronRight size={14} className="text-muted-foreground" />
         </div>
       ) },
@@ -699,7 +714,7 @@ const CrmCustomers: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
-                      onClick={() => { setDialogOpen(false); setDupSuggestions([]); setForm({ ...EMPTY_FORM }); setEditingId(d.Id); }}
+                      onClick={() => { setDialogOpen(false); setDupSuggestions([]); setForm({ ...EMPTY_FORM }); openCustomer(d.Id); }}
                       className="px-2 py-1 rounded-md text-xs font-medium border border-amber-400/60 text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/20 transition-colors"
                     >
                       View Customer
@@ -732,7 +747,7 @@ const CrmCustomers: React.FC = () => {
       {editingId && editingCustomer && (
         <EditCustomerDialog
           customer={editingCustomer}
-          onClose={() => setEditingId(null)}
+          onClose={closeCustomer}
           onSaved={() => qc.invalidateQueries({ queryKey: ["crm-customers"] })}
         />
       )}

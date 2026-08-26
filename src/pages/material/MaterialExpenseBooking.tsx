@@ -2310,6 +2310,7 @@ export default function MaterialExpenseBooking() {
                     set("igstRate", 0);
                   }
                 }}
+                tdsAmount={form.tdsAmount || 0}
               />
 
               {/* ── GRN Items Summary ──────────────────────────────────── */}
@@ -2337,7 +2338,7 @@ export default function MaterialExpenseBooking() {
                   <Field
                     label="Allocation"
                     required
-                    hint="At least one Expense Head is required — split this invoice's debit side across one or more ledger heads, must add up to the net amount above"
+                    hint={`At least one Expense Head is required — split this invoice's debit side across one or more ledger heads, must add up to the gross invoice amount (₹${fmt(bd.netAmount)})${(form.tdsAmount || 0) > 0 ? "; TDS is withheld separately and does not reduce this total" : ""}`}
                   >
                     <ExpenseHeadAllocationEditor
                       rows={form.expenseHeadAllocations ?? []}

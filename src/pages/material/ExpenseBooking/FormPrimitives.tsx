@@ -152,12 +152,14 @@ export function PriceBreakdownPanel({
   sgstRate,
   igstRate = 0,
   hasDiscount,
+  tdsAmount = 0,
 }: {
   bd: PriceBreakdown;
   cgstRate: number;
   sgstRate: number;
   igstRate?: number;
   hasDiscount: boolean;
+  tdsAmount?: number;
 }) {
   const preGstTerms = bd.preGstTerms ?? [];
   const postGstTerms = bd.postGstTerms ?? [];
@@ -287,11 +289,21 @@ export function PriceBreakdownPanel({
         />
       )}
 
+      {/* TDS withheld at source */}
+      {tdsAmount > 0 && (
+        <BreakdownRow
+          label="TDS Withheld"
+          sublabel="Deducted at source"
+          value={"− ₹" + fmt(tdsAmount)}
+          variant="debit"
+        />
+      )}
+
       {/* Net Payable */}
       <BreakdownRow
         label="Net Payable"
-        sublabel="Final amount due"
-        value={"₹" + fmt(bd.netAmount)}
+        sublabel={tdsAmount > 0 ? "Payable after TDS deduction" : "Final amount due"}
+        value={"₹" + fmt(Math.max(0, bd.netAmount - tdsAmount))}
         variant="total"
       />
     </div>
