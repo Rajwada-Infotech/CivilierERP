@@ -200,7 +200,23 @@ const CrmMoneyReceipts: React.FC = () => {
       } },
   ];
 
-  usePageRights("crm-money-receipts");
+  const { canEdit } = usePageRights("crm-money-receipts");
+  const [sweeping, setSweeping] = React.useState(false);
+
+  async function sweepPendingMrs() {
+    setSweeping(true);
+    try {
+      const res = await fetchWithAuth(`${API}/sweep-pending`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || "Sweep failed"); return; }
+      if (data.processed === 0 && data.failed === 0) {
+        toast.info("No stuck receipts found — all confirmed bookings are up to date.");
+      } else {
+        toast.success(`Swept ${data.processed} receipt(s) into Finance queue.${data.failed ? ` ${data.failed} failed — check console.` : ""}`);
+        refetch();
+      }
+    } catch { toast.error("Sweep failed"); } finally { setSweeping(false); }
+  }
 
   return (
     <>
@@ -208,7 +224,17 @@ const CrmMoneyReceipts: React.FC = () => {
       <CrmShell
         title="CRM — Money Receipts"
       subtitle="Created once Data Review is complete and the Booking has been submitted for approval — one receipt per Booking Amount"
-      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
+      action={
+        <div className="flex items-center gap-2">
+          {canEdit && (
+            <button onClick={sweepPendingMrs} disabled={sweeping}
+              className="text-xs px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+              {sweeping ? "Sweeping…" : "Sweep Stuck Receipts"}
+            </button>
+          )}
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+        </div>
+      }
     >
       <div className="flex gap-3 flex-wrap items-center">
         <div className="relative flex-1 min-w-48">

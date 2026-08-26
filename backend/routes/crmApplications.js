@@ -8,7 +8,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const allowRoles = require("../middleware/role");
 const { actorId, requireUserEmail, isSuperAdminOnly } = require("../services/saAccess");
 const { validateSourceChain } = require("../services/sourceChain");
-const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
+const { advanceApplicationStatus, logStatusChange } = require("../services/crmApplicationWorkflow");
 // The generic multi-module approval engine — Submit/Approve/Reject go through
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
@@ -18,6 +18,7 @@ const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releas
 const { recalculateRemainingMilestones, requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { releaseAllParkingForApplication } = require("../routes/crmParking");
 const { ensureBrokerForChannelPartner } = require("../services/channelPartnerBrokerBridge");
+const { getApplicationFormPdfBuffer } = require("../services/applicationFormPdf");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -202,6 +203,28 @@ router.get("/:id", requirePageRight("crm-applications", "view"), async (req, res
     res.json({ application: appRes.recordset[0], bookings: bookRes.recordset, statusLog: logRes.recordset });
   } catch (e) {
     console.error("[crm-applications] GET /:id error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/pdf — the customer-facing Application Form, same "download and
+// hand to the customer" pattern as crm-money-receipts' own GET /:id/pdf.
+// Always regenerated fresh (not cached) — unlike a Money Receipt, an
+// Application's own data (pricing, co-applicants, plan) can keep changing
+// right up to Approval, so a stale cached copy would drift from reality.
+router.get("/:id/pdf", requirePageRight("crm-applications", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const appRow = await pool.request().input("id", sql.Int, id)
+      .query("SELECT ApplicationNo FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+    if (!appRow.recordset.length) return res.status(404).json({ error: "Application not found" });
+    const buffer = await getApplicationFormPdfBuffer(pool, id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${appRow.recordset[0].ApplicationNo}-ApplicationForm.pdf"`);
+    res.send(buffer);
+  } catch (e) {
+    console.error("[crm-applications] GET /:id/pdf error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -703,6 +726,11 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
     `);
     if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
     const a = app.recordset[0];
+    // Only Pending applications can have a booking created — Draft means the
+    // wizard was never submitted, so the form data may be incomplete.
+    if (a.Status !== "Pending") {
+      return res.status(400).json({ error: `Cannot create a booking for a ${a.Status} application — the application must be submitted first` });
+    }
     if (!a.PreferredUnitId) {
       return res.status(400).json({ error: "This application has no preferred unit selected" });
     }
@@ -776,18 +804,17 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
       });
     }
 
+    // Release inventory BEFORE advancing status so that if a release fails
+    // the Application is still Active and the user gets a real error to act on,
+    // rather than ending up Cancelled with inventory stuck in a held state.
+    // releaseAllHoldsForApplication / releaseAllParkingForApplication are both
+    // idempotent, so running them on an application whose holds are already
+    // clear is always safe.
+    await releaseAllHoldsForApplication(pool, id, actorId(req));
+    await releaseAllParkingForApplication(pool, id);
+
     const result = await advanceApplicationStatus(pool, id, "Cancelled", "Manual", remarks, actorId(req));
     if (!result.ok) return res.status(result.error === "Application not found" ? 404 : 400).json({ error: result.error });
-    // Same reasoning as the Reject path above — the active-Booking check
-    // just above guarantees nothing but a hold or a standalone parking
-    // allotment could still be tying up real inventory for this
-    // Application, so release both now rather than waiting on the hourly
-    // SLA sweep (which only ever covers hold expiry, never parking
-    // allotments — see releaseAllParkingForApplication in crmParking.js).
-    try { await releaseAllHoldsForApplication(pool, id, actorId(req)); }
-    catch (holdErr) { console.error("[crm-applications] hold release on cancel failed:", holdErr.message); }
-    try { await releaseAllParkingForApplication(pool, id); }
-    catch (parkErr) { console.error("[crm-applications] parking release on cancel failed:", parkErr.message); }
     res.json({ success: true, status: result.to });
   } catch (e) {
     console.error("[crm-applications] cancel error:", e.message);
@@ -838,6 +865,13 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     }
 
     const actor = actorId(req);
+
+    // Release inventory BEFORE setting IsActive = 0 so that if a release
+    // fails the application is still visible/active and the error surfaces
+    // to the caller rather than leaving inventory stuck on a "deleted" record.
+    await releaseAllHoldsForApplication(pool, id, actor);
+    await releaseAllParkingForApplication(pool, id);
+
     await pool.request()
       .input("id", sql.Int, id)
       .input("ub", sql.Int, actor)
@@ -846,11 +880,6 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
         SET IsActive = 0, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
-
-    try { await releaseAllHoldsForApplication(pool, id, actor); }
-    catch (holdErr) { console.error("[crm-applications] hold release on delete failed:", holdErr.message); }
-    try { await releaseAllParkingForApplication(pool, id); }
-    catch (parkErr) { console.error("[crm-applications] parking release on delete failed:", parkErr.message); }
 
     await logStatusChange(pool, id, app.Status, app.Status, "AdminDelete", "Application soft-deleted by admin", actor);
     res.json({ success: true, message: `Application ${app.ApplicationNo} deleted` });

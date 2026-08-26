@@ -309,7 +309,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
            @pt, @bhk,
            @src, @platid, @campid, @adid, @cpid,
            @rate, @doa, @ppid, @ttype, @tval, @bamt, @pmode,
-           @asgn, @asgnby, 'Pending', @note, @refApp, 1, @cb, SYSDATETIME(),
+           @asgn, @asgnby, 'Draft', @note, @refApp, 1, @cb, SYSDATETIME(),
            @brkid, @brkpct, @brkplan)
       `);
   } catch (e) {
@@ -318,7 +318,18 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     throw e;
   }
   const applicationId = result.recordset[0].Id;
-  await logStatusChange(pool, applicationId, null, "Pending", "Manual", "Application created", actorUserId);
+  // Starts Draft, not Pending — the wizard's own PUT /:id/submit (see
+  // crmApplications.js) is the real Draft->Pending gate (approvalTransition
+  // only allows that transition from Draft/Rejected). Inserting straight as
+  // Pending here used to skip that gate entirely: every fresh application —
+  // even a one-field stub with no unit, no payment plan, nothing past Step 1
+  // — was immediately eligible for "Create Booking" (POST /:id/create-booking
+  // only checks Status==='Pending' + PreferredUnitId), producing a real
+  // Booking against a customer who was never actually verified or asked to
+  // submit anything. The frontend's own Applications list already expected
+  // Draft to exist here (isResumable/"Not submitted yet" caption, the
+  // Create-Booking button's own comment) — this was the missing half.
+  await logStatusChange(pool, applicationId, null, "Draft", "Manual", "Application created", actorUserId);
 
   // Stamp the reverse FK so this lead drops out of the "available" pool —
   // CrmApplicationId being set is the sole "already used" signal (Status
@@ -804,7 +815,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // of this function; the slot just goes back to Available and staff can
   // re-add it manually from the Booking's own Parking tab.
   const parkingHolds = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId)).query(`
-    SELECT h.Id, h.EntityId AS ParkingSlotId
+    SELECT h.Id, h.EntityId AS ParkingSlotId, h.RateOverride
     FROM dbo.CrmInventoryHold h
     WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
   `);
@@ -822,7 +833,10 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
           ORDER BY CASE WHEN BlockId = @bid2 THEN 0 ELSE 1 END
         `);
       if (!rate.recordset.length) continue;
-      await applyAddParking(pool, bookingId, { ParkingMasterId: rate.recordset[0].Id, ParkingSlotId: hold.ParkingSlotId, Quantity: 1 }, actorUserId);
+      await applyAddParking(pool, bookingId, {
+        ParkingMasterId: rate.recordset[0].Id, ParkingSlotId: hold.ParkingSlotId, Quantity: 1,
+        RateOverride: hold.RateOverride,
+      }, actorUserId);
     } catch (parkErr) {
       console.error("[crm-entity-creation] parking hold conversion failed:", parkErr.message);
     }

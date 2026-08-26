@@ -14,6 +14,7 @@ import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
   Mail, MapPin, IndianRupee, Users2, Briefcase, X, PlayCircle, Ban, Lock, Wallet, Eye, Download,
+  AlertTriangle,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -183,10 +184,10 @@ function parseMilestones(json: string | null | undefined): MilestoneRow[] {
 const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40";
 const labelCls = "text-xs text-muted-foreground block mb-1.5";
 
-// Live "cost + GST" preview shown at every point Unit/Parking/Extra Work
+// Live "cost + GST" preview shown at every point Unit/Parking/Extra Charges
 // values are picked — Application's Project/Unit and Parking steps, and
 // (via the same component reused in CrmBookingDetail.tsx) the Booking's own
-// Parking & Extra Work tab. Rate is always fetched live from HSN Master
+// Parking & Extra Charges tab. Rate is always fetched live from HSN Master
 // (useGstRates), never hardcoded — this is a preview of the exact same fixed
 // rule the backend enforces (crmGst.js), not a separate/independent guess.
 const GstBreakdownBox: React.FC<{ unitValue: number; parkingBase: number }> = ({ unitValue, parkingBase }) => {
@@ -255,6 +256,381 @@ const GstGrandTotalText: React.FC<{ unitValue: number; parkingBase: number }> = 
   return <>{fmtInr(gst.total)}</>;
 };
 
+// ── Step 4: Co-Applicant(s) ─────────────────────────────────────────────────────
+// Captured directly against the Application (dbo.CrmCoApplicant, ApplicationId
+// set now, BookingId backfilled later by crmEntityCreation.js) rather than as
+// a single flat name/relation/mobile on CrmCustomer as before — a customer can
+// have a different set of co-applicants on each of their Applications, and a
+// deal can have more than one. See crmCoApplicant.js's /application/:id routes.
+const emptyCoApplicant = () => ({
+  Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "",
+  DateOfBirth: "", Gender: "", Occupation: "", AnnualIncome: "",
+  Address: "", City: "", State: "", Pincode: "", Notes: "",
+});
+
+const CoApplicantStep: React.FC<{
+  applicationId: number;
+  applicantName?: string;
+  applicantAddress?: string;
+  applicantCity?: string;
+  applicantState?: string;
+  applicantPincode?: string;
+}> = ({ applicationId, applicantName, applicantAddress, applicantCity, applicantState, applicantPincode }) => {
+  const { data: coApplicants = [], refetch } = useQuery({
+    queryKey: ["crm-app-co-applicants-edit", applicationId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${CO_APPLICANT_API}/application/${applicationId}`);
+      return r.ok ? r.json() : [];
+    },
+  });
+
+  const [editingId, setEditingId] = useState<number | "new" | null>(null);
+  const [draft, setDraft] = useState<any>(emptyCoApplicant());
+  const [saving, setSaving] = useState(false);
+  // Clicking a co-applicant's row (anywhere but Edit/Delete) opens a
+  // read-only details popup — the row itself only ever shows Name/Relation/
+  // Mobile, so this is the only way to see PAN, Aadhaar, DOB, address, etc.
+  // without dropping into edit mode.
+  const [viewingCoApplicant, setViewingCoApplicant] = useState<any | null>(null);
+  // "Same as applicant's address" — same convenience toggle as the Nominee
+  // section: checking it copies the applicant's current Address/City/State/
+  // Pincode in and locks those fields; unchecking hands them back for free
+  // editing. Defaults on if a saved co-applicant's address already matches
+  // the applicant's (e.g. re-opening a previously saved entry).
+  const [sameAsApplicant, setSameAsApplicant] = useState(false);
+
+  const startAdd = () => { setDraft(emptyCoApplicant()); setEditingId("new"); setSameAsApplicant(false); };
+  const startEdit = (co: any) => {
+    setDraft({
+      Name: co.Name || "", Relation: co.Relation || "", Mobile: co.Mobile || "",
+      Email: co.Email || "", PanNo: co.PanNo || "", AadhaarNo: co.AadhaarNo || "",
+      DateOfBirth: co.DateOfBirth ? String(co.DateOfBirth).slice(0, 10) : "",
+      Gender: co.Gender || "", Occupation: co.Occupation || "",
+      AnnualIncome: co.AnnualIncome != null ? String(co.AnnualIncome) : "",
+      Address: co.Address || "", City: co.City || "", State: co.State || "",
+      Pincode: co.Pincode || "", Notes: co.Notes || "",
+    });
+    setEditingId(co.Id);
+    setSameAsApplicant(
+      !!applicantAddress && (co.Address || "").trim() === applicantAddress.trim() &&
+      (co.City || "").trim() === (applicantCity || "").trim() &&
+      (co.State || "").trim() === (applicantState || "").trim() &&
+      (co.Pincode || "").trim() === (applicantPincode || "").trim()
+    );
+  };
+  const cancelEdit = () => { setEditingId(null); setDraft(emptyCoApplicant()); setSameAsApplicant(false); };
+
+  // While the checkbox is on, keep the draft's address fields in step if
+  // the applicant's own address changes mid-edit.
+  useEffect(() => {
+    if (sameAsApplicant) {
+      setDraft((d: any) => ({
+        ...d,
+        Address: applicantAddress || "", City: applicantCity || "",
+        State: applicantState || "", Pincode: applicantPincode || "",
+      }));
+    }
+  }, [sameAsApplicant, applicantAddress, applicantCity, applicantState, applicantPincode]);
+
+  const handleSave = async () => {
+    if (!draft.Name?.trim()) { toast.error("Name is required"); return; }
+    if (draft.Mobile?.trim() && !/^\d{10}$/.test(draft.Mobile.trim())) { toast.error("Co-applicant mobile must be exactly 10 digits"); return; }
+    if (draft.PanNo?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(draft.PanNo.trim().toUpperCase())) { toast.error("Co-applicant PAN must be in format ABCDE1234F"); return; }
+    if (draft.AadhaarNo?.trim() && !/^\d{12}$/.test(draft.AadhaarNo.trim())) { toast.error("Co-applicant Aadhaar must be exactly 12 digits"); return; }
+    if (draft.Pincode?.trim() && !/^\d{6}$/.test(draft.Pincode.trim())) { toast.error("Co-applicant Pincode must be exactly 6 digits"); return; }
+    if (draft.Email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.Email.trim())) { toast.error("Invalid co-applicant email address"); return; }
+    setSaving(true);
+    try {
+      const isNew = editingId === "new";
+      const url = isNew ? `${CO_APPLICANT_API}/application/${applicationId}` : `${CO_APPLICANT_API}/${editingId}`;
+      const res = await fetchWithAuth(url, {
+        method: isNew ? "POST" : "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Save failed");
+      toast.success(isNew ? "Co-applicant added" : "Co-applicant updated");
+      cancelEdit();
+      refetch();
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    try {
+      const res = await fetchWithAuth(`${CO_APPLICANT_API}/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Delete failed");
+      refetch();
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-border p-3 space-y-2">
+        <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Users2 size={13} /> Co-Applicants</label>
+        {(coApplicants as any[]).length > 0 ? (
+          <div className="space-y-1.5">
+            {(coApplicants as any[]).map((co: any) => (
+              <div key={co.Id}
+                onClick={() => setViewingCoApplicant(co)}
+                className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5 cursor-pointer hover:bg-muted/50">
+                <span className="flex items-center gap-1.5">
+                  <span className="font-medium text-foreground">{co.Name}</span>
+                  {co.Relation && <span className="text-muted-foreground">({co.Relation})</span>}
+                  {co.Mobile && <span className="text-muted-foreground">— {co.Mobile}</span>}
+                </span>
+                <span className="flex items-center gap-2">
+                  <button onClick={(e) => { e.stopPropagation(); startEdit(co); }} className="text-primary hover:underline">Edit</button>
+                  <button onClick={(e) => { e.stopPropagation(); handleDelete(co.Id); }} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No co-applicants added yet — optional.</p>
+        )}
+        {editingId === null && (
+          <button onClick={startAdd}
+            className="text-xs px-3 py-1.5 border border-border rounded-md text-primary hover:bg-muted/40 flex items-center gap-1">
+            <Plus size={12} /> Add Co-Applicant
+          </button>
+        )}
+      </div>
+
+      {editingId !== null && (
+        <div className="rounded-lg border border-border p-3 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Name *</label>
+              <input value={draft.Name} onChange={(e) => setDraft((d: any) => ({ ...d, Name: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Relation</label>
+              <select value={draft.Relation} onChange={(e) => setDraft((d: any) => ({ ...d, Relation: e.target.value }))} className={inputCls}>
+                <option value="">Select</option>
+                <option value="Spouse">Spouse</option>
+                <option value="Son">Son</option>
+                <option value="Daughter">Daughter</option>
+                <option value="Father">Father</option>
+                <option value="Mother">Mother</option>
+                <option value="Brother">Brother</option>
+                <option value="Sister">Sister</option>
+                <option value="Friend">Friend</option>
+                <option value="Business Partner">Business Partner</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Mobile</label>
+              <input value={draft.Mobile} onChange={(e) => setDraft((d: any) => ({ ...d, Mobile: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Email</label>
+              <input value={draft.Email} onChange={(e) => setDraft((d: any) => ({ ...d, Email: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>PAN</label>
+              <input value={draft.PanNo} onChange={(e) => setDraft((d: any) => ({ ...d, PanNo: e.target.value.toUpperCase() }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Aadhaar No.</label>
+              <input value={draft.AadhaarNo} onChange={(e) => setDraft((d: any) => ({ ...d, AadhaarNo: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Date of Birth</label>
+              <input type="date" value={draft.DateOfBirth} onChange={(e) => setDraft((d: any) => ({ ...d, DateOfBirth: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Gender</label>
+              <select value={draft.Gender} onChange={(e) => setDraft((d: any) => ({ ...d, Gender: e.target.value }))} className={inputCls}>
+                <option value="">Select</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Occupation</label>
+              <input value={draft.Occupation} onChange={(e) => setDraft((d: any) => ({ ...d, Occupation: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Annual Income</label>
+              <input type="number" value={draft.AnnualIncome} onChange={(e) => setDraft((d: any) => ({ ...d, AnnualIncome: e.target.value }))} className={inputCls} />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className={labelCls + " mb-0"}>Address</label>
+              {applicantAddress && (
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                  <input type="checkbox" checked={sameAsApplicant}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSameAsApplicant(checked);
+                      if (checked) {
+                        setDraft((d: any) => ({
+                          ...d, Address: applicantAddress || "", City: applicantCity || "",
+                          State: applicantState || "", Pincode: applicantPincode || "",
+                        }));
+                      }
+                    }}
+                    className="rounded border-border" />
+                  Same as {applicantName || "applicant"}'s address
+                </label>
+              )}
+            </div>
+            <input value={draft.Address} readOnly={sameAsApplicant}
+              onChange={(e) => setDraft((d: any) => ({ ...d, Address: e.target.value }))}
+              className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className={labelCls}>City</label>
+              <input value={draft.City} readOnly={sameAsApplicant}
+                onChange={(e) => setDraft((d: any) => ({ ...d, City: e.target.value }))}
+                className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
+            </div>
+            <div>
+              <label className={labelCls}>State</label>
+              <input value={draft.State} readOnly={sameAsApplicant}
+                onChange={(e) => setDraft((d: any) => ({ ...d, State: e.target.value }))}
+                className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
+            </div>
+            <div>
+              <label className={labelCls}>Pincode</label>
+              <input value={draft.Pincode} readOnly={sameAsApplicant}
+                onChange={(e) => setDraft((d: any) => ({ ...d, Pincode: e.target.value }))}
+                className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
+            </div>
+          </div>
+          <div>
+            <label className={labelCls}>Notes</label>
+            <textarea value={draft.Notes} onChange={(e) => setDraft((d: any) => ({ ...d, Notes: e.target.value }))} rows={2} className={`${inputCls} resize-none`} />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={cancelEdit} className="px-3 py-1.5 text-xs border border-border rounded-md text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleSave} disabled={saving}
+              className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Plain custom overlay instead of the shadcn/Radix <Dialog> — this
+          popup opens while the wizard's own Dialog is already open, and
+          nesting two Radix Dialogs is a known source of a stuck
+          pointer-events/focus-trap state on the outer dialog once the inner
+          one closes (symptom: buttons like Edit stop responding). A plain
+          div-based overlay sidesteps that entirely. */}
+      {viewingCoApplicant && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setViewingCoApplicant(null)}
+        >
+          <div
+            className="bg-background border border-border rounded-lg shadow-xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-heading text-sm font-semibold text-foreground flex items-center gap-2">
+                <Users2 size={16} />
+                {viewingCoApplicant.Name}
+                {viewingCoApplicant.Relation && (
+                  <span className="text-xs font-normal text-muted-foreground">({viewingCoApplicant.Relation})</span>
+                )}
+              </h3>
+              <button onClick={() => setViewingCoApplicant(null)} className="text-muted-foreground hover:text-foreground">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+              <div><span className="text-muted-foreground">Mobile:</span> <span className="text-foreground">{viewingCoApplicant.Mobile || "—"}</span></div>
+              <div><span className="text-muted-foreground">Email:</span> <span className="text-foreground">{viewingCoApplicant.Email || "—"}</span></div>
+              <div><span className="text-muted-foreground">PAN:</span> <span className="text-foreground">{viewingCoApplicant.PanNo || "—"}</span></div>
+              <div><span className="text-muted-foreground">Aadhaar No.:</span> <span className="text-foreground">{viewingCoApplicant.AadhaarNo || "—"}</span></div>
+              <div><span className="text-muted-foreground">Date of Birth:</span> <span className="text-foreground">{viewingCoApplicant.DateOfBirth ? String(viewingCoApplicant.DateOfBirth).slice(0, 10) : "—"}</span></div>
+              <div><span className="text-muted-foreground">Gender:</span> <span className="text-foreground">{viewingCoApplicant.Gender || "—"}</span></div>
+              <div><span className="text-muted-foreground">Occupation:</span> <span className="text-foreground">{viewingCoApplicant.Occupation || "—"}</span></div>
+              <div><span className="text-muted-foreground">Annual Income:</span> <span className="text-foreground">{viewingCoApplicant.AnnualIncome != null && viewingCoApplicant.AnnualIncome !== "" ? viewingCoApplicant.AnnualIncome : "—"}</span></div>
+              <div className="col-span-2"><span className="text-muted-foreground">Address:</span> <span className="text-foreground">{viewingCoApplicant.Address || "—"}</span></div>
+              <div><span className="text-muted-foreground">City:</span> <span className="text-foreground">{viewingCoApplicant.City || "—"}</span></div>
+              <div><span className="text-muted-foreground">State:</span> <span className="text-foreground">{viewingCoApplicant.State || "—"}</span></div>
+              <div><span className="text-muted-foreground">Pincode:</span> <span className="text-foreground">{viewingCoApplicant.Pincode || "—"}</span></div>
+              {viewingCoApplicant.Notes && (
+                <div className="col-span-2"><span className="text-muted-foreground">Notes:</span> <span className="text-foreground">{viewingCoApplicant.Notes}</span></div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4">
+              <button
+                type="button"
+                onClick={() => { const co = viewingCoApplicant; setViewingCoApplicant(null); startEdit(co); }}
+                className="px-3 py-1.5 text-xs border border-border rounded-md text-primary hover:bg-muted/40">
+                Edit
+              </button>
+              <button type="button" onClick={() => setViewingCoApplicant(null)}
+                className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+// Same "fetch as blob, preview in an iframe, offer Download" pattern as
+// CrmMoneyReceipts.tsx's ReceiptPdfDialog — so staff can hand a customer
+// both documents the same way, from the same page.
+const ApplicationFormPdfDialog: React.FC<{ applicationId: number; applicationNo: string; onClose: () => void }> = ({ applicationId, applicationNo, onClose }) => {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    fetchWithAuth(`${API}/${applicationId}/pdf`)
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (cancelled || !blob) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch(() => setBlobUrl(null));
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [applicationId]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <div className="flex items-center justify-between gap-3 pr-6">
+            <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> Application Form — {applicationNo}</DialogTitle>
+            {blobUrl && (
+              <a href={blobUrl} download={`${applicationNo}-ApplicationForm.pdf`}
+                className="shrink-0 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 flex items-center gap-1.5">
+                <Download size={14} /> Download PDF
+              </a>
+            )}
+          </div>
+        </DialogHeader>
+        <div className="flex items-center justify-center min-h-[400px] bg-muted/20 rounded-lg overflow-hidden border border-border">
+          {!blobUrl ? <span className="text-sm text-muted-foreground">Generating preview…</span>
+            : <iframe src={blobUrl} title={applicationNo} className="w-full h-[75vh] border-0" />}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -309,7 +685,23 @@ const CrmApplication: React.FC = () => {
   // single "default" plan to silently apply; Payment Plan is always an
   // explicit, mandatory pick once a unit is on the application.)
   const [viewingAppId, setViewingAppId] = useState<number | null>(null);
+  const [pdfDialogApp, setPdfDialogApp] = useState<{ id: number; no: string } | null>(null);
   const saveBankDetailsRef = useRef<null | (() => Promise<void>)>(null);
+
+  // Row clicks only ever set local state — the URL stayed plain
+  // /crm/applications, so a refresh lost the open detail dialog and there
+  // was nothing to copy/bookmark/share to jump straight back to this
+  // application. openApplication/closeApplication keep ?id= in sync with
+  // the dialog's actual open/closed state, same pattern as CrmBooking.tsx's
+  // ?view= and CrmWelcomeCall.tsx's ?bookingId=.
+  const openApplication = (id: number) => {
+    setViewingAppId(id);
+    setSearchParams((sp) => { sp.set("id", String(id)); return sp; }, { replace: true });
+  };
+  const closeApplication = () => {
+    setViewingAppId(null);
+    setSearchParams((sp) => { sp.delete("id"); return sp; }, { replace: true });
+  };
 
   const { data: apps = [], isLoading } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 60_000 });
   const { data: viewingAppDetail } = useQuery({
@@ -663,7 +1055,7 @@ const CrmApplication: React.FC = () => {
   );
   const selectedPlanMilestones = useMemo(() => parseMilestones(selectedPaymentPlan?.MilestonesJson), [selectedPaymentPlan]);
   const selectedPlanBookingAmount = Number(selectedPaymentPlan?.BookingAmount || 0);
-  // Extra Work's own GST-inclusive total folds into GrandTotal (and, once a
+  // Extra Charges's own GST-inclusive total folds into GrandTotal (and, once a
   // real Booking exists, into the same shared %-based milestones via
   // recalculateRemainingMilestones) exactly like Parking — this preview
   // needs to include it too, or it understates what each later milestone %
@@ -729,15 +1121,22 @@ const CrmApplication: React.FC = () => {
 
   // Deep-link from CrmLeads.tsx's "View Application" link (a converted lead
   // whose linked Customer already has an Application) — opens the read-only
-  // detail dialog directly instead of the list-only page.
+  // detail dialog directly instead of the list-only page. One-shot guard
+  // (matching CrmBooking.tsx/CrmWelcomeCall.tsx's deepLinkOpened) so this
+  // doesn't refire and reopen the dialog right after closeApplication just
+  // cleared ?id= — the param now persists while the dialog is open (see
+  // openApplication/closeApplication above) instead of being stripped
+  // immediately on read, so it's actually bookmarkable/shareable/
+  // refresh-safe rather than a fire-once-only redirect.
+  const [appDeepLinkOpened, setAppDeepLinkOpened] = useState(false);
   useEffect(() => {
+    if (appDeepLinkOpened) return;
     const id = searchParams.get("id");
     if (id) {
+      setAppDeepLinkOpened(true);
       setViewingAppId(parseInt(id));
-      setSearchParams((sp) => { sp.delete("id"); return sp; }, { replace: true });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [searchParams, appDeepLinkOpened]);
 
   const loadApplicationIntoWizard = async (id: number) => {
     setLoadingApplication(true);
@@ -962,7 +1361,15 @@ const CrmApplication: React.FC = () => {
     // app (CrmBooking.tsx, CrmBookingDetail.tsx, CrmPaymentMilestones.tsx):
     // if the project has tagged banks (or even just the open bank list is
     // non-empty), a bank must be picked before this can go through — only
-    // gated when a real token amount is actually being captured.
+    // gated when a real token amount is actually being captured. Checked
+    // here (not just server-side) so staff get an immediate, specific
+    // message instead of a round-trip 400 that translateError's generic
+    // "required" fallback used to flatten into an unhelpful "fill in all
+    // required fields" toast pointing at nothing.
+    if (form.TokenValue && bankOptions.length > 0 && !form.DepositBankId) {
+      toast.error("Select which company bank this token payment landed in (Deposited To)");
+      return;
+    }
     setSaving(true);
     try {
       await saveApplicationFields({
@@ -1078,7 +1485,7 @@ const CrmApplication: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["unit-master"] });
       qc.invalidateQueries({ queryKey: ["unit-matrix"] });
       qc.invalidateQueries({ queryKey: ["parking-matrix"] });
-      if (viewingAppId === a.Id) setViewingAppId(null);
+      if (viewingAppId === a.Id) closeApplication();
     } catch (e: any) {
       toast.error(translateError(e.message));
     }
@@ -1116,7 +1523,7 @@ const CrmApplication: React.FC = () => {
   const convertedColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "App No", size: 120,
       cell: (i) => (
-        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">
+        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">
           {i.getValue() as string}
         </span>
       ) },
@@ -1126,7 +1533,7 @@ const CrmApplication: React.FC = () => {
        edge-to-edge instead of bunching columns on the left. */
       accessorKey: "ApplicantName", header: "Applicant", size: 210,
       cell: (i) => (
-        <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
+        <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
           <div className="text-xs text-muted-foreground">
             {i.row.original.Mobile}
@@ -1136,34 +1543,39 @@ const CrmApplication: React.FC = () => {
       ) },
     { accessorKey: "BookingNo", header: "Booking", size: 190,
       cell: (i) => (
-        <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
+        <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
           <div className="font-mono text-xs font-semibold text-foreground">{i.row.original.BookingNo}</div>
           <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-green-600 bg-green-50 border-green-200">{i.row.original.BookingStatus}</span>
         </div>
       ) },
     { id: "unitProject", header: "Unit / Project", size: 220, enableSorting: false,
       cell: (i) => (
-        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">
+        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs">
           {[i.row.original.BookingProjectName, i.row.original.BookingUnitNo].filter(Boolean).join(" · ") || "—"}
         </span>
       ) },
     { accessorKey: "BookingTotalValue", header: "Value", size: 150,
       cell: (i) => {
         const val = i.row.original.BookingGrandTotal ?? i.row.original.BookingTotalValue;
-        return <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs font-medium">{val ? `₹${Number(val).toLocaleString("en-IN")}` : "—"}</span>;
+        return <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs font-medium">{val ? `₹${Number(val).toLocaleString("en-IN")}` : "—"}</span>;
       } },
     { accessorKey: "BookingDate", header: "Booked On", size: 130,
       cell: (i) => (
-        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
+        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
           {i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}
         </span>
       ) },
-    { id: "actions", header: "", size: 200, enableSorting: false,
+    { id: "actions", header: "", size: 240, enableSorting: false,
       cell: (i) => (
         <div className="flex items-center gap-3 flex-wrap">
           <button onClick={() => navigate(`/crm/bookings?applicationId=${i.row.original.Id}`)}
             className="flex items-center gap-1 text-xs text-primary hover:underline">
             <Building2 size={12} /> View Booking <ChevronRight size={12} />
+          </button>
+          <button onClick={() => setPdfDialogApp({ id: i.row.original.Id, no: i.row.original.ApplicationNo })}
+            title="Preview / download Application Form PDF"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
+            <FileText size={12} /> Form
           </button>
           {(canEditApplications || canRequestBookingCancellation) && i.row.original.BookingId && i.row.original.BookingStatus !== CrmStatus.CANCELLED && (
             <button onClick={() => navigate(`/crm/cancellations?bookingId=${i.row.original.BookingId}`)}
@@ -1178,7 +1590,7 @@ const CrmApplication: React.FC = () => {
   const inProcessColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "App No", size: 120,
       cell: (i) => (
-        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
+        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
           {i.getValue() as string}
         </span>
       ) },
@@ -1191,7 +1603,7 @@ const CrmApplication: React.FC = () => {
        columns bunched on the left with dead space after Date. */
       accessorKey: "ApplicantName", header: "Applicant", size: 220,
       cell: (i) => (
-        <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer">
+        <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
           <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
           <div className="text-xs text-muted-foreground">
             {i.row.original.Mobile}
@@ -1204,14 +1616,14 @@ const CrmApplication: React.FC = () => {
         const r = i.row.original;
         const typeBit = [r.BhkPreference, r.PropertyType].filter(Boolean).join(" · ") || r.UnitTypeFromMaster || "";
         return (
-          <span onClick={() => setViewingAppId(r.Id)} className="cursor-pointer">
+          <span onClick={() => openApplication(r.Id)} className="cursor-pointer">
             {[r.InterestedProject, typeBit].filter(Boolean).join(" · ") || "—"}
           </span>
         );
       } },
     { accessorKey: "Source", header: "Source", size: 170,
       cell: (i) => (
-        <div onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">
+        <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs">
           <div>{i.row.original.Source || "—"}</div>
           <div className="text-muted-foreground">
             {[i.row.original.PlatformName, i.row.original.CampaignName, i.row.original.AdName].filter(Boolean).join(" › ") || i.row.original.ChannelPartnerName || ""}
@@ -1219,9 +1631,9 @@ const CrmApplication: React.FC = () => {
         </div>
       ) },
     { accessorKey: "RatePerSqFt", header: "Rate", size: 130,
-      cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs">{i.row.original.RatePerSqFt ? `₹${Number(i.row.original.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span> },
+      cell: (i) => <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs">{i.row.original.RatePerSqFt ? `₹${Number(i.row.original.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span> },
     { accessorKey: "AssigneeName", header: "Assigned To", size: 140,
-      cell: (i) => <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-sm">{(i.getValue() as string) || "—"}</span> },
+      cell: (i) => <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-sm">{(i.getValue() as string) || "—"}</span> },
     { accessorKey: "Status", header: "Status", size: 110,
       cell: (i) => {
         const r = i.row.original;
@@ -1233,7 +1645,7 @@ const CrmApplication: React.FC = () => {
         const displayStatus = r.Stage === "Converted" ? "Booked" : r.Status;
         return (
           <span
-            onClick={() => setViewingAppId(r.Id)}
+            onClick={() => openApplication(r.Id)}
             className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[displayStatus] || ""}`}
           >
             {displayStatus}
@@ -1242,7 +1654,7 @@ const CrmApplication: React.FC = () => {
       } },
     { accessorKey: "CreatedAt", header: "Date", size: 110,
       cell: (i) => (
-        <span onClick={() => setViewingAppId(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
+        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
           {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
         </span>
       ) },
@@ -1282,18 +1694,25 @@ const CrmApplication: React.FC = () => {
                       if (data?.bookingError) qc.invalidateQueries({ queryKey: ["unit-master"] });
                     }}
                   />
-                  {/* Submitting the Application auto-creates the Booking; this
-                      only ever shows up when that auto-create didn't happen
-                      (no unit was picked yet, or a unit-hold conflict at the
-                      time) — the sole retry path, no separate "New Booking"
-                      form exists anywhere else. */}
-                  {!["Rejected", "Cancelled", "Expired"].includes(a.Status) && a.Stage !== "Converted" && (
+                  {/* Create Booking — only when the application has been properly
+                      submitted (Status=Pending) AND a unit was picked. Draft
+                      applications haven't been submitted yet so the wizard may
+                      not be complete. Stage=Converted means a booking already
+                      exists — retry path is not needed. */}
+                  {a.Status === CrmStatus.PENDING && a.Stage !== "Converted" && (
                     a.UnitUnavailableForBooking ? (
                       <span
                         className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-red-600 border-red-200 bg-red-50 font-medium"
                         title="This application's picked unit is currently booked or held by a different application — re-pick a unit before a booking can be created."
                       >
                         <XCircle size={12} /> Unit unavailable
+                      </span>
+                    ) : !a.PreferredUnitId ? (
+                      <span
+                        className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-amber-600 border-amber-200 bg-amber-50 font-medium"
+                        title="No unit was selected in the application — edit the application and pick a unit first."
+                      >
+                        <AlertTriangle size={12} /> No unit selected
                       </span>
                     ) : (
                       <button
@@ -1342,12 +1761,34 @@ const CrmApplication: React.FC = () => {
                   )}
                 </>
               )}
+              {/* Available regardless of stage/status — the same "download and
+                  hand to the customer alongside the Money Receipt" document
+                  either way, generated fresh from whatever's on the
+                  application right now (see crmApplications.js GET /:id/pdf). */}
+              <button
+                onClick={() => setPdfDialogApp({ id: a.Id, no: a.ApplicationNo })}
+                title="Preview / download Application Form PDF"
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <FileText size={12} /> Form
+              </button>
             </div>
             {/* Status hint lives on its own line as a plain caption, never
                 inline with the buttons — that inline mixing (a link, a
                 sentence, another link, all wrapping unpredictably in a
                 210px cell) was what made this column look broken. */}
-            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && (
+            {/* Status hint — contextual caption below the action buttons */}
+            {activeStage === "InProcess" && a.Status === CrmStatus.DRAFT && (
+              <span className="flex items-center gap-1 text-[11px] text-amber-600">
+                <Clock size={10} /> Not submitted yet — complete the wizard and submit
+              </span>
+            )}
+            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && !a.PreferredUnitId && (
+              <span className="flex items-center gap-1 text-[11px] text-amber-600">
+                <AlertTriangle size={10} /> Submitted but no unit selected — edit to add a unit
+              </span>
+            )}
+            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && !!a.PreferredUnitId && (
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                 <Clock size={10} /> Submitted — booking not yet created
               </span>
@@ -1484,7 +1925,7 @@ const CrmApplication: React.FC = () => {
               clickable — steps 2-6 all need applicationId (created in step 1)
               and Bank/KYC intentionally still gates via its own Next/Save. */}
           <div className="flex items-center gap-2 text-xs flex-wrap">
-            {["Project/Unit", "Parking", "Extra Work", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => {
+            {["Project/Unit", "Parking", "Extra Charges", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => {
               const stepNum = i + 1;
               const reachable = stepNum === 1 || (!!applicationId && stepNum <= maxStepReached);
               return (
@@ -1924,13 +2365,13 @@ const CrmApplication: React.FC = () => {
                 <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
               )}
 
-              {/* Extra Work — separate from the Unit+Parking GST bracket
+              {/* Extra Charges — separate from the Unit+Parking GST bracket
                   entirely (own fixed 18% HSN rate, never affects which
                   bracket Unit+Parking lands in), so it's its own summary
                   rather than folded into GstBreakdownBox above. */}
               {(detailExtraCharges as any[]).length > 0 && (
                 <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs space-y-1">
-                  <p className="font-semibold text-foreground">Extra Work</p>
+                  <p className="font-semibold text-foreground">Extra Charges</p>
                   {(detailExtraCharges as any[]).map((c: any) => (
                     <div key={c.Id} className="flex items-center justify-between text-muted-foreground">
                       <span className="truncate pr-2">{c.Description} <span className="text-[10px]">(GST {c.GstRate}%)</span></span>
@@ -1938,7 +2379,7 @@ const CrmApplication: React.FC = () => {
                     </div>
                   ))}
                   <div className="flex items-center justify-between border-t border-border pt-1 font-semibold text-foreground">
-                    <span>Extra Work Total</span>
+                    <span>Extra Charges Total</span>
                     <span>₹{detailExtraChargesTotal.toLocaleString("en-IN")}</span>
                   </div>
                 </div>
@@ -2031,6 +2472,26 @@ const CrmApplication: React.FC = () => {
                       {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
                     </select>
                   </div>
+                  {/* Which real company bank this token payment landed in —
+                      required by the backend (crmApplications.js PUT /:id)
+                      the moment a project has any tagged bank, but this
+                      picker never actually rendered here before, so staff
+                      had no way to satisfy that check and Submit would fail
+                      with no visible field to fix. Same "Deposited To"
+                      pattern as CrmBooking.tsx. */}
+                  {bankOptions.length > 0 && (
+                    <div>
+                      <label className={labelCls}>Deposited To *</label>
+                      <select value={form.DepositBankId} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
+                        onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
+                        className={inputCls}>
+                        <option value="">— Select bank —</option>
+                        {(bankOptions as any[]).map((b: any) => (
+                          <option key={b.BId} value={String(b.BId)}>{b.BName}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   {/* Instrument reference — appears only once a non-Cash mode
                       is picked, since that's the only time there's actually
                       anything to reference. Cheque gets its own number/date
@@ -2143,7 +2604,7 @@ const CrmApplication: React.FC = () => {
           tab (In Process/Converted/Not Converted). Read-only summary; the
           actions that actually change something (Resume, Approve/Reject,
           View Booking, Generate Invoice) stay on the row itself, not here. ── */}
-      <Dialog open={!!viewingAppId} onOpenChange={(o) => { if (!o) setViewingAppId(null); }}>
+      <Dialog open={!!viewingAppId} onOpenChange={(o) => { if (!o) closeApplication(); }}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2">
@@ -2272,7 +2733,7 @@ const CrmApplication: React.FC = () => {
                     )}
                     {extraChargesTotal > 0 && (
                       <div className="flex justify-between text-xs">
-                        <span className="text-muted-foreground">Extra Work</span>
+                        <span className="text-muted-foreground">Extra Charges</span>
                         <span className="font-medium">₹{extraChargesTotal.toLocaleString("en-IN")}</span>
                       </div>
                     )}
@@ -2307,7 +2768,7 @@ const CrmApplication: React.FC = () => {
                     {/* Extra work detail */}
                     {extraChargeRows.length > 0 && (
                       <div className="pt-2 border-t border-border space-y-1">
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Extra Work</p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Extra Charges</p>
                         {extraChargeRows.map((c: any) => (
                           <div key={c.Id} className="flex justify-between text-[11px]">
                             <span className="text-muted-foreground truncate pr-2">{c.Description}</span>
@@ -2377,7 +2838,7 @@ const CrmApplication: React.FC = () => {
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
                       <FileText size={13} className="text-primary shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Linked Booking</span>
-                      <button onClick={() => { setViewingAppId(null); navigate(`/crm/bookings?applicationId=${a.Id}`); }}
+                      <button onClick={() => { closeApplication(); navigate(`/crm/bookings?applicationId=${a.Id}`); }}
                         className="ml-auto text-[11px] text-primary hover:underline flex items-center gap-0.5">
                         Open <ChevronRight size={11} />
                       </button>
@@ -2429,7 +2890,7 @@ const CrmApplication: React.FC = () => {
             );
           })()}
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => setViewingAppId(null)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+            <button onClick={() => closeApplication()} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
               Close
             </button>
             {viewingAppDetail && canCancelApplication(viewingAppDetail.application) && (
@@ -2458,7 +2919,7 @@ const CrmApplication: React.FC = () => {
             )}
             {viewingAppDetail && (isResumable(viewingAppDetail.application) || isEditableApplication(viewingAppDetail.application)) && (
               <button
-                onClick={() => { const id = viewingAppDetail.application.Id; setViewingAppId(null); loadApplicationIntoWizard(id); }}
+                onClick={() => { const id = viewingAppDetail.application.Id; closeApplication(); loadApplicationIntoWizard(id); }}
                 disabled={loadingApplication}
                 className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40"
               >
@@ -2521,6 +2982,13 @@ const CrmApplication: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+      {pdfDialogApp && (
+        <ApplicationFormPdfDialog
+          applicationId={pdfDialogApp.id}
+          applicationNo={pdfDialogApp.no}
+          onClose={() => setPdfDialogApp(null)}
+        />
+      )}
     </CrmShell>
     </>
   );
@@ -2796,13 +3264,20 @@ const ParkingSelectionStep: React.FC<{
 
   const [selectedType, setSelectedType] = useState("");
   const [selectedSlotId, setSelectedSlotId] = useState("");
+  const [rateOverride, setRateOverride] = useState("");
   const [adding, setAdding] = useState(false);
+  const [rateEditing, setRateEditing] = useState(false);
 
   // Reset the slot/quantity pick (not the type) whenever the chosen type's
   // own available list changes under it — e.g. someone else just took the
   // one slot this staff member had highlighted.
   const currentType = (availableRates as any[]).find((r: any) => r.ParkingType === selectedType) || null;
-  useEffect(() => { setSelectedSlotId(""); }, [selectedType]);
+  useEffect(() => {
+    setSelectedSlotId("");
+    const rate = (availableRates as any[]).find((r: any) => r.ParkingType === selectedType);
+    setRateOverride(rate ? String(rate.Charge) : "");
+    setRateEditing(false);
+  }, [selectedType]);
 
   const handleAdd = async () => {
     if (!currentType) return;
@@ -2813,6 +3288,11 @@ const ParkingSelectionStep: React.FC<{
       const body: any = {
         ApplicationId: applicationId, ParkingMasterId: currentType.ParkingMasterId,
         ParkingSlotId: parseInt(selectedSlotId), Quantity: 1,
+        // Only send a RateOverride when the user explicitly unlocked and changed the rate.
+        // Pre-filling the field with the master rate should not be treated as an override.
+        ...(rateEditing && rateOverride && Number(rateOverride) !== Number(currentType.Charge)
+          ? { RateOverride: rateOverride }
+          : {}),
       };
       const res = await fetchWithAuth(`${PARKING_API}/standalone`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -2820,7 +3300,7 @@ const ParkingSelectionStep: React.FC<{
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed to add ${currentType.ParkingType}`);
       toast.success(`${currentType.ParkingType} added — ₹${Number(data.TotalAmount).toLocaleString("en-IN")}`);
-      setSelectedType(""); setSelectedSlotId("");
+      setSelectedType(""); setSelectedSlotId(""); setRateOverride(""); setRateEditing(false);
       refetchAll();
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -2966,6 +3446,65 @@ const ParkingSelectionStep: React.FC<{
             </p>
           )}
 
+          {/* Rate — locked by default, shows the master rate clearly.
+              Click the pencil to unlock if a negotiated price applies. */}
+          {currentType && currentType.HasSlots && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-muted-foreground">Rate (₹ per unit)</label>
+                {!rateEditing ? (
+                  <button
+                    type="button"
+                    onClick={() => setRateEditing(true)}
+                    className="text-[11px] text-muted-foreground hover:text-primary flex items-center gap-0.5 transition-colors"
+                    title="Override rate for this customer"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    Edit
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => { setRateOverride(currentType ? String(currentType.Charge) : ""); setRateEditing(false); }}
+                    className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                    title="Reset to master rate"
+                  >
+                    ↺ Reset
+                  </button>
+                )}
+              </div>
+              {rateEditing ? (
+                <input
+                  type="number" min={0}
+                  value={rateOverride}
+                  onChange={(e) => setRateOverride(e.target.value)}
+                  autoFocus
+                  className="w-full text-sm border border-primary rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              ) : (
+                <div
+                  className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-muted/30 flex items-center justify-between cursor-default select-none"
+                  title="Click Edit to change this rate"
+                >
+                  <span className="font-medium tabular-nums">
+                    ₹{Number(rateOverride || currentType.Charge).toLocaleString("en-IN")}
+                  </span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/50"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+              )}
+              {rateEditing && rateOverride && Number(rateOverride) !== Number(currentType.Charge) && (
+                <p className="text-[11px] text-amber-600 mt-1">
+                  Master rate is ₹{Number(currentType.Charge).toLocaleString("en-IN")} — you're overriding to ₹{Number(rateOverride).toLocaleString("en-IN")}.
+                </p>
+              )}
+              {!rateEditing && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Master rate. Click <span className="font-medium">Edit</span> to set a negotiated price.
+                </p>
+              )}
+            </div>
+          )}
+
           {currentType && (
             <button onClick={handleAdd} disabled={adding || !currentType.HasSlots || !selectedSlotId}
               className="w-full text-xs px-3 py-2 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
@@ -2978,8 +3517,8 @@ const ParkingSelectionStep: React.FC<{
   );
 };
 
-// ── Step 3: Extra Work ──────────────────────────────────────────────────────────
-// Unlike Parking (Step 2), Extra Work is never tied to a scarce/exclusive
+// ── Step 3: Extra Charges ──────────────────────────────────────────────────────────
+// Unlike Parking (Step 2), Extra Charges is never tied to a scarce/exclusive
 // resource — no physical slot to hold — so items added here are real
 // dbo.CrmExtraCharge rows straight away (ApplicationId set, BookingId NULL),
 // not a hold-then-convert flow. Non-mandatory, exactly like Parking. Locked
@@ -3045,13 +3584,13 @@ const ExtraWorkSelectionStep: React.FC<{
       <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
         <IndianRupee size={11} className="text-primary shrink-0" />
         Unit {fmtInr(computedTotal)}
-        {chargesTotal > 0 && ` + Extra Work ${fmtInr(chargesTotal)}`}
-        {" — Extra Work is optional and never affects the Unit+Parking GST bracket, only its own fixed 18% (HSN Master)."}
+        {chargesTotal > 0 && ` + Extra Charges ${fmtInr(chargesTotal)}`}
+        {" — Extra Charges is optional and never affects the Unit+Parking GST bracket, only its own fixed 18% (HSN Master)."}
       </div>
 
       <div className="rounded-lg border border-border p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Wallet size={13} /> Extra Work</label>
+          <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Wallet size={13} /> Extra Charges</label>
           {!canEdit && (
             <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
               <Lock size={11} /> Locked ({wizardAppStatus})
@@ -3090,340 +3629,8 @@ const ExtraWorkSelectionStep: React.FC<{
           )}
           <button onClick={handleAdd} disabled={adding || !description.trim() || !amount}
             className="w-full text-xs px-3 py-2 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
-            {adding ? "Adding..." : "Add Extra Work"}
+            {adding ? "Adding..." : "Add Extra Charges"}
           </button>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ── Step 4: Co-Applicant(s) ─────────────────────────────────────────────────────
-// Captured directly against the Application (dbo.CrmCoApplicant, ApplicationId
-// set now, BookingId backfilled later by crmEntityCreation.js) rather than as
-// a single flat name/relation/mobile on CrmCustomer as before — a customer can
-// have a different set of co-applicants on each of their Applications, and a
-// deal can have more than one. See crmCoApplicant.js's /application/:id routes.
-const emptyCoApplicant = () => ({
-  Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "",
-  DateOfBirth: "", Gender: "", Occupation: "", AnnualIncome: "",
-  Address: "", City: "", State: "", Pincode: "", Notes: "",
-});
-
-const CoApplicantStep: React.FC<{
-  applicationId: number;
-  applicantName?: string;
-  applicantAddress?: string;
-  applicantCity?: string;
-  applicantState?: string;
-  applicantPincode?: string;
-}> = ({ applicationId, applicantName, applicantAddress, applicantCity, applicantState, applicantPincode }) => {
-  const { data: coApplicants = [], refetch } = useQuery({
-    queryKey: ["crm-app-co-applicants-edit", applicationId],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${CO_APPLICANT_API}/application/${applicationId}`);
-      return r.ok ? r.json() : [];
-    },
-  });
-
-  const [editingId, setEditingId] = useState<number | "new" | null>(null);
-  const [draft, setDraft] = useState<any>(emptyCoApplicant());
-  const [saving, setSaving] = useState(false);
-  // Clicking a co-applicant's row (anywhere but Edit/Delete) opens a
-  // read-only details popup — the row itself only ever shows Name/Relation/
-  // Mobile, so this is the only way to see PAN, Aadhaar, DOB, address, etc.
-  // without dropping into edit mode.
-  const [viewingCoApplicant, setViewingCoApplicant] = useState<any | null>(null);
-  // "Same as applicant's address" — same convenience toggle as the Nominee
-  // section: checking it copies the applicant's current Address/City/State/
-  // Pincode in and locks those fields; unchecking hands them back for free
-  // editing. Defaults on if a saved co-applicant's address already matches
-  // the applicant's (e.g. re-opening a previously saved entry).
-  const [sameAsApplicant, setSameAsApplicant] = useState(false);
-
-  const startAdd = () => { setDraft(emptyCoApplicant()); setEditingId("new"); setSameAsApplicant(false); };
-  const startEdit = (co: any) => {
-    setDraft({
-      Name: co.Name || "", Relation: co.Relation || "", Mobile: co.Mobile || "",
-      Email: co.Email || "", PanNo: co.PanNo || "", AadhaarNo: co.AadhaarNo || "",
-      DateOfBirth: co.DateOfBirth ? String(co.DateOfBirth).slice(0, 10) : "",
-      Gender: co.Gender || "", Occupation: co.Occupation || "",
-      AnnualIncome: co.AnnualIncome != null ? String(co.AnnualIncome) : "",
-      Address: co.Address || "", City: co.City || "", State: co.State || "",
-      Pincode: co.Pincode || "", Notes: co.Notes || "",
-    });
-    setEditingId(co.Id);
-    setSameAsApplicant(
-      !!applicantAddress && (co.Address || "").trim() === applicantAddress.trim() &&
-      (co.City || "").trim() === (applicantCity || "").trim() &&
-      (co.State || "").trim() === (applicantState || "").trim() &&
-      (co.Pincode || "").trim() === (applicantPincode || "").trim()
-    );
-  };
-  const cancelEdit = () => { setEditingId(null); setDraft(emptyCoApplicant()); setSameAsApplicant(false); };
-
-  // While the checkbox is on, keep the draft's address fields in step if
-  // the applicant's own address changes mid-edit.
-  useEffect(() => {
-    if (sameAsApplicant) {
-      setDraft((d: any) => ({
-        ...d,
-        Address: applicantAddress || "", City: applicantCity || "",
-        State: applicantState || "", Pincode: applicantPincode || "",
-      }));
-    }
-  }, [sameAsApplicant, applicantAddress, applicantCity, applicantState, applicantPincode]);
-
-  const handleSave = async () => {
-    if (!draft.Name?.trim()) { toast.error("Name is required"); return; }
-    if (draft.Mobile?.trim() && !/^\d{10}$/.test(draft.Mobile.trim())) { toast.error("Co-applicant mobile must be exactly 10 digits"); return; }
-    if (draft.PanNo?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(draft.PanNo.trim().toUpperCase())) { toast.error("Co-applicant PAN must be in format ABCDE1234F"); return; }
-    if (draft.AadhaarNo?.trim() && !/^\d{12}$/.test(draft.AadhaarNo.trim())) { toast.error("Co-applicant Aadhaar must be exactly 12 digits"); return; }
-    if (draft.Pincode?.trim() && !/^\d{6}$/.test(draft.Pincode.trim())) { toast.error("Co-applicant Pincode must be exactly 6 digits"); return; }
-    if (draft.Email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.Email.trim())) { toast.error("Invalid co-applicant email address"); return; }
-    setSaving(true);
-    try {
-      const isNew = editingId === "new";
-      const url = isNew ? `${CO_APPLICANT_API}/application/${applicationId}` : `${CO_APPLICANT_API}/${editingId}`;
-      const res = await fetchWithAuth(url, {
-        method: isNew ? "POST" : "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Save failed");
-      toast.success(isNew ? "Co-applicant added" : "Co-applicant updated");
-      cancelEdit();
-      refetch();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (id: number) => {
-    try {
-      const res = await fetchWithAuth(`${CO_APPLICANT_API}/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Delete failed");
-      refetch();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-border p-3 space-y-2">
-        <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Users2 size={13} /> Co-Applicants</label>
-        {(coApplicants as any[]).length > 0 ? (
-          <div className="space-y-1.5">
-            {(coApplicants as any[]).map((co: any) => (
-              <div key={co.Id}
-                onClick={() => setViewingCoApplicant(co)}
-                className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5 cursor-pointer hover:bg-muted/50">
-                <span className="flex items-center gap-1.5">
-                  <span className="font-medium text-foreground">{co.Name}</span>
-                  {co.Relation && <span className="text-muted-foreground">({co.Relation})</span>}
-                  {co.Mobile && <span className="text-muted-foreground">— {co.Mobile}</span>}
-                </span>
-                <span className="flex items-center gap-2">
-                  <button onClick={(e) => { e.stopPropagation(); startEdit(co); }} className="text-primary hover:underline">Edit</button>
-                  <button onClick={(e) => { e.stopPropagation(); handleDelete(co.Id); }} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">No co-applicants added yet — optional.</p>
-        )}
-        {editingId === null && (
-          <button onClick={startAdd}
-            className="text-xs px-3 py-1.5 border border-border rounded-md text-primary hover:bg-muted/40 flex items-center gap-1">
-            <Plus size={12} /> Add Co-Applicant
-          </button>
-        )}
-      </div>
-
-      {editingId !== null && (
-        <div className="rounded-lg border border-border p-3 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Name *</label>
-              <input value={draft.Name} onChange={(e) => setDraft((d: any) => ({ ...d, Name: e.target.value }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Relation</label>
-              <select value={draft.Relation} onChange={(e) => setDraft((d: any) => ({ ...d, Relation: e.target.value }))} className={inputCls}>
-                <option value="">Select</option>
-                <option value="Spouse">Spouse</option>
-                <option value="Son">Son</option>
-                <option value="Daughter">Daughter</option>
-                <option value="Father">Father</option>
-                <option value="Mother">Mother</option>
-                <option value="Brother">Brother</option>
-                <option value="Sister">Sister</option>
-                <option value="Friend">Friend</option>
-                <option value="Business Partner">Business Partner</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Mobile</label>
-              <input value={draft.Mobile} onChange={(e) => setDraft((d: any) => ({ ...d, Mobile: e.target.value }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Email</label>
-              <input value={draft.Email} onChange={(e) => setDraft((d: any) => ({ ...d, Email: e.target.value }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>PAN</label>
-              <input value={draft.PanNo} onChange={(e) => setDraft((d: any) => ({ ...d, PanNo: e.target.value.toUpperCase() }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Aadhaar No.</label>
-              <input value={draft.AadhaarNo} onChange={(e) => setDraft((d: any) => ({ ...d, AadhaarNo: e.target.value }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Date of Birth</label>
-              <input type="date" value={draft.DateOfBirth} onChange={(e) => setDraft((d: any) => ({ ...d, DateOfBirth: e.target.value }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Gender</label>
-              <select value={draft.Gender} onChange={(e) => setDraft((d: any) => ({ ...d, Gender: e.target.value }))} className={inputCls}>
-                <option value="">Select</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Occupation</label>
-              <input value={draft.Occupation} onChange={(e) => setDraft((d: any) => ({ ...d, Occupation: e.target.value }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Annual Income</label>
-              <input type="number" value={draft.AnnualIncome} onChange={(e) => setDraft((d: any) => ({ ...d, AnnualIncome: e.target.value }))} className={inputCls} />
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className={labelCls + " mb-0"}>Address</label>
-              {applicantAddress && (
-                <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-                  <input type="checkbox" checked={sameAsApplicant}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setSameAsApplicant(checked);
-                      if (checked) {
-                        setDraft((d: any) => ({
-                          ...d, Address: applicantAddress || "", City: applicantCity || "",
-                          State: applicantState || "", Pincode: applicantPincode || "",
-                        }));
-                      }
-                    }}
-                    className="rounded border-border" />
-                  Same as {applicantName || "applicant"}'s address
-                </label>
-              )}
-            </div>
-            <input value={draft.Address} readOnly={sameAsApplicant}
-              onChange={(e) => setDraft((d: any) => ({ ...d, Address: e.target.value }))}
-              className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className={labelCls}>City</label>
-              <input value={draft.City} readOnly={sameAsApplicant}
-                onChange={(e) => setDraft((d: any) => ({ ...d, City: e.target.value }))}
-                className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
-            </div>
-            <div>
-              <label className={labelCls}>State</label>
-              <input value={draft.State} readOnly={sameAsApplicant}
-                onChange={(e) => setDraft((d: any) => ({ ...d, State: e.target.value }))}
-                className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
-            </div>
-            <div>
-              <label className={labelCls}>Pincode</label>
-              <input value={draft.Pincode} readOnly={sameAsApplicant}
-                onChange={(e) => setDraft((d: any) => ({ ...d, Pincode: e.target.value }))}
-                className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
-            </div>
-          </div>
-          <div>
-            <label className={labelCls}>Notes</label>
-            <textarea value={draft.Notes} onChange={(e) => setDraft((d: any) => ({ ...d, Notes: e.target.value }))} rows={2} className={`${inputCls} resize-none`} />
-          </div>
-          <div className="flex justify-end gap-2 pt-1">
-            <button onClick={cancelEdit} className="px-3 py-1.5 text-xs border border-border rounded-md text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving}
-              className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Plain custom overlay instead of the shadcn/Radix <Dialog> — this
-          popup opens while the wizard's own Dialog is already open, and
-          nesting two Radix Dialogs is a known source of a stuck
-          pointer-events/focus-trap state on the outer dialog once the inner
-          one closes (symptom: buttons like Edit stop responding). A plain
-          div-based overlay sidesteps that entirely. */}
-      {viewingCoApplicant && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
-          onClick={() => setViewingCoApplicant(null)}
-        >
-          <div
-            className="bg-background border border-border rounded-lg shadow-xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-heading text-sm font-semibold text-foreground flex items-center gap-2">
-                <Users2 size={16} />
-                {viewingCoApplicant.Name}
-                {viewingCoApplicant.Relation && (
-                  <span className="text-xs font-normal text-muted-foreground">({viewingCoApplicant.Relation})</span>
-                )}
-              </h3>
-              <button onClick={() => setViewingCoApplicant(null)} className="text-muted-foreground hover:text-foreground">
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-              <div><span className="text-muted-foreground">Mobile:</span> <span className="text-foreground">{viewingCoApplicant.Mobile || "—"}</span></div>
-              <div><span className="text-muted-foreground">Email:</span> <span className="text-foreground">{viewingCoApplicant.Email || "—"}</span></div>
-              <div><span className="text-muted-foreground">PAN:</span> <span className="text-foreground">{viewingCoApplicant.PanNo || "—"}</span></div>
-              <div><span className="text-muted-foreground">Aadhaar No.:</span> <span className="text-foreground">{viewingCoApplicant.AadhaarNo || "—"}</span></div>
-              <div><span className="text-muted-foreground">Date of Birth:</span> <span className="text-foreground">{viewingCoApplicant.DateOfBirth ? String(viewingCoApplicant.DateOfBirth).slice(0, 10) : "—"}</span></div>
-              <div><span className="text-muted-foreground">Gender:</span> <span className="text-foreground">{viewingCoApplicant.Gender || "—"}</span></div>
-              <div><span className="text-muted-foreground">Occupation:</span> <span className="text-foreground">{viewingCoApplicant.Occupation || "—"}</span></div>
-              <div><span className="text-muted-foreground">Annual Income:</span> <span className="text-foreground">{viewingCoApplicant.AnnualIncome != null && viewingCoApplicant.AnnualIncome !== "" ? viewingCoApplicant.AnnualIncome : "—"}</span></div>
-              <div className="col-span-2"><span className="text-muted-foreground">Address:</span> <span className="text-foreground">{viewingCoApplicant.Address || "—"}</span></div>
-              <div><span className="text-muted-foreground">City:</span> <span className="text-foreground">{viewingCoApplicant.City || "—"}</span></div>
-              <div><span className="text-muted-foreground">State:</span> <span className="text-foreground">{viewingCoApplicant.State || "—"}</span></div>
-              <div><span className="text-muted-foreground">Pincode:</span> <span className="text-foreground">{viewingCoApplicant.Pincode || "—"}</span></div>
-              {viewingCoApplicant.Notes && (
-                <div className="col-span-2"><span className="text-muted-foreground">Notes:</span> <span className="text-foreground">{viewingCoApplicant.Notes}</span></div>
-              )}
-            </div>
-
-            <div className="flex justify-end gap-2 pt-4">
-              <button
-                type="button"
-                onClick={() => { const co = viewingCoApplicant; setViewingCoApplicant(null); startEdit(co); }}
-                className="px-3 py-1.5 text-xs border border-border rounded-md text-primary hover:bg-muted/40">
-                Edit
-              </button>
-              <button type="button" onClick={() => setViewingCoApplicant(null)}
-                className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90">
-                Close
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

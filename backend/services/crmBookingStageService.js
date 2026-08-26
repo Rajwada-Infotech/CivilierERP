@@ -279,6 +279,27 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
       console.error("[crmBookingStageService] portal provisioning on confirm failed:", e.message);
       portalInfo = { created: false, error: e.message };
     }
+
+    // Auto-process any Pending MRs that were blocked by WorkflowStage !== 'Confirmed'.
+    // When the approver tried to approve the MR before the Director approved the booking,
+    // it threw and the MR stayed Pending with ReceivedPaymentId = NULL — Finance never
+    // got a row to approve, so milestone AmountPaid was never updated. Now that the
+    // booking is Confirmed, sweep those MRs through approveMoneyReceipt so the
+    // ReceivedPayment row lands in Finance's queue automatically.
+    try {
+      const { approveMoneyReceipt } = require("./crmMoneyReceiptWorkflow");
+      const pendingMrs = await pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT Id FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status = 'Pending' AND ReceivedPaymentId IS NULL");
+      for (const mr of pendingMrs.recordset) {
+        try {
+          await approveMoneyReceipt(pool, mr.Id, userId, userEmail);
+        } catch (mrErr) {
+          console.error("[crmBookingStageService] auto-approve pending MR", mr.Id, "on confirm failed:", mrErr.message);
+        }
+      }
+    } catch (e) {
+      console.error("[crmBookingStageService] pending MR sweep on confirm failed:", e.message);
+    }
   }
 
   return {

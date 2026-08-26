@@ -1275,7 +1275,7 @@ export default function MaterialExpenseBooking() {
     // the PO/GRN flow — see the backend post-to-gl fallback branch) and
     // rows must add up to the invoice's net amount, same check the backend
     // re-runs, but catching it here avoids a round trip.
-    if (isDirect && selectedDoc?.kind === "TOD") {
+    if (isDirectPartyMode) {
       if ((form.expenseHeadAllocations?.length ?? 0) === 0) {
         toast.error("At least one Expense Head is required for this invoice.");
         return;
@@ -1325,7 +1325,12 @@ export default function MaterialExpenseBooking() {
         bd.netAmount,
         selectedDoc?.kind === "TOD" ? (selectedDoc.sourceId ?? null) : null,
       ),
-      ESourceType: selectedDoc?.kind ?? null,
+      // A party picked straight from Payable Party with nothing linked
+      // never sets selectedDoc (see the Select's onValueChange above, which
+      // deliberately leaves it alone) — still a direct/"Other Expenses"
+      // booking as far as the backend's own ESourceType='TOD' convention
+      // goes (see openEditForm's reverse mapping on load).
+      ESourceType: selectedDoc?.kind ?? (isDirectPartyMode ? "TOD" : null),
       ESourceId: selectedDoc?.sourceId ?? null,
       // Present only when multiple GRNs (same PO) were combined into this
       // one invoice — see ExpenseBooking/invoiceLinking.ts.
@@ -1453,6 +1458,16 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "WO_PO";
   /** True when the booking is a direct / Other-Expenses (TOD) entry with no linked source doc. */
   const isDirect = !isGRN && !isPOorWO;
+  // True once a direct booking actually has a party picked — whether that
+  // came from a formal "Other Expenses" template pick first (selectedDoc
+  // already {kind:"TOD"}) or straight from the Payable Party field with no
+  // document selected at all (selectedDoc still null). Gates TDS, the
+  // Direct Items table, and Expense Head Allocation — using selectedDoc's
+  // kind alone here would leave all three permanently hidden for a party
+  // picked without ever going through the template list, since nothing else
+  // sets selectedDoc to "TOD" for that flow.
+  const isDirectPartyMode =
+    isDirect && (selectedDoc?.kind === "TOD" || (!selectedDoc && !!form.supplierLHeadId));
 
   // TDS eligibility — live-checked as the direct/TOD form fills in. Scoped
   // to direct bookings only: GRN/PO/WORK_DONE-sourced bookings don't carry
@@ -1462,7 +1477,7 @@ export default function MaterialExpenseBooking() {
   // this is purely a frontend UI gap for a later pass.
   const tdsSupplierId = (form as any).supplierLHeadId as number | null | undefined;
   useEffect(() => {
-    if (!isDirect || selectedDoc?.kind !== "TOD" || !tdsSupplierId || !form.companyId) {
+    if (!isDirectPartyMode || !tdsSupplierId || !form.companyId) {
       setTdsEligibility(null);
       return;
     }
@@ -1484,7 +1499,7 @@ export default function MaterialExpenseBooking() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDirect, selectedDoc?.kind, tdsSupplierId, form.companyId, form.basicAmount, form.bookingDate]);
+  }, [isDirectPartyMode, tdsSupplierId, form.companyId, form.basicAmount, form.bookingDate]);
 
   // Keep form.tdsAmount live — it used to only be set once, inside the TDS
   // <select>'s onChange, so editing the basic amount (or anything else that
@@ -1828,7 +1843,15 @@ export default function MaterialExpenseBooking() {
                             // Other Expenses (TOD) bookings have no source-doc
                             // label to name themselves after — keep the
                             // booking name in sync with the chosen supplier.
-                            if (name && selectedDoc?.kind === "TOD") {
+                            // Deliberately NOT stamping selectedDoc here —
+                            // DocSelectorPanel treats any non-null selectedDoc
+                            // as "a document is already picked" and collapses
+                            // into its locked summary view, which would hide
+                            // the PO/GRN/Work Done picker for a party chosen
+                            // before any document. isDirectPartyMode below
+                            // covers this case for TDS/Direct Items/Expense
+                            // Head Allocation without touching this state.
+                            if (name && (selectedDoc?.kind === "TOD" || !selectedDoc)) {
                               set("bookingName", `Payment for ${name}`);
                             }
                             if (!name) return;
@@ -2168,7 +2191,7 @@ export default function MaterialExpenseBooking() {
                     <Field
                       label="Cost Center"
                       className={
-                        isDirect && selectedDoc?.kind === "TOD"
+                        isDirectPartyMode
                           ? undefined
                           : "sm:col-span-2"
                       }
@@ -2192,7 +2215,7 @@ export default function MaterialExpenseBooking() {
                         TDS Applicable flag). Never mandatory here — the
                         ₹30k single-bill / ₹1L yearly-cumulative threshold is
                         only enforced later, at payment time. */}
-                    {isDirect && selectedDoc?.kind === "TOD" && tdsEligibility?.tdsApplicable && (
+                    {isDirectPartyMode && tdsEligibility?.tdsApplicable && (
                       <Field
                         label="TDS"
                         className="sm:col-span-2"
@@ -2234,7 +2257,7 @@ export default function MaterialExpenseBooking() {
               </div>
 
               {/* ── Direct (Other Expenses) Items ──────────────────────── */}
-              {isDirect && selectedDoc?.kind === "TOD" && (
+              {isDirectPartyMode && (
                 <DirectItemsTable
                   items={form.directItems ?? []}
                   readOnly={
@@ -2287,6 +2310,7 @@ export default function MaterialExpenseBooking() {
                     set("igstRate", 0);
                   }
                 }}
+                tdsAmount={form.tdsAmount || 0}
               />
 
               {/* ── GRN Items Summary ──────────────────────────────────── */}
@@ -2308,13 +2332,13 @@ export default function MaterialExpenseBooking() {
                   Only makes sense for Other Expenses (TOD) bookings —
                   PO/GRN/WO-linked invoices already resolve GL posting from
                   the linked document's own accounts. */}
-              {isDirect && selectedDoc?.kind === "TOD" && (
+              {isDirectPartyMode && (
                 <div className="space-y-3">
                   <SectionHeader label="Expense Head" />
                   <Field
                     label="Allocation"
                     required
-                    hint="At least one Expense Head is required — split this invoice's debit side across one or more ledger heads, must add up to the net amount above"
+                    hint={`At least one Expense Head is required — split this invoice's debit side across one or more ledger heads, must add up to the gross invoice amount (₹${fmt(bd.netAmount)})${(form.tdsAmount || 0) > 0 ? "; TDS is withheld separately and does not reduce this total" : ""}`}
                   >
                     <ExpenseHeadAllocationEditor
                       rows={form.expenseHeadAllocations ?? []}

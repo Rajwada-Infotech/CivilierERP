@@ -680,6 +680,7 @@ const CrmInvoices: React.FC = () => {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [preview, setPreview] = useState<InvoiceRow | null>(null);
+  const [invoiceDeepLinkOpened, setInvoiceDeepLinkOpened] = useState(false);
   const [voidTarget, setVoidTarget] = useState<InvoiceRow | null>(null);
   const [genBookingId, setGenBookingId] = useState<number | null | undefined>(undefined); // undefined = closed
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
@@ -700,11 +701,36 @@ const CrmInvoices: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Preview only ever set local state — the URL stayed put, so a refresh
+  // lost the open preview and there was nothing to copy/bookmark/share to
+  // jump straight back to this invoice. Unlike ?bookingId= above (a
+  // one-shot create-flow prefill), ?invoiceId= persists while the preview
+  // is open — same convention as the fixes to other CRM list pages this
+  // session (CrmBooking.tsx's ?view=, CrmWelcomeCall.tsx's ?bookingId=).
+  const openInvoice = (inv: InvoiceRow) => {
+    setPreview(inv);
+    setSearchParams((sp) => { sp.set("invoiceId", String(inv.Id)); return sp; }, { replace: true });
+  };
+  const closeInvoice = () => {
+    setPreview(null);
+    setSearchParams((sp) => { sp.delete("invoiceId"); return sp; }, { replace: true });
+  };
+
   const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-invoices", type, search],
     queryFn: () => fetchInvoices(type, search),
     placeholderData: (prev) => prev,
   });
+
+  useEffect(() => {
+    const invId = searchParams.get("invoiceId");
+    if (!invId || invoiceDeepLinkOpened || !rows.length) return;
+    const match = rows.find((r) => String(r.Id) === invId);
+    if (match) {
+      setInvoiceDeepLinkOpened(true);
+      setPreview(match);
+    }
+  }, [searchParams, invoiceDeepLinkOpened, rows]);
 
   // Booking-wise separated — every invoice grouped under the booking it
   // belongs to, most recently active booking first, instead of one flat
@@ -837,7 +863,7 @@ const CrmInvoices: React.FC = () => {
                               <td className="px-3 py-1.5 text-xs text-muted-foreground">{inv.CreatedByName || "—"}</td>
                               <td className="px-3 py-1.5">
                                 <div className="flex items-center gap-1.5">
-                                  <button onClick={() => setPreview(inv)}
+                                  <button onClick={() => openInvoice(inv)}
                                     className="flex items-center gap-1 px-2 py-1 text-xs border border-border rounded-md hover:bg-muted">
                                     <FileText className="w-3 h-3" /> View
                                   </button>
@@ -862,7 +888,7 @@ const CrmInvoices: React.FC = () => {
         </div>
       )}
 
-      {preview && <InvoicePreviewDialog invoice={preview} onClose={() => setPreview(null)} />}
+      {preview && <InvoicePreviewDialog invoice={preview} onClose={closeInvoice} />}
       {voidTarget && (
         <VoidInvoiceDialog
           invoice={voidTarget}

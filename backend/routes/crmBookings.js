@@ -23,7 +23,7 @@ const { recalculateBookingGst } = require("../services/crmGst");
 // the Admin Approval Inbox, same as every other CRM approval flow.
 const { transition: approvalTransition } = require("../services/approvalService");
 const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
-const { logStatusChange } = require("../services/crmApplicationWorkflow");
+const { logStatusChange, syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
 const {
   getStageState,
   submitForApproval,
@@ -212,6 +212,20 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
 router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) => {
   try {
     const pool = getPool();
+    // If this booking is being created from an application, verify the
+    // application has been submitted (Pending). Draft = wizard not complete.
+    if (req.body.ApplicationId) {
+      const appRow = await pool.request()
+        .input("aid", sql.Int, parseInt(req.body.ApplicationId))
+        .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+      if (!appRow.recordset.length) return res.status(404).json({ error: "Application not found" });
+      const appStatus = appRow.recordset[0].Status;
+      if (appStatus !== "Pending") {
+        return res.status(400).json({
+          error: `Cannot create a booking for a ${appStatus} application — the application must be submitted first`,
+        });
+      }
+    }
     const { id: bookingId, BookingNo: bookingNo, tokenWarning } = await createCrmBookingRecord(pool, req.body, actorId(req));
     res.status(201).json({ success: true, id: bookingId, BookingNo: bookingNo, tokenWarning });
   } catch (e) {
@@ -877,7 +891,8 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
         (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Rejected') AS MoneyReceipts,
         (SELECT COUNT(*) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS OnAccountPayments,
         (SELECT COUNT(*) FROM dbo.CrmPaymentReceipt r JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid) AS PaymentReceipts,
-        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))) AS PaidMilestones
+        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))) AS PaidMilestones,
+        (SELECT COUNT(*) FROM dbo.CrmCancellation WHERE BookingId = @bid AND Status IN ('Pending', 'FinancePending')) AS ActiveCancellations
     `);
     const d = downstream.recordset[0] || {};
     for (const [label, count] of Object.entries(d)) {
@@ -901,13 +916,35 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
 
     // Revert Application-stage rows so the application can be corrected and
     // re-booked without stale child rows remaining pinned to the deleted booking.
+    // Parking allotments are fully deactivated (IsActive = 0) rather than just
+    // orphaned (BookingId = NULL) — a NULL-BookingId row with IsActive = 1
+    // permanently blocks the slot in the availability matrix for everyone.
     await pool.request().input("bid", sql.Int, id).input("aid", sql.Int, booking.ApplicationId).query(`
       UPDATE dbo.CrmCustomerBankDetail SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
       UPDATE dbo.CrmBookingDocument SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
-      UPDATE dbo.CrmParkingAllotment SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+      UPDATE dbo.CrmParkingAllotment SET BookingId = NULL, IsActive = 0 WHERE BookingId = @bid AND ApplicationId = @aid;
       UPDATE dbo.CrmCoApplicant SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
       UPDATE dbo.CrmExtraCharge SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
     `);
+
+    // Void any pending brokerage tranches — orphaned Pending tranches would
+    // inflate the brokerage liability reports and confuse clawback tracking
+    // if the application is later re-booked with fresh brokerage.
+    await pool.request().input("bid", sql.Int, id).query(`
+      UPDATE dbo.CrmBrokerageMaster
+      SET Status = 'Voided', UpdatedAt = SYSDATETIME(),
+          Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided — booking deleted by admin.'
+      WHERE BookingId = @bid AND Status = 'Pending'
+    `);
+
+    // Revert the Application from Approved → back to a cancellable/re-bookable
+    // state. createCrmBookingRecord force-advanced Application to Approved when
+    // the booking was created; without this call the Application stays at
+    // Approved forever with no live booking behind it — it can't be cancelled
+    // through the normal UI (APPLICATION_TRANSITIONS['Approved'] = []) and
+    // can't be re-booked, leaving the Application orphaned with no recovery path.
+    await syncApplicationOnBookingTerminal(pool, id, CrmStatus.CANCELLED,
+      "BookingAdminDelete", "Booking deleted by admin", actor);
 
     if (booking.UnitId) {
       try {
@@ -988,6 +1025,11 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmUnitChangeLog WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.ApprovalAuditLog WHERE TableName = 'CrmBooking' AND RecordId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmAuditLog WHERE EntityType = 'Booking' AND EntityId = @bid");
+      // CrmBrokerageMaster rows must be removed before the parent CrmBooking
+      // row to avoid FK constraint violations. At this point the booking is
+      // already soft-deleted and its Pending tranches were voided at that
+      // time — any remaining rows here are Voided/Clawback records.
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBooking WHERE Id = @bid");
       await tx.commit();
     } catch (txErr) {
@@ -1739,7 +1781,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         .query("SELECT TOP 1 Id, Status, CreatedAt FROM dbo.CrmQueryPayment WHERE BookingId = @id ORDER BY CreatedAt DESC"),
       // registry
       pool.request().input("id", sql.Int, id)
-        .query("SELECT TOP 1 Id, Status, AppointmentDate, CreatedAt FROM dbo.CrmRegistry WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+        .query("SELECT TOP 1 Id, Status, ScheduledDate, CompletedDate, CreatedAt FROM dbo.CrmRegistry WHERE BookingId = @id ORDER BY CreatedAt DESC"),
       // NOC
       pool.request().input("id", sql.Int, id)
         .query("SELECT TOP 1 Id, Status, NocType, CreatedAt FROM dbo.CrmNoc WHERE BookingId = @id ORDER BY CreatedAt DESC"),
@@ -1783,7 +1825,10 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Application",
         status: "done",
         date: d(bk.BookingDate),
-        link: bk.ApplicationId ? `/crm/applications` : null,
+        // ?id= opens CrmApplication.tsx's detail dialog directly for this
+        // application (see its openApplication/?id= deep link) — was a bare
+        // `/crm/applications` with no id at all before.
+        link: bk.ApplicationId ? `/crm/applications?id=${bk.ApplicationId}` : null,
         blockedBy: null,
       },
       {
@@ -1791,7 +1836,11 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Booking",
         status: "done",
         date: d(bk.BookingDate),
-        link: "/crm/booking",
+        // Was "/crm/booking" (singular) — not a real route (the actual
+        // route is "/crm/bookings"), so this 404'd. Now also opens this
+        // exact booking directly via CrmBooking.tsx's ?view= deep link
+        // instead of landing on the bare, unfiltered list.
+        link: `/crm/bookings?view=${id}`,
         blockedBy: null,
       },
       {
@@ -1799,16 +1848,24 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Welcome Call",
         status: wc ? "done" : "active",
         date: wc ? d(wc.CallDate) : null,
-        link: "/crm/welcome-call",
+        // Was "/crm/welcome-call" (singular) — not a real route (the actual
+        // route is "/crm/welcome-calls"), so this 404'd too.
+        link: `/crm/welcome-calls?bookingId=${id}`,
         blockedBy: null,
       },
       {
         key: "agreement",
         label: "Agreement",
-        status: agDone ? "done" : ag ? "active" : "active",
+        // Was `ag ? "active" : "active"` — both branches identical, so this
+        // step showed as the current one from the moment the Booking was
+        // created, regardless of Welcome Call state. Every other step here
+        // gates on its real predecessor; this one didn't, which is why it
+        // and Welcome Call both rendered as "active" (pulsing/highlighted)
+        // at once — looked like two simultaneous "current" steps.
+        status: agDone ? "done" : ag ? "active" : wc ? "active" : "locked",
         date: agDone ? d(ag.AgreementDate || ag.CreatedAt) : ag ? d(ag.CreatedAt) : null,
-        link: "/crm/agreements",
-        blockedBy: null,
+        link: `/crm/agreements?bookingId=${id}`,
+        blockedBy: wc ? null : "Welcome Call must be completed first",
       },
       {
         key: "legal_milestones",
@@ -1826,7 +1883,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Sales Deed",
         status: sdDone ? "done" : sd ? "active" : agDone ? "active" : "locked",
         date: sd ? d(sd.CreatedAt) : null,
-        link: "/crm/sales-deed",
+        link: `/crm/sales-deed?bookingId=${id}`,
         blockedBy: agDone ? null : "Agreement must be Executed first",
       },
       {
@@ -1837,7 +1894,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
                : agDone ? "active"
                : "locked",
         date: noc ? d(noc.CreatedAt) : null,
-        link: "/crm/noc",
+        link: `/crm/noc?bookingId=${id}`,
         blockedBy: agDone ? null : "Agreement must be Executed first",
       },
       {
@@ -1845,7 +1902,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Query Payment",
         status: qpDone ? "done" : qp ? "active" : sd ? "active" : "locked",
         date: qp ? d(qp.CreatedAt) : null,
-        link: "/crm/query-payment",
+        link: `/crm/query-payment?bookingId=${id}`,
         blockedBy: sd ? null : "Sales Deed must be created first",
       },
       {
@@ -1855,8 +1912,8 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
                : reg ? "active"
                : qpDone ? "active"
                : "locked",
-        date: reg ? d(reg.AppointmentDate || reg.CreatedAt) : null,
-        link: "/crm/registry",
+        date: reg ? d(reg.CompletedDate || reg.ScheduledDate || reg.CreatedAt) : null,
+        link: `/crm/registry?bookingId=${id}`,
         blockedBy: qpDone ? null : "Query Payment must be Confirmed first",
       },
       {
