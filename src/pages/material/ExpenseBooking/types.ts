@@ -98,6 +98,10 @@ export interface ExpenseRecord {
   bookingName: string;
   bookingReference: string;
   docTypeName: string;
+  /** The TypeOfDoc this booking's own bookingReference was numbered against
+   *  (direct/TOD bookings only) — needed to re-preview a new number when
+   *  financialYear changes on an existing booking; not sent on save. */
+  docTypeId?: number | null;
   bookingDate: string;
   dueDate: string;
   financialYear: string;

@@ -724,7 +724,12 @@ export default function JournalVoucher() {
                                     {LHEAD_TYPE_LABEL[type] || type}
                                   </SelectLabel>
                                   {opts.map((opt) => (
-                                    <SelectItem key={opt.id} value={String(opt.id)} className="text-xs">{opt.label}</SelectItem>
+                                    <SelectItem key={opt.id} value={String(opt.id)} className="text-xs">
+                                      {opt.label}
+                                      {opt.accountNoLast4 && (
+                                        <span className="text-muted-foreground"> •••{opt.accountNoLast4}</span>
+                                      )}
+                                    </SelectItem>
                                   ))}
                                 </SelectGroup>
                               ))}

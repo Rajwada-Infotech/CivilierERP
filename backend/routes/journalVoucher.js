@@ -137,7 +137,11 @@ router.get("/ledger-options", authenticateToken, async (req, res) => {
     // place — LHeadStatus (the real active/inactive toggle) is what
     // actually governs usability.
     const result = await pool.request().query(`
-      SELECT LHeadId AS id, ISNULL(DisplayName, LHeadName) AS label, LHeadCode AS code, LHeadType AS type
+      SELECT LHeadId AS id, ISNULL(DisplayName, LHeadName) AS label, LHeadCode AS code, LHeadType AS type,
+        -- Bank heads only — lets the frontend show "...1234" alongside the
+        -- bank name so picking between two accounts at the same bank
+        -- doesn't require opening Bank Master to tell them apart.
+        CASE WHEN LHeadType = 'B' THEN RIGHT(LAccountNo, 4) ELSE NULL END AS accountNoLast4
       FROM dbo.AccountHeadMaster
       WHERE ISNULL(LHeadStatus, 1) = 1 AND LHeadType <> 'LN'
       ORDER BY LHeadType, LHeadName
