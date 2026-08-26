@@ -8,7 +8,12 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rajwadainfotech.civiliererpadmin",
+      "infoPlist": {
+        "NSCameraUsageDescription": "CivilierERP Admin uses the camera to attach photos to records.",
+        "NSPhotoLibraryUsageDescription": "CivilierERP Admin needs access to your photo library to attach existing photos to records."
+      }
     },
     "android": {
       "adaptiveIcon": {
