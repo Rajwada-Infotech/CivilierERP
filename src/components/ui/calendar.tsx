@@ -1,21 +1,66 @@
 import * as React from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { DayPicker } from "react-day-picker";
+import { DayPicker, type DropdownProps } from "react-day-picker";
 
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export type CalendarProps = React.ComponentProps<typeof DayPicker>;
+
+// captionLayout="dropdown"'s default Dropdown renders a real native <select>
+// — its popup option list is the browser's own unstylable native UI (always
+// light, regardless of the app's dark theme), which reads as broken sitting
+// inside a themed calendar. Swap in the app's own Select (Radix, fully
+// themeable) instead, translating its onValueChange back into the plain
+// change event react-day-picker's Dropdown props expect.
+function ThemedDropdown({ options, value, onChange, disabled }: DropdownProps) {
+  const selected = options?.find((o) => String(o.value) === String(value));
+  return (
+    <Select
+      value={value != null ? String(value) : undefined}
+      disabled={disabled}
+      onValueChange={(val) => {
+        onChange?.({
+          target: { value: val },
+        } as React.ChangeEvent<HTMLSelectElement>);
+      }}
+    >
+      <SelectTrigger className="h-7 w-auto gap-1 border-none bg-transparent px-2 text-sm font-medium hover:bg-accent focus:ring-0 focus:ring-offset-0">
+        <SelectValue>{selected?.label}</SelectValue>
+      </SelectTrigger>
+      {/* The calendar itself usually sits inside a Popover (see DateField)
+          whose own content shares this same base z-[70] — without a higher
+          z-index here, DOM-mount-order alone decides which one paints on
+          top, and it isn't always this one. */}
+      <SelectContent className="max-h-64 z-[80]">
+        {options?.map((o) => (
+          <SelectItem key={o.value} value={String(o.value)} disabled={o.disabled} className="text-xs">
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
 
 function Calendar({
   className,
   classNames,
   showOutsideDays = true,
+  captionLayout = "dropdown",
   ...props
 }: CalendarProps) {
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
+      captionLayout={captionLayout}
       className={cn("p-3", className)}
       classNames={{
         // ── Layout ────────────────────────────────────────────────────────────
@@ -23,6 +68,10 @@ function Calendar({
         month: "flex flex-col gap-4",
         month_caption: "flex justify-center pt-1 relative items-center",
         caption_label: "text-sm font-medium",
+        // Wraps the Month + Year ThemedDropdown pair (captionLayout="dropdown")
+        // — picking either is one click/tap instead of swiping the prev/next
+        // arrows one step at a time.
+        dropdowns: "flex items-center gap-1",
 
         // ── Navigation ────────────────────────────────────────────────────────
         nav: "flex items-center gap-1",
@@ -84,6 +133,8 @@ function Calendar({
           ) : (
             <ChevronRight className="h-4 w-4" />
           ),
+        // Themed Month/Year <select> replacements — see ThemedDropdown above.
+        Dropdown: ThemedDropdown,
       }}
       {...props}
     />
