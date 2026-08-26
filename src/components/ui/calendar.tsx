@@ -55,12 +55,24 @@ function Calendar({
   classNames,
   showOutsideDays = true,
   captionLayout = "dropdown",
+  startMonth,
+  endMonth,
   ...props
 }: CalendarProps) {
+  // captionLayout="dropdown" is documented to auto-default startMonth/endMonth
+  // (100 years back / end of this year) when they're omitted — but that
+  // default lives inside react-day-picker's own prop-merging and, at least
+  // as observed here, wasn't actually populating the Month/Year options
+  // (rendered as an empty dropdown). Set them explicitly instead of relying
+  // on that internal resolution, so ThemedDropdown's `options` is always a
+  // real array. +15 years covers any real due-date/forward-dated field.
+  const today = new Date();
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
       captionLayout={captionLayout}
+      startMonth={startMonth ?? new Date(today.getFullYear() - 100, 0, 1)}
+      endMonth={endMonth ?? new Date(today.getFullYear() + 15, 11, 31)}
       className={cn("p-3", className)}
       classNames={{
         // ── Layout ────────────────────────────────────────────────────────────
