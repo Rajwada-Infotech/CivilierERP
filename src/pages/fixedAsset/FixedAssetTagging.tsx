@@ -1,17 +1,21 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Plus, ArrowLeft, AlertCircle, Search,
   Building2, Package, Calendar, FileText, Hash, Tag as TagIcon, X, Boxes,
+  Download, Upload, Loader2, Check,
 } from "lucide-react";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getGodowns, type Godown } from "@/api/godownsApi";
+import { getItems } from "@/api/itemMasterApi";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import {
   getEligibleAssetItems, getFixedAssetTaggings, createFixedAssetTagging,
   type EligibleAssetItem, type TaggingListItem,
@@ -94,6 +98,61 @@ function deriveFinYear(docDate: string, finYears: { year: string; startDate: str
   if (!docDate) return "";
   const match = finYears.find((f) => f.startDate && f.endDate && docDate >= f.startDate && docDate <= f.endDate);
   return match?.year || "";
+}
+
+// ── Excel/CSV Bulk Import ────────────────────────────────────────────────────
+// Purely additive to the manual "New FA Inventory" flow above: it resolves
+// each spreadsheet row to the same {companyId, projectId, godownId, itemId,
+// numberOfItems} shape and creates it via the existing createFixedAssetTagging
+// call — so FA Item Code generation, doc numbering, company/project mapping,
+// and stock/eligibility checks all run through the untouched backend logic.
+const IMPORT_CSV_HEADERS = {
+  company:  "Company",
+  project:  "Project",
+  godown:   "Godown",
+  itemName: "Item Name",
+  date:     "Date (DD-MM-YYYY)",
+  quantity: "Quantity",
+  remarks:  "Remarks",
+};
+
+const IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
+  { header: IMPORT_CSV_HEADERS.company,  accessor: "company" },
+  { header: IMPORT_CSV_HEADERS.project,  accessor: "project" },
+  { header: IMPORT_CSV_HEADERS.godown,   accessor: "godown" },
+  { header: IMPORT_CSV_HEADERS.itemName, accessor: "itemName" },
+  { header: IMPORT_CSV_HEADERS.date,     accessor: "date" },
+  { header: IMPORT_CSV_HEADERS.quantity, accessor: "quantity" },
+  { header: IMPORT_CSV_HEADERS.remarks,  accessor: "remarks" },
+];
+
+function parseImportDate(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (m) {
+    const [, d, mo, y] = m;
+    return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  return null;
+}
+
+interface ImportRowResult {
+  row: number;
+  companyLabel: string;
+  projectLabel: string;
+  godownLabel: string;
+  itemName: string;
+  docDate: string;
+  quantity: number;
+  remarks?: string;
+  status: "valid" | "success" | "error";
+  message?: string;
+  companyId?: number;
+  projectId?: number;
+  godownId?: number;
+  itemId?: string;
 }
 
 type ViewMode = "list" | "form";
@@ -221,6 +280,162 @@ export default function FixedAssetTagging() {
 
   const resetForm = () => setForm(emptyForm());
   const goToCreate = () => { resetForm(); setViewMode("form"); };
+
+  // ── Excel/CSV bulk import ─────────────────────────────────────────────────
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importPreview, setImportPreview] = useState<ImportRowResult[] | null>(null);
+  const [importValidating, setImportValidating] = useState(false);
+  const [importSubmitting, setImportSubmitting] = useState(false);
+  const [importDone, setImportDone] = useState(false);
+
+  const handleDownloadImportTemplate = () => {
+    exportToCsv([], IMPORT_TEMPLATE_COLUMNS, "fa-inventory-import-template");
+    toast.success("Template downloaded — fill it in and use Import from Excel.");
+  };
+
+  const handleImportClick = () => importFileInputRef.current?.click();
+
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Please select a .csv file (open/save it as CSV from Excel).");
+      return;
+    }
+
+    setImportValidating(true);
+    setImportDone(false);
+    setImportPreview(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (rows.length === 0) {
+        toast.error("The file has no data rows.");
+        return;
+      }
+
+      // Item Master is fetched on demand (only when an import is attempted)
+      // so this page's normal load doesn't pick up an extra background query.
+      const itemMaster = await getItems();
+
+      const results: ImportRowResult[] = rows.map((raw, i) => {
+        const rowNum = i + 2; // +1 for header, +1 for 1-based numbering
+        const companyLabel = (raw[IMPORT_CSV_HEADERS.company] || "").trim();
+        const projectLabel = (raw[IMPORT_CSV_HEADERS.project] || "").trim();
+        const godownLabel  = (raw[IMPORT_CSV_HEADERS.godown] || "").trim();
+        const itemNameRaw  = (raw[IMPORT_CSV_HEADERS.itemName] || "").trim();
+        const dateRaw       = (raw[IMPORT_CSV_HEADERS.date] || "").trim();
+        const qtyRaw        = (raw[IMPORT_CSV_HEADERS.quantity] || "").trim();
+        const remarks        = (raw[IMPORT_CSV_HEADERS.remarks] || "").trim();
+
+        const base = {
+          row: rowNum, companyLabel, projectLabel, godownLabel,
+          itemName: itemNameRaw, docDate: dateRaw, quantity: Number(qtyRaw) || 0, remarks,
+        };
+
+        try {
+          if (!companyLabel) throw new Error("Company is required");
+          const company = ensureArray<{ id: number; label: string }>(companies)
+            .find((c) => c.label.toLowerCase() === companyLabel.toLowerCase());
+          if (!company) throw new Error(`Company "${companyLabel}" was not found`);
+
+          if (!projectLabel) throw new Error("Project is required");
+          const project = ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects)
+            .find((p) => p.company_id === company.id && p.label.toLowerCase() === projectLabel.toLowerCase());
+          if (!project) throw new Error(`Project "${projectLabel}" was not found under company "${companyLabel}"`);
+
+          if (!godownLabel) throw new Error("Godown is required");
+          const godown = ensureArray<Godown>(godownsData?.data)
+            .filter((g) => !g.IsDeleted && g.IsActive)
+            .find((g) => g.EnterpriseID === company.id
+              && (g.ProjectID === project.id || g.ProjectID == null)
+              && (g.GodownName || "").toLowerCase() === godownLabel.toLowerCase());
+          if (!godown) throw new Error(`Godown "${godownLabel}" was not found under company/project "${companyLabel}/${projectLabel}"`);
+
+          if (!itemNameRaw) throw new Error("Item Name is required");
+          const item = itemMaster.find((it) => (it.M_Name || "").trim().toLowerCase() === itemNameRaw.toLowerCase());
+          if (!item) throw new Error(`Item "${itemNameRaw}" does not exist in Item Master`);
+          if ((item.M_Type || "").trim() !== "Fixed Asset") {
+            throw new Error(`Item "${itemNameRaw}" exists but its Type of Item is "${item.M_Type || "blank"}", not "Fixed Asset"`);
+          }
+
+          const docDate = parseImportDate(dateRaw);
+          if (!docDate) throw new Error(`Date "${dateRaw}" is invalid — use DD-MM-YYYY`);
+          const finYear = deriveFinYear(docDate, finYears);
+          if (!finYear) throw new Error(`Date "${dateRaw}" doesn't fall in any configured Financial Year`);
+
+          const quantity = parseInt(qtyRaw, 10);
+          if (!Number.isFinite(quantity) || quantity <= 0 || String(quantity) !== qtyRaw.trim()) {
+            throw new Error("Quantity must be a positive whole number");
+          }
+
+          return {
+            ...base, docDate, quantity, status: "valid" as const,
+            companyId: company.id, projectId: project.id, godownId: godown.GodownID, itemId: item.M_Id,
+          };
+        } catch (err) {
+          return { ...base, status: "error" as const, message: err instanceof Error ? err.message : "Invalid row" };
+        }
+      });
+
+      setImportPreview(results);
+    } catch (err) {
+      toast.error("Could not read the file: " + (err instanceof Error ? err.message : "Unknown error"));
+    } finally {
+      setImportValidating(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importPreview) return;
+    const validRows = importPreview.filter((r) => r.status === "valid");
+    if (validRows.length === 0) return;
+
+    setImportSubmitting(true);
+    const finalResults = [...importPreview];
+
+    // Sequential, not Promise.all — mirrors the manual "Generate ID" flow
+    // (one create call at a time) and keeps per-row error attribution clean.
+    for (const row of validRows) {
+      const idx = finalResults.findIndex((r) => r.row === row.row);
+      try {
+        await createFixedAssetTagging({
+          docDate: row.docDate,
+          companyId: row.companyId,
+          projectId: row.projectId!,
+          godownId: row.godownId!,
+          itemId: row.itemId!,
+          numberOfItems: row.quantity,
+          remarks: row.remarks || undefined,
+        });
+        finalResults[idx] = { ...row, status: "success" };
+      } catch (err) {
+        finalResults[idx] = { ...row, status: "error", message: err instanceof Error ? err.message : "Failed to create" };
+      }
+    }
+
+    setImportPreview(finalResults);
+    setImportDone(true);
+    setImportSubmitting(false);
+
+    const successCount = finalResults.filter((r) => r.status === "success").length;
+    const errorCount = finalResults.length - successCount;
+    if (successCount > 0) {
+      qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+    }
+    if (errorCount === 0) {
+      toast.success(`Imported ${successCount} row${successCount === 1 ? "" : "s"} ✓`);
+    } else if (successCount === 0) {
+      toast.error(`Import failed for all ${errorCount} row${errorCount === 1 ? "" : "s"}.`);
+    } else {
+      toast.warning(`Imported ${successCount} of ${finalResults.length} rows — ${errorCount} failed.`);
+    }
+  };
+
+  const closeImportDialog = () => { setImportPreview(null); setImportDone(false); };
 
   const handleSave = () => {
     if (!form.companyId)  return toast.error("Company is required");
@@ -392,6 +607,25 @@ export default function FixedAssetTagging() {
       subtitle="Tag received fixed-asset stock and track untagged quantities"
       icon={TagIcon}
       accentColor="#eab308"
+      action={
+        rights.canCreate ? (
+          <div className="flex items-center gap-2">
+            <input ref={importFileInputRef} type="file" accept=".csv"
+              onChange={handleImportFileChange} className="hidden" />
+            <button onClick={handleDownloadImportTemplate}
+              title="Download a blank CSV import template (opens/edits fine in Excel)"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+              <Download size={13} /> <span className="hidden sm:inline">Template</span>
+            </button>
+            <button onClick={handleImportClick} disabled={importValidating}
+              title="Bulk import FA Inventory rows from Excel/CSV"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+              {importValidating ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+              {importValidating ? "Validating…" : "Import from Excel"}
+            </button>
+          </div>
+        ) : undefined
+      }
     >
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         <SummaryCard label="Tagging Entries" value={fmt(stats.count)} icon={Boxes} />
@@ -529,6 +763,90 @@ export default function FixedAssetTagging() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!importPreview} onOpenChange={(open) => { if (!open) closeImportDialog(); }}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-base">
+              {importDone ? "Import Results" : "Review Import"}
+            </DialogTitle>
+          </DialogHeader>
+          {importPreview && (
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center gap-3 text-sm">
+                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                  <Check size={14} />
+                  {importPreview.filter((r) => r.status === "valid" || r.status === "success").length}{" "}
+                  {importDone ? "succeeded" : "valid"}
+                </span>
+                {importPreview.some((r) => r.status === "error") && (
+                  <span className="flex items-center gap-1.5 text-destructive">
+                    <X size={14} />
+                    {importPreview.filter((r) => r.status === "error").length}{" "}
+                    {importDone ? "failed" : "rejected"}
+                  </span>
+                )}
+              </div>
+              <div className="max-h-96 overflow-auto rounded-lg border border-border">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50 text-muted-foreground uppercase tracking-wide sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Row</th>
+                      <th className="px-3 py-2 text-left">Company / Project</th>
+                      <th className="px-3 py-2 text-left">Godown</th>
+                      <th className="px-3 py-2 text-left">Item</th>
+                      <th className="px-3 py-2 text-left">Date</th>
+                      <th className="px-3 py-2 text-left">Qty</th>
+                      <th className="px-3 py-2 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {importPreview.map((r) => (
+                      <tr key={r.row} className={r.status === "error" ? "bg-destructive/5" : ""}>
+                        <td className="px-3 py-2">{r.row}</td>
+                        <td className="px-3 py-2 max-w-[160px] truncate">{r.companyLabel} / {r.projectLabel}</td>
+                        <td className="px-3 py-2 max-w-[120px] truncate">{r.godownLabel}</td>
+                        <td className="px-3 py-2 max-w-[140px] truncate">{r.itemName}</td>
+                        <td className="px-3 py-2">{r.docDate}</td>
+                        <td className="px-3 py-2">{r.quantity || "—"}</td>
+                        <td className="px-3 py-2 max-w-[260px]">
+                          {r.status === "error" ? (
+                            <span className="text-destructive">{r.message}</span>
+                          ) : r.status === "success" ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><Check size={12} /> Imported</span>
+                          ) : (
+                            <span className="text-emerald-600 dark:text-emerald-400">Valid</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+            {!importDone ? (
+              <>
+                <button onClick={closeImportDialog}
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+                  Cancel
+                </button>
+                <button onClick={handleConfirmImport}
+                  disabled={importSubmitting || !importPreview?.some((r) => r.status === "valid")}
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+                  {importSubmitting ? "Importing…" : `Import ${importPreview?.filter((r) => r.status === "valid").length || 0} Valid Row(s)`}
+                </button>
+              </>
+            ) : (
+              <button onClick={closeImportDialog}
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+                Close
+              </button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </GlassShell>
     </>
   );

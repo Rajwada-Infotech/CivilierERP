@@ -85,16 +85,20 @@ function useGlass() {
   return { isDark, glassCard };
 }
 
-const ClosedTaskCard: React.FC<{ task: ClosedTask; index: number; onClick: () => void }> = ({
+const TABLE_HEAD_CLS = "px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80 whitespace-nowrap";
+
+// Row-wise replacement for the old ClosedTaskCard — same fields, laid out as
+// a compact <tr> so many closed tasks are visible at once instead of one per
+// large card.
+const ClosedTaskRow: React.FC<{ task: ClosedTask; index: number; onClick: () => void }> = ({
   task,
   index,
   onClick,
 }) => {
-  const { glassCard } = useGlass();
   const color = PRIORITY_COLORS[task.Priority as (typeof PRIORITIES)[number]] ?? PRIORITY_COLORS.Normal;
 
   return (
-    <motion.div
+    <motion.tr
       role="button"
       tabIndex={0}
       onClick={onClick}
@@ -104,71 +108,71 @@ const ClosedTaskCard: React.FC<{ task: ClosedTask; index: number; onClick: () =>
           onClick();
         }
       }}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, delay: Math.min(index, 8) * 0.03, ease: "easeOut" }}
-      whileHover={{ y: -2 }}
-      className="relative w-full text-left rounded-xl p-4 space-y-1.5 group overflow-hidden cursor-pointer"
-      style={glassCard}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2, delay: Math.min(index, 10) * 0.02, ease: "easeOut" }}
+      className="group cursor-pointer transition-colors hover:bg-muted/40"
     >
-      <div
-        className="absolute left-0 top-0 bottom-0 w-0.5"
-        style={{ background: "linear-gradient(to bottom, transparent 10%, #64748b 30%, #64748b 70%, transparent 90%)" }}
-      />
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest">
+      <td className="pl-3 pr-2 py-2.5 align-top relative">
+        <div
+          className="absolute left-0 top-0 bottom-0 w-0.5"
+          style={{ background: "linear-gradient(to bottom, transparent 10%, #64748b 30%, #64748b 70%, transparent 90%)" }}
+        />
+        <span className="font-mono text-[10px] text-muted-foreground uppercase tracking-widest">
           {task.TaskNo || "—"}
         </span>
+        <p className="text-sm font-semibold text-foreground truncate">{task.Subject}</p>
+        {task.ParentTaskNo && (
+          <p className="text-[11px] text-muted-foreground truncate">
+            Subtask of {task.ParentTaskNo}
+            {task.ParentTaskSubject ? ` — ${task.ParentTaskSubject}` : ""}
+          </p>
+        )}
+        {task.CaseProjectName && (
+          <p className="text-[11px] text-muted-foreground truncate">{task.CaseProjectName}</p>
+        )}
+        {task.Tags?.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {task.Tags.map((tag) => (
+              <span
+                key={tag.Id}
+                className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium truncate max-w-[100px]"
+                style={{ background: "rgba(13,148,136,0.12)", border: "1px solid rgba(13,148,136,0.3)", color: ACCENT }}
+                title={tag.Name}
+              >
+                {tag.Name}
+              </span>
+            ))}
+          </div>
+        )}
+      </td>
+      <td className="px-2 py-2.5 align-top text-xs font-medium text-muted-foreground whitespace-nowrap">
         <span
-          className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
+          className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md mb-1"
           style={{ background: "rgba(100,116,139,0.14)", color: "#64748b" }}
         >
           <CheckCircle2 size={10} /> Closed
         </span>
-      </div>
-      <p className="text-sm font-semibold text-foreground truncate">{task.Subject}</p>
-      {task.ParentTaskNo && (
-        <p className="text-[11px] text-muted-foreground truncate">
-          Subtask of {task.ParentTaskNo}
-          {task.ParentTaskSubject ? ` — ${task.ParentTaskSubject}` : ""}
-        </p>
-      )}
-      {task.CaseProjectName && (
-        <p className="text-xs text-muted-foreground truncate">{task.CaseProjectName}</p>
-      )}
-      <p className="text-xs font-medium text-muted-foreground">
-        {task.ClosedAt ? `Closed ${formatDate(task.ClosedAt)}` : "Closed"}
-      </p>
-      {/* Read-only here — a closed task reads as complete; edit progress
-          from the drawer/active board instead of implying you can reopen
-          it by dragging this bar back down. */}
-      <ProgressBar value={task.EffectiveProgress ?? task.Progress ?? 100} onCommit={() => {}} disabled size="sm" />
-      {task.Tags?.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {task.Tags.map((tag) => (
-            <span
-              key={tag.Id}
-              className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium truncate max-w-[110px]"
-              style={{ background: "rgba(13,148,136,0.12)", border: "1px solid rgba(13,148,136,0.3)", color: ACCENT }}
-              title={tag.Name}
-            >
-              {tag.Name}
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="flex items-center gap-1.5 pt-1">
+        <div>{task.ClosedAt ? formatDate(task.ClosedAt) : "—"}</div>
+      </td>
+      <td className="px-2 py-2.5 align-top">
         <span
-          className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md border"
+          className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
           style={{ borderColor: `${color}4d`, color, background: `${color}1A` }}
         >
           {task.Priority}
         </span>
-        {task.CaseNumber && (
-          <span className="ml-auto text-[11px] text-muted-foreground font-mono">{task.CaseNumber}</span>
-        )}
-      </div>
-    </motion.div>
+      </td>
+      <td className="px-2 py-2.5 align-top text-xs text-muted-foreground font-mono whitespace-nowrap">
+        {task.CaseNumber || "—"}
+      </td>
+      <td className="pl-2 pr-3 py-2.5 align-top w-[150px]" onClick={(e) => e.stopPropagation()}>
+        {/* Read-only here — a closed task reads as complete; edit progress
+            from the drawer/active board instead of implying you can reopen
+            it by dragging this bar back down. */}
+        <ProgressBar value={task.EffectiveProgress ?? task.Progress ?? 100} onCommit={() => {}} disabled size="sm" />
+      </td>
+    </motion.tr>
   );
 };
 
@@ -302,10 +306,25 @@ const ClosedTasks: React.FC = () => {
             <span className="text-[10px] text-muted-foreground">{filtered.length}</span>
             <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, rgba(13,148,136,0.25), transparent)" }} />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filtered.map((t, i) => (
-              <ClosedTaskCard key={t.Id} task={t} index={i} onClick={() => setSelectedTaskId(String(t.Id))} />
-            ))}
+          <div className="rounded-xl overflow-hidden" style={glassCard}>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px]">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: "rgba(13,148,136,0.15)" }}>
+                    <th className={`${TABLE_HEAD_CLS} pl-3`}>Task</th>
+                    <th className={TABLE_HEAD_CLS}>Status / Closed</th>
+                    <th className={TABLE_HEAD_CLS}>Priority</th>
+                    <th className={TABLE_HEAD_CLS}>Case No.</th>
+                    <th className={`${TABLE_HEAD_CLS} pr-3`}>Progress</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/30">
+                  {filtered.map((t, i) => (
+                    <ClosedTaskRow key={t.Id} task={t} index={i} onClick={() => setSelectedTaskId(String(t.Id))} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
