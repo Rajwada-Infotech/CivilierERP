@@ -75,6 +75,7 @@ export const crmNavItems: NavItem[] = [
     label: "Closure",
     icon: HardHat,
     children: [
+      { label: "OC / CC",               path: "/crm/oc-cc",                pageKey: "crm-oc-cc"                },
       { label: "Pre-Possession Check", path: "/crm/pre-possession",       pageKey: "crm-pre-possession"       },
       { label: "Possession Notice",    path: "/crm/possession-notice",    pageKey: "crm-possession-notice"    },
       { label: "Construction Updates", path: "/crm/construction-updates", pageKey: "crm-construction-updates" },
