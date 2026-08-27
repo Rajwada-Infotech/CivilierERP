@@ -1469,6 +1469,51 @@ export default function MaterialExpenseBooking() {
   const isDirectPartyMode =
     isDirect && (selectedDoc?.kind === "TOD" || (!selectedDoc && !!form.supplierLHeadId));
 
+  // Re-preview the booking reference when Year is changed on an EXISTING
+  // direct/TOD booking. The create-time effect below (keyed on selectedTod)
+  // only ever fires while picking a fresh "Other Expenses" template — it
+  // never runs on edit, because openEditForm has no template to restore
+  // (only the resulting docNo is stored, not which TypeOfDoc generated it).
+  // So editing FY 2025-2026 -> 2026-2027 silently kept the old year's
+  // number. Uses the record's own EDocTypeId (loaded via dbToRecord) instead
+  // of selectedTod. Skipped once Approved — a payment/on-account/debit-note
+  // reference may already point at the current bookingReference string, and
+  // renumbering would silently orphan it (nothing else in this app updates
+  // those references when EDocNo changes).
+  const editOriginalFinYearRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isEditing) editOriginalFinYearRef.current = form.financialYear;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId]);
+  useEffect(() => {
+    if (!isEditing || !isDirectPartyMode || !form.docTypeId) return;
+    if (form.status === "Approved") return;
+    if (form.financialYear === editOriginalFinYearRef.current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const qs = form.financialYear
+          ? `?finYear=${encodeURIComponent(form.financialYear)}`
+          : "";
+        const data = await apiFetch(`/api/document-type/${form.docTypeId}/next-number${qs}`);
+        if (cancelled || !data.nextDocNo) return;
+        setForm((prev) => ({ ...prev, bookingReference: data.nextDocNo }));
+        toast.info(`Booking reference updated to ${data.nextDocNo} for the new financial year`);
+      } catch (err) {
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Could not generate a booking reference for the new financial year",
+        );
+      }
+    })();
+    editOriginalFinYearRef.current = form.financialYear;
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.financialYear, isEditing, isDirectPartyMode, form.docTypeId, form.status]);
+
   // TDS eligibility — live-checked as the direct/TOD form fills in. Scoped
   // to direct bookings only: GRN/PO/WORK_DONE-sourced bookings don't carry
   // a resolved supplier LHeadId client-side to check against (their

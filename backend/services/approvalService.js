@@ -10,6 +10,7 @@ const {
   postPaymentApproval,
   postJournalVoucherApproval,
   postFundTransferApproval,
+  postDebitNoteApproval,
 } = require("./generalLedger");
 const { userHasEffectivePageRight } = require("../middleware/permissions");
 
@@ -23,6 +24,7 @@ const GL_POSTERS = {
   payments: postPaymentApproval,
   "journal-voucher": postJournalVoucherApproval,
   "fund-transfer": postFundTransferApproval,
+  "debit-note": postDebitNoteApproval,
 };
 
 // Map module slug → { table, pkCol, statusCol }
@@ -82,6 +84,11 @@ const MODULE_MAP = {
     pk: "FTId",
     status: "Status",
   },
+  "debit-note": {
+    table: "dbo.DebitNote",
+    pk: "id",
+    status: "Status",
+  },
   "crm-applications": { table: "dbo.CrmApplication", pk: "Id", status: "Status" },
   "crm-bookings": { table: "dbo.CrmBooking", pk: "Id", status: "Status" },
   // The "approval" on a CrmAgreement is specifically the senior sign-off gate
@@ -124,6 +131,7 @@ const MODULE_DOC_LINKS = {
   "journal-voucher": "Journal Voucher",
   "inter-company-transfer": "Inter-Company Transfer",
   "fund-transfer": "Fund Transfer",
+  "debit-note": "Debit Note",
 };
 
 const APPROVER_ROLES = ["admin", "super_admin", "dba"];

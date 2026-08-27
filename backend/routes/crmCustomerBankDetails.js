@@ -286,6 +286,26 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     // fire the auto-create check (no-op if the welcome call isn't done yet).
     await maybeAutoCreateAgreement(pool, bid, actor);
 
+    // Sync KYC fields back to the centralized Customer record so the
+    // data remains consistent across the ERP.
+    await pool.request()
+      .input("bid", sql.Int, bid)
+      .input("pan", sql.NVarChar(20), fields.pan)
+      .input("aadh", sql.NVarChar(20), fields.aadh)
+      .input("occ", sql.NVarChar(100), fields.occ)
+      .input("inc", sql.Decimal(18,2), fields.inc)
+      .query(`
+        UPDATE c SET
+          c.PanNo = ISNULL(@pan, c.PanNo),
+          c.AadhaarNo = ISNULL(@aadh, c.AadhaarNo),
+          c.Occupation = ISNULL(@occ, c.Occupation),
+          c.AnnualIncome = ISNULL(@inc, c.AnnualIncome)
+        FROM dbo.CrmCustomer c
+        JOIN dbo.CrmApplication a ON a.CustomerId = c.Id
+        JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id
+        WHERE b.Id = @bid
+      `);
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-customer-bank-details] PUT error:", e.message);
@@ -475,6 +495,25 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     if (linkedBookingId) {
       await maybeAutoCreateAgreement(pool, linkedBookingId, actor);
     }
+
+    // Sync KYC fields back to the centralized Customer record so the
+    // data remains consistent across the ERP.
+    await pool.request()
+      .input("aid", sql.Int, aid)
+      .input("pan", sql.NVarChar(20), fields.pan)
+      .input("aadh", sql.NVarChar(20), fields.aadh)
+      .input("occ", sql.NVarChar(100), fields.occ)
+      .input("inc", sql.Decimal(18,2), fields.inc)
+      .query(`
+        UPDATE c SET
+          c.PanNo = ISNULL(@pan, c.PanNo),
+          c.AadhaarNo = ISNULL(@aadh, c.AadhaarNo),
+          c.Occupation = ISNULL(@occ, c.Occupation),
+          c.AnnualIncome = ISNULL(@inc, c.AnnualIncome)
+        FROM dbo.CrmCustomer c
+        JOIN dbo.CrmApplication a ON a.CustomerId = c.Id
+        WHERE a.Id = @aid
+      `);
 
     res.json({ success: true });
   } catch (e) {

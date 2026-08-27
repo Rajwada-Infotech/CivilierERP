@@ -362,8 +362,8 @@ const CrmBooking: React.FC = () => {
     }));
   };
 
-  // Area is auto-fetched from the selected unit (Unit Master) — only Rate
-  // is entered here, and it recalculates TotalValue against that fixed area.
+  // Inclusive saleable area is auto-fetched from Unit Master. Rate applies to
+  // that single agreed area; the structural breakdown stays informational.
   const handleRateChange = (val: string) => {
     const rate = parseFloat(val);
     const area = parseFloat(form.AreaSqFt);
@@ -823,7 +823,7 @@ const CrmBooking: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-3 gap-2.5">
                   <div>
-                    <label className={labelCls}>Area (sq ft)</label>
+                    <label className={labelCls}>Inclusive Saleable Area (sq ft)</label>
                     <input type="text" value={form.AreaSqFt} readOnly disabled
                       placeholder="Auto-filled"
                       className={inputClsDisabled} />

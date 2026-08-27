@@ -29,7 +29,11 @@ const SOURCE_TYPES = ["Ad", "WalkIn", "Referral", "PortalInquiry", "ColdCall", "
 
 const APP_SELECT = `
   SELECT
-    a.Id, a.ApplicationNo, a.LeadId, a.CustomerId, a.ApplicantName, a.Mobile, a.AltMobile, a.Email,
+    a.Id, a.ApplicationNo, a.LeadId, a.CustomerId,
+    -- Always read from CrmCustomer master so name/mobile corrections propagate instantly.
+    COALESCE(cust.CustomerName, a.ApplicantName) AS ApplicantName,
+    COALESCE(cust.Mobile,       a.Mobile)        AS Mobile,
+    a.AltMobile, a.Email,
     a.ProjectId, a.PreferredUnitId, a.CompanyId,
     a.InterestedProject, a.InterestedUnit, a.PropertyType, a.BhkPreference,
     a.Source, a.PlatformId, a.CampaignId, a.AdId, a.ChannelPartnerId,
@@ -162,7 +166,7 @@ router.get("/", requirePageRight("crm-applications", "view"), async (req, res) =
     if (companyId) { req0.input("companyId", sql.Int, parseInt(companyId, 10)); conds.push("a.CompanyId = @companyId"); }
     if (search) {
       req0.input("srch", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @srch OR a.Mobile LIKE @srch OR a.ApplicationNo LIKE @srch)");
+      conds.push("(COALESCE(cust.CustomerName, a.ApplicantName) LIKE @srch OR COALESCE(cust.Mobile, a.Mobile) LIKE @srch OR a.ApplicationNo LIKE @srch)");
     }
     const where = "WHERE " + conds.join(" AND ");
     const result = await req0.query(`${APP_SELECT} ${where} ORDER BY a.CreatedAt DESC`);

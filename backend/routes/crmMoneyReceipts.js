@@ -68,11 +68,14 @@ router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res)
              mr.TransactionRef, mr.ReceivedDate, mr.CreatedAt, mr.ReceivedPaymentId, mr.Status AS MoneyReceiptStatus,
              mr.BouncedReason, mr.ApprovedAt,
              rp.RPStatus, rp.RPDocNo, rp.RPRejectionNote,
-             b.BookingNo, b.ProjectName, b.UnitNo, b.WorkflowStage,
+             b.BookingNo, COALESCE(proj.name, b.ProjectName) AS ProjectName,
+             COALESCE(um.UnitName, b.UnitNo) AS UnitNo, b.WorkflowStage,
              a.ApplicantName, a.Mobile
       FROM dbo.CrmMoneyReceipt mr
       JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
       LEFT JOIN dbo.ReceivedPayment rp ON rp.RPPaymentID = mr.ReceivedPaymentId
       ${where}
       ORDER BY mr.CreatedAt DESC
@@ -106,11 +109,15 @@ router.get("/:id", requirePageRight("crm-money-receipts", "view"), async (req, r
     const result = await pool.request().input("id", sql.Int, id).query(`
       SELECT mr.*, mr.Status AS MoneyReceiptStatus,
              rp.RPStatus, rp.RPDocNo, rp.RPRejectionNote,
-             b.BookingNo, b.WorkflowStage, b.ProjectName, b.UnitNo,
+             b.BookingNo, b.WorkflowStage,
+             COALESCE(proj.name, b.ProjectName) AS ProjectName,
+             COALESCE(um.UnitName, b.UnitNo) AS UnitNo,
              a.ApplicantName
       FROM dbo.CrmMoneyReceipt mr
       JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
       LEFT JOIN dbo.ReceivedPayment rp ON rp.RPPaymentID = mr.ReceivedPaymentId
       WHERE mr.Id = @id
     `);

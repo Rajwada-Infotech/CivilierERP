@@ -741,6 +741,33 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "debit-note") {
+      queries.push(`
+        SELECT
+          'debit-note'                          AS Module,
+          'Debit Note'                          AS ModuleLabel,
+          CAST(dn.id AS NVARCHAR)               AS RecordId,
+          ISNULL(dn.DocNo, CONCAT('DN#', CAST(dn.id AS NVARCHAR))) AS Reference,
+          dn.DebitDate                          AS RecordDate,
+          ISNULL(dn.Status, 'Draft')             AS Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          CONCAT(ISNULL(party.LHeadName, ''), ' — ', ISNULL(eb.EDocNo, '')) AS SupplierName,
+          dn.TotalAmount                        AS Amount,
+          ${NULL_EXTRA}
+          CAST(ISNULL(u.name, CAST(dn.created_by AS NVARCHAR(255))) AS NVARCHAR(255)) AS CreatedBy,
+          ''                                    AS ApprovedBy,
+          ''                                    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ISNULL(CAST(dn.Reason AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(dn.updated_at, dn.created_at)  AS LastModified
+        FROM dbo.DebitNote dn
+        LEFT JOIN dbo.AccountHeadMaster party ON party.LHeadId = dn.supplier_id
+        LEFT JOIN dbo.ExpenseBooking eb ON eb.Eid = dn.bill_id
+        LEFT JOIN dbo.users u ON u.id = dn.created_by
+        WHERE ISNULL(dn.Status, 'Draft') = 'Pending' AND dn.is_active = 1
+      `);
+    }
+
     if (!module || module === "contracts") {
       queries.push(`
         SELECT
@@ -812,7 +839,8 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.CrmBrokerageMaster WHERE Status = 'Pending' AND IsLocked = 0) +
         (SELECT COUNT(*) FROM dbo.CrmCancellation    WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmNoc             WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.Contract           WHERE Status = 'Pending')
+        (SELECT COUNT(*) FROM dbo.Contract           WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.DebitNote          WHERE ISNULL(Status,'Draft') = 'Pending' AND is_active = 1)
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });

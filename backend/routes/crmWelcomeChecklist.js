@@ -21,21 +21,13 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 // have a saved row for it yet, which the GET endpoint treats as unchecked).
 const CHECKLIST_TEMPLATE = [
   { section: "ProjectUnit", key: "project_name", label: "Project name confirmed with customer" },
-  { section: "ProjectUnit", key: "unit_no", label: "Unit number & type confirmed" },
+  { section: "ProjectUnit", key: "unit_no", label: "Unit number, type & structural area confirmed" },
   { section: "ProjectUnit", key: "booking_date", label: "Booking date confirmed" },
   { section: "ProjectUnit", key: "total_value", label: "Total booking value / grand total confirmed" },
 
   { section: "PaymentPlan", key: "plan_structure", label: "Payment plan name & milestone structure confirmed" },
   { section: "PaymentPlan", key: "milestone_dates", label: "Milestone due dates explained to customer" },
   { section: "PaymentPlan", key: "outstanding_balance", label: "Outstanding balance confirmed" },
-
-  { section: "BankNominee", key: "bank_account", label: "Bank name & account number confirmed" },
-  { section: "BankNominee", key: "ifsc_branch", label: "IFSC code & branch confirmed" },
-  { section: "BankNominee", key: "pan", label: "PAN number confirmed" },
-  { section: "BankNominee", key: "aadhaar", label: "Aadhaar number confirmed" },
-  { section: "BankNominee", key: "occupation_income", label: "Occupation & annual income confirmed" },
-  { section: "BankNominee", key: "nominee_details", label: "Nominee name & relation confirmed" },
-  { section: "BankNominee", key: "nominee_contact", label: "Nominee contact & address confirmed" },
 
   { section: "CoApplicant", key: "co_applicant_identity", label: "Co-applicant name & relation confirmed (or marked N/A)" },
   { section: "CoApplicant", key: "co_applicant_kyc", label: "Co-applicant PAN/Aadhaar confirmed (or marked N/A)" },
@@ -56,7 +48,6 @@ const CHECKLIST_TEMPLATE = [
 const SECTION_LABELS = {
   ProjectUnit: "Project & Unit Details",
   PaymentPlan: "Payment Plan",
-  BankNominee: "Bank & Nominee (KYC)",
   CoApplicant: "Co-Applicant Details",
   PersonalContact: "Customer Personal & Contact Details",
   Parking: "Parking",
