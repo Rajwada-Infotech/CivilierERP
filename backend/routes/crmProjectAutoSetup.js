@@ -297,7 +297,8 @@ router.get("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
   try {
     const blockId = parseInt(req.params.id, 10);
     const items = await pool.request().input("bid", sql.Int, blockId).query(`
-      SELECT Id, SortOrder, UnitType, Count, AreaSqFt
+      SELECT Id, SortOrder, UnitType, Count, AreaSqFt,
+             CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
       FROM dbo.CrmProjectAutoSetupUnitTemplate
       WHERE BlockId = @bid AND IsActive = 1
       ORDER BY SortOrder
@@ -329,8 +330,9 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
     }
 
     const block = await pool.request().input("id", sql.Int, blockId)
-      .query("SELECT Id FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Id, ProjectId FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
     if (!block.recordset.length) return res.status(404).json({ error: "Block not found" });
+    const projectId = block.recordset[0].ProjectId;
 
     const tx = pool.transaction();
     await tx.begin();
@@ -344,16 +346,59 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
           .input("type", sql.NVarChar(50), String(items[i].UnitType).trim())
           .input("count", sql.Int, parseInt(items[i].Count, 10))
           .input("area", sql.Decimal(18, 2), items[i].AreaSqFt != null && items[i].AreaSqFt !== "" ? parseFloat(items[i].AreaSqFt) : null)
+          .input("carpetArea", sql.Decimal(18, 2), items[i].CarpetAreaSqFt != null && items[i].CarpetAreaSqFt !== "" ? parseFloat(items[i].CarpetAreaSqFt) : null)
+          .input("builtUpArea", sql.Decimal(18, 2), items[i].BuiltUpAreaSqFt != null && items[i].BuiltUpAreaSqFt !== "" ? parseFloat(items[i].BuiltUpAreaSqFt) : null)
+          .input("superBuiltUpArea", sql.Decimal(18, 2), items[i].SuperBuiltUpAreaSqFt != null && items[i].SuperBuiltUpAreaSqFt !== "" ? parseFloat(items[i].SuperBuiltUpAreaSqFt) : null)
+          .input("openTerraceArea", sql.Decimal(18, 2), items[i].OpenTerraceAreaSqFt != null && items[i].OpenTerraceAreaSqFt !== "" ? parseFloat(items[i].OpenTerraceAreaSqFt) : null)
+          .input("rate", sql.Decimal(18, 2), items[i].RatePerSqFt != null && items[i].RatePerSqFt !== "" ? parseFloat(items[i].RatePerSqFt) : null)
           .input("cb", sql.Int, updatedBy)
           .query(`
-            INSERT INTO dbo.CrmProjectAutoSetupUnitTemplate (BlockId, SortOrder, UnitType, Count, AreaSqFt, IsActive, CreatedBy, CreatedAt)
-            VALUES (@bid, @so, @type, @count, @area, 1, @cb, SYSDATETIME())
+            INSERT INTO dbo.CrmProjectAutoSetupUnitTemplate
+              (BlockId, SortOrder, UnitType, Count, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
+            VALUES (@bid, @so, @type, @count, @area, @carpetArea, @builtUpArea, @superBuiltUpArea, @openTerraceArea, @rate, 1, @cb, SYSDATETIME())
           `);
       }
       await tx.commit();
     } catch (e) {
       await tx.rollback();
       throw e;
+    }
+
+    // Write-through to BlockUnitTypeSpec so Unit Master inherits these areas
+    // automatically for any new unit of this type in this block.
+    // MERGE ensures we upsert (update if exists, insert if not) without wiping
+    // unrelated rows for other unit types in the same block.
+    for (const item of items) {
+      const carpetArea  = item.CarpetAreaSqFt  != null && item.CarpetAreaSqFt  !== "" ? parseFloat(item.CarpetAreaSqFt)  : null;
+      const builtUpArea = item.BuiltUpAreaSqFt != null && item.BuiltUpAreaSqFt !== "" ? parseFloat(item.BuiltUpAreaSqFt) : null;
+      const sbuArea     = item.SuperBuiltUpAreaSqFt != null && item.SuperBuiltUpAreaSqFt !== "" ? parseFloat(item.SuperBuiltUpAreaSqFt) : null;
+      const openTerrace = item.OpenTerraceAreaSqFt  != null && item.OpenTerraceAreaSqFt  !== "" ? parseFloat(item.OpenTerraceAreaSqFt)  : null;
+      const baseRate    = item.RatePerSqFt != null && item.RatePerSqFt !== "" ? parseFloat(item.RatePerSqFt) : null;
+      if (!sbuArea && !carpetArea && !builtUpArea && !baseRate) continue;
+      await pool.request()
+        .input("bid",  sql.Int,          blockId)
+        .input("ut",   sql.NVarChar(50), String(item.UnitType).trim())
+        .input("ca",   sql.Decimal(18,2), carpetArea)
+        .input("bua",  sql.Decimal(18,2), builtUpArea)
+        .input("sbu",  sql.Decimal(18,2), sbuArea)
+        .input("ot",   sql.Decimal(18,2), openTerrace)
+        .input("rate", sql.Decimal(18,2), baseRate)
+        .query(`
+          MERGE dbo.BlockUnitTypeSpec AS tgt
+          USING (SELECT @bid AS BlockId, @ut AS UnitType) AS src
+            ON tgt.BlockId = src.BlockId AND tgt.UnitType = src.UnitType
+          WHEN MATCHED THEN
+            UPDATE SET
+              CarpetAreaSqFt       = @ca,
+              BuiltUpAreaSqFt      = @bua,
+              SuperBuiltUpAreaSqFt = @sbu,
+              OpenTerraceAreaSqFt  = @ot,
+              BaseRatePerSqFt      = @rate,
+              UpdatedAt            = SYSDATETIME()
+          WHEN NOT MATCHED THEN
+            INSERT (BlockId, UnitType, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, BaseRatePerSqFt)
+            VALUES (@bid, @ut, @ca, @bua, @sbu, @ot, @rate);
+        `);
     }
 
     const total = items.reduce((s, it) => s + parseInt(it.Count, 10), 0);
@@ -653,7 +698,9 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
     const { BlockId, FloorNo } = floor.recordset[0];
 
     const units = await pool.request().input("bid", sql.Int, BlockId).input("fno", sql.Int, FloorNo).query(`
-      SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType, u.AreaSqFt, u.IsActive,
+      SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType,
+        u.AreaSqFt, u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
+        u.IsActive,
         tags.PlanIds AS PaymentPlanIds,
         bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId, app.ApplicationNo AS LockApplicationNo
       FROM dbo.UnitMaster u
@@ -686,12 +733,23 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
 // exactly like before this feature existed.
 async function getBlockUnitSequence(pool, blockId) {
   const rows = await pool.request().input("bid", sql.Int, blockId).query(`
-    SELECT UnitType, Count, AreaSqFt FROM dbo.CrmProjectAutoSetupUnitTemplate
+    SELECT UnitType, Count, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
+    FROM dbo.CrmProjectAutoSetupUnitTemplate
     WHERE BlockId = @bid AND IsActive = 1 ORDER BY SortOrder
   `);
   const sequence = [];
   for (const r of rows.recordset) {
-    for (let i = 0; i < r.Count; i++) sequence.push({ UnitType: r.UnitType, AreaSqFt: r.AreaSqFt });
+    for (let i = 0; i < r.Count; i++) {
+      sequence.push({
+        UnitType: r.UnitType,
+        AreaSqFt: r.AreaSqFt,
+        CarpetAreaSqFt: r.CarpetAreaSqFt,
+        BuiltUpAreaSqFt: r.BuiltUpAreaSqFt,
+        SuperBuiltUpAreaSqFt: r.SuperBuiltUpAreaSqFt,
+        OpenTerraceAreaSqFt: r.OpenTerraceAreaSqFt,
+        RatePerSqFt: r.RatePerSqFt,
+      });
+    }
   }
   return sequence;
 }
@@ -768,23 +826,53 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
 
         if (dupe.recordset.length) {
           if (!dupe.recordset[0].IsActive) {
-            await pool.request().input("id", sql.Int, dupe.recordset[0].Id).input("fno", sql.Int, floor.FloorNo)
-              .input("utype", sql.NVarChar(50), typeSlot?.UnitType || null)
-              .input("area", sql.Decimal(18, 2), typeSlot?.AreaSqFt ?? null)
-              .query("UPDATE dbo.UnitMaster SET IsActive = 1, FloorNo = @fno, UnitType = ISNULL(UnitType, @utype), AreaSqFt = ISNULL(AreaSqFt, @area), UpdatedAt = SYSDATETIME() WHERE Id = @id");
+            await pool.request()
+              .input("id",             sql.Int,         dupe.recordset[0].Id)
+              .input("fno",            sql.Int,         floor.FloorNo)
+              .input("utype",          sql.NVarChar(50),typeSlot?.UnitType || null)
+              .input("area",           sql.Decimal(18,2),typeSlot?.AreaSqFt ?? null)
+              .input("carpetArea",     sql.Decimal(18,2),typeSlot?.CarpetAreaSqFt ?? null)
+              .input("builtUp",        sql.Decimal(18,2),typeSlot?.BuiltUpAreaSqFt ?? null)
+              .input("superBuiltUp",   sql.Decimal(18,2),typeSlot?.SuperBuiltUpAreaSqFt ?? null)
+              .input("openTerrace",    sql.Decimal(18,2),typeSlot?.OpenTerraceAreaSqFt ?? null)
+              .input("rate",           sql.Decimal(18,2),typeSlot?.RatePerSqFt ?? null)
+              .query(`UPDATE dbo.UnitMaster SET
+                IsActive = 1, FloorNo = @fno,
+                UnitType           = ISNULL(UnitType, @utype),
+                AreaSqFt           = ISNULL(AreaSqFt, @area),
+                CarpetAreaSqFt     = ISNULL(CarpetAreaSqFt, @carpetArea),
+                BuiltUpAreaSqFt    = ISNULL(BuiltUpAreaSqFt, @builtUp),
+                SuperBuiltUpAreaSqFt = ISNULL(SuperBuiltUpAreaSqFt, @superBuiltUp),
+                OpenTerraceAreaSqFt  = ISNULL(OpenTerraceAreaSqFt, @openTerrace),
+                RatePerSqFt          = ISNULL(RatePerSqFt, @rate),
+                UpdatedAt = SYSDATETIME()
+              WHERE Id = @id`);
             totalCreated++;
           }
           // Already active — leave it alone, it's already real inventory.
         } else {
           await pool.request()
-            .input("pid", sql.Int, projectId).input("bid", sql.Int, floor.BlockId)
-            .input("name", sql.NVarChar(100), unitName).input("fno", sql.Int, floor.FloorNo)
-            .input("utype", sql.NVarChar(50), typeSlot?.UnitType || null)
-            .input("area", sql.Decimal(18, 2), typeSlot?.AreaSqFt ?? null)
-            .input("cb", sql.Int, createdBy)
+            .input("pid",          sql.Int,          projectId)
+            .input("bid",          sql.Int,          floor.BlockId)
+            .input("name",         sql.NVarChar(100),unitName)
+            .input("fno",          sql.Int,          floor.FloorNo)
+            .input("utype",        sql.NVarChar(50), typeSlot?.UnitType || null)
+            .input("area",         sql.Decimal(18,2),typeSlot?.AreaSqFt ?? null)
+            .input("carpetArea",   sql.Decimal(18,2),typeSlot?.CarpetAreaSqFt ?? null)
+            .input("builtUp",      sql.Decimal(18,2),typeSlot?.BuiltUpAreaSqFt ?? null)
+            .input("superBuiltUp", sql.Decimal(18,2),typeSlot?.SuperBuiltUpAreaSqFt ?? null)
+            .input("openTerrace",  sql.Decimal(18,2),typeSlot?.OpenTerraceAreaSqFt ?? null)
+            .input("rate",         sql.Decimal(18,2),typeSlot?.RatePerSqFt ?? null)
+            .input("cb",           sql.Int,          createdBy)
             .query(`
-              INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, CreatedBy, CreatedAt)
-              VALUES (@pid, @bid, @name, @fno, @utype, @area, 1, @cb, SYSDATETIME())
+              INSERT INTO dbo.UnitMaster
+                (ProjectId, BlockId, UnitName, FloorNo, UnitType,
+                 AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt,
+                 IsActive, CreatedBy, CreatedAt)
+              VALUES
+                (@pid, @bid, @name, @fno, @utype,
+                 @area, @carpetArea, @builtUp, @superBuiltUp, @openTerrace, @rate,
+                 1, @cb, SYSDATETIME())
             `);
           totalCreated++;
         }

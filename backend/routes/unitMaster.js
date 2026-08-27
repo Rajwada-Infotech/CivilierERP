@@ -63,6 +63,18 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
         u.FloorNo,
         u.UnitType,
         u.AreaSqFt,
+        u.CarpetAreaSqFt,
+        u.BuiltUpAreaSqFt,
+        u.SuperBuiltUpAreaSqFt,
+        u.OpenTerraceAreaSqFt,
+        u.RatePerSqFt,
+        -- BlockUnitTypeSpec: block-level area defaults. Joined so Unit Master
+        -- can show inherited values vs. per-unit overrides without re-querying.
+        spec.CarpetAreaSqFt       AS SpecCarpetAreaSqFt,
+        spec.BuiltUpAreaSqFt      AS SpecBuiltUpAreaSqFt,
+        spec.SuperBuiltUpAreaSqFt AS SpecSuperBuiltUpAreaSqFt,
+        spec.OpenTerraceAreaSqFt  AS SpecOpenTerraceAreaSqFt,
+        spec.BaseRatePerSqFt      AS SpecBaseRatePerSqFt,
         u.IsActive,
         u.CreatedAt,
         u.UpdatedAt,
@@ -84,6 +96,8 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
         ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (bk.Status = 'Approved' OR bk.ConfirmDeadline IS NULL OR bk.ConfirmDeadline >= SYSDATETIME())
       LEFT JOIN dbo.CrmInventoryHold h
         ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+      LEFT JOIN dbo.BlockUnitTypeSpec spec
+        ON spec.BlockId = u.BlockId AND spec.UnitType = u.UnitType
       ${where}
       ORDER BY ep.name, b.BlockName, u.UnitName
     `);
@@ -159,12 +173,39 @@ router.get("/applicable-payment-plans", async (req, res) => {
 
 // POST — add unit
 router.post("/", requirePageRight("followup-unit-master", "create"), async (req, res) => {
-  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, PaymentPlanIds } = req.body;
+  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, PaymentPlanIds } = req.body;
   const requestedPlanIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
   const createdBy = req.user?.userId || null;
   const userName = req.user?.name || req.user?.email || null;
+  // SuperBuiltUpAreaSqFt is the saleable area used for pricing (Rate × SBU = Total).
+  // AreaSqFt is the legacy field kept in sync for backward compat — SBU wins, falls back to raw AreaSqFt.
+  // If neither is provided, fall back to the BlockUnitTypeSpec for this Block+UnitType.
   try {
     const pool = getPool();
+
+    // Fetch block-level spec for this unit type.
+    // Inheritance chain: explicit value → block spec → null.
+    let blockSpec = null;
+    if (BlockId && UnitType) {
+      const bsr = await pool.request()
+        .input("bid", sql.Int, parseInt(BlockId))
+        .input("ut",  sql.NVarChar(50), UnitType)
+        .query("SELECT * FROM dbo.BlockUnitTypeSpec WHERE BlockId=@bid AND UnitType=@ut");
+      blockSpec = bsr.recordset[0] ?? null;
+    }
+
+    const fromSpec = (val, field) => {
+      if (val != null && val !== "") return parseFloat(val);
+      if (blockSpec?.[field] != null) return Number(blockSpec[field]);
+      return null;
+    };
+
+    const carpetArea    = fromSpec(CarpetAreaSqFt,       "CarpetAreaSqFt");
+    const builtUpArea   = fromSpec(BuiltUpAreaSqFt,      "BuiltUpAreaSqFt");
+    const sbuArea       = fromSpec(SuperBuiltUpAreaSqFt, "SuperBuiltUpAreaSqFt");
+    const openTerrace   = fromSpec(OpenTerraceAreaSqFt,  "OpenTerraceAreaSqFt");
+    const ratePerSqFt   = fromSpec(RatePerSqFt,          "BaseRatePerSqFt");
+    const effectiveArea = sbuArea ?? (AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null);
 
     // Every tagged plan must be within this Unit's own applicable cascade
     // (Block's tags -> Project's tags -> all active) — same defensive shape
@@ -207,13 +248,23 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
         .input("Id", sql.Int, existing.Id)
         .input("FloorNo", sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null)
         .input("UnitType", sql.NVarChar(50), UnitType || null)
-        .input("Area", sql.Decimal(18, 2), AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null)
+        .input("Area",         sql.Decimal(18, 2), effectiveArea)
+        .input("CarpetArea",   sql.Decimal(18, 2), carpetArea)
+        .input("BuiltUpArea",  sql.Decimal(18, 2), builtUpArea)
+        .input("SuperBuiltUpArea", sql.Decimal(18, 2), sbuArea)
+        .input("OpenTerraceArea",  sql.Decimal(18, 2), openTerrace)
+        .input("Rate",         sql.Decimal(18, 2), ratePerSqFt)
         .input("UpdatedBy", sql.Int, createdBy)
         .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
           UPDATE dbo.UnitMaster SET
             FloorNo = @FloorNo,
             UnitType = @UnitType,
             AreaSqFt = @Area,
+            CarpetAreaSqFt = @CarpetArea,
+            BuiltUpAreaSqFt = @BuiltUpArea,
+            SuperBuiltUpAreaSqFt = @SuperBuiltUpArea,
+            OpenTerraceAreaSqFt = @OpenTerraceArea,
+            RatePerSqFt = @Rate,
             IsActive = 1,
             UpdatedBy = @UpdatedBy,
             UpdatedAt = @UpdatedAt
@@ -232,13 +283,18 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
       .input("UnitName",  sql.NVarChar(100), UnitName)
       .input("FloorNo",   sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null)
       .input("UnitType",  sql.NVarChar(50), UnitType || null)
-      .input("Area",      sql.Decimal(18,2), AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null)
+      .input("Area",      sql.Decimal(18,2), effectiveArea)
+      .input("CarpetArea",      sql.Decimal(18,2), carpetArea)
+      .input("BuiltUpArea",     sql.Decimal(18,2), builtUpArea)
+      .input("SuperBuiltUpArea", sql.Decimal(18,2), sbuArea)
+      .input("OpenTerraceArea", sql.Decimal(18,2), openTerrace)
+      .input("Rate",      sql.Decimal(18,2), ratePerSqFt)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
-        INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, CreatedBy, CreatedAt)
+        INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@ProjectId, @BlockId, @UnitName, @FloorNo, @UnitType, @Area, @IsActive, @CreatedBy, @CreatedAt)
+        VALUES (@ProjectId, @BlockId, @UnitName, @FloorNo, @UnitType, @Area, @CarpetArea, @BuiltUpArea, @SuperBuiltUpArea, @OpenTerraceArea, @Rate, @IsActive, @CreatedBy, @CreatedAt)
       `);
     await syncUnitPaymentPlanTags(pool, result.recordset[0].Id, planIds);
     await bumpCacheVersion("unit-master");
@@ -253,12 +309,34 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
 // PUT — update unit
 router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req, res) => {
   const { id } = req.params;
-  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, IsActive, PaymentPlanIds } = req.body;
+  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, PaymentPlanIds } = req.body;
   const requestedPlanIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
   const updatedBy = req.user?.userId || null;
   const userName = req.user?.name || req.user?.email || null;
   try {
     const pool = getPool();
+
+    // Fetch block-level spec for this unit type.
+    // Inheritance chain: explicit value → block spec → null.
+    let blockSpec = null;
+    if (BlockId && UnitType) {
+      const bsr = await pool.request()
+        .input("bid", sql.Int, parseInt(BlockId))
+        .input("ut",  sql.NVarChar(50), UnitType)
+        .query("SELECT * FROM dbo.BlockUnitTypeSpec WHERE BlockId=@bid AND UnitType=@ut");
+      blockSpec = bsr.recordset[0] ?? null;
+    }
+    const fromSpec = (val, field) => {
+      if (val != null && val !== "") return parseFloat(val);
+      if (blockSpec?.[field] != null) return Number(blockSpec[field]);
+      return null;
+    };
+    const carpetArea  = fromSpec(CarpetAreaSqFt,       "CarpetAreaSqFt");
+    const builtUpArea = fromSpec(BuiltUpAreaSqFt,      "BuiltUpAreaSqFt");
+    const sbuArea     = fromSpec(SuperBuiltUpAreaSqFt, "SuperBuiltUpAreaSqFt");
+    const openTerrace = fromSpec(OpenTerraceAreaSqFt,  "OpenTerraceAreaSqFt");
+    const ratePerSqFt = fromSpec(RatePerSqFt,          "BaseRatePerSqFt");
+    const effectiveArea = sbuArea ?? (AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null);
 
     let planIds = [];
     if (requestedPlanIds.length) {
@@ -306,7 +384,12 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
       .input("UnitName",  sql.NVarChar(100), UnitName)
       .input("FloorNo",   sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null)
       .input("UnitType",  sql.NVarChar(50), UnitType || null)
-      .input("Area",      sql.Decimal(18,2), AreaSqFt != null && AreaSqFt !== "" ? parseFloat(AreaSqFt) : null)
+      .input("Area",      sql.Decimal(18,2), effectiveArea)
+      .input("CarpetArea",      sql.Decimal(18,2), carpetArea)
+      .input("BuiltUpArea",     sql.Decimal(18,2), builtUpArea)
+      .input("SuperBuiltUpArea",sql.Decimal(18,2), sbuArea)
+      .input("OpenTerraceArea", sql.Decimal(18,2), openTerrace)
+      .input("Rate",            sql.Decimal(18,2), ratePerSqFt)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("UpdatedBy", sql.Int, updatedBy)
       .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
@@ -317,6 +400,11 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
           FloorNo   = @FloorNo,
           UnitType  = @UnitType,
           AreaSqFt  = @Area,
+          CarpetAreaSqFt = @CarpetArea,
+          BuiltUpAreaSqFt = @BuiltUpArea,
+          SuperBuiltUpAreaSqFt = @SuperBuiltUpArea,
+          OpenTerraceAreaSqFt = @OpenTerraceArea,
+          RatePerSqFt = @Rate,
           IsActive  = @IsActive,
           UpdatedBy = @UpdatedBy,
           UpdatedAt = @UpdatedAt

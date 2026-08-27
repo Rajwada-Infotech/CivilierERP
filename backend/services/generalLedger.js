@@ -25,6 +25,9 @@ const GL_ACCOUNTS = {
   // — Cash payments never carry a PBankID (Payment.tsx disables the Bank
   // field for Cash), so this stands in for the bank leg on the credit side.
   CASH_IN_HAND: "Cash-in-Hand A/c",
+  // Singleton counter-account for Debit Note value adjustments (migration
+  // 359) — see postDebitNoteAdjustment below.
+  DEBIT_NOTE_ADJUSTMENT: "Debit Note Adjustment A/c",
 };
 
 /** Same "advance / on account" Payment Reason match used by newPayment.js's
@@ -734,6 +737,124 @@ async function reverseOnAccountAdjustmentPosting(pool, oaId) {
     `);
 }
 
+/**
+ * Debit Note saved — a value adjustment against an invoice that increases
+ * what the invoice is worth (Adjusted Invoice Value = Original + Sum of
+ * Debit Notes), not a return/discount that reduces it.
+ *
+ * Creditor-type parties (Supplier/Contractor/Broker — normally credit
+ * balances, "how much we owe them") get MORE owed to them:
+ *   Dr Debit Note Adjustment A/c ... amount
+ *   Cr Party head ................. amount
+ *
+ * Debtor-type party (Customer — normally a debit balance, "how much they
+ * owe us") gets MORE owed BY them:
+ *   Dr Party head ................. amount
+ *   Cr Debit Note Adjustment A/c ... amount
+ */
+async function postDebitNoteAdjustment(pool, {
+  debitNoteId,
+  partyHeadId,
+  partyType,
+  amount,
+  docNo,
+  invoiceDocNo,
+  voucherDate,
+  companyId = null,
+  projectId = null,
+  createdBy = null,
+}) {
+  if (await hasPosting(pool, "DebitNoteAdjustment", debitNoteId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const adjustmentHeadId = await getGLHeadId(pool, GL_ACCOUNTS.DEBIT_NOTE_ADJUSTMENT);
+  const voucherNo = docNo || `DN-ADJ-${debitNoteId}`;
+  const narration = `${voucherNo} — Debit Note against invoice ${invoiceDocNo}`;
+
+  const isDebtor = partyType === "A"; // Customer
+
+  await postVoucher(pool, {
+    voucherNo,
+    voucherDate,
+    sourceType: "DebitNoteAdjustment",
+    sourceId: debitNoteId,
+    companyId,
+    projectId,
+    createdBy,
+    legs: isDebtor
+      ? [
+          { lHeadId: partyHeadId, debit: amount, narration },
+          { lHeadId: adjustmentHeadId, credit: amount, narration },
+        ]
+      : [
+          { lHeadId: adjustmentHeadId, debit: amount, narration },
+          { lHeadId: partyHeadId, credit: amount, narration },
+        ],
+  });
+  return { posted: true, voucherNo };
+}
+
+/** Reverse a previously-posted Debit Note voucher — same flip-IsReversed
+ * pattern as reverseOnAccountAdjustmentPosting. */
+async function reverseDebitNotePosting(pool, debitNoteId) {
+  await pool
+    .request()
+    .input("DebitNoteId", sql.Int, debitNoteId)
+    .query(`
+      UPDATE dbo.GeneralLedgerEntry
+      SET IsReversed = 1
+      WHERE SourceType = 'DebitNoteAdjustment' AND SourceId = @DebitNoteId AND IsReversed = 0
+    `);
+}
+
+/**
+ * Debit Note approved (via approvalService's Approval Inbox workflow —
+ * matches the `GL_POSTERS[module]` signature every other module's poster
+ * uses: (pool, recordId, userEmail) -> outcome). Loads the record itself
+ * (routes/debitNote.js no longer posts inline on save) and posts + syncs the
+ * linked invoice's bill status in one place.
+ */
+async function postDebitNoteApproval(pool, debitNoteId, userEmail) {
+  if (await hasPosting(pool, "DebitNoteAdjustment", debitNoteId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const result = await pool.request().input("Id", sql.Int, debitNoteId).query(`
+    SELECT dn.id, dn.DocNo, dn.DebitDate, dn.TotalAmount, dn.party_type,
+           dn.supplier_id AS PartyId, dn.company_id, dn.project_id,
+           eb.EDocNo AS InvoiceDocNo
+    FROM dbo.DebitNote dn
+    LEFT JOIN dbo.ExpenseBooking eb ON eb.Eid = dn.bill_id
+    WHERE dn.id = @Id
+  `);
+  const dn = result.recordset[0];
+  if (!dn) return { posted: false, reason: `Debit Note ${debitNoteId} not found` };
+  if (!dn.InvoiceDocNo) return { posted: false, reason: `Debit Note ${debitNoteId} has no linked invoice` };
+
+  const amount = Number(dn.TotalAmount) || 0;
+  if (amount <= 0) return { posted: false, reason: `Debit Note ${debitNoteId} has no amount to post` };
+
+  const outcome = await postDebitNoteAdjustment(pool, {
+    debitNoteId: dn.id,
+    partyHeadId: dn.PartyId,
+    partyType: dn.party_type,
+    amount,
+    docNo: dn.DocNo,
+    invoiceDocNo: dn.InvoiceDocNo,
+    voucherDate: dn.DebitDate,
+    companyId: dn.company_id,
+    projectId: dn.project_id,
+    createdBy: userEmail,
+  });
+
+  // syncBillStatus lives in utils/ (not services/) and has no reverse
+  // dependency on this file, so requiring it here (rather than at module
+  // load) avoids any risk of a require cycle.
+  const { syncBillStatus } = require("../utils/syncBillStatus");
+  await syncBillStatus(pool, sql, dn.InvoiceDocNo);
+
+  return outcome;
+}
+
 /** Generic version of the reversal pattern above, for any (sourceType,
  * sourceId) pair — used by scripts/repostLegacyIntercompanyLoans.js to undo
  * a document's existing posting before reposting it with corrected values.
@@ -998,5 +1119,8 @@ module.exports = {
   postFundTransferApproval,
   postOnAccountAdjustment,
   reverseOnAccountAdjustmentPosting,
+  postDebitNoteAdjustment,
+  postDebitNoteApproval,
+  reverseDebitNotePosting,
   reversePostingBySource,
 };

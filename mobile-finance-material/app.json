@@ -8,7 +8,12 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rajwadainfotech.civiliererp",
+      "infoPlist": {
+        "NSCameraUsageDescription": "CivilierERP uses the camera to attach photos to Vehicle In/Out entries and contract documents.",
+        "NSPhotoLibraryUsageDescription": "CivilierERP needs access to your photo library to attach existing photos to Vehicle In/Out entries and contract documents."
+      }
     },
     "android": {
       "adaptiveIcon": {

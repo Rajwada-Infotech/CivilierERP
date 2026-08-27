@@ -22,7 +22,8 @@ const UNIT_TYPES = [
   "Studio", "Villa", "Plot", "Commercial", "Other",
 ];
 
-type TemplateRow = { UnitType: string; Count: string; AreaSqFt: string };
+type TemplateRow = { UnitType: string; Count: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
+type UnitEdit = { UnitName: string; UnitType: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
 
 async function fetchProjects(): Promise<any[]> {
   try { const r = await fetchWithAuth(PROJECTS_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -163,7 +164,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   const [savingTemplateBlockId, setSavingTemplateBlockId] = useState<number | null>(null);
   const [applyingTemplateBlockId, setApplyingTemplateBlockId] = useState<number | null>(null);
   const [editingUnitId, setEditingUnitId] = useState<number | null>(null);
-  const [editingUnit, setEditingUnit] = useState<{ UnitName: string; UnitType: string; AreaSqFt: string } | null>(null);
+  const [editingUnit, setEditingUnit] = useState<UnitEdit | null>(null);
   const [savingUnitId, setSavingUnitId] = useState<number | null>(null);
   // Non-Ground floors render as a compact one-line summary by default — this
   // tracks which single floor is currently expanded into its editable count
@@ -275,8 +276,17 @@ const CrmProjectAutoSetup: React.FC = () => {
         const r = await fetchWithAuth(`${API}/blocks/${b.Id}/unit-template`);
         const data = r.ok ? await r.json() : { items: [] };
         const rows: TemplateRow[] = (data.items || []).length
-          ? data.items.map((it: any) => ({ UnitType: it.UnitType, Count: String(it.Count), AreaSqFt: it.AreaSqFt != null ? String(it.AreaSqFt) : "" }))
-          : [{ UnitType: "2 BHK", Count: "1", AreaSqFt: "" }];
+          ? data.items.map((it: any) => ({
+              UnitType: it.UnitType,
+              Count: String(it.Count),
+              AreaSqFt: it.AreaSqFt != null ? String(it.AreaSqFt) : "",
+              CarpetAreaSqFt: it.CarpetAreaSqFt != null ? String(it.CarpetAreaSqFt) : "",
+              BuiltUpAreaSqFt: it.BuiltUpAreaSqFt != null ? String(it.BuiltUpAreaSqFt) : "",
+              SuperBuiltUpAreaSqFt: it.SuperBuiltUpAreaSqFt != null ? String(it.SuperBuiltUpAreaSqFt) : (it.AreaSqFt != null ? String(it.AreaSqFt) : ""),
+              OpenTerraceAreaSqFt: it.OpenTerraceAreaSqFt != null ? String(it.OpenTerraceAreaSqFt) : "",
+              RatePerSqFt: it.RatePerSqFt != null ? String(it.RatePerSqFt) : "",
+            }))
+          : [{ UnitType: "2 BHK", Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }];
         setTemplates((m) => ({ ...m, [b.Id]: rows }));
       } catch { /* leave unset — user can still add rows manually */ }
     });
@@ -460,6 +470,12 @@ const CrmProjectAutoSetup: React.FC = () => {
       UnitName: unit.UnitName || "",
       UnitType: unit.UnitType || "2 BHK",
       AreaSqFt: unit.AreaSqFt != null ? String(unit.AreaSqFt) : "",
+      CarpetAreaSqFt: unit.CarpetAreaSqFt != null ? String(unit.CarpetAreaSqFt) : "",
+      BuiltUpAreaSqFt: unit.BuiltUpAreaSqFt != null ? String(unit.BuiltUpAreaSqFt) : "",
+      SuperBuiltUpAreaSqFt: unit.SuperBuiltUpAreaSqFt != null ? String(unit.SuperBuiltUpAreaSqFt)
+        : unit.AreaSqFt != null ? String(unit.AreaSqFt) : "",
+      OpenTerraceAreaSqFt: unit.OpenTerraceAreaSqFt != null ? String(unit.OpenTerraceAreaSqFt) : "",
+      RatePerSqFt: unit.RatePerSqFt != null ? String(unit.RatePerSqFt) : "",
     });
   };
 
@@ -479,6 +495,11 @@ const CrmProjectAutoSetup: React.FC = () => {
           FloorNo: unit.FloorNo,
           UnitType: editingUnit.UnitType || null,
           AreaSqFt: editingUnit.AreaSqFt || null,
+          CarpetAreaSqFt: editingUnit.CarpetAreaSqFt || null,
+          BuiltUpAreaSqFt: editingUnit.BuiltUpAreaSqFt || null,
+          SuperBuiltUpAreaSqFt: editingUnit.SuperBuiltUpAreaSqFt || null,
+          OpenTerraceAreaSqFt: editingUnit.OpenTerraceAreaSqFt || null,
+          RatePerSqFt: editingUnit.RatePerSqFt || null,
           IsActive: unit.IsActive !== false,
           PaymentPlanIds: unit.PaymentPlanIds ? String(unit.PaymentPlanIds).split(",").map((x) => parseInt(x, 10)).filter(Number.isFinite) : [],
         }),
@@ -489,7 +510,13 @@ const CrmProjectAutoSetup: React.FC = () => {
       setFloorUnits((m) => ({
         ...m,
         [floorId]: (m[floorId] || []).map((u) => u.Id === unit.Id
-          ? { ...u, UnitName: unitName, UnitType: editingUnit.UnitType, AreaSqFt: editingUnit.AreaSqFt || null }
+          ? { ...u, UnitName: unitName, UnitType: editingUnit.UnitType,
+              CarpetAreaSqFt: editingUnit.CarpetAreaSqFt || null,
+              BuiltUpAreaSqFt: editingUnit.BuiltUpAreaSqFt || null,
+              SuperBuiltUpAreaSqFt: editingUnit.SuperBuiltUpAreaSqFt || null,
+              OpenTerraceAreaSqFt: editingUnit.OpenTerraceAreaSqFt || null,
+              RatePerSqFt: editingUnit.RatePerSqFt || null,
+              AreaSqFt: editingUnit.AreaSqFt || null }
           : u),
       }));
       setEditingUnitId(null);
@@ -506,7 +533,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   const templateTotal = (blockId: number) => (templates[blockId] || []).reduce((s, r) => s + (parseInt(r.Count, 10) || 0), 0);
 
   const addTemplateRow = (blockId: number) =>
-    setTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { UnitType: "2 BHK", Count: "1", AreaSqFt: "" }] }));
+    setTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { UnitType: "2 BHK", Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }] }));
   const removeTemplateRow = (blockId: number, idx: number) =>
     setTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).filter((_, i) => i !== idx) }));
   const updateTemplateRow = (blockId: number, idx: number, patch: Partial<TemplateRow>) =>
@@ -521,7 +548,16 @@ const CrmProjectAutoSetup: React.FC = () => {
       const res = await fetchWithAuth(`${API}/blocks/${blockId}/unit-template`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Items: rows.map((r) => ({ UnitType: r.UnitType, Count: r.Count, AreaSqFt: r.AreaSqFt || null })) }),
+        body: JSON.stringify({ Items: rows.map((r) => ({
+          UnitType: r.UnitType,
+          Count: r.Count,
+          AreaSqFt: r.AreaSqFt || null,
+          CarpetAreaSqFt: r.CarpetAreaSqFt || null,
+          BuiltUpAreaSqFt: r.BuiltUpAreaSqFt || null,
+          SuperBuiltUpAreaSqFt: r.SuperBuiltUpAreaSqFt || null,
+          OpenTerraceAreaSqFt: r.OpenTerraceAreaSqFt || null,
+          RatePerSqFt: r.RatePerSqFt || null,
+        })) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to save template");
@@ -1147,20 +1183,57 @@ const CrmProjectAutoSetup: React.FC = () => {
                             this same sequence (see getBlockUnitSequence). */}
                         <div className="space-y-1.5">
                           {rows.map((row, idx) => (
-                            <div key={idx} className="flex items-center gap-2">
-                              <select value={row.UnitType} onChange={(e) => updateTemplateRow(b.Id, idx, { UnitType: e.target.value })}
-                                className={`${inputCls} !py-1 flex-1`}>
-                                {UNIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                              </select>
-                              <input type="number" min={1} max={100} placeholder="Count" value={row.Count}
-                                onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })}
-                                className={`${inputCls} !py-1 !w-20`} />
-                              <input type="number" min={0} placeholder="Area (sqft)" value={row.AreaSqFt}
-                                onChange={(e) => updateTemplateRow(b.Id, idx, { AreaSqFt: e.target.value })}
-                                className={`${inputCls} !py-1 !w-28`} />
-                              <button onClick={() => removeTemplateRow(b.Id, idx)} className="text-muted-foreground hover:text-red-600 shrink-0">
-                                <X size={12} />
-                              </button>
+                            <div key={idx} className="rounded border border-border/50 bg-muted/20 p-2 space-y-1.5">
+                              <div className="flex items-center gap-2">
+                                <select value={row.UnitType} onChange={(e) => updateTemplateRow(b.Id, idx, { UnitType: e.target.value })}
+                                  className={`${inputCls} !py-1 flex-1`}>
+                                  {UNIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                                <input type="number" min={1} max={100} placeholder="Count" value={row.Count}
+                                  onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })}
+                                  className={`${inputCls} !py-1 !w-20`} />
+                                <button onClick={() => removeTemplateRow(b.Id, idx)} className="text-muted-foreground hover:text-red-600 shrink-0 ml-auto">
+                                  <X size={12} />
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_1fr_1fr_1fr] gap-1.5">
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Saleable (sqft)</span>
+                                  <input type="number" min={0} placeholder="—" value={row.AreaSqFt}
+                                    onChange={(e) => updateTemplateRow(b.Id, idx, { AreaSqFt: e.target.value })}
+                                    className={`${inputCls} !py-1`} />
+                                </div>
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Rate/sqft (₹)</span>
+                                  <input type="number" min={0} placeholder="—" value={row.RatePerSqFt}
+                                    onChange={(e) => updateTemplateRow(b.Id, idx, { RatePerSqFt: e.target.value })}
+                                    className={`${inputCls} !py-1`} />
+                                </div>
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Carpet (sqft)</span>
+                                  <input type="number" min={0} placeholder="—" value={row.CarpetAreaSqFt}
+                                    onChange={(e) => updateTemplateRow(b.Id, idx, { CarpetAreaSqFt: e.target.value })}
+                                    className={`${inputCls} !py-1`} />
+                                </div>
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Built-up (sqft)</span>
+                                  <input type="number" min={0} placeholder="—" value={row.BuiltUpAreaSqFt}
+                                    onChange={(e) => updateTemplateRow(b.Id, idx, { BuiltUpAreaSqFt: e.target.value })}
+                                    className={`${inputCls} !py-1`} />
+                                </div>
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">SBU (sqft)</span>
+                                  <input type="number" min={0} placeholder="—" value={row.SuperBuiltUpAreaSqFt}
+                                    onChange={(e) => updateTemplateRow(b.Id, idx, { SuperBuiltUpAreaSqFt: e.target.value })}
+                                    className={`${inputCls} !py-1`} />
+                                </div>
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Open Terrace (sqft)</span>
+                                  <input type="number" min={0} placeholder="—" value={row.OpenTerraceAreaSqFt}
+                                    onChange={(e) => updateTemplateRow(b.Id, idx, { OpenTerraceAreaSqFt: e.target.value })}
+                                    className={`${inputCls} !py-1`} />
+                                </div>
+                              </div>
                             </div>
                           ))}
                           <div className="flex items-center gap-2">
@@ -1316,10 +1389,10 @@ const BlockFloorTree: React.FC<{
   floorUnits: Record<number, any[]>;
   loadingUnitsFloorId: number | null;
   editingUnitId: number | null;
-  editingUnit: { UnitName: string; UnitType: string; AreaSqFt: string } | null;
+  editingUnit: UnitEdit | null;
   savingUnitId: number | null;
   onStartEditUnit: (unit: any) => void;
-  onEditUnitChange: (patch: Partial<{ UnitName: string; UnitType: string; AreaSqFt: string }>) => void;
+  onEditUnitChange: (patch: Partial<UnitEdit>) => void;
   onCancelEditUnit: () => void;
   onSaveUnit: (floorId: number, unit: any) => void;
   onDeleteUnit: (floorId: number, unit: any) => void;
@@ -1377,10 +1450,10 @@ const FloorUnitList: React.FC<{
   units: any[] | undefined;
   loading: boolean;
   editingUnitId: number | null;
-  editingUnit: { UnitName: string; UnitType: string; AreaSqFt: string } | null;
+  editingUnit: UnitEdit | null;
   savingUnitId: number | null;
   onStartEdit: (unit: any) => void;
-  onEditChange: (patch: Partial<{ UnitName: string; UnitType: string; AreaSqFt: string }>) => void;
+  onEditChange: (patch: Partial<UnitEdit>) => void;
   onCancelEdit: () => void;
   onSave: (floorId: number, unit: any) => void;
   onDelete: (floorId: number, unit: any) => void;
@@ -1415,7 +1488,7 @@ const FloorUnitList: React.FC<{
             if (isEditing) {
               return (
                 <div key={u.Id} className="col-span-2 sm:col-span-3 lg:col-span-4 rounded-lg border border-primary/40 bg-muted/20 p-2 space-y-1.5">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-2 gap-1.5">
                     <input autoFocus value={editingUnit.UnitName}
                       autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                       name={`unit-name-${u.Id}`}
@@ -1427,9 +1500,44 @@ const FloorUnitList: React.FC<{
                       className="h-7 rounded border border-border bg-background px-1 text-[11px] outline-none focus:border-primary">
                       {UNIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                     </select>
-                    <input value={editingUnit.AreaSqFt} type="number" min={0} placeholder="Area (sqft)"
-                      onChange={(e) => onEditChange({ AreaSqFt: e.target.value })}
-                      className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-6 gap-1.5">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Saleable (sqft)</span>
+                      <input value={editingUnit.AreaSqFt} type="number" min={0} placeholder="—"
+                        onChange={(e) => onEditChange({ AreaSqFt: e.target.value })}
+                        className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Carpet (sqft)</span>
+                      <input value={editingUnit.CarpetAreaSqFt} type="number" min={0} placeholder="—"
+                        onChange={(e) => onEditChange({ CarpetAreaSqFt: e.target.value })}
+                        className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Built-up (sqft)</span>
+                      <input value={editingUnit.BuiltUpAreaSqFt} type="number" min={0} placeholder="—"
+                        onChange={(e) => onEditChange({ BuiltUpAreaSqFt: e.target.value })}
+                        className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">SBU (sqft)</span>
+                      <input value={editingUnit.SuperBuiltUpAreaSqFt} type="number" min={0} placeholder="—"
+                        onChange={(e) => onEditChange({ SuperBuiltUpAreaSqFt: e.target.value })}
+                        className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Open Terrace (sqft)</span>
+                      <input value={editingUnit.OpenTerraceAreaSqFt} type="number" min={0} placeholder="—"
+                        onChange={(e) => onEditChange({ OpenTerraceAreaSqFt: e.target.value })}
+                        className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Rate/sqft (₹)</span>
+                      <input value={editingUnit.RatePerSqFt} type="number" min={0} placeholder="—"
+                        onChange={(e) => onEditChange({ RatePerSqFt: e.target.value })}
+                        className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                    </div>
                   </div>
                   <div className="flex justify-end gap-2">
                     <button onClick={onCancelEdit} className="text-[11px] px-2 py-1 rounded text-muted-foreground hover:text-foreground">Cancel</button>
@@ -1452,7 +1560,9 @@ const FloorUnitList: React.FC<{
                   <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} title={lockReason || "Available"} />
                 </div>
                 <div className="text-muted-foreground truncate">
-                  {u.UnitType || "No type set"}{u.AreaSqFt ? ` · ${u.AreaSqFt} sqft` : ""}
+                  {u.UnitType || "No type set"}
+                  {u.AreaSqFt ? ` · ${u.AreaSqFt} sqft` : ""}
+                  {u.RatePerSqFt ? ` · ₹${Number(u.RatePerSqFt).toLocaleString("en-IN")}/sqft` : ""}
                 </div>
 
                 {isExpanded && (

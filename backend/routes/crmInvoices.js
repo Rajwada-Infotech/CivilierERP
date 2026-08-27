@@ -32,12 +32,16 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`
       SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.Status, inv.VoidReason, inv.CreatedAt,
-             b.Id AS BookingId, b.BookingNo, b.ProjectName, b.UnitNo,
+             b.Id AS BookingId, b.BookingNo,
+             COALESCE(proj.name, b.ProjectName) AS ProjectName,
+             COALESCE(um.UnitName, b.UnitNo) AS UnitNo,
              a.ApplicantName, a.Mobile,
              cu.name AS CreatedByName
       FROM dbo.CrmInvoice inv
       JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
       LEFT JOIN dbo.Users cu ON cu.id = inv.CreatedBy
       ${where}
       ORDER BY inv.CreatedAt DESC

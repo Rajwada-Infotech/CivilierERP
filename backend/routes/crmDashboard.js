@@ -28,10 +28,11 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
 
     // ── PROJECTS LIST (for the selector dropdown) ─────────────────────────────
     const projectsQ = pool.request().query(`
-      SELECT DISTINCT b.ProjectId AS Id, b.ProjectName AS Name
+      SELECT DISTINCT b.ProjectId AS Id, COALESCE(proj.name, b.ProjectName) AS Name
       FROM dbo.CrmBooking b
-      WHERE b.IsActive = 1 AND b.ProjectId IS NOT NULL AND b.ProjectName IS NOT NULL
-      ORDER BY b.ProjectName
+      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
+      WHERE b.IsActive = 1 AND b.ProjectId IS NOT NULL
+      ORDER BY COALESCE(proj.name, b.ProjectName)
     `);
 
     // ── ALERT KPIs ────────────────────────────────────────────────────────────
@@ -172,15 +173,16 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     // Collection efficiency per project
     const collectionPerProjectQ = pool.request().query(`
       SELECT
-        b.ProjectName,
+        COALESCE(proj.name, b.ProjectName) AS ProjectName,
         ISNULL(SUM(m.AmountDue), 0)  AS TotalDue,
         ISNULL(SUM(m.AmountPaid), 0) AS TotalPaid,
         SUM(CASE WHEN m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END) AS OverdueCount
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
       WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME())
-      GROUP BY b.ProjectName
-      ORDER BY b.ProjectName
+      GROUP BY COALESCE(proj.name, b.ProjectName)
+      ORDER BY COALESCE(proj.name, b.ProjectName)
     `);
 
     // Forward-looking: amount due in next 30 days

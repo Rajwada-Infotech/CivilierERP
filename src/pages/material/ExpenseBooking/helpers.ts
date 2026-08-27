@@ -406,6 +406,7 @@ export function dbToRecord(row: any): ExpenseRecord {
           ? `Draft #${id}`
           : ""),
     docTypeName: row.DocTypeName ?? "",
+    docTypeId: row.EDocTypeId != null ? Number(row.EDocTypeId) : null,
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
     dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",
     financialYear: row.EFinYear ?? "",
