@@ -56,6 +56,8 @@ import {
   MapPinned,
   Percent,
   Repeat,
+  Cpu,
+  ListChecks,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
