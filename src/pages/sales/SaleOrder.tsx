@@ -1114,24 +1114,24 @@ export default function SaleOrder() {
             {rights.canCreate && (
               <button
                 onClick={() => setActiveTab("create")}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg transition-colors ${
                   activeTab === "create"
                     ? "bg-violet-600 text-white shadow-sm"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`}
               >
-                <Send size={14} /> New Sale Order
+                <Send size={13} /> New Sale Order
               </button>
             )}
             <button
               onClick={() => setActiveTab("history")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg transition-colors ${
                 activeTab === "history"
                   ? "bg-violet-600 text-white shadow-sm"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
               }`}
             >
-              <ClipboardList size={14} /> History
+              <ClipboardList size={13} /> History
             </button>
           </div>
         }

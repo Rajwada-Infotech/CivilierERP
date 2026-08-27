@@ -55,6 +55,7 @@ export interface BrsFilterOption {
   name: string;
   companyId?: number | null;
   companyName?: string | null;
+  accountNoLast4?: string | null;
 }
 
 export interface BrsFilters {

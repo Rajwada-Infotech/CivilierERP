@@ -27,7 +27,6 @@ import {
   getBRS,
   getBRSFilters,
   markClear,
-  markUnclear,
   markBounced,
   type BrsEntry,
   type BrsFilterOption,
@@ -87,29 +86,11 @@ function isCancelled(e: BrsEntry): boolean {
 
 
 // ─── Export column definitions ────────────────────────────────────────────────
-
-const EXPORT_COLUMNS: ExportColumn[] = [
-  { header: "Type",       accessor: (r) => (r.SourceType === "RECEIVED" ? "Received" : "Payment") },
-  { header: "Company",    accessor: "CompanyName" },
-  { header: "Bank",       accessor: "BankName" },
-  { header: "Date",       accessor: (r) => fmt(r.PayDate as string) },
-  { header: "Amount",     accessor: (r) => `Rs. ${Number(r.Amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}` },
-  { header: "Mode",       accessor: "Mode" },
-  { header: "Cheque No",  accessor: (r) => (r as unknown as BrsEntry).ChequeNo ?? "—" },
-  { header: "Doc No.",    accessor: (r) => r.DocNo ?? "—" },
-  { header: "Txn ID",     accessor: (r) => r.TxnId ?? "—" },
-  { header: "Pay Status", accessor: "PayStatus" },
-  { header: "BRS Status", accessor: (r) => {
-    const e = r as unknown as BrsEntry;
-    if (isCancelled(e)) return "Cheque Cancelled";
-    if (e.IsBounced === 1 || e.IsBounced === true) return "Bounced";
-    return e.IsMatched === 1 || e.IsMatched === true ? "Clear" : "Unclear";
-  }},
-  { header: "Clearing Date", accessor: (r) => fmt((r as unknown as BrsEntry).ClearingDate) },
-  { header: "Bounce Date",   accessor: (r) => fmt((r as unknown as BrsEntry).BounceDate) },
-  { header: "Bounce Reason", accessor: (r) => (r as unknown as BrsEntry).BounceReason ?? "—" },
-  { header: "Bounce Remarks",accessor: (r) => (r as unknown as BrsEntry).BounceRemarks ?? "—" },
-];
+// Built inside the component (see EXPORT_COLUMNS useMemo below) since the
+// Bank column needs the fetched allBanks list to append each bank's last-4
+// account digits — the same disambiguator already shown in the Bank filter
+// dropdown, so two rows both named e.g. "HDFC Bank" read distinctly in
+// exports too, not just on-screen.
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -176,15 +157,19 @@ function PayStatusBadge({ status }: { status: string | null }) {
 }
 
 function PassbookCheck({ checked, loading, onChange }: { checked: boolean; loading: boolean; onChange: () => void }) {
+  // Once cleared, this is locked — the bank has confirmed the payment in
+  // the passbook, so it can never be un-cleared from here again (server
+  // enforces the same rule independently, see PUT /:sourceType/:id/unclear).
+  const locked = checked;
   return (
     <button
       onClick={onChange}
-      disabled={loading}
-      title={checked ? "Mark as Unclear" : "Mark as Clear"}
+      disabled={loading || locked}
+      title={locked ? "Cleared — cannot be undone" : "Mark as Clear"}
       className={`
         relative flex items-center justify-center w-5 h-5 rounded border-2 transition-all duration-150
         focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50
-        ${loading ? "opacity-40 cursor-wait" : "cursor-pointer"}
+        ${loading ? "opacity-40 cursor-wait" : locked ? "cursor-not-allowed" : "cursor-pointer"}
         ${checked
           ? "bg-emerald-500 border-emerald-500 shadow-sm shadow-emerald-500/30"
           : "bg-transparent border-border hover:border-emerald-400 hover:bg-emerald-500/5"
@@ -488,16 +473,16 @@ export default function Brs() {
   // ── Toggle clear / unclear ────────────────────────────────────────────────
   const toggle = useCallback(async (entry: BrsEntry) => {
     if (isBounced(entry) || isCancelled(entry)) return; // can't toggle a bounced or cancelled-cheque entry
+    // Clearing is one-way — once matched, it's locked (server enforces this
+    // independently in PUT /:sourceType/:id/unclear). PassbookCheck already
+    // disables the control at that point; this is the second guard so
+    // nothing else calling toggle() can slip past it either.
+    if (isCleared(entry)) return;
     const key = `${entry.SourceType}-${entry.SourceID}`;
     setTogglingId(key);
     try {
-      if (isCleared(entry)) {
-        await markUnclear(entry.SourceType, entry.SourceID);
-        toast.success("Marked as Unclear");
-      } else {
-        await markClear(entry.SourceType, entry.SourceID);
-        toast.success("Marked as Clear ✓");
-      }
+      await markClear(entry.SourceType, entry.SourceID);
+      toast.success("Marked as Clear ✓");
       await fetchData();
     } catch (err) {
       console.error("BRS toggle error", err);
@@ -562,6 +547,37 @@ export default function Brs() {
   }, [entries, search]);
 
   const exportData = useMemo(() => filtered as unknown as Record<string, unknown>[], [filtered]);
+
+  const EXPORT_COLUMNS: ExportColumn[] = useMemo(() => [
+    { header: "Type",       accessor: (r) => (r.SourceType === "RECEIVED" ? "Received" : "Payment") },
+    { header: "Company",    accessor: "CompanyName" },
+    { header: "Bank", accessor: (r) => {
+      const bank = allBanks.find((b) => b.name === r.BankName);
+      return bank?.accountNoLast4 ? `${r.BankName} •••${bank.accountNoLast4}` : String(r.BankName ?? "—");
+    }},
+    { header: "Date",       accessor: (r) => fmt(r.PayDate as string) },
+    { header: "Amount",     accessor: (r) => `Rs. ${Number(r.Amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}` },
+    { header: "Mode",       accessor: "Mode" },
+    { header: "Cheque No",  accessor: (r) => (r as unknown as BrsEntry).ChequeNo ?? "—" },
+    { header: "Doc No.",    accessor: (r) => r.DocNo ?? "—" },
+    { header: "Txn ID",     accessor: (r) => r.TxnId ?? "—" },
+    { header: "Pay Status", accessor: "PayStatus" },
+    { header: "BRS Status", accessor: (r) => {
+      const e = r as unknown as BrsEntry;
+      if (isCancelled(e)) return "Cheque Cancelled";
+      if (e.IsBounced === 1 || e.IsBounced === true) return "Bounced";
+      return e.IsMatched === 1 || e.IsMatched === true ? "Clear" : "Unclear";
+    }},
+    { header: "Cleared On", accessor: (r) => {
+      const e = r as unknown as BrsEntry;
+      if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
+      const { date, time } = fmtDT(e.ClearingDate);
+      return time ? `${date}, ${time}` : date;
+    }},
+    { header: "Bounce Date",   accessor: (r) => fmt((r as unknown as BrsEntry).BounceDate) },
+    { header: "Bounce Reason", accessor: (r) => (r as unknown as BrsEntry).BounceReason ?? "—" },
+    { header: "Bounce Remarks",accessor: (r) => (r as unknown as BrsEntry).BounceRemarks ?? "—" },
+  ], [allBanks]);
 
   // ── Stats cards ───────────────────────────────────────────────────────────
   const stats = [
@@ -733,7 +749,9 @@ export default function Brs() {
               >
                 <option value="">All Banks</option>
                 {allBanks.map((b) => (
-                  <option key={b.id} value={String(b.id)}>{b.name}</option>
+                  <option key={b.id} value={String(b.id)}>
+                    {b.name}{b.accountNoLast4 ? ` •••${b.accountNoLast4}` : ""}
+                  </option>
                 ))}
               </select>
             </div>
@@ -952,15 +970,20 @@ export default function Brs() {
             </div>
 
             {/* ── Desktop table (md+) ───────────────────────────────────────── */}
-            <table className="w-full text-sm hidden md:table">
+            {/* Scrolls horizontally instead of being clipped by the card's
+                own overflow-hidden (rounded corners) — at md-only widths the
+                visible columns alone can still exceed the pane, which
+                previously hard-cut the rightmost Action column/button. */}
+            <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/10">
                   <th className="px-3 py-3 text-center w-10">
                     <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">✓</span>
                   </th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[72px]">Type</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[180px]">Company / Party</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell">Bank</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[130px]">Company / Party</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[110px]">Bank</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[90px]">Date</th>
                   <th className="px-3 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">Amount</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[110px]">Mode / Cheque</th>
@@ -1037,7 +1060,7 @@ export default function Brs() {
                           <div className="w-5 h-5 rounded bg-blue-500/10 flex items-center justify-center shrink-0">
                             <Landmark size={10} className="text-blue-500" />
                           </div>
-                          <span className="text-xs text-foreground truncate max-w-[120px]">
+                          <span className="text-xs text-foreground truncate max-w-[80px]">
                             {entry.BankName || "—"}
                           </span>
                         </div>
@@ -1120,6 +1143,7 @@ export default function Brs() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
 
           {/* ── Pagination ─────────────────────────────────────────────────── */}

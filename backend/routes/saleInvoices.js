@@ -11,6 +11,7 @@ const {
   lockNextDocNumber,
   backPatchRecordId,
 } = require("../utils/docNumberLock");
+const { getActiveFinYearName } = require("./receivedPayment");
 
 // Sale Invoices are gated per-route via requirePageRight("sale-invoice", ...)
 
@@ -386,12 +387,19 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
           "SELECT TOP 1 LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = 'DUMMY-BANK' AND Status = 'Approved'",
         );
         if (dummyBank.recordset.length) {
+          // This auto-generated receipt bypasses createReceivedPaymentInternal
+          // (a raw INSERT, not the shared POST path) — it never set RPFinYear,
+          // so every Contract Advance auto-receipt landed with a NULL Fin Year
+          // in the Received Payments table. Same active-FinYear fallback the
+          // shared internal creator now uses.
+          const activeFinYear = await getActiveFinYearName(pool);
           await pool
             .request()
             .input("RPCompanyName", sql.NVarChar(255), null)
             .input("RPReceivedFrom", sql.NVarChar(255), `Contract Advance (${finalDocNo})`)
             .input("RPProjectName", sql.NVarChar(255), "")
             .input("RPDocDate", sql.Date, new Date())
+            .input("RPFinYear", sql.NVarChar(20), activeFinYear || null)
             .input("RPMode", sql.NVarChar(50), "Cash")
             .input("RPAmount", sql.Decimal(18, 2), allocation.allocatedAmount)
             .input("RPDepositBankId", sql.Int, dummyBank.recordset[0].LHeadId)
@@ -402,12 +410,12 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
             .input("ContractId", sql.Int, parseInt(ContractId, 10))
             .input("RPCreatedBy", sql.NVarChar(100), userEmail).query(`
               INSERT INTO dbo.ReceivedPayment
-                (RPCompanyName, RPReceivedFrom, RPProjectName, RPDocDate, RPMode, RPAmount,
+                (RPCompanyName, RPReceivedFrom, RPProjectName, RPDocDate, RPFinYear, RPMode, RPAmount,
                  RPDepositBankId, RPDepositBankName, RPRemarks,
                  SourceSaleInvoiceId, SourceSaleInvoiceDocNo, ContractId,
                  RPStatus, RPCreatedBy, RPCreatedAt)
               VALUES
-                (@RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPMode, @RPAmount,
+                (@RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPFinYear, @RPMode, @RPAmount,
                  @RPDepositBankId, @RPDepositBankName, @RPRemarks,
                  @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo, @ContractId,
                  'Approved', @RPCreatedBy, GETDATE())
