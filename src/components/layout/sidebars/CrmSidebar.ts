@@ -55,14 +55,17 @@ export const crmNavItems: NavItem[] = [
     label: "Legal",
     icon: Scale,
     children: [
-      { label: "Legal Milestones", path: "/crm/legal-milestones", pageKey: "crm-legal-milestones" },
-      // Order follows the real post-agreement sequence: the Sale Deed must
-      // exist before Query Payment (which reads its stamp duty/reg fee) or
-      // Bank NOC (which releases the bank's charge against the unit).
-      { label: "Sale Deed",        path: "/crm/sales-deed",       pageKey: "crm-sales-deed"       },
-      { label: "Query Payment",    path: "/crm/query-payment",    pageKey: "crm-query-payment"    },
-      { label: "Registry",         path: "/crm/registry",         pageKey: "crm-registry"         },
-      { label: "NOC (Org & Bank)", path: "/crm/noc",              pageKey: "crm-noc"              },
+      { label: "Legal Milestones",   path: "/crm/legal-milestones",    pageKey: "crm-legal-milestones"    },
+      // Order follows the real workflow sequence:
+      //   Agreement Executed → AFS Query Payment (Sub-Registrar Visit 1:
+      //   communicate AFS stamp duty to customer) → AFS registered →
+      //   Handover → Sale Deed → Sale Deed Query Payment (Visit 2: net
+      //   payable = Stamp Duty + Reg Fee − AFS credit) → Registry → NOC.
+      { label: "AFS Query Payment", path: "/crm/afs-query-payment", pageKey: "crm-afs-query-payment" },
+      { label: "Sale Deed",         path: "/crm/sales-deed",        pageKey: "crm-sales-deed"        },
+      { label: "Query Payment",     path: "/crm/query-payment",     pageKey: "crm-query-payment"     },
+      { label: "Registry",          path: "/crm/registry",          pageKey: "crm-registry"          },
+      { label: "NOC (Org & Bank)",  path: "/crm/noc",               pageKey: "crm-noc"               },
     ],
   },
 
