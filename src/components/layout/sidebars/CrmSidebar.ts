@@ -45,30 +45,37 @@ export const crmNavItems: NavItem[] = [
     label: "Documents",
     icon: FileText,
     children: [
-      { label: "Allotment Letter", path: "/crm/allotment-letter", pageKey: "crm-allotment-letter" },
-      { label: "Agreements",       path: "/crm/agreements",        pageKey: "crm-agreements" },
-      { label: "Agreement Papers", path: "/crm/agreement-papers",  pageKey: "crm-documents"  },
+      // Allotment Letter: issued right after booking is confirmed
+      { label: "Allotment Letter",          path: "/crm/allotment-letter", pageKey: "crm-allotment-letter" },
+      // Agreement for Sale (AFS): the agreement document itself — drafted, approved, and executed here
+      { label: "Agreement for Sale",        path: "/crm/agreements",        pageKey: "crm-agreements" },
+      // Supporting documents uploaded alongside the Agreement for Sale
+      { label: "Agreement Documents",       path: "/crm/agreement-papers",  pageKey: "crm-documents"  },
     ],
   },
 
   // ── CRM Legal ───────────────────────────────────────────────────────────────
+  // Workflow sequence (all booking-level, each gated on the one before):
+  //   1. Agreement for Sale signing (8-step workflow — tracked in Legal Journey Overview)
+  //   2. Agreement Registration Fees  — stamp duty & reg fee paid before Sub-Registrar Visit 1
+  //   3. Agreement Registration Visit — buyer + seller appear at Sub-Registrar to register the AFS (Visit 1)
+  //   4. Sale Deed                    — legal document transferring ownership (prepared after AFS registered)
+  //   5. Sale Deed Registration Fees  — stamp duty & reg fee paid before Sub-Registrar Visit 2
+  //   6. Sale Deed Registration Visit — buyer + seller appear at Sub-Registrar to register the Sale Deed (Visit 2)
+  //   7. Property Mutation            — municipal records (Khata) updated to new owner
+  //   8. No Objection Certificates    — Bank NOC (loan cleared) + Organisation NOC (no dues)
   {
     label: "Legal",
     icon: Scale,
     children: [
-      { label: "Legal Milestones",   path: "/crm/legal-milestones",    pageKey: "crm-legal-milestones"    },
-      // Order follows the real workflow sequence:
-      //   Agreement Executed → AFS Query Payment (Sub-Registrar Visit 1:
-      //   communicate AFS stamp duty to customer) → AFS registered →
-      //   Handover → Sale Deed → Sale Deed Query Payment (Visit 2: net
-      //   payable = Stamp Duty + Reg Fee − AFS credit) → Registry → NOC.
-      { label: "AFS Query Payment", path: "/crm/afs-query-payment", pageKey: "crm-afs-query-payment" },
-      { label: "AFS Registry",     path: "/crm/afs-registry",     pageKey: "crm-afs-registry"     },
-      { label: "Sale Deed",         path: "/crm/sales-deed",        pageKey: "crm-sales-deed"        },
-      { label: "Query Payment",     path: "/crm/query-payment",     pageKey: "crm-query-payment"     },
-      { label: "Registry",          path: "/crm/registry",          pageKey: "crm-registry"          },
-      { label: "Mutation",          path: "/crm/mutation",          pageKey: "crm-mutation"          },
-      { label: "NOC (Org & Bank)",  path: "/crm/noc",               pageKey: "crm-noc"               },
+      { label: "Legal Journey Overview",         path: "/crm/legal-milestones",    pageKey: "crm-legal-milestones"    },
+      { label: "Agreement Registration Fees",    path: "/crm/afs-query-payment",   pageKey: "crm-afs-query-payment"   },
+      { label: "Agreement Registration Visit",   path: "/crm/afs-registry",        pageKey: "crm-afs-registry"        },
+      { label: "Sale Deed",                      path: "/crm/sales-deed",          pageKey: "crm-sales-deed"          },
+      { label: "Sale Deed Registration Fees",    path: "/crm/query-payment",       pageKey: "crm-query-payment"       },
+      { label: "Sale Deed Registration Visit",   path: "/crm/registry",            pageKey: "crm-registry"            },
+      { label: "Property Mutation (Khata)",      path: "/crm/mutation",            pageKey: "crm-mutation"            },
+      { label: "No Objection Certificates",      path: "/crm/noc",                 pageKey: "crm-noc"                 },
     ],
   },
 
@@ -77,7 +84,7 @@ export const crmNavItems: NavItem[] = [
     label: "Closure",
     icon: HardHat,
     children: [
-      { label: "OC / CC",               path: "/crm/oc-cc",                pageKey: "crm-oc-cc"                },
+      { label: "Occupancy Certificate (OC/CC)", path: "/crm/oc-cc",                pageKey: "crm-oc-cc"                },
       { label: "Pre-Possession Check", path: "/crm/pre-possession",       pageKey: "crm-pre-possession"       },
       { label: "Possession Notice",    path: "/crm/possession-notice",    pageKey: "crm-possession-notice"    },
       { label: "Construction Updates", path: "/crm/construction-updates", pageKey: "crm-construction-updates" },
