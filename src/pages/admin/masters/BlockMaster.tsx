@@ -135,7 +135,7 @@ const SpecPanel: React.FC<{ blocks: RecordWithId[] }> = ({ blocks }) => {
           <option value="">— choose a block —</option>
           {activeBlocks.map((b) => (
             <option key={b._id} value={b._id}>
-              {b.projectName} / {b.blockName}
+              {String(b.projectName ?? "")} / {String(b.blockName ?? "")}
             </option>
           ))}
         </select>
