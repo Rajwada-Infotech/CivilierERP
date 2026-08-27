@@ -1268,11 +1268,21 @@ router.get("/:id/can-delete", async (req, res) => {
     const pool = getPool();
 
     // ── 1. Linked expense bookings ────────────────────────────────────────────
+    // A multi-GRN combined invoice (see migration 194) only stores its
+    // PRIMARY (first) GRN as ESourceId — the rest live only in the JSON
+    // ELinkedGrnIds array. Checking ESourceId alone let a non-primary GRN
+    // in a combined invoice be deleted even though the invoice was still
+    // active against it (the actual bug this fixes).
     const expCheck = await pool.request().input("GRNID", sql.Int, grnId).query(`
         SELECT eb.Eid, eb.EDocNo, eb.EStatus
         FROM dbo.ExpenseBooking eb
-        WHERE eb.ESourceType = 'GRN' AND eb.ESourceId = @GRNID
-          AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+        WHERE ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+          AND (
+            (eb.ESourceType = 'GRN' AND eb.ESourceId = @GRNID)
+            OR (eb.ELinkedGrnIds IS NOT NULL AND EXISTS (
+                  SELECT 1 FROM OPENJSON(eb.ELinkedGrnIds) WHERE TRY_CAST(value AS INT) = @GRNID
+                ))
+          )
       `);
 
     if (expCheck.recordset.length === 0) return res.json({ deletable: true });
@@ -1363,11 +1373,19 @@ router.delete(
     const pool = getPool();
 
     // ── Guard: linked expense bookings ────────────────────────────────────────
+    // Same OPENJSON expansion as GET /:id/can-delete above — a non-primary
+    // GRN in a multi-GRN combined invoice (migration 194's ELinkedGrnIds)
+    // only appears there, not in ESourceId, so it must be checked too.
     const expGuard = await pool.request().input("GRNID", sql.Int, grnId).query(`
       SELECT COUNT(*) AS cnt
       FROM dbo.ExpenseBooking eb
-      WHERE eb.ESourceType = 'GRN' AND eb.ESourceId = @GRNID
-        AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+      WHERE ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+        AND (
+          (eb.ESourceType = 'GRN' AND eb.ESourceId = @GRNID)
+          OR (eb.ELinkedGrnIds IS NOT NULL AND EXISTS (
+                SELECT 1 FROM OPENJSON(eb.ELinkedGrnIds) WHERE TRY_CAST(value AS INT) = @GRNID
+              ))
+        )
     `);
     if (Number(expGuard.recordset[0]?.cnt) > 0) {
       return res.status(409).json({
