@@ -38,8 +38,9 @@ function decodeBase64File(f, label) {
 // customer and, later, whether they've actually paid it to the government.
 const QP_SELECT = `
   SELECT qp.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
-         sd.DeedNo, sd.StampDuty, sd.RegistrationFee,
-         ISNULL(sd.StampDuty, 0) + ISNULL(sd.RegistrationFee, 0) AS RequiredAmount
+         sd.DeedNo, sd.StampDuty, sd.RegistrationFee, sd.StampDutyCredit,
+         ISNULL(sd.StampDuty, 0) + ISNULL(sd.RegistrationFee, 0) AS GrossAmount,
+         ISNULL(sd.StampDuty, 0) + ISNULL(sd.RegistrationFee, 0) - ISNULL(sd.StampDutyCredit, 0) AS RequiredAmount
   FROM dbo.CrmQueryPayment qp
   JOIN dbo.CrmBooking b ON b.Id = qp.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId

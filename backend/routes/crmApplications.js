@@ -216,21 +216,36 @@ router.get("/:id", requirePageRight("crm-applications", "view"), async (req, res
   }
 });
 
-// GET /:id/pdf — the customer-facing Application Form, same "download and
-// hand to the customer" pattern as crm-money-receipts' own GET /:id/pdf.
-// Always regenerated fresh (not cached) — unlike a Money Receipt, an
-// Application's own data (pricing, co-applicants, plan) can keep changing
-// right up to Approval, so a stale cached copy would drift from reality.
+// GET /:id/pdf — Application Form PDF.
+// Gated: only available after Level 1 verification, i.e. the Application has
+// been Approved (which triggers Booking creation). A Pending application has
+// not yet passed L1 review, so no PDF is issued — mirrors how Money Receipt
+// PDFs are only available once a Booking exists and has been submitted.
 router.get("/:id/pdf", requirePageRight("crm-applications", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
-    const appRow = await pool.request().input("id", sql.Int, id)
-      .query("SELECT ApplicationNo FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+    const appRow = await pool.request().input("id", sql.Int, id).query(`
+      SELECT a.ApplicationNo, a.Status,
+             bk.Id AS BookingId, bk.Status AS BookingStatus
+      FROM dbo.CrmApplication a
+      LEFT JOIN dbo.CrmBooking bk ON bk.ApplicationId = a.Id AND bk.IsActive = 1
+      WHERE a.Id = @id AND a.IsActive = 1
+    `);
     if (!appRow.recordset.length) return res.status(404).json({ error: "Application not found" });
+    const app = appRow.recordset[0];
+    // Level 1 gate: a live booking must exist (Booking not Cancelled/Rejected),
+    // which only happens after the Application is Approved.
+    const hasLiveBooking = app.BookingId
+      && !["Cancelled", "Rejected"].includes(app.BookingStatus);
+    if (!hasLiveBooking) {
+      return res.status(403).json({
+        error: "Application Form PDF is only available after Level 1 verification (Application Approved). Please complete the review process first.",
+      });
+    }
     const buffer = await getApplicationFormPdfBuffer(pool, id);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${appRow.recordset[0].ApplicationNo}-ApplicationForm.pdf"`);
+    res.setHeader("Content-Disposition", `inline; filename="${app.ApplicationNo}-ApplicationForm.pdf"`);
     res.send(buffer);
   } catch (e) {
     console.error("[crm-applications] GET /:id/pdf error:", e.message);

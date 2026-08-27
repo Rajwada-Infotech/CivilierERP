@@ -87,7 +87,7 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-sales-deed", "vi
     if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });
 
     const agreement = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+      .query("SELECT TOP 1 Id, AgreementNo, Status, AfsStampDuty, AfsRegistrationFee FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
 
     const loanDetail = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT BankName, LoanAccountNo, LoanAmount, SanctionStatus FROM dbo.CrmLoanDetail WHERE BookingId = @bid");
@@ -146,25 +146,26 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), async (req, res) 
     const deedNo = await getNextDocNumber(pool, "DEED", "DEED");
 
     const result = await pool.request()
-      .input("no",   sql.NVarChar(30),  deedNo)
-      .input("bid",  sql.Int,           bookingId)
-      .input("agid", sql.Int,           b.AgreementId ? parseInt(b.AgreementId) : agreement.recordset[0].Id)
-      .input("val",  sql.Decimal(18,2), b.DeedValue != null ? parseFloat(b.DeedValue) : null)
-      .input("stamp",sql.Decimal(18,2), b.StampDuty != null ? parseFloat(b.StampDuty) : null)
-      .input("regfee",sql.Decimal(18,2), b.RegistrationFee != null ? parseFloat(b.RegistrationFee) : null)
-      .input("sro",  sql.NVarChar(255), b.SubRegistrarOffice || null)
-      .input("dt",   sql.Date,          b.DeedDate || null)
-      .input("regdl",sql.Date,          b.RegistrationDeadline || null)
-      .input("exby", sql.NVarChar(200), b.ExecutedBy || null)
-      .input("wit",  sql.NVarChar(500), b.WitnessNames || null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cb",   sql.Int,           actorId(req))
-      .input("st",   sql.NVarChar(30),  deriveDeedStatus({ bookingStatus: null, registrationNo: null, executedBy: b.ExecutedBy || null, deedDate: b.DeedDate || null, registrationDeadline: b.RegistrationDeadline || null }))
+      .input("no",      sql.NVarChar(30),      deedNo)
+      .input("bid",     sql.Int,               bookingId)
+      .input("agid",    sql.Int,               b.AgreementId ? parseInt(b.AgreementId) : agreement.recordset[0].Id)
+      .input("val",     sql.Decimal(18,2),     b.DeedValue != null ? parseFloat(b.DeedValue) : null)
+      .input("stamp",   sql.Decimal(18,2),     b.StampDuty != null ? parseFloat(b.StampDuty) : null)
+      .input("regfee",  sql.Decimal(18,2),     b.RegistrationFee != null ? parseFloat(b.RegistrationFee) : null)
+      .input("credit",  sql.Decimal(18,2),     b.StampDutyCredit != null && b.StampDutyCredit !== "" ? parseFloat(b.StampDutyCredit) : null)
+      .input("sro",     sql.NVarChar(255),     b.SubRegistrarOffice || null)
+      .input("dt",      sql.Date,              b.DeedDate || null)
+      .input("regdl",   sql.Date,              b.RegistrationDeadline || null)
+      .input("exby",    sql.NVarChar(200),     b.ExecutedBy || null)
+      .input("wit",     sql.NVarChar(500),     b.WitnessNames || null)
+      .input("note",    sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("cb",      sql.Int,               actorId(req))
+      .input("st",      sql.NVarChar(30),      deriveDeedStatus({ bookingStatus: null, registrationNo: null, executedBy: b.ExecutedBy || null, deedDate: b.DeedDate || null, registrationDeadline: b.RegistrationDeadline || null }))
       .query(`
         INSERT INTO dbo.CrmSalesDeed
-          (DeedNo, BookingId, AgreementId, DeedValue, StampDuty, RegistrationFee, SubRegistrarOffice, DeedDate, RegistrationDeadline, ExecutedBy, WitnessNames, Status, Notes, CreatedBy, CreatedAt)
+          (DeedNo, BookingId, AgreementId, DeedValue, StampDuty, RegistrationFee, StampDutyCredit, SubRegistrarOffice, DeedDate, RegistrationDeadline, ExecutedBy, WitnessNames, Status, Notes, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@no, @bid, @agid, @val, @stamp, @regfee, @sro, @dt, @regdl, @exby, @wit, @st, @note, @cb, SYSDATETIME())
+        VALUES (@no, @bid, @agid, @val, @stamp, @regfee, @credit, @sro, @dt, @regdl, @exby, @wit, @st, @note, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id, DeedNo: deedNo });
   } catch (e) {
@@ -348,10 +349,10 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     // RequiredAmount, so changing them after the fact would silently
     // invalidate an approval already in flight or a payment amount already
     // communicated to the customer.
-    const CORE_FIELDS = ["DeedValue", "StampDuty", "RegistrationFee", "SubRegistrarOffice", "DeedDate"];
+    const CORE_FIELDS = ["DeedValue", "StampDuty", "RegistrationFee", "StampDutyCredit", "SubRegistrarOffice", "DeedDate"];
     const editingCoreFields = CORE_FIELDS.some((k) => b[k] !== undefined);
     if (editingCoreFields && row.SentToCustomerAt) {
-      return res.status(400).json({ error: "Deed Value, Stamp Duty, Registration Fee, Sub-Registrar Office and Deed Date can no longer be edited once the deed has been sent to the customer for approval." });
+      return res.status(400).json({ error: "Deed Value, Stamp Duty, Registration Fee, Stamp Duty Credit, Sub-Registrar Office and Deed Date can no longer be edited once the deed has been sent to the customer for approval." });
     }
 
     // Registry (a separate tracker — see crmRegistry.js) must be Completed
@@ -391,12 +392,13 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
       .input("exby",  sql.NVarChar(200), b.ExecutedBy || null)
       .input("st",    sql.NVarChar(30), newStatus)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("dval",  sql.Decimal(18,2), b.DeedValue != null && b.DeedValue !== "" ? parseFloat(b.DeedValue) : null)
-      .input("stamp", sql.Decimal(18,2), b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : null)
-      .input("regfee",sql.Decimal(18,2), b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : null)
-      .input("sro",   sql.NVarChar(255), b.SubRegistrarOffice || null)
-      .input("ddt",   sql.Date, b.DeedDate || null)
-      .input("ub",    sql.Int,  actorId(req))
+      .input("dval",   sql.Decimal(18,2), b.DeedValue != null && b.DeedValue !== "" ? parseFloat(b.DeedValue) : null)
+      .input("stamp",  sql.Decimal(18,2), b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : null)
+      .input("regfee", sql.Decimal(18,2), b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : null)
+      .input("credit", sql.Decimal(18,2), b.StampDutyCredit != null && b.StampDutyCredit !== "" ? parseFloat(b.StampDutyCredit) : null)
+      .input("sro",    sql.NVarChar(255), b.SubRegistrarOffice || null)
+      .input("ddt",    sql.Date, b.DeedDate || null)
+      .input("ub",     sql.Int,  actorId(req))
       .query(`
         UPDATE dbo.CrmSalesDeed SET
           RegistrationNo = ISNULL(@regno, RegistrationNo), BookNo = ISNULL(@bookno, BookNo),
@@ -404,7 +406,9 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
           PossessionDate = ISNULL(@posdt, PossessionDate), ExecutedBy = ISNULL(@exby, ExecutedBy),
           RegistrationDeadline = @regdl,
           DeedValue = ISNULL(@dval, DeedValue), StampDuty = ISNULL(@stamp, StampDuty),
-          RegistrationFee = ISNULL(@regfee, RegistrationFee), SubRegistrarOffice = ISNULL(@sro, SubRegistrarOffice),
+          RegistrationFee = ISNULL(@regfee, RegistrationFee),
+          StampDutyCredit = ISNULL(@credit, StampDutyCredit),
+          SubRegistrarOffice = ISNULL(@sro, SubRegistrarOffice),
           DeedDate = ISNULL(@ddt, DeedDate),
           Status = @st, Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id

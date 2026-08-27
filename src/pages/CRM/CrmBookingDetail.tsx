@@ -2625,10 +2625,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <h3 className="text-sm font-semibold flex items-center gap-1.5">
                       <FileText size={15} className="text-primary" /> Money Receipt
                     </h3>
-                    {/* Same document, same "give it to the customer" purpose
-                        as the Money Receipt PDFs right below — surfaced here
-                        too so both are downloadable from one place. */}
-                    {booking?.ApplicationId && (
+                    {/* Application Form PDF — gated to post-L1 (Data Review complete).
+                        While the booking is still at Review stage the form has not
+                        been verified yet, so neither preview nor download is offered. */}
+                    {booking?.ApplicationId && currentStage !== "Review" && (
                       <div className="flex items-center gap-1.5">
                         <button onClick={() => setPreviewApplicationForm({ id: booking.ApplicationId, no: booking.ApplicationNo })}
                           className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border rounded-lg hover:bg-muted font-medium">

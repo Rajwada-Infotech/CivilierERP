@@ -74,8 +74,8 @@ function fmtDate(d?: string | null) {
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-const EMPTY_FORM = { BookingId: "", DeedValue: "", StampDuty: "", RegistrationFee: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "" };
-const EMPTY_DEED_FORM = { DeedValue: "", StampDuty: "", RegistrationFee: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "" };
+const EMPTY_FORM = { BookingId: "", DeedValue: "", StampDuty: "", RegistrationFee: "", StampDutyCredit: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "" };
+const EMPTY_DEED_FORM = { DeedValue: "", StampDuty: "", RegistrationFee: "", StampDutyCredit: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "" };
 const EMPTY_PROGRESS_FORM = { ExecutedBy: "", RegistrationNo: "", BookNo: "", PartNo: "", RegistrationDate: "", PossessionDate: "" };
 
 async function fetchAll(): Promise<any[]> {
@@ -200,6 +200,7 @@ const CrmSalesDeed: React.FC = () => {
       DeedValue: d.DeedValue != null ? String(d.DeedValue) : "",
       StampDuty: d.StampDuty != null ? String(d.StampDuty) : "",
       RegistrationFee: d.RegistrationFee != null ? String(d.RegistrationFee) : "",
+      StampDutyCredit: d.StampDutyCredit != null ? String(d.StampDutyCredit) : "",
       SubRegistrarOffice: d.SubRegistrarOffice || "",
       DeedDate: d.DeedDate ? String(d.DeedDate).slice(0, 10) : "",
       RegistrationDeadline: d.RegistrationDeadline ? String(d.RegistrationDeadline).slice(0, 10) : "",
@@ -450,6 +451,11 @@ const CrmSalesDeed: React.FC = () => {
                 <Input type="number" className="h-10 font-mono" value={form.RegistrationFee} onChange={(e) => setForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">AFS Stamp Duty Credit</label>
+                <Input type="number" className="h-10 font-mono" placeholder="0" value={form.StampDutyCredit} onChange={(e) => setForm((f) => ({ ...f, StampDutyCredit: e.target.value }))} />
+                <p className="text-[10px] text-muted-foreground">Stamp duty already paid at AFS registration — deducted from net payable at Sale Deed registration.</p>
+              </div>
+              <div className="space-y-1.5">
                 <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Deed Date</label>
                 <Input type="date" className="h-10" value={form.DeedDate} onChange={(e) => setForm((f) => ({ ...f, DeedDate: e.target.value }))} />
               </div>
@@ -533,6 +539,10 @@ const CrmSalesDeed: React.FC = () => {
                           <Input type="number" className="h-10 font-mono" value={deedForm.RegistrationFee} onChange={(e) => setDeedForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
                         </div>
                         <div className="space-y-1.5">
+                          <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">AFS Stamp Duty Credit</label>
+                          <Input type="number" className="h-10 font-mono" placeholder="0" value={deedForm.StampDutyCredit} onChange={(e) => setDeedForm((f) => ({ ...f, StampDutyCredit: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1.5">
                           <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Deed Date</label>
                           <Input type="date" className="h-10" value={deedForm.DeedDate} onChange={(e) => setDeedForm((f) => ({ ...f, DeedDate: e.target.value }))} />
                         </div>
@@ -558,6 +568,9 @@ const CrmSalesDeed: React.FC = () => {
                       <DetailRow label="Deed Value" value={detail.DeedValue ? formatINR(detail.DeedValue) : "�"} mono />
                       <DetailRow label="Stamp Duty" value={detail.StampDuty ? formatINR(detail.StampDuty) : "�"} mono />
                       <DetailRow label="Registration Fee" value={detail.RegistrationFee ? formatINR(detail.RegistrationFee) : "�"} mono />
+                      {detail.StampDutyCredit != null && (
+                        <DetailRow label="AFS Stamp Duty Credit" value={String.fromCharCode(8722) + " " + formatINR(detail.StampDutyCredit)} mono />
+                      )}
                       <DetailRow label="Deed Date" value={fmtDate(detail.DeedDate)} />
                       <DetailRow label="Registration Deadline" value={fmtDate(detail.RegistrationDeadline)} />
                       <DetailRow label="Sub-Registrar Office" value={detail.SubRegistrarOffice || "�"} />

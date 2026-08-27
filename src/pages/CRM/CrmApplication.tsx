@@ -1572,11 +1572,13 @@ const CrmApplication: React.FC = () => {
             className="flex items-center gap-1 text-xs text-primary hover:underline">
             <Building2 size={12} /> View Booking <ChevronRight size={12} />
           </button>
-          <button onClick={() => setPdfDialogApp({ id: i.row.original.Id, no: i.row.original.ApplicationNo })}
-            title="Preview / download Application Form PDF"
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
-            <FileText size={12} /> Form
-          </button>
+          {i.row.original.Stage === "Converted" && (
+            <button onClick={() => setPdfDialogApp({ id: i.row.original.Id, no: i.row.original.ApplicationNo })}
+              title="Preview / download Application Form PDF"
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
+              <FileText size={12} /> Form
+            </button>
+          )}
           {(canEditApplications || canRequestBookingCancellation) && i.row.original.BookingId && i.row.original.BookingStatus !== CrmStatus.CANCELLED && (
             <button onClick={() => navigate(`/crm/cancellations?bookingId=${i.row.original.BookingId}`)}
               className="flex items-center gap-1 text-xs text-red-600 hover:underline">
@@ -1761,17 +1763,18 @@ const CrmApplication: React.FC = () => {
                   )}
                 </>
               )}
-              {/* Available regardless of stage/status — the same "download and
-                  hand to the customer alongside the Money Receipt" document
-                  either way, generated fresh from whatever's on the
-                  application right now (see crmApplications.js GET /:id/pdf). */}
-              <button
-                onClick={() => setPdfDialogApp({ id: a.Id, no: a.ApplicationNo })}
-                title="Preview / download Application Form PDF"
-                className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                <FileText size={12} /> Form
-              </button>
+              {/* Application Form PDF — only after Level 1 verification (Stage=Converted,
+                  i.e. the Application is Approved and a live Booking exists).
+                  Backend enforces the same gate; this hides the button before that point. */}
+              {a.Stage === "Converted" && (
+                <button
+                  onClick={() => setPdfDialogApp({ id: a.Id, no: a.ApplicationNo })}
+                  title="Preview / download Application Form PDF"
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  <FileText size={12} /> Form
+                </button>
+              )}
             </div>
             {/* Status hint lives on its own line as a plain caption, never
                 inline with the buttons — that inline mixing (a link, a

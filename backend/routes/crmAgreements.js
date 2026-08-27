@@ -54,6 +54,7 @@ const AGR_SELECT = `
     ag.RecheckCount, ag.LastRecheckRemarks,
     ag.ProposedDate, ag.ProposedDateStatus, ag.SentToCustomerAt, ag.DateApprovalStatus,
     ag.AfsRegistrationNo, ag.AfsRegistrationDate,
+    ag.AfsStampDuty, ag.AfsRegistrationFee,
     ag.LegalExecutiveId, le.name AS LegalExecutiveName,
     b.BookingNo,
     COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
@@ -1112,7 +1113,7 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
     const pool = getPool();
     const id = parseInt(req.params.id);
     const actor = actorId(req);
-    const { AfsRegistrationNo, AfsRegistrationDate } = req.body || {};
+    const { AfsRegistrationNo, AfsRegistrationDate, AfsStampDuty, AfsRegistrationFee } = req.body || {};
 
     if (!AfsRegistrationNo || !String(AfsRegistrationNo).trim()) {
       return res.status(400).json({ error: "AFS Registration No. is required — enter the Doc No received from the Sub-Registrar" });
@@ -1133,27 +1134,36 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
 
     const regNo = String(AfsRegistrationNo).trim();
     const regDate = AfsRegistrationDate;
+    const afsStamp = AfsStampDuty != null && AfsStampDuty !== "" ? parseFloat(AfsStampDuty) : null;
+    const afsRegFee = AfsRegistrationFee != null && AfsRegistrationFee !== "" ? parseFloat(AfsRegistrationFee) : null;
 
     await pool.request()
-      .input("id",    sql.Int,           id)
-      .input("ub",    sql.Int,           actor)
-      .input("regNo", sql.NVarChar(100), regNo)
-      .input("regDt", sql.Date,          regDate)
+      .input("id",       sql.Int,           id)
+      .input("ub",       sql.Int,           actor)
+      .input("regNo",    sql.NVarChar(100), regNo)
+      .input("regDt",    sql.Date,          regDate)
+      .input("afsStamp", sql.Decimal(18,2), afsStamp)
+      .input("afsRegFee",sql.Decimal(18,2), afsRegFee)
       .query(`
         UPDATE dbo.CrmAgreement SET
           Status              = '${CrmStatus.REGISTERED}',
           AfsRegistrationNo   = @regNo,
           AfsRegistrationDate = @regDt,
+          AfsStampDuty        = @afsStamp,
+          AfsRegistrationFee  = @afsRegFee,
           UpdatedBy           = @ub,
           UpdatedAt           = SYSDATETIME()
         WHERE Id = @id
       `);
 
-    await logCrmAudit(pool, "Agreement", id, actor, [
+    const auditFields = [
       { field: "Status",              oldVal: CrmStatus.EXECUTED, newVal: CrmStatus.REGISTERED },
       { field: "AfsRegistrationNo",   oldVal: null,               newVal: regNo },
       { field: "AfsRegistrationDate", oldVal: null,               newVal: regDate },
-    ]);
+    ];
+    if (afsStamp != null)  auditFields.push({ field: "AfsStampDuty",       oldVal: null, newVal: afsStamp });
+    if (afsRegFee != null) auditFields.push({ field: "AfsRegistrationFee", oldVal: null, newVal: afsRegFee });
+    await logCrmAudit(pool, "Agreement", id, actor, auditFields);
 
     res.json({ success: true, status: CrmStatus.REGISTERED });
   } catch (e) {

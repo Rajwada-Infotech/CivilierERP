@@ -432,7 +432,7 @@ const CrmAgreement: React.FC = () => {
   const [proposeDateDialog, setProposeDateDialog] = useState(false);
   const [sendDate, setSendDate] = useState("");
   const [regDialog, setRegDialog] = useState(false);
-  const [regForm, setRegForm] = useState({ AfsRegistrationNo: "", AfsRegistrationDate: "" });
+  const [regForm, setRegForm] = useState({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" });
   const [regSaving, setRegSaving] = useState(false);
   const [agrForm, setAgrForm] = useState({ ...EMPTY_AGR_FORM, BookingId: bkgFilter });
   const [docForm, setDocForm] = useState({ ...EMPTY_DOC_FORM });
@@ -728,13 +728,18 @@ const CrmAgreement: React.FC = () => {
       const res = await fetchWithAuth(`${API}/${selectedId}/mark-registered`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ AfsRegistrationNo: regForm.AfsRegistrationNo.trim(), AfsRegistrationDate: regForm.AfsRegistrationDate }),
+        body: JSON.stringify({
+          AfsRegistrationNo: regForm.AfsRegistrationNo.trim(),
+          AfsRegistrationDate: regForm.AfsRegistrationDate,
+          AfsStampDuty: regForm.AfsStampDuty !== "" ? regForm.AfsStampDuty : undefined,
+          AfsRegistrationFee: regForm.AfsRegistrationFee !== "" ? regForm.AfsRegistrationFee : undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success("Agreement marked Registered");
       setRegDialog(false);
-      setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "" });
+      setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" });
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
       promptNextStep(navigate, "Agreement registered — you may now request Bank / Organisation NOC.", "/crm/noc", "Go to NOC");
@@ -1047,7 +1052,7 @@ const CrmAgreement: React.FC = () => {
                           Mark Registered
                         </span>
                       ) : (
-                        <button onClick={() => { setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "" }); setRegDialog(true); }}
+                        <button onClick={() => { setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" }); setRegDialog(true); }}
                           className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
                           Mark Registered
                         </button>
@@ -1133,6 +1138,18 @@ const CrmAgreement: React.FC = () => {
                         <span className="text-xs text-muted-foreground">Registration Date: </span>
                         <span className="font-medium">{detail.agreement.AfsRegistrationDate ? String(detail.agreement.AfsRegistrationDate).slice(0, 10) : "—"}</span>
                       </div>
+                      {detail.agreement.AfsStampDuty != null && (
+                        <div>
+                          <span className="text-xs text-muted-foreground">Stamp Duty Paid: </span>
+                          <span className="font-medium font-mono">{Number(detail.agreement.AfsStampDuty).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })}</span>
+                        </div>
+                      )}
+                      {detail.agreement.AfsRegistrationFee != null && (
+                        <div>
+                          <span className="text-xs text-muted-foreground">Registration Fee: </span>
+                          <span className="font-medium font-mono">{Number(detail.agreement.AfsRegistrationFee).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1571,7 +1588,7 @@ const CrmAgreement: React.FC = () => {
       {/* Mark Registered Dialog — collects the AFS registration details received
           from the Sub-Registrar (Doc No + date). The physical AFS is registered
           outside the system; this records the outcome of that event. */}
-      <Dialog open={regDialog} onOpenChange={(o) => { if (!o) { setRegDialog(false); setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "" }); } }}>
+      <Dialog open={regDialog} onOpenChange={(o) => { if (!o) { setRegDialog(false); setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" }); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="font-heading">Mark Agreement Registered</DialogTitle>
@@ -1602,9 +1619,32 @@ const CrmAgreement: React.FC = () => {
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
               />
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-medium text-foreground block mb-1">AFS Stamp Duty <span className="text-muted-foreground">(optional)</span></label>
+                <input
+                  type="number"
+                  placeholder="0"
+                  value={regForm.AfsStampDuty}
+                  onChange={(e) => setRegForm((f) => ({ ...f, AfsStampDuty: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-foreground block mb-1">AFS Reg. Fee <span className="text-muted-foreground">(optional)</span></label>
+                <input
+                  type="number"
+                  placeholder="0"
+                  value={regForm.AfsRegistrationFee}
+                  onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationFee: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background font-mono"
+                />
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">Stamp duty paid at AFS registration is creditable against Sale Deed stamp duty — record it here so the Sale Deed Query Payment can show the correct net amount.</p>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setRegDialog(false); setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "" }); }}
+            <button onClick={() => { setRegDialog(false); setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" }); }}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleMarkRegistered} disabled={regSaving || !regForm.AfsRegistrationNo.trim() || !regForm.AfsRegistrationDate}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">

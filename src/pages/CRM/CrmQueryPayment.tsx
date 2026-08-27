@@ -332,7 +332,7 @@ const CrmQueryPayment: React.FC = () => {
         </div>
       ) },
     { accessorKey: "DeedNo", header: "Deed", size: 100, cell: (i) => <span className="text-xs">{i.getValue() as string || "�"}</span> },
-    { id: "amount", header: "Required Amount", size: 130,
+    { id: "amount", header: "Net Payable", size: 130,
       cell: (i) => <span className="text-xs font-mono">{formatINR(i.row.original.RequiredAmount)}</span> },
     { accessorKey: "Status", header: "Status", size: 110,
       cell: (i) => <StatusBadge status={i.row.original.Status} /> },
@@ -425,8 +425,9 @@ const CrmQueryPayment: React.FC = () => {
                   <p className="text-sm font-semibold text-foreground">{detail.ApplicantName}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{detail.BookingNo} � {detail.UnitNo} � Deed {detail.DeedNo || "�"}</p>
                   <p className="text-xs mt-1.5">
-                    Stamp Duty {formatINR(detail.StampDuty)} + Registration Fee {formatINR(detail.RegistrationFee)}
-                    {" "}= <span className="font-semibold font-mono">{formatINR(detail.RequiredAmount)}</span> required
+                    Stamp Duty {formatINR(detail.StampDuty)} + Reg. Fee {formatINR(detail.RegistrationFee)}
+                    {detail.StampDutyCredit ? <> − AFS Credit {formatINR(detail.StampDutyCredit)}</> : null}
+                    {" "}= <span className="font-semibold font-mono">{formatINR(detail.RequiredAmount)}</span> net payable
                   </p>
                 </div>
                 {detail.Status !== "Confirmed" && (!detail.StampDuty && !detail.RegistrationFee) && (
