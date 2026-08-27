@@ -302,7 +302,10 @@ const Payment: React.FC = () => {
   useEffect(() => {
     if (detailTab !== "posting" || pmtPostingLoading || pmtPosting) return;
     const entries: any[] = pmtPostingData?.entries ?? [];
-    const next = entries.find((e) => !e.isPosted && !e.isBounced);
+    // Debit Notes (routes/debitNote.js) post themselves immediately on save
+    // — there's no /:id/post-to-gl for a debit note id, so this loop must
+    // never try to "auto-post" one the way it does payments/bounce charges.
+    const next = entries.find((e) => !e.isPosted && !e.isBounced && e.type !== "debit_note");
     if (!next) return;
     const url =
       next.type === "bounce_charge"
@@ -5531,7 +5534,7 @@ const Payment: React.FC = () => {
                     const fmtAmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                     const fmtDate = (d: string) => d ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(d)) : "—";
                     type ChainEntry = {
-                      date: string; docNo: string; pmtId: number; type: "payment" | "bounce_charge";
+                      date: string; docNo: string; pmtId: number; type: "payment" | "bounce_charge" | "debit_note";
                       amount: number; mode: string; bounceReason?: string;
                       isBounced?: boolean;
                       accounts: any; isPosted: boolean; jvNo: string | null;
@@ -5542,11 +5545,17 @@ const Payment: React.FC = () => {
                         {entries.map((entry, idx) => {
                           const isPayment = entry.type === "payment";
                           const isBounce = entry.type === "bounce_charge";
+                          const isDebitNote = entry.type === "debit_note";
                           const isBouncedPayment = isPayment && !!entry.isBounced;
                           const rows = isPayment
                             ? [
                                 { label: entry.accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: entry.accounts?.supplier?.code, side: "debit" as const },
                                 { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const },
+                              ]
+                            : isDebitNote
+                            ? [
+                                { label: entry.accounts?.debitLeg?.label ?? "—", code: entry.accounts?.debitLeg?.code, side: "debit" as const },
+                                { label: entry.accounts?.creditLeg?.label ?? "—", code: entry.accounts?.creditLeg?.code, side: "credit" as const },
                               ]
                             : [
                                 { label: entry.accounts?.bankCharges?.label ?? "Bank Charges (Other Expenses)", code: entry.accounts?.bankCharges?.code, side: "debit" as const },
@@ -5556,12 +5565,12 @@ const Payment: React.FC = () => {
                           const entryKey = `${entry.pmtId}-${entry.type}`;
 
                           return (
-                            <div key={entryKey} className={`rounded-xl border overflow-hidden ${isBounce ? "border-rose-500/30" : isBouncedPayment ? "border-rose-500/20 opacity-60" : "border-border"}`}>
+                            <div key={entryKey} className={`rounded-xl border overflow-hidden ${isBounce ? "border-rose-500/30" : isDebitNote ? "border-primary/30" : isBouncedPayment ? "border-rose-500/20 opacity-60" : "border-border"}`}>
                               {/* Entry header */}
-                              <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isBounce ? "bg-rose-500/5 border-rose-500/20" : isBouncedPayment ? "bg-rose-500/5 border-rose-500/10" : "bg-muted/40 border-border"}`}>
+                              <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isBounce ? "bg-rose-500/5 border-rose-500/20" : isDebitNote ? "bg-primary/5 border-primary/20" : isBouncedPayment ? "bg-rose-500/5 border-rose-500/10" : "bg-muted/40 border-border"}`}>
                                 <div className="flex items-center gap-2.5 flex-wrap">
-                                  <span className={`text-[10px] font-semibold uppercase tracking-widest ${isBounce ? "text-rose-600" : isBouncedPayment ? "text-rose-500" : "text-muted-foreground"}`}>
-                                    {isBounce ? "Bounce Charge" : "Payment"}
+                                  <span className={`text-[10px] font-semibold uppercase tracking-widest ${isBounce ? "text-rose-600" : isDebitNote ? "text-primary" : isBouncedPayment ? "text-rose-500" : "text-muted-foreground"}`}>
+                                    {isBounce ? "Bounce Charge" : isDebitNote ? "Debit Note" : "Payment"}
                                   </span>
                                   <span className="text-[10px] font-mono text-muted-foreground">{entry.docNo}</span>
                                   <span className="text-[10px] text-muted-foreground">{fmtDate(entry.date)}</span>

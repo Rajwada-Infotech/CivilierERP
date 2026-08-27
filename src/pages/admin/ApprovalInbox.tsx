@@ -36,6 +36,7 @@ import {
   FileText,
   Landmark,
   UserCheck,
+  FileWarning,
 } from "lucide-react";
 import type { ApprovalTable } from "@/components/ApprovalStatusChain";
 import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
@@ -260,6 +261,13 @@ export const MODULE_CONFIG: Record<
     navPath: "/finance/contracts",
     apiEndpoint: "/api/contract",
     label: "Contracts",
+  },
+  "debit-note": {
+    icon: FileWarning,
+    color: "text-rose-600 bg-rose-600/10",
+    navPath: "/material/debit-note",
+    apiEndpoint: "/api/debit-note",
+    label: "Debit Notes",
   },
 };
 
