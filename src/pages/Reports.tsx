@@ -1712,6 +1712,30 @@ const MODULE_SECTIONS: ModuleSection[] = [
     ],
   },
   {
+    id: "fixed-asset",
+    label: "Fixed Asset",
+    accent: "#8b5cf6",
+    description: "Asset register, tagging, transfers & depreciation setup",
+    icon: Cpu,
+    reportIds: [
+      "fixed-asset-register-report",
+      "fa-inventory-report",
+      "asset-transfer-report",
+      "depreciation-setup-report",
+    ],
+  },
+  {
+    id: "followup",
+    label: "Follow-Up",
+    accent: "#0d9488",
+    description: "Task performance, delays & entry-type/document follow-up activity",
+    icon: ListChecks,
+    reportIds: [
+      "task-performance-report",
+      "entry-type-doc-followup-report",
+    ],
+  },
+  {
     id: "sales-automation",
     label: "Sales Automation",
     accent: "#d946ef",

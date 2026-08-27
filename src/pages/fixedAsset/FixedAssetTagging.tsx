@@ -1,17 +1,21 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Plus, ArrowLeft, AlertCircle, Search,
   Building2, Package, Calendar, FileText, Hash, Tag as TagIcon, X, Boxes,
+  Download, Upload, Loader2, Check,
 } from "lucide-react";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getGodowns, type Godown } from "@/api/godownsApi";
+import { getItems } from "@/api/itemMasterApi";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import {
   getEligibleAssetItems, getFixedAssetTaggings, createFixedAssetTagging,
   type EligibleAssetItem, type TaggingListItem,
@@ -222,6 +226,56 @@ export default function FixedAssetTagging() {
   const resetForm = () => setForm(emptyForm());
   const goToCreate = () => { resetForm(); setViewMode("form"); };
 
+  const handleConfirmImport = async () => {
+    if (!importPreview) return;
+    const validRows = importPreview.filter((r) => r.status === "valid");
+    if (validRows.length === 0) return;
+
+    setImportSubmitting(true);
+    const finalResults = [...importPreview];
+
+    // Sequential, not Promise.all — mirrors the manual "Generate ID" flow
+    // (one create call at a time) and keeps per-row error attribution clean.
+    for (const row of validRows) {
+      const idx = finalResults.findIndex((r) => r.row === row.row);
+      try {
+        await createFixedAssetTagging({
+          docDate: row.docDate,
+          companyId: row.companyId,
+          projectId: row.projectId!,
+          godownId: row.godownId!,
+          itemId: row.itemId!,
+          numberOfItems: row.quantity,
+          remarks: row.remarks || undefined,
+        });
+        finalResults[idx] = { ...row, status: "success" };
+      } catch (err) {
+        finalResults[idx] = { ...row, status: "error", message: err instanceof Error ? err.message : "Failed to create" };
+      }
+    }
+
+    setImportPreview(finalResults);
+    setImportDone(true);
+    setImportSubmitting(false);
+
+    const successCount = finalResults.filter((r) => r.status === "success").length;
+    const errorCount = finalResults.length - successCount;
+    if (successCount > 0) {
+      qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+    }
+    if (errorCount === 0) {
+      toast.success(`Imported ${successCount} row${successCount === 1 ? "" : "s"} ✓`);
+    } else if (successCount === 0) {
+      toast.error(`Import failed for all ${errorCount} row${errorCount === 1 ? "" : "s"}.`);
+    } else {
+      toast.warning(`Imported ${successCount} of ${finalResults.length} rows — ${errorCount} failed.`);
+    }
+  };
+
+  const closeImportDialog = () => { setImportPreview(null); setImportDone(false); };
+
   const handleSave = () => {
     if (!form.companyId)  return toast.error("Company is required");
     if (!form.docDate)    return toast.error("Date is required");
@@ -392,6 +446,25 @@ export default function FixedAssetTagging() {
       subtitle="Tag received fixed-asset stock and track untagged quantities"
       icon={TagIcon}
       accentColor="#eab308"
+      action={
+        rights.canCreate ? (
+          <div className="flex items-center gap-2">
+            <input ref={importFileInputRef} type="file" accept=".csv"
+              onChange={handleImportFileChange} className="hidden" />
+            <button onClick={handleDownloadImportTemplate}
+              title="Download a blank CSV import template (opens/edits fine in Excel)"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+              <Download size={13} /> <span className="hidden sm:inline">Template</span>
+            </button>
+            <button onClick={handleImportClick} disabled={importValidating}
+              title="Bulk import FA Inventory rows from Excel/CSV"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+              {importValidating ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+              {importValidating ? "Validating…" : "Import from Excel"}
+            </button>
+          </div>
+        ) : undefined
+      }
     >
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         <SummaryCard label="Tagging Entries" value={fmt(stats.count)} icon={Boxes} />
@@ -529,6 +602,90 @@ export default function FixedAssetTagging() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!importPreview} onOpenChange={(open) => { if (!open) closeImportDialog(); }}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-base">
+              {importDone ? "Import Results" : "Review Import"}
+            </DialogTitle>
+          </DialogHeader>
+          {importPreview && (
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center gap-3 text-sm">
+                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                  <Check size={14} />
+                  {importPreview.filter((r) => r.status === "valid" || r.status === "success").length}{" "}
+                  {importDone ? "succeeded" : "valid"}
+                </span>
+                {importPreview.some((r) => r.status === "error") && (
+                  <span className="flex items-center gap-1.5 text-destructive">
+                    <X size={14} />
+                    {importPreview.filter((r) => r.status === "error").length}{" "}
+                    {importDone ? "failed" : "rejected"}
+                  </span>
+                )}
+              </div>
+              <div className="max-h-96 overflow-auto rounded-lg border border-border">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50 text-muted-foreground uppercase tracking-wide sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Row</th>
+                      <th className="px-3 py-2 text-left">Company / Project</th>
+                      <th className="px-3 py-2 text-left">Godown</th>
+                      <th className="px-3 py-2 text-left">Item</th>
+                      <th className="px-3 py-2 text-left">Date</th>
+                      <th className="px-3 py-2 text-left">Qty</th>
+                      <th className="px-3 py-2 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {importPreview.map((r) => (
+                      <tr key={r.row} className={r.status === "error" ? "bg-destructive/5" : ""}>
+                        <td className="px-3 py-2">{r.row}</td>
+                        <td className="px-3 py-2 max-w-[160px] truncate">{r.companyLabel} / {r.projectLabel}</td>
+                        <td className="px-3 py-2 max-w-[120px] truncate">{r.godownLabel}</td>
+                        <td className="px-3 py-2 max-w-[140px] truncate">{r.itemName}</td>
+                        <td className="px-3 py-2">{r.docDate}</td>
+                        <td className="px-3 py-2">{r.quantity || "—"}</td>
+                        <td className="px-3 py-2 max-w-[260px]">
+                          {r.status === "error" ? (
+                            <span className="text-destructive">{r.message}</span>
+                          ) : r.status === "success" ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><Check size={12} /> Imported</span>
+                          ) : (
+                            <span className="text-emerald-600 dark:text-emerald-400">Valid</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+            {!importDone ? (
+              <>
+                <button onClick={closeImportDialog}
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+                  Cancel
+                </button>
+                <button onClick={handleConfirmImport}
+                  disabled={importSubmitting || !importPreview?.some((r) => r.status === "valid")}
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+                  {importSubmitting ? "Importing…" : `Import ${importPreview?.filter((r) => r.status === "valid").length || 0} Valid Row(s)`}
+                </button>
+              </>
+            ) : (
+              <button onClick={closeImportDialog}
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+                Close
+              </button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </GlassShell>
     </>
   );
