@@ -416,7 +416,7 @@ router.get("/", requirePageRight("crm-parking-booking", "view"), async (req, res
 // Registered BEFORE GET /:bookingId deliberately — same single-segment
 // greedy-match issue documented on POST /standalone above ("/available"
 // would otherwise be parsed as a bookingId).
-router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "view"), async (req, res) => {
+router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const projectId = parseInt(req.query.projectId);
@@ -426,9 +426,19 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
     const rates = await pool.request()
       .input("pid", sql.Int, projectId).input("bid", sql.Int, blockId)
       .query(`
+        WITH RankedRates AS (
+          SELECT Id, ParkingType, Charge, GstRate, BlockId,
+            ROW_NUMBER() OVER(
+              PARTITION BY ParkingType 
+              ORDER BY CASE WHEN BlockId = @bid THEN 0 ELSE 1 END
+            ) as rn
+          FROM dbo.ParkingMaster
+          WHERE ProjectId = @pid AND IsActive = 1 
+            AND (BlockId = @bid OR BlockId IS NULL)
+        )
         SELECT Id, ParkingType, Charge, GstRate, BlockId
-        FROM dbo.ParkingMaster
-        WHERE ProjectId = @pid AND IsActive = 1 AND (BlockId IS NULL OR @bid IS NULL OR BlockId = @bid)
+        FROM RankedRates
+        WHERE rn = 1
       `);
 
     const slots = await pool.request()
@@ -516,7 +526,7 @@ router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, 
 // pending picks carry Kind: 'Hold' — so this stays the single "one
 // customer, unit + parking together" view the Application wizard's Parking
 // step (and takenSlotIds availability check) reads from.
-router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "view"), async (req, res) => {
+router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const applicationId = parseInt(req.params.applicationId);
@@ -558,7 +568,7 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
 // Registered BEFORE POST /:bookingId deliberately — Express matches routes
 // in registration order, and "/:bookingId" is a single-segment param that
 // would otherwise greedily match the literal path "/standalone" too.
-router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
+router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
@@ -667,7 +677,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
 });
 
 // DELETE /hold/:holdId — release an Application-stage parking hold.
-router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
+router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const holdId = parseInt(req.params.holdId);
@@ -804,7 +814,7 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
 // directly and bypass the frontend gate entirely.
 //
 // Reason is mandatory unconditionally and always written to the audit trail.
-router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
+router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);

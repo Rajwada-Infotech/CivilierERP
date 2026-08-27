@@ -463,7 +463,8 @@ router.post("/demands/bulk", requirePageRight("crm-payments", "edit"), async (re
     ];
     if (projectName) {
       req0.input("pname", sql.NVarChar(200), projectName);
-      conds.push("b.ProjectName = @pname");
+      // Filter by ProjectId via enterprise master so a renamed project still matches.
+      conds.push("b.ProjectId IN (SELECT id FROM dbo.enterprise WHERE name = @pname AND business_type = 'P')");
     }
     if (milestoneName) {
       req0.input("mname", sql.NVarChar(200), milestoneName);
@@ -1480,7 +1481,7 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
     if (dateFrom)  { where += " AND o.ReceivedDate >= @df";  req_.input("df",        sql.Date, dateFrom); }
     if (dateTo)    { where += " AND o.ReceivedDate <= @dt";  req_.input("dt",        sql.Date, dateTo); }
     if (search) {
-      where += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR b.ProjectName LIKE @s OR b.UnitNo LIKE @s)";
+      where += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR um.UnitName LIKE @s)";
       req_.input("s", sql.NVarChar(200), `%${search}%`);
     }
 
@@ -1490,12 +1491,17 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
         CAST(o.Amount - o.AppliedAmount AS DECIMAL(18,2)) AS AvailableBalance,
         o.Status, o.ReceivedDate, o.PaymentMode, o.TransactionRef, o.Notes,
         o.CreatedAt, o.DepositBankId, o.DepositBankName, o.SourceReceivedPaymentId,
-        b.BookingNo, b.ProjectId, b.ProjectName, b.UnitNo, b.GrandTotal,
+        b.BookingNo, b.ProjectId,
+        COALESCE(proj.name, b.ProjectName) AS ProjectName,
+        COALESCE(um.UnitName, b.UnitNo) AS UnitNo,
+        b.GrandTotal,
         a.ApplicantName, a.Mobile,
         u.name AS CreatedByName
       FROM dbo.CrmOnAccountPayment o
       JOIN dbo.CrmBooking b ON b.Id = o.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
       LEFT JOIN dbo.Users u ON u.id = o.CreatedBy
       ${where}
       ORDER BY o.CreatedAt DESC
@@ -1509,7 +1515,7 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
     if (dateFrom)  { countWhere += " AND o.ReceivedDate >= @df";  countReq.input("df",        sql.Date, dateFrom); }
     if (dateTo)    { countWhere += " AND o.ReceivedDate <= @dt";  countReq.input("dt",        sql.Date, dateTo); }
     if (search) {
-      countWhere += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR b.ProjectName LIKE @s OR b.UnitNo LIKE @s)";
+      countWhere += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR um.UnitName LIKE @s)";
       countReq.input("s", sql.NVarChar(200), `%${search}%`);
     }
     const countResult = await countReq.query(`
@@ -1517,6 +1523,8 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
       FROM dbo.CrmOnAccountPayment o
       JOIN dbo.CrmBooking b ON b.Id = o.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
       ${countWhere}
     `);
 

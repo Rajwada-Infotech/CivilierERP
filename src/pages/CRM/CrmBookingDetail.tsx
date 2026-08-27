@@ -11,9 +11,9 @@ import {
   ChevronUp, ChevronDown, ShieldAlert, Check,
   CreditCard, ClipboardCheck, ArrowLeft, ArrowRight,
   KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, Phone, User,
-  CalendarCheck, Lock, Clock, Hourglass, Info,
+  CalendarCheck, Lock, Clock, Hourglass, Info, X,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useGstRates, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { BookingLifecycleBar } from "@/components/crm/BookingLifecycleBar";
@@ -152,29 +152,35 @@ function PdfPreviewDialog({ pdfUrl, title, subtitle, filename, onClose }: {
   }, [pdfUrl]);
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <div className="flex items-center justify-between gap-3 pr-6">
-            <DialogTitle className="flex items-center gap-2">
-              <FileText size={16} className="text-primary" /> {title}
-            </DialogTitle>
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}>
+      <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden max-h-[90vh]"
+        onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <FileText size={16} className="text-primary shrink-0" />
+              <span className="font-medium text-sm truncate">{title}</span>
+            </div>
+            {subtitle && <p className="text-xs text-muted-foreground mt-0.5 ml-6">{subtitle}</p>}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
             {blobUrl && (
               <a href={blobUrl} download={filename}
-                className="shrink-0 px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted flex items-center gap-1.5">
+                className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted flex items-center gap-1.5">
                 <Download size={14} /> Download PDF
               </a>
             )}
+            <button onClick={onClose} className="p-1 rounded-md hover:bg-muted text-muted-foreground"><X size={16} /></button>
           </div>
-          {subtitle && <DialogDescription>{subtitle}</DialogDescription>}
-        </DialogHeader>
-        <div className="flex items-center justify-center min-h-[300px] bg-muted/20 rounded-lg overflow-hidden border border-border">
+        </div>
+        <div className="flex-1 flex items-center justify-center min-h-[300px] bg-muted/20 overflow-hidden">
           {!blobUrl
             ? <span className="text-sm text-muted-foreground flex items-center gap-2"><RefreshCw size={14} className="animate-spin" /> Loading preview…</span>
             : <iframe src={blobUrl} title={title} className="w-full h-[65vh] border-0" />}
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }
 
@@ -1339,6 +1345,32 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30 font-semibold">{fmt(grandTotal)}</div>
                   </div>
                 </div>
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-2 rounded-lg border border-border/60 bg-muted/20 p-2 text-xs">
+                  <div>
+                    <span className="text-muted-foreground block">Carpet</span>
+                    <span className="font-medium">{booking.CarpetAreaSqFt != null ? `${Number(booking.CarpetAreaSqFt).toLocaleString("en-IN")} sqft` : "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">Built-up</span>
+                    <span className="font-medium">{booking.BuiltUpAreaSqFt != null ? `${Number(booking.BuiltUpAreaSqFt).toLocaleString("en-IN")} sqft` : "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">Saleable</span>
+                    <span className="font-medium">{booking.AreaSqFt != null ? `${Number(booking.AreaSqFt).toLocaleString("en-IN")} sqft` : "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">Super Built-up</span>
+                    <span className="font-medium">{booking.SuperBuiltUpAreaSqFt != null ? `${Number(booking.SuperBuiltUpAreaSqFt).toLocaleString("en-IN")} sqft` : "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">Open Terrace</span>
+                    <span className="font-medium">{booking.OpenTerraceAreaSqFt != null ? `${Number(booking.OpenTerraceAreaSqFt).toLocaleString("en-IN")} sqft` : "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block">Inclusive Rate</span>
+                    <span className="font-medium">{booking.RatePerSqFt != null ? `₹${Number(booking.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span>
+                  </div>
+                </div>
 
                 {/* GST is fixed, HSN-Master-driven — never a per-booking
                     input anywhere in this app. Unit+Parking picks 1% or 5%
@@ -1954,84 +1986,95 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   {addingParking && (
                     <div className="rounded-lg border border-border p-3 space-y-2 bg-muted/20">
                       <div className="text-xs font-medium text-foreground mb-1">Add Parking Allotment</div>
-                      <select value={addParkingForm.ParkingMasterId}
-                        onChange={(e) => {
-                          const rate = (availableParking.rates as any[]).find((r: any) => String(r.ParkingMasterId) === e.target.value);
-                          setAddParkingForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "", ...(rate ? {} : {}) }));
-                        }}
-                        className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background">
-                        <option value="">— Select parking type —</option>
-                        {(availableParking.rates as any[]).map((r: any) => (
-                          <option key={r.ParkingMasterId} value={String(r.ParkingMasterId)} disabled={r.SoldOutProjectWide}>
-                            {r.ParkingType} — {fmt(r.Charge)} + {r.GstRate}% GST{r.SoldOutProjectWide ? " (sold out)" : r.FreeCountProjectWide > 0 ? ` (${r.FreeCountProjectWide} free)` : ""}
-                          </option>
-                        ))}
-                      </select>
-                      {addParkingForm.ParkingMasterId && (() => {
-                        const rate = (availableParking.rates as any[]).find((r: any) => String(r.ParkingMasterId) === addParkingForm.ParkingMasterId);
-                        return rate?.AvailableSlots?.length > 0 ? (
-                          <select value={addParkingForm.ParkingSlotId}
-                            onChange={(e) => setAddParkingForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
+                      {(availableParking.rates as any[])?.length === 0 ? (
+                        <p className="text-xs text-muted-foreground mb-3">
+                          {(availableParking.unratedTypesWithInventory as any[])?.length > 0
+                            ? `${(availableParking.unratedTypesWithInventory as any[]).join(", ")} parking slots exist for this project, but no rate is configured — add one in Parking Rate Master.`
+                            : "No parking rates configured for this project."}
+                        </p>
+                      ) : (
+                        <>
+                          <select value={addParkingForm.ParkingMasterId}
+                            onChange={(e) => {
+                              const rate = (availableParking.rates as any[]).find((r: any) => String(r.ParkingMasterId) === e.target.value);
+                              setAddParkingForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "", ...(rate ? {} : {}) }));
+                            }}
                             className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background">
-                            <option value="">— Any available slot —</option>
-                            {rate.AvailableSlots.map((s: any) => (
-                              <option key={s.Id} value={String(s.Id)}>{s.SlotNo}</option>
+                            <option value="">— Select parking type —</option>
+                            {(availableParking.rates as any[]).map((r: any) => (
+                              <option key={r.ParkingMasterId} value={String(r.ParkingMasterId)} disabled={r.SoldOutProjectWide}>
+                                {r.ParkingType} — {fmt(r.Charge)} + {r.GstRate}% GST{r.SoldOutProjectWide ? " (sold out)" : r.FreeCountProjectWide > 0 ? ` (${r.FreeCountProjectWide} free)` : ""}
+                              </option>
                             ))}
                           </select>
-                        ) : null;
-                      })()}
-                      {addParkingForm.ParkingMasterId && (() => {
-                        const rate = (availableParking.rates as any[]).find((r: any) => String(r.ParkingMasterId) === addParkingForm.ParkingMasterId);
-                        const effectiveRate = addParkingForm.RateOverride ? Number(addParkingForm.RateOverride) : (rate ? Number(rate.Charge) : 0);
-                        const gst = rate ? Math.round(effectiveRate * Number(rate.GstRate) / 100 * 100) / 100 : 0;
-                        return (
-                          <>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <label className="text-xs font-medium text-foreground block mb-1">Rate (₹)</label>
-                                <input type="number" min={0} value={addParkingForm.RateOverride}
-                                  onChange={(e) => setAddParkingForm((f) => ({ ...f, RateOverride: e.target.value }))}
-                                  placeholder={rate ? String(rate.Charge) : undefined}
-                                  className="w-full text-xs border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-                                {rate && <p className="text-[10px] text-muted-foreground mt-0.5">Master: {fmt(rate.Charge)}</p>}
-                              </div>
-                              <div>
-                                <label className="text-xs font-medium text-foreground block mb-1">Qty</label>
-                                <input type="number" min="1" value={addParkingForm.Quantity}
-                                  onChange={(e) => setAddParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
-                                  className="w-full text-xs border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-                              </div>
-                            </div>
-                            {/* Live total preview */}
-                            {effectiveRate > 0 && Number(addParkingForm.Quantity) > 0 && rate && (
-                              <div className="rounded-md bg-background border border-border px-3 py-2 text-xs space-y-0.5">
-                                <div className="flex justify-between text-muted-foreground">
-                                  <span>Base ({addParkingForm.Quantity} × {fmt(effectiveRate)})</span>
-                                  <span>{fmt(effectiveRate * Number(addParkingForm.Quantity))}</span>
+                          {addParkingForm.ParkingMasterId && (() => {
+                            const rate = (availableParking.rates as any[]).find((r: any) => String(r.ParkingMasterId) === addParkingForm.ParkingMasterId);
+                            return rate?.AvailableSlots?.length > 0 ? (
+                              <select value={addParkingForm.ParkingSlotId}
+                                onChange={(e) => setAddParkingForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
+                                className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background">
+                                <option value="">— Any available slot —</option>
+                                {rate.AvailableSlots.map((s: any) => (
+                                  <option key={s.Id} value={String(s.Id)}>{s.SlotNo}</option>
+                                ))}
+                              </select>
+                            ) : null;
+                          })()}
+                          {addParkingForm.ParkingMasterId && (() => {
+                            const rate = (availableParking.rates as any[]).find((r: any) => String(r.ParkingMasterId) === addParkingForm.ParkingMasterId);
+                            const effectiveRate = addParkingForm.RateOverride ? Number(addParkingForm.RateOverride) : (rate ? Number(rate.Charge) : 0);
+                            const gst = rate ? Math.round(effectiveRate * Number(rate.GstRate) / 100 * 100) / 100 : 0;
+                            return (
+                              <>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="text-xs font-medium text-foreground block mb-1">Rate (₹)</label>
+                                    <input type="number" min={0} value={addParkingForm.RateOverride}
+                                      onChange={(e) => setAddParkingForm((f) => ({ ...f, RateOverride: e.target.value }))}
+                                      placeholder={rate ? String(rate.Charge) : undefined}
+                                      className="w-full text-xs border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                                    {rate && <p className="text-[10px] text-muted-foreground mt-0.5">Master: {fmt(rate.Charge)}</p>}
+                                  </div>
+                                  <div>
+                                    <label className="text-xs font-medium text-foreground block mb-1">Qty</label>
+                                    <input type="number" min="1" value={addParkingForm.Quantity}
+                                      onChange={(e) => setAddParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
+                                      className="w-full text-xs border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                                  </div>
                                 </div>
-                                <div className="flex justify-between text-muted-foreground">
-                                  <span>GST ({rate.GstRate}%)</span>
-                                  <span>{fmt(gst * Number(addParkingForm.Quantity))}</span>
-                                </div>
-                                <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
-                                  <span>Total payable</span>
-                                  <span>{fmt((effectiveRate + gst) * Number(addParkingForm.Quantity))}</span>
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        );
-                      })()}
-                      {legalWorkStarted && (
-                        <input placeholder="Reason for amendment (required)" value={addParkingForm.Reason}
-                          onChange={(e) => setAddParkingForm((f) => ({ ...f, Reason: e.target.value }))}
-                          className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                                {effectiveRate > 0 && Number(addParkingForm.Quantity) > 0 && rate && (
+                                  <div className="rounded-md bg-background border border-border px-3 py-2 text-xs space-y-0.5">
+                                    <div className="flex justify-between text-muted-foreground">
+                                      <span>Base ({addParkingForm.Quantity} × {fmt(effectiveRate)})</span>
+                                      <span>{fmt(effectiveRate * Number(addParkingForm.Quantity))}</span>
+                                    </div>
+                                    <div className="flex justify-between text-muted-foreground">
+                                      <span>GST ({rate.GstRate}%)</span>
+                                      <span>{fmt(gst * Number(addParkingForm.Quantity))}</span>
+                                    </div>
+                                    <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
+                                      <span>Total payable</span>
+                                      <span>{fmt((effectiveRate + gst) * Number(addParkingForm.Quantity))}</span>
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
+                          {legalWorkStarted && (
+                            <input placeholder="Reason for amendment (required)" value={addParkingForm.Reason}
+                              onChange={(e) => setAddParkingForm((f) => ({ ...f, Reason: e.target.value }))}
+                              className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background" />
+                          )}
+                        </>
                       )}
                       <div className="flex gap-1.5">
-                        <button onClick={handleAddParkingFromDetail} disabled={chargesSaving}
-                          className="px-2.5 py-1 text-xs text-white bg-amber-500 hover:bg-amber-600 rounded font-medium disabled:opacity-40">
-                          Save
-                        </button>
+                        {(availableParking.rates as any[])?.length > 0 && (
+                          <button onClick={handleAddParkingFromDetail} disabled={chargesSaving}
+                            className="px-2.5 py-1 text-xs text-white bg-amber-500 hover:bg-amber-600 rounded font-medium disabled:opacity-40">
+                            Save
+                          </button>
+                        )}
                         <button onClick={() => { setAddingParking(false); setAddParkingForm({ ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "", RateOverride: "" }); }}
                           className="px-2.5 py-1 text-xs border border-border rounded text-muted-foreground hover:bg-muted">
                           Cancel
@@ -2749,15 +2792,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 )}
 
-                {previewInvoice && (
-                  <PdfPreviewDialog
-                    pdfUrl={`${API}/${bookingId}/invoices/${previewInvoice.Id}/pdf`}
-                    title={previewInvoice.InvoiceNo}
-                    subtitle={`${previewInvoice.InvoiceType} · ${fmt(previewInvoice.Amount)}`}
-                    filename={`${previewInvoice.InvoiceNo}.pdf`}
-                    onClose={() => setPreviewInvoice(null)}
-                  />
-                )}
               </div>
             )}
 
@@ -2825,6 +2859,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         )}
       </DialogContent>
     </Dialog>
+    {previewInvoice && (
+      <PdfPreviewDialog
+        pdfUrl={`${API}/${bookingId}/invoices/${previewInvoice.Id}/pdf`}
+        title={previewInvoice.InvoiceNo}
+        subtitle={`${previewInvoice.InvoiceType} · ${fmt(previewInvoice.Amount)}`}
+        filename={`${previewInvoice.InvoiceNo}.pdf`}
+        onClose={() => setPreviewInvoice(null)}
+      />
+    )}
     {previewReceipt && (
       <PdfPreviewDialog
         pdfUrl={`/api/crm/money-receipts/${previewReceipt.Id}/pdf`}
@@ -2843,22 +2886,28 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         onClose={() => setPreviewApplicationForm(null)}
       />
     )}
+    {/* Plain div overlay — avoids nested Radix Dialog focus-trap conflict
+        (same fix as CoApplicant: two Radix Dialogs open at once leave buttons
+        in the outer dialog unresponsive after the inner one closes). */}
     {previewAttachment && (
-      <Dialog open onOpenChange={(o) => { if (!o) setPreviewAttachment(null); }}>
-        <DialogContent className="max-w-6xl w-[94vw] max-h-[90vh] p-0 overflow-hidden">
-          <DialogHeader className="px-4 py-3 border-b border-border">
-            <div className="flex items-center justify-between gap-3 pr-8">
-              <DialogTitle className="flex min-w-0 items-center gap-2 text-sm font-medium">
-                <Paperclip size={14} className="text-primary shrink-0" />
-                <span className="truncate">{previewAttachment.FileName}</span>
-              </DialogTitle>
+      <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4"
+        onClick={() => setPreviewAttachment(null)}>
+        <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
+          onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
+            <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+              <Paperclip size={14} className="text-primary shrink-0" />
+              <span className="truncate">{previewAttachment.FileName}</span>
+            </span>
+            <div className="flex items-center gap-2 shrink-0">
               <a href={previewAttachmentBlobUrl || previewAttachment.fileUrl} target="_blank" rel="noopener noreferrer" download={previewAttachment.FileName}
-                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted font-medium">
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted font-medium">
                 <Download size={13} /> Download
               </a>
+              <button onClick={() => setPreviewAttachment(null)} className="text-muted-foreground hover:text-foreground p-1"><X size={16} /></button>
             </div>
-          </DialogHeader>
-          <div className="h-[76vh] bg-neutral-950 flex items-center justify-center">
+          </div>
+          <div className="flex-1 bg-neutral-950 flex items-center justify-center min-h-0">
             {previewAttachmentLoading ? (
               <div className="text-xs text-neutral-300">Loading preview...</div>
             ) : previewAttachmentError ? (
@@ -2870,27 +2919,29 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 </a>
               </div>
             ) : !previewAttachmentBlobUrl ? null : /\.pdf$/i.test(previewAttachment.FileName || "") ? (
-              <iframe src={previewAttachmentBlobUrl} title={previewAttachment.FileName} className="w-full h-full border-0 bg-white" />
+              <iframe src={previewAttachmentBlobUrl} title={previewAttachment.FileName} className="w-full h-full border-0 bg-white" style={{ minHeight: "70vh" }} />
             ) : (
               <img src={previewAttachmentBlobUrl} alt={previewAttachment.FileName} className="max-w-full max-h-full object-contain" />
             )}
           </div>
           {previewAttachment.CreatedAt && (
-            <p className="px-4 py-2 text-[11px] text-muted-foreground border-t border-border">
+            <p className="px-4 py-2 text-[11px] text-muted-foreground border-t border-border shrink-0">
               Uploaded {new Date(previewAttachment.CreatedAt).toLocaleDateString("en-IN")}
               {previewAttachment.UploaderName ? ` by ${previewAttachment.UploaderName}` : ""}
             </p>
           )}
-        </DialogContent>
-      </Dialog>
+        </div>
+      </div>
     )}
     {reasonDialog && (
-      <Dialog open onOpenChange={(o) => { if (!o) setReasonDialog(null); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{reasonDialog.title}</DialogTitle>
-            <DialogDescription>{reasonDialog.label}</DialogDescription>
-          </DialogHeader>
+      <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+        onClick={() => setReasonDialog(null)}>
+        <div className="bg-background border border-border rounded-xl shadow-xl w-full max-w-md p-5 space-y-4"
+          onClick={(e) => e.stopPropagation()}>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">{reasonDialog.title}</h3>
+            <p className="text-xs text-muted-foreground mt-1">{reasonDialog.label}</p>
+          </div>
           <form onSubmit={async (e) => {
             e.preventDefault();
             const reason = (e.currentTarget.elements.namedItem("reason") as HTMLTextAreaElement).value;
@@ -2898,14 +2949,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             await reasonDialog.onConfirm(reason);
             setReasonDialog(null);
           }}>
-            <textarea name="reason" rows={3} className="w-full border rounded-lg p-2 text-sm" autoFocus />
+            <textarea name="reason" rows={3} className="w-full border border-border rounded-lg p-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" autoFocus />
             <div className="flex justify-end gap-2 mt-4">
-              <button type="button" onClick={() => setReasonDialog(null)} className="px-4 py-1.5 text-sm border rounded-lg">Cancel</button>
-              <button type="submit" className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg">Confirm</button>
+              <button type="button" onClick={() => setReasonDialog(null)} className="px-4 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              <button type="submit" className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">Confirm</button>
             </div>
           </form>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </div>
     )}
   </>);
 }

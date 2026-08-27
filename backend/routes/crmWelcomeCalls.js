@@ -19,11 +19,14 @@ const WC_SELECT = `
     wc.Outcome, wc.NextCallDate, wc.Notes, wc.CustomFields, wc.PreferredAgreementDate,
     wc.PaymentPlanConfirmed, wc.PaymentPlanConfirmedAt, wc.CreatedAt,
     u.name  AS CalledByName,
-    b.BookingNo, b.UnitNo, b.ProjectName,
+    b.BookingNo,
+    COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+    COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
     a.ApplicantName, a.Mobile
   FROM dbo.CrmWelcomeCall wc
   JOIN  dbo.CrmBooking b     ON b.Id = wc.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.Users u      ON u.id = wc.CalledBy
 `;
 
@@ -37,13 +40,17 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        b.Id AS BookingId, b.BookingNo, b.UnitNo, b.ProjectName, b.BookingDate,
+        b.Id AS BookingId, b.BookingNo,
+        COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+        COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+        b.BookingDate,
         a.ApplicantName, a.Mobile,
         last.Id AS LastCallId, last.Outcome AS LastOutcome, last.CallDate AS LastCallDate,
         last.NextCallDate,
         streak.ConsecutiveNonReached
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       OUTER APPLY (
         SELECT TOP 1 Id, Outcome, CallDate, NextCallDate
         FROM dbo.CrmWelcomeCall
@@ -152,12 +159,19 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
 
     const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, streakRes] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId).query(`
-        SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.BookingAmount, b.GrandTotal,
+        SELECT b.Id, b.BookingNo,
+               COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+               COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+               COALESCE(bn.UnitType, b.UnitType) AS UnitType,
+               b.AreaSqFt,
+               b.CarpetAreaSqFt, b.BuiltUpAreaSqFt, b.SuperBuiltUpAreaSqFt, b.OpenTerraceAreaSqFt,
+               b.RatePerSqFt, b.TotalValue, b.BookingAmount, b.GrandTotal,
                b.ParkingTotal, b.ExtraChargesTotal, b.UnitGstAmount,
                b.PaymentPlanId, pp.PlanName AS PaymentPlanName,
                a.ApplicantName, a.Mobile, a.Email
         FROM dbo.CrmBooking b
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
         LEFT JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = b.PaymentPlanId
         WHERE b.Id = @bid
       `),
@@ -405,12 +419,13 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
       customFieldsJson = cleaned.length ? JSON.stringify(cleaned) : null;
     }
 
+    // CalledBy/CallDate/DurationSeconds are the factual record of when the
+    // call happened, who made it, and how long it ran — that's history, not
+    // an editable field, so this endpoint never touches them after creation.
+    // Everything else here (outcome, follow-up, notes, custom fields) is a
+    // legitimate after-the-fact correction/annotation and stays editable.
     await pool.request()
       .input("id",   sql.Int, id)
-      .input("cb",   sql.Int, b.CalledBy ? parseInt(b.CalledBy) : null)
-      .input("dt",   sql.DateTime2(3), b.CallDate || null)
-      .input("dur",  sql.Int, b.DurationSeconds != null ? parseInt(b.DurationSeconds) : null)
-      .input("durP", sql.Bit, has("DurationSeconds") ? 1 : 0)
       .input("out",  sql.NVarChar(50), b.Outcome || null)
       .input("ncd",  sql.Date, b.NextCallDate || null)
       .input("ncdP", sql.Bit, has("NextCallDate") ? 1 : 0)
@@ -424,9 +439,6 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
       .input("ppr",  sql.NVarChar(500), b.PaymentPlanConfirmed === false ? String(b.PaymentPlanDisputeReason).trim() : null)
       .query(`
         UPDATE dbo.CrmWelcomeCall SET
-          CalledBy = ISNULL(@cb, CalledBy),
-          CallDate = ISNULL(@dt, CallDate),
-          DurationSeconds = CASE WHEN @durP = 1 THEN @dur ELSE DurationSeconds END,
           Outcome = ISNULL(@out, Outcome),
           NextCallDate = CASE WHEN @ncdP = 1 THEN @ncd ELSE NextCallDate END,
           Notes = CASE WHEN @noteP = 1 THEN @note ELSE Notes END,
@@ -485,6 +497,90 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-welcome-calls] PUT error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Bank Preference endpoints ─────────────────────────────────────────────
+// These record which bank(s) the customer prefers for a home loan, captured
+// during the welcome call. Multiple banks are supported. This is NOT the
+// finalised/sanctioned loan (that lives in dbo.CrmLoanDetail).
+
+// GET /:bookingId/bank-preferences
+router.get("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId);
+    const result = await pool.request()
+      .input("bid", sql.Int, bookingId)
+      .query(`
+        SELECT bp.Id, bp.BankName, bp.Remarks, bp.CreatedAt, u.name AS CreatedByName
+        FROM dbo.CrmWelcomeCallBankPreference bp
+        LEFT JOIN dbo.Users u ON u.id = bp.CreatedBy
+        WHERE bp.BookingId = @bid
+        ORDER BY bp.CreatedAt ASC
+      `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-welcome-calls] GET /:bookingId/bank-preferences error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:bookingId/bank-preferences — add a preferred bank
+router.post("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId);
+    const { BankName, Remarks } = req.body;
+
+    if (!BankName || !String(BankName).trim()) {
+      return res.status(400).json({ error: "BankName is required" });
+    }
+
+    const activeErr = await requireActiveBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const result = await pool.request()
+      .input("bid",    sql.Int,            bookingId)
+      .input("bank",   sql.NVarChar(200),  String(BankName).trim())
+      .input("rem",    sql.NVarChar(500),  Remarks ? String(Remarks).trim() : null)
+      .input("cb",     sql.Int,            actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmWelcomeCallBankPreference
+          (BookingId, BankName, Remarks, CreatedBy, CreatedAt)
+        OUTPUT
+          INSERTED.Id, INSERTED.BankName, INSERTED.Remarks, INSERTED.CreatedAt
+        VALUES (@bid, @bank, @rem, @cb, SYSDATETIME())
+      `);
+    res.status(201).json(result.recordset[0]);
+  } catch (e) {
+    console.error("[crm-welcome-calls] POST /:bookingId/bank-preferences error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /:bookingId/bank-preferences/:id — remove a preferred bank
+router.delete("/:bookingId/bank-preferences/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId);
+    const id = parseInt(req.params.id);
+
+    const existing = await pool.request()
+      .input("id",  sql.Int, id)
+      .input("bid", sql.Int, bookingId)
+      .query("SELECT Id FROM dbo.CrmWelcomeCallBankPreference WHERE Id = @id AND BookingId = @bid");
+    if (!existing.recordset.length) {
+      return res.status(404).json({ error: "Bank preference not found" });
+    }
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .query("DELETE FROM dbo.CrmWelcomeCallBankPreference WHERE Id = @id");
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-welcome-calls] DELETE /:bookingId/bank-preferences/:id error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

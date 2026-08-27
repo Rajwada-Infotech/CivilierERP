@@ -595,6 +595,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`
     SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
+           u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
            proj.name AS ProjectName, proj.company_id AS CompanyId,
            blk.BlockName
     FROM dbo.UnitMaster u
@@ -645,8 +646,13 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     paymentPlanId: b.PaymentPlanId || appRow.recordset[0].PaymentPlanId || null,
   });
 
-  const area  = unitRow.AreaSqFt != null ? unitRow.AreaSqFt : (b.AreaSqFt != null ? parseFloat(b.AreaSqFt) : null);
-  const rate  = b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null;
+  // AreaSqFt is the single pricing/saleable area. Structural breakdown fields
+  // are copied to the booking as descriptive snapshots only.
+  const area  = unitRow.AreaSqFt != null ? unitRow.AreaSqFt
+              : (b.AreaSqFt != null ? parseFloat(b.AreaSqFt) : null);
+  // Rate: request body wins (editable at booking time); falls back to unit master's defined rate.
+  const rate  = b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt)
+              : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
   const total = b.TotalValue  != null ? parseFloat(b.TotalValue)
               : (area && rate ? Math.round(area * rate) : null);
 
@@ -709,6 +715,10 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       .input("flr",   sql.NVarChar(100), b.FloorName   || null)
       .input("utype", sql.NVarChar(100), unitRow.UnitType || b.UnitType || null)
       .input("area",  sql.Decimal(18,2), area)
+      .input("carpetArea",      sql.Decimal(18,2), unitRow.CarpetAreaSqFt != null ? Number(unitRow.CarpetAreaSqFt) : null)
+      .input("builtUpArea",     sql.Decimal(18,2), unitRow.BuiltUpAreaSqFt != null ? Number(unitRow.BuiltUpAreaSqFt) : null)
+      .input("superBuiltUpArea", sql.Decimal(18,2), unitRow.SuperBuiltUpAreaSqFt != null ? Number(unitRow.SuperBuiltUpAreaSqFt) : null)
+      .input("openTerraceArea", sql.Decimal(18,2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
       .input("rate",  sql.Decimal(18,2), rate)
       .input("tot",   sql.Decimal(18,2), total)
       .input("bamt",  sql.Decimal(18,2), bookingAmount)
@@ -727,14 +737,16 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       .query(`
         INSERT INTO dbo.CrmBooking
           (BookingNo, ApplicationId, UnitId, ProjectId, ProjectName, CompanyId, UnitNo, BlockName, FloorName, UnitType,
-           AreaSqFt, RatePerSqFt, TotalValue, BookingAmount, TokenType, TokenValue, PaymentPlanId,
+           AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt,
+           RatePerSqFt, TotalValue, BookingAmount, TokenType, TokenValue, PaymentPlanId,
            BookingDate, PaymentMode, AssignedTo, Status, Notes, IsActive,
            ParkingTotal, ExtraChargesTotal, GrandTotal, CreatedBy, CreatedAt,
            BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ConfirmDeadline)
         OUTPUT INSERTED.Id
         VALUES
           (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @flr, @utype,
-           @area, @rate, @tot, @bamt, @ttype, @tval, @ppid,
+           @area, @carpetArea, @builtUpArea, @superBuiltUpArea, @openTerraceArea,
+           @rate, @tot, @bamt, @ttype, @tval, @ppid,
            ISNULL(@bdate, CAST(SYSDATETIME() AS DATE)), @pmode,
            @asgn, 'Pending', @note, 1,
            0, 0, ISNULL(@tot, 0), @cb, SYSDATETIME(),

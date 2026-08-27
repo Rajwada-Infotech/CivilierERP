@@ -240,34 +240,41 @@ function cache(namespace, ttl = 300, { shared = false } = {}) {
         return next();
       }
 
-      // Cache miss — write to cache after DB responds
+      // Cache miss — write to cache after DB responds.
+      // Only cache 2xx responses — error responses must never be stored because
+      // the cache HIT path replays data without the original status code, which
+      // would serve an error body as 200 and break every client that checks
+      // res.ok before parsing the body.
       res.json = async (data) => {
         try {
           if (dbStart) req.timing.mark("db.query", dbStart);
-          const writeStart = req.timing?.startStage();
-          const jsonStr = JSON.stringify(data);
-          const finalTtl =
-            res.statusCode >= 500
-              ? 30
-              : (await getCachedDynamicTtl(ttl)) || ttl;
 
           incrGlobalCacheMiss().catch(() => {});
 
-          let valueToStore = jsonStr;
-          if (jsonStr.length > 1024) {
-            const compressed = await compress(data);
-            if (compressed) valueToStore = compressed;
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            const writeStart = req.timing?.startStage();
+            const jsonStr = JSON.stringify(data);
+            const finalTtl = (await getCachedDynamicTtl(ttl)) || ttl;
+
+            let valueToStore = jsonStr;
+            if (jsonStr.length > 1024) {
+              const compressed = await compress(data);
+              if (compressed) valueToStore = compressed;
+            }
+
+            await Promise.all([
+              redisOp(() => redisSet(key, valueToStore, finalTtl)),
+              redisOp(() => redisSet(staleKey, valueToStore, finalTtl * 2)),
+            ]);
+
+            if (writeStart) req.timing.mark("cache.write", writeStart);
+            res.setHeader("X-Cache", "MISS");
+            res.setHeader("X-Cache-TTL", `${finalTtl}s`);
+          } else {
+            res.setHeader("X-Cache", "SKIP");
           }
 
-          await Promise.all([
-            redisOp(() => redisSet(key, valueToStore, finalTtl)),
-            redisOp(() => redisSet(staleKey, valueToStore, finalTtl * 2)),
-          ]);
           releaseLock(); // explicit early release; "finish" listener is a safety net
-
-          if (writeStart) req.timing.mark("cache.write", writeStart);
-          res.setHeader("X-Cache", "MISS");
-          res.setHeader("X-Cache-TTL", `${finalTtl}s`);
         } catch (err) {
           console.error("[cache] write error:", err.message);
           releaseLock(); // always release even on write failure

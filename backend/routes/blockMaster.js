@@ -356,4 +356,129 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
   }
 });
 
+// ── Unit Type Specs ────────────────────────────────────────────────────────────
+// BlockUnitTypeSpec is the authoritative source for area breakdown per unit type
+// per block. All units of the same type in a block share the same RERA-registered
+// Carpet/Built-up/SBU areas — defining it once here avoids repeating it across
+// every individual unit row in Unit Master.
+
+// GET /api/block-master/:id/unit-type-specs
+// Returns { unitTypes, specs }:
+//   unitTypes — distinct unit types that actually exist in this block
+//               (from Auto Setup template OR from real UnitMaster rows)
+//   specs     — current BlockUnitTypeSpec rows for this block
+// The frontend merges these: for every known unit type, show its spec values
+// (empty if not yet set). Unit types are real data — never free-typed by staff.
+router.get("/:id/unit-type-specs", async (req, res) => {
+  const blockId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(blockId)) return res.status(400).json({ error: "Invalid block id" });
+  try {
+    const pool = getPool();
+
+    // Distinct unit types from the Auto Setup template + actual generated units
+    const typesResult = await pool.request()
+      .input("bid", sql.Int, blockId)
+      .query(`
+        SELECT DISTINCT UnitType FROM (
+          SELECT UnitType FROM dbo.CrmProjectAutoSetupUnitTemplate
+          WHERE BlockId = @bid AND IsActive = 1 AND UnitType IS NOT NULL
+          UNION
+          SELECT UnitType FROM dbo.UnitMaster
+          WHERE BlockId = @bid AND IsActive = 1 AND UnitType IS NOT NULL
+        ) t
+        ORDER BY UnitType
+      `);
+
+    const specsResult = await pool.request()
+      .input("bid", sql.Int, blockId)
+      .query(`
+        SELECT Id, BlockId, UnitType,
+               CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt,
+               OpenTerraceAreaSqFt, BaseRatePerSqFt
+        FROM dbo.BlockUnitTypeSpec
+        WHERE BlockId = @bid
+        ORDER BY UnitType
+      `);
+
+    res.json({
+      unitTypes: typesResult.recordset.map((r) => r.UnitType),
+      specs: specsResult.recordset,
+    });
+  } catch (err) {
+    console.error("[block-master] GET unit-type-specs error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/block-master/:id/unit-type-specs — full replace for this block
+// Receives an array of {UnitType, CarpetAreaSqFt, BuiltUpAreaSqFt,
+// SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, BaseRatePerSqFt}.
+router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+  const blockId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(blockId)) return res.status(400).json({ error: "Invalid block id" });
+  const specs = req.body;
+  if (!Array.isArray(specs)) return res.status(400).json({ error: "Expected an array" });
+  try {
+    const pool = getPool();
+    // Full replace — delete existing then re-insert, same pattern as payment plan tag sync.
+    await pool.request().input("blockId", sql.Int, blockId)
+      .query("DELETE FROM dbo.BlockUnitTypeSpec WHERE BlockId = @blockId");
+    for (const s of specs) {
+      if (!s.UnitType?.trim()) continue;
+      const toDb = (v) => v != null && v !== "" ? parseFloat(v) : null;
+      const carpet   = toDb(s.CarpetAreaSqFt);
+      const builtUp  = toDb(s.BuiltUpAreaSqFt);
+      const sbu      = toDb(s.SuperBuiltUpAreaSqFt);
+      const openTerr = toDb(s.OpenTerraceAreaSqFt);
+      const rate     = toDb(s.BaseRatePerSqFt);
+
+      await pool.request()
+        .input("blockId",    sql.Int, blockId)
+        .input("unitType",   sql.NVarChar(50),   s.UnitType.trim())
+        .input("carpet",     sql.Decimal(18, 2), carpet)
+        .input("builtUp",    sql.Decimal(18, 2), builtUp)
+        .input("sbu",        sql.Decimal(18, 2), sbu)
+        .input("openTerr",   sql.Decimal(18, 2), openTerr)
+        .input("rate",       sql.Decimal(18, 2), rate)
+        .query(`
+          INSERT INTO dbo.BlockUnitTypeSpec
+            (BlockId, UnitType, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt,
+             OpenTerraceAreaSqFt, BaseRatePerSqFt, UpdatedAt)
+          VALUES
+            (@blockId, @unitType, @carpet, @builtUp, @sbu, @openTerr, @rate, SYSDATETIME())
+        `);
+
+      // Cascade spec changes to every unit in this block that shares the
+      // same unit type. The spec is the single source of truth — individual
+      // unit rows must always reflect whatever the block-level spec says.
+      // AreaSqFt is the legacy single-field kept in sync with SBU.
+      await pool.request()
+        .input("blockId",  sql.Int, blockId)
+        .input("unitType", sql.NVarChar(50),   s.UnitType.trim())
+        .input("carpet",   sql.Decimal(18, 2), carpet)
+        .input("builtUp",  sql.Decimal(18, 2), builtUp)
+        .input("sbu",      sql.Decimal(18, 2), sbu)
+        .input("openTerr", sql.Decimal(18, 2), openTerr)
+        .input("rate",     sql.Decimal(18, 2), rate)
+        .query(`
+          UPDATE dbo.UnitMaster SET
+            CarpetAreaSqFt       = @carpet,
+            BuiltUpAreaSqFt      = @builtUp,
+            SuperBuiltUpAreaSqFt = @sbu,
+            AreaSqFt             = COALESCE(@sbu, AreaSqFt),
+            OpenTerraceAreaSqFt  = @openTerr,
+            RatePerSqFt          = @rate,
+            UpdatedAt            = SYSDATETIME()
+          WHERE BlockId = @blockId AND UnitType = @unitType AND IsActive = 1
+        `);
+    }
+    await bumpCacheVersion("block-master");
+    await bumpCacheVersion("unit-master");
+    res.json({ message: "Unit type specs saved" });
+  } catch (err) {
+    console.error("[block-master] PUT unit-type-specs error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
