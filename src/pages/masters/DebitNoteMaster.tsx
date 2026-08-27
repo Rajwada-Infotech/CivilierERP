@@ -244,7 +244,7 @@ function PartyInvoiceRenderer({
 
   const selectedInvoice = invoiceOptions.find((o) => o.billId === g.billId) ?? null;
   const isItemMode = isItemModeInvoice(g.sourceType);
-  const itemsTotal = ((formData.items as DebitNoteItem[] | undefined) ?? []).reduce((s, it) => s + (parseFloat(it.Amount) || 0), 0);
+  const itemsTotal = (Array.isArray(formData.items) ? (formData.items as DebitNoteItem[]) : []).reduce((s, it) => s + (parseFloat(it.Amount) || 0), 0);
   const enteredAmount = isItemMode ? itemsTotal : parseFloat(String(formData.debitAmount ?? "")) || 0;
   const previousDebit = selectedInvoice
     ? Math.max(0, selectedInvoice.previousDebitAmount - (g.originalDebitAmount ?? 0))
@@ -461,7 +461,7 @@ const DebitNoteMaster: React.FC = () => {
   const toPayload = (formData: Record<string, unknown>) => {
     const g = formData.partyInvoiceGroup as PartyInvoiceGroup | undefined;
     const isItemMode = isItemModeInvoice(g?.sourceType);
-    const rawItems = (formData.items as DebitNoteItem[] | undefined) ?? [];
+    const rawItems = Array.isArray(formData.items) ? (formData.items as DebitNoteItem[]) : [];
     return {
       company_id: idByLabel(COMPANY_OPTIONS, formData.company as string),
       project_id: idByLabel(PROJECT_OPTIONS, formData.project as string),
@@ -479,7 +479,7 @@ const DebitNoteMaster: React.FC = () => {
     const g = formData.partyInvoiceGroup as PartyInvoiceGroup | undefined;
     if (!g?.partyType || !g?.partyId || !g?.billId) return null;
     if (isItemModeInvoice(g.sourceType)) {
-      const items = (formData.items as DebitNoteItem[] | undefined) ?? [];
+      const items = Array.isArray(formData.items) ? (formData.items as DebitNoteItem[]) : [];
       const valid = items.filter((it) => it.Description.trim() && Number.isFinite(parseFloat(it.Amount)) && parseFloat(it.Amount) >= 0);
       if (!valid.length) return null;
     } else {
@@ -626,7 +626,7 @@ const DebitNoteMaster: React.FC = () => {
       render: (({ value, onChange, formData }) => {
         const g = formData.partyInvoiceGroup as PartyInvoiceGroup | undefined;
         if (!isItemModeInvoice(g?.sourceType)) return null;
-        return <ItemsRenderer value={(value as DebitNoteItem[]) ?? []} onChange={onChange} />;
+        return <ItemsRenderer value={Array.isArray(value) ? (value as DebitNoteItem[]) : []} onChange={onChange} />;
       }) as FieldDef["render"],
     },
     {
