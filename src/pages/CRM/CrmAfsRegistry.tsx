@@ -171,8 +171,8 @@ const CrmAfsRegistry: React.FC = () => {
 
   return (
     <CrmShell
-      title="CRM — AFS Registry"
-      subtitle="Agreement for Sale registration at the Sub-Registrar Office (Visit 1) — gated on AFS Query Payment confirmed"
+      title="Agreement Registration — Sub-Registrar Visit 1"
+      subtitle="Both parties appear at the Sub-Registrar's Office to officially register the Agreement for Sale — requires registration fees to be confirmed first"
       action={
         <div className="flex items-center gap-3">
           {dataUpdatedAt > 0 && (

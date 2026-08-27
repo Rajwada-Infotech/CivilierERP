@@ -160,8 +160,8 @@ const CrmOcCc: React.FC = () => {
 
   return (
     <CrmShell
-      title="CRM — OC / CC"
-      subtitle="Occupancy Certificate & Completion Certificate — project-level tracker, prerequisite for possession"
+      title="Occupancy & Completion Certificate (OC / CC)"
+      subtitle="Local authority certificate confirming the building is structurally complete and fit for occupation — required before handing over possession to buyers"
       action={
         <div className="flex items-center gap-3">
           {dataUpdatedAt > 0 && (

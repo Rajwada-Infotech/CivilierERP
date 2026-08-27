@@ -341,8 +341,8 @@ const CrmSalesDeed: React.FC = () => {
 
   return (
     <CrmShell
-      title="CRM � Sale Deed"
-      subtitle="Deed execution and registration tracking"
+      title="Sale Deed"
+      subtitle="The legal document that transfers property ownership from the developer to the buyer"
       action={
         <div className="flex items-center gap-3">
           {dataUpdatedAt > 0 && (

@@ -347,8 +347,8 @@ const CrmQueryPayment: React.FC = () => {
 
   return (
     <CrmShell
-      title="CRM � Query Payment"
-      subtitle="Stamp duty & registration fee paid by the customer directly to the government"
+      title="Sale Deed Registration Fees"
+      subtitle="Stamp duty & registration fee the buyer pays before the Sale Deed is registered at the Sub-Registrar Office (Visit 2)"
       action={
         <div className="flex items-center gap-3">
           {listUpdatedAt > 0 && (

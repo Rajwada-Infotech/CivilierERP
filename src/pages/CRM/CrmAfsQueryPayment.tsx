@@ -329,8 +329,8 @@ const CrmAfsQueryPayment: React.FC = () => {
 
   return (
     <CrmShell
-      title="CRM — AFS Query Payment"
-      subtitle="AFS stamp duty & registration fee paid by the customer at Sub-Registrar Visit 1"
+      title="Agreement Registration Fees"
+      subtitle="Stamp duty & registration fee the buyer must pay before the Agreement for Sale is registered at the Sub-Registrar's Office (Visit 1)"
       action={
         <div className="flex items-center gap-3">
           {listUpdatedAt > 0 && (

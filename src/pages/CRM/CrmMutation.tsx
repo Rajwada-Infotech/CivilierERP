@@ -185,8 +185,8 @@ const CrmMutation: React.FC = () => {
 
   return (
     <CrmShell
-      title="CRM — Mutation"
-      subtitle="Municipal property record transfer (Khata Transfer) after Sale Deed registration — gated on Registry Completed"
+      title="Property Mutation — Khata Transfer"
+      subtitle="Application to update the municipal land records (Khata) with the new owner's name — can only be done after the Sale Deed is officially registered"
       action={
         <div className="flex items-center gap-3">
           {dataUpdatedAt > 0 && (

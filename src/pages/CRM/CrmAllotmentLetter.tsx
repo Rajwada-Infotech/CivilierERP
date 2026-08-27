@@ -198,8 +198,8 @@ const CrmAllotmentLetter: React.FC = () => {
 
   return (
     <CrmShell
-      title="CRM — Allotment Letter"
-      subtitle="RERA-mandated allotment letter issued to buyers confirming unit, booking amount, and payment schedule"
+      title="Allotment Letter"
+      subtitle="RERA-mandated letter issued to the buyer after booking, confirming the allotted unit, booking amount, and payment schedule"
       action={
         <div className="flex items-center gap-3">
           {dataUpdatedAt > 0 && (
