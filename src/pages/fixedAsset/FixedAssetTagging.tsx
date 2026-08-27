@@ -102,6 +102,34 @@ function deriveFinYear(docDate: string, finYears: { year: string; startDate: str
 
 type ViewMode = "list" | "form";
 
+// ── bulk import (Excel/CSV) ────────────────────────────────────────────────────
+const IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
+  { header: "Company", accessor: "Company" },
+  { header: "Project", accessor: "Project" },
+  { header: "Godown", accessor: "Godown" },
+  { header: "Item", accessor: "Item" },
+  { header: "Date", accessor: "Date" },
+  { header: "Quantity", accessor: "Quantity" },
+  { header: "Remarks", accessor: "Remarks" },
+];
+
+interface ImportRow {
+  row: number;
+  companyId: number;
+  companyLabel: string;
+  projectId: number | null;
+  projectLabel: string;
+  godownId: number | null;
+  godownLabel: string;
+  itemId: string | null;
+  itemName: string;
+  docDate: string;
+  quantity: number;
+  remarks?: string;
+  status: "valid" | "success" | "error";
+  message?: string;
+}
+
 export default function FixedAssetTagging() {
   const rights = usePageRights("fixed-asset-tagging");
   const qc     = useQueryClient();
@@ -117,6 +145,13 @@ export default function FixedAssetTagging() {
   const [filterFromDate, setFilterFromDate] = useState("");
   const [filterToDate, setFilterToDate] = useState("");
   const [search, setSearch] = useState("");
+
+  // ── bulk import (Excel/CSV) ──
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importPreview, setImportPreview] = useState<ImportRow[] | null>(null);
+  const [importDone, setImportDone] = useState(false);
+  const [importSubmitting, setImportSubmitting] = useState(false);
+  const [importValidating, setImportValidating] = useState(false);
 
   const setField = useCallback(<K extends keyof FormState>(k: K, v: FormState[K]) => {
     setForm((p) => ({ ...p, [k]: v }));
@@ -225,6 +260,140 @@ export default function FixedAssetTagging() {
 
   const resetForm = () => setForm(emptyForm());
   const goToCreate = () => { resetForm(); setViewMode("form"); };
+
+  // ── bulk import (Excel/CSV) ────────────────────────────────────────────────
+  const handleImportClick = () => importFileInputRef.current?.click();
+
+  const handleDownloadImportTemplate = () => {
+    exportToCsv(
+      [{ Company: "", Project: "", Godown: "", Item: "", Date: "", Quantity: "", Remarks: "" }],
+      IMPORT_TEMPLATE_COLUMNS,
+      "fa-inventory-import-template",
+    );
+  };
+
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file after a fix
+    if (!file) return;
+
+    setImportValidating(true);
+    try {
+      const rawRows = parseCsv(await file.text());
+      if (rawRows.length === 0) {
+        toast.error("The file has no data rows");
+        return;
+      }
+
+      const companyList = ensureArray<{ id: number; label: string }>(companies);
+      const projectList = ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects);
+      const godownList = ensureArray<Godown>(godownsData?.data).filter((g) => !g.IsDeleted && g.IsActive);
+
+      // Eligible items depend on (company, project, godown, finYear) scope —
+      // cache per unique combination so rows sharing a scope don't refetch.
+      const eligibleCache = new Map<string, EligibleAssetItem[]>();
+
+      const results: ImportRow[] = [];
+      let rowNum = 1;
+      for (const raw of rawRows) {
+        rowNum += 1; // header is row 1, first data row is row 2
+        const companyName  = (raw["Company"]  || "").trim();
+        const projectName  = (raw["Project"]  || "").trim();
+        const godownName   = (raw["Godown"]   || "").trim();
+        const itemName     = (raw["Item"]     || "").trim();
+        const docDate      = (raw["Date"]     || "").trim();
+        const quantityRaw  = (raw["Quantity"] || "").trim();
+        const remarks      = (raw["Remarks"]  || "").trim();
+
+        const row: ImportRow = {
+          row: rowNum,
+          companyId: 0,
+          companyLabel: companyName || "—",
+          projectId: null,
+          projectLabel: projectName || "—",
+          godownId: null,
+          godownLabel: godownName || "—",
+          itemId: null,
+          itemName: itemName || "—",
+          docDate,
+          quantity: 0,
+          remarks: remarks || undefined,
+          status: "error",
+        };
+
+        if (!companyName || !projectName || !godownName || !itemName || !docDate || !quantityRaw) {
+          row.message = "Missing required field(s)";
+          results.push(row);
+          continue;
+        }
+
+        const company = companyList.find((c) => c.label.toLowerCase() === companyName.toLowerCase());
+        if (!company) { row.message = `Company "${companyName}" not found`; results.push(row); continue; }
+        row.companyId = company.id;
+        row.companyLabel = company.label;
+
+        const project = projectList.find((p) => p.company_id === company.id && p.label.toLowerCase() === projectName.toLowerCase());
+        if (!project) { row.message = `Project "${projectName}" not found under ${company.label}`; results.push(row); continue; }
+        row.projectId = project.id;
+        row.projectLabel = project.label;
+
+        const godown = godownList.find((g) =>
+          g.EnterpriseID === company.id &&
+          (g.ProjectID === project.id || g.ProjectID == null) &&
+          g.GodownName.toLowerCase() === godownName.toLowerCase()
+        );
+        if (!godown) { row.message = `Godown "${godownName}" not found for this company/project`; results.push(row); continue; }
+        row.godownId = godown.GodownID;
+        row.godownLabel = godown.GodownName;
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(docDate)) {
+          row.message = "Date must be in YYYY-MM-DD format";
+          results.push(row);
+          continue;
+        }
+        const finYear = deriveFinYear(docDate, finYears);
+        if (!finYear) { row.message = "Date doesn't fall in any configured Financial Year"; results.push(row); continue; }
+
+        const quantity = parseInt(quantityRaw, 10);
+        if (!Number.isFinite(quantity) || quantity <= 0 || String(quantity) !== quantityRaw) {
+          row.message = "Quantity must be a positive whole number";
+          results.push(row);
+          continue;
+        }
+        row.quantity = quantity;
+
+        const cacheKey = `${company.id}|${project.id}|${godown.GodownID}|${finYear}`;
+        let items = eligibleCache.get(cacheKey);
+        if (!items) {
+          items = await getEligibleAssetItems({
+            godownId: godown.GodownID,
+            companyId: company.id,
+            projectId: project.id,
+            finYear,
+          });
+          eligibleCache.set(cacheKey, items);
+        }
+        const item = items.find((i) => (i.ItemName || "").toLowerCase() === itemName.toLowerCase());
+        if (!item) { row.message = `Item "${itemName}" is not an untagged fixed-asset item at this godown`; results.push(row); continue; }
+        if (quantity > item.UntaggedQty) {
+          row.message = `Only ${fmt(item.UntaggedQty)} unit(s) untagged for "${item.ItemName}"`;
+          results.push(row);
+          continue;
+        }
+        row.itemId = item.ItemId;
+        row.itemName = item.ItemName || itemName;
+        row.status = "valid";
+        results.push(row);
+      }
+
+      setImportPreview(results);
+      setImportDone(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to read the file");
+    } finally {
+      setImportValidating(false);
+    }
+  };
 
   const handleConfirmImport = async () => {
     if (!importPreview) return;
