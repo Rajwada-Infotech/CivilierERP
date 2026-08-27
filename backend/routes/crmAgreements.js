@@ -53,6 +53,7 @@ const AGR_SELECT = `
     ag.CustomerApprovalStatus, ag.CustomerApprovedAt,
     ag.RecheckCount, ag.LastRecheckRemarks,
     ag.ProposedDate, ag.ProposedDateStatus, ag.SentToCustomerAt, ag.DateApprovalStatus,
+    ag.AfsRegistrationNo, ag.AfsRegistrationDate,
     ag.LegalExecutiveId, le.name AS LegalExecutiveName,
     b.BookingNo,
     COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
@@ -1102,14 +1103,26 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
   }
 });
 
-// PUT /:id/mark-registered — Executed -> Registered. Gated on the linked
-// CrmSalesDeed actually carrying a RegistrationNo — the real evidence of
-// registration, not a free-form pick.
+// PUT /:id/mark-registered — Executed -> Registered.
+// The AFS is physically registered at the Sub-Registrar Office before the
+// Sale Deed exists at all. The caller must supply the Doc No and date they
+// receive from the Sub-Registrar as proof of the real-world event —
+// AfsRegistrationNo is required, AfsRegistrationDate is required.
+// There is no dependency on CrmSalesDeed here; that is a separate document
+// registered much later at a separate Sub-Registrar visit.
 router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
     const actor = actorId(req);
+    const { AfsRegistrationNo, AfsRegistrationDate } = req.body || {};
+
+    if (!AfsRegistrationNo || !String(AfsRegistrationNo).trim()) {
+      return res.status(400).json({ error: "AFS Registration No. is required — enter the Doc No received from the Sub-Registrar" });
+    }
+    if (!AfsRegistrationDate) {
+      return res.status(400).json({ error: "AFS Registration Date is required — enter the date of Sub-Registrar registration" });
+    }
 
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status FROM dbo.CrmAgreement WHERE Id = @id");
@@ -1118,24 +1131,31 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
       return res.status(400).json({ error: `Cannot mark-registered from status '${cur.recordset[0].Status}'` });
     }
 
-    const deed = await pool.request().input("id", sql.Int, id)
-      .query("SELECT TOP 1 RegistrationNo FROM dbo.CrmSalesDeed WHERE AgreementId = @id");
-    if (!deed.recordset.length || !deed.recordset[0].RegistrationNo) {
-      return res.status(400).json({ error: "A Sales Deed with a Registration No. must exist before this agreement can be marked Registered" });
-    }
     const lockReason = await getAgreementBookingLockReason(pool, id);
     if (lockReason) return res.status(409).json({ error: `Cannot mark registered — ${lockReason}. Cancel the agreement instead.` });
 
+    const regNo = String(AfsRegistrationNo).trim();
+    const regDate = AfsRegistrationDate;
+
     await pool.request()
-      .input("id", sql.Int, id)
-      .input("ub", sql.Int, actor)
+      .input("id",    sql.Int,           id)
+      .input("ub",    sql.Int,           actor)
+      .input("regNo", sql.NVarChar(100), regNo)
+      .input("regDt", sql.Date,          regDate)
       .query(`
-        UPDATE dbo.CrmAgreement SET Status = '${CrmStatus.REGISTERED}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        UPDATE dbo.CrmAgreement SET
+          Status              = '${CrmStatus.REGISTERED}',
+          AfsRegistrationNo   = @regNo,
+          AfsRegistrationDate = @regDt,
+          UpdatedBy           = @ub,
+          UpdatedAt           = SYSDATETIME()
         WHERE Id = @id
       `);
 
     await logCrmAudit(pool, "Agreement", id, actor, [
-      { field: "Status", oldVal: CrmStatus.EXECUTED, newVal: CrmStatus.REGISTERED },
+      { field: "Status",              oldVal: CrmStatus.EXECUTED, newVal: CrmStatus.REGISTERED },
+      { field: "AfsRegistrationNo",   oldVal: null,               newVal: regNo },
+      { field: "AfsRegistrationDate", oldVal: null,               newVal: regDate },
     ]);
 
     res.json({ success: true, status: CrmStatus.REGISTERED });

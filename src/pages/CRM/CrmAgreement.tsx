@@ -431,6 +431,9 @@ const CrmAgreement: React.FC = () => {
   const [sendDialog, setSendDialog] = useState(false);
   const [proposeDateDialog, setProposeDateDialog] = useState(false);
   const [sendDate, setSendDate] = useState("");
+  const [regDialog, setRegDialog] = useState(false);
+  const [regForm, setRegForm] = useState({ AfsRegistrationNo: "", AfsRegistrationDate: "" });
+  const [regSaving, setRegSaving] = useState(false);
   const [agrForm, setAgrForm] = useState({ ...EMPTY_AGR_FORM, BookingId: bkgFilter });
   const [docForm, setDocForm] = useState({ ...EMPTY_DOC_FORM });
   const [docRequestForm, setDocRequestForm] = useState({ ...EMPTY_DOC_REQUEST_FORM });
@@ -713,6 +716,32 @@ const CrmAgreement: React.FC = () => {
       }
     } catch (e: any) {
       toast.error(translateError(e.message));
+    }
+  };
+
+  const handleMarkRegistered = async () => {
+    if (!selectedId) return;
+    if (!regForm.AfsRegistrationNo.trim()) { toast.error("AFS Registration No. is required"); return; }
+    if (!regForm.AfsRegistrationDate) { toast.error("AFS Registration Date is required"); return; }
+    setRegSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${selectedId}/mark-registered`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ AfsRegistrationNo: regForm.AfsRegistrationNo.trim(), AfsRegistrationDate: regForm.AfsRegistrationDate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Agreement marked Registered");
+      setRegDialog(false);
+      setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "" });
+      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+      promptNextStep(navigate, "Agreement registered — you may now request Bank / Organisation NOC.", "/crm/noc", "Go to NOC");
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setRegSaving(false);
     }
   };
 
@@ -1018,7 +1047,7 @@ const CrmAgreement: React.FC = () => {
                           Mark Registered
                         </span>
                       ) : (
-                        <button onClick={() => handleAgreementAction("mark-registered")}
+                        <button onClick={() => { setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "" }); setRegDialog(true); }}
                           className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
                           Mark Registered
                         </button>
@@ -1092,6 +1121,21 @@ const CrmAgreement: React.FC = () => {
                     )}
                   </div>
                 </div>
+                {detail.agreement?.Status === CrmStatus.REGISTERED && (
+                  <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/40 px-3 py-2.5 space-y-1">
+                    <div className="text-[11px] font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide">AFS Registration (Sub-Registrar)</div>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+                      <div>
+                        <span className="text-xs text-muted-foreground">Doc No.: </span>
+                        <span className="font-medium font-mono">{detail.agreement.AfsRegistrationNo || "—"}</span>
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground">Registration Date: </span>
+                        <span className="font-medium">{detail.agreement.AfsRegistrationDate ? String(detail.agreement.AfsRegistrationDate).slice(0, 10) : "—"}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {detail?.financialSummary && (() => {
                   const ag = detail.agreement;
                   const storedGrand = Number(ag?.GrandTotal ?? 0);
@@ -1519,6 +1563,52 @@ const CrmAgreement: React.FC = () => {
             <button onClick={() => handleProposeDate(sendDate)} disabled={saving}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Saving..." : "Propose Date"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mark Registered Dialog — collects the AFS registration details received
+          from the Sub-Registrar (Doc No + date). The physical AFS is registered
+          outside the system; this records the outcome of that event. */}
+      <Dialog open={regDialog} onOpenChange={(o) => { if (!o) { setRegDialog(false); setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "" }); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Mark Agreement Registered</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1 pb-1">
+            <p className="text-xs text-muted-foreground">
+              Enter the details from the Sub-Registrar's office. The AFS registration is a separate legal event from the Sale Deed — it happens now, early in the process.
+            </p>
+          </div>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-foreground block mb-1">AFS Registration No. <span className="text-red-500">*</span></label>
+              <input
+                type="text"
+                placeholder="e.g. SRO/MH/2024/001234"
+                value={regForm.AfsRegistrationNo}
+                onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationNo: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">Doc No. issued by Sub-Registrar at the time of AFS registration.</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-foreground block mb-1">AFS Registration Date <span className="text-red-500">*</span></label>
+              <input
+                type="date"
+                value={regForm.AfsRegistrationDate}
+                onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationDate: e.target.value }))}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <button onClick={() => { setRegDialog(false); setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "" }); }}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleMarkRegistered} disabled={regSaving || !regForm.AfsRegistrationNo.trim() || !regForm.AfsRegistrationDate}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {regSaving ? "Saving..." : "Confirm Registration"}
             </button>
           </div>
         </DialogContent>
