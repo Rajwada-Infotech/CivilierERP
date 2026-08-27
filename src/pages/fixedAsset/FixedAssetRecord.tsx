@@ -1367,10 +1367,11 @@ export default function FixedAssetRecord() {
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[900px]">
+          <table className="w-full text-sm min-w-[1020px]">
             <thead>
               <tr className="bg-yellow-500/5 text-muted-foreground text-xs uppercase tracking-wide">
                 <th className="px-4 py-3 text-left">Asset</th>
+                <th className="px-4 py-3 text-left">FA Item Code</th>
                 <th className="px-4 py-3 text-left">Category</th>
                 <th className="px-4 py-3 text-left">Company / Project</th>
                 <th className="px-4 py-3 text-left">Purchase Date</th>
@@ -1397,6 +1398,9 @@ export default function FixedAssetRecord() {
                           <p className="text-[11px] text-muted-foreground font-mono truncate">{a.AssetCode || "—"}</p>
                         </div>
                       </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="font-mono text-xs text-yellow-600 dark:text-yellow-400">{a.FAItemCode || "—"}</span>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{a.AssetCategory}</td>
                     <td className="px-4 py-3 text-muted-foreground">
