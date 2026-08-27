@@ -26,7 +26,14 @@ router.post("/", requirePageRight("hsn-master", "create"), async (req, res) => {
     HCGST, HSGST, HIGST, HStatus, HIsSAC,
   } = req.body
 
-  const createdBy = req.user?.userId || null
+  // CreatedBy is NOT NULL on dbo.HSN — req.user?.userId alone reached null
+  // for some sessions/tokens and crashed the INSERT with an unhandled SQL
+  // constraint error (500, no useful message) instead of a clean check.
+  // Same req.user?.id fallback already used in debitNote.js/accountGroup.js.
+  const createdBy = req.user?.userId ?? req.user?.id ?? null
+  if (!createdBy) {
+    return res.status(401).json({ error: "User context missing — please sign in again." })
+  }
 
   try {
     const pool = getPool()
@@ -76,7 +83,7 @@ router.put("/:id", requirePageRight("hsn-master", "edit"), async (req, res) => {
     HCGST, HSGST, HIGST, HStatus, HIsSAC,
   } = req.body
 
-  const updatedBy = req.user?.userId || null
+  const updatedBy = req.user?.userId ?? req.user?.id ?? null
 
   try {
     const pool = getPool()

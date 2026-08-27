@@ -22,21 +22,39 @@ import {
 // ─── API ──────────────────────────────────────────────────────────────────────
 const BASE = "/api/hsn";
 
+// None of these checked r.ok — a failed request (e.g. the 500 CreatedBy
+// crash) still resolved its .json() error body as a normal success value,
+// so handleDataEvent's try/catch below never caught anything and showed
+// "HSN saved!" even when the save had actually failed server-side.
+async function readError(res: Response, fallback: string): Promise<Error> {
+  const body = await res.json().catch(() => null);
+  return new Error(body?.error || body?.message || fallback);
+}
+
 const getHsn = () => fetchWithAuth(BASE).then((r) => r.json().catch(() => ({})));
-const addHsn = (data: object) =>
-  fetchWithAuth(BASE, {
+const addHsn = async (data: object) => {
+  const res = await fetchWithAuth(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
-  }).then((r) => r.json().catch(() => ({})));
-const updateHsn = (id: string, data: object) =>
-  fetchWithAuth(`${BASE}/${id}`, {
+  });
+  if (!res.ok) throw await readError(res, "Failed to save HSN");
+  return res.json().catch(() => ({}));
+};
+const updateHsn = async (id: string, data: object) => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
-  }).then((r) => r.json().catch(() => ({})));
-const deleteHsn = (id: string) =>
-  fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => r.json().catch(() => ({})));
+  });
+  if (!res.ok) throw await readError(res, "Failed to update HSN");
+  return res.json().catch(() => ({}));
+};
+const deleteHsn = async (id: string) => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
+  if (!res.ok) throw await readError(res, "Failed to delete HSN");
+  return res.json().catch(() => ({}));
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbHsn {
