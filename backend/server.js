@@ -325,6 +325,7 @@ const ALL_ROUTES = [
   { path: "/api/crm/afs-registry",        file: "./routes/crmAfsRegistry"         },
   { path: "/api/crm/query-payment",        file: "./routes/crmQueryPayment"        },
   { path: "/api/crm/registry",             file: "./routes/crmRegistry"            },
+  { path: "/api/crm/mutation",             file: "./routes/crmMutation"            },
   { path: "/api/crm/pre-possession",       file: "./routes/crmPrePossession"       },
   { path: "/api/crm/possession-notice",    file: "./routes/crmPossessionNotice"    },
   { path: "/api/crm/construction-updates", file: "./routes/crmConstructionUpdates" },

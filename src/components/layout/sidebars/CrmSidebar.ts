@@ -67,6 +67,7 @@ export const crmNavItems: NavItem[] = [
       { label: "Sale Deed",         path: "/crm/sales-deed",        pageKey: "crm-sales-deed"        },
       { label: "Query Payment",     path: "/crm/query-payment",     pageKey: "crm-query-payment"     },
       { label: "Registry",          path: "/crm/registry",          pageKey: "crm-registry"          },
+      { label: "Mutation",          path: "/crm/mutation",          pageKey: "crm-mutation"          },
       { label: "NOC (Org & Bank)",  path: "/crm/noc",               pageKey: "crm-noc"               },
     ],
   },
