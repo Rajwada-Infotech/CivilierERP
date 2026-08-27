@@ -684,14 +684,6 @@ const PurchaseOrderMaster: React.FC = () => {
     queryFn: getEnterprises,
   });
 
-  const { data: costCenters = [] } = useQuery<{ id: number; label: string }[]>({
-    queryKey: ["cost-centers-po"],
-    queryFn: () =>
-      fetchWithAuth("/api/cost-center/options").then((r) =>
-        r.json().catch(() => ({})),
-      ),
-  });
-
   const { data: paymentTerms = [] } = useQuery<{ id: number; label: string; days: number }[]>({
     queryKey: ["payment-terms-po"],
     queryFn: () =>
@@ -1659,7 +1651,6 @@ const PurchaseOrderMaster: React.FC = () => {
     if (!form.supplierId) e.supplierId = true;
     if (!form.companyId) e.companyId = true;
     if (!form.projectId) e.projectId = true;
-    if (!form.costCenterId) e.costCenterId = true;
     if (lineItems.every((li) => !li.itemName && !li.quantity))
       e.lineItems = true;
     setErrors(e);
@@ -4105,29 +4096,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
                   />
                 </div>
-              </div>
-
-              {/* Cost Center */}
-              <div>
-                <FieldLabel required>Cost Center</FieldLabel>
-                <select
-                  value={form.costCenterId}
-                  onChange={(e) => setField("costCenterId", e.target.value)}
-                  disabled={isReadOnly}
-                  className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} ${errors.costCenterId ? "border-red-400" : ""}`}
-                >
-                  <option value="">— Select Cost Center —</option>
-                  {costCenters.map((cc) => (
-                    <option key={cc.id} value={cc.id}>
-                      {cc.label}
-                    </option>
-                  ))}
-                </select>
-                {errors.costCenterId && (
-                  <p className="text-xs text-destructive mt-1">
-                    Cost Center is required
-                  </p>
-                )}
               </div>
 
               {/* Payment Terms — Invoice computes its Due Date from Vendor
