@@ -20,7 +20,9 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -49,10 +51,10 @@ import {
   Landmark,
   ChevronsUpDown,
   Check,
-  SendHorizontal,
   X,
   Eye,
   Printer,
+  BookOpen,
 } from "lucide-react";
 import {
   getReceivedPayments,
@@ -60,7 +62,9 @@ import {
   addReceivedPayment,
   updateReceivedPayment,
   deleteReceivedPayment,
+  getReceivedPaymentPosting,
   type ReceivedPaymentRecord,
+  type ReceivedPaymentPosting,
 } from "@/api/receivedPaymentApi";
 import { useSearchParams } from "react-router-dom";
 import { getPayableEmis, payLoan, type PayableEmi } from "@/api/loanSanctionApi";
@@ -187,6 +191,45 @@ const normalizeCompanyName = (value: string | null | undefined) =>
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
+
+// Customer Bank Name was a free-text field — switched to a picker of common
+// Indian banks (grouped Major/Other) so entries stay consistent for
+// reporting, while still allowing any bank via "Other" for names not listed.
+const MAJOR_BANKS = [
+  "State Bank of India",
+  "HDFC Bank",
+  "ICICI Bank",
+  "Axis Bank",
+  "Kotak Mahindra Bank",
+  "Punjab National Bank",
+  "Bank of Baroda",
+  "Canara Bank",
+  "Union Bank of India",
+  "IndusInd Bank",
+  "IDBI Bank",
+  "Yes Bank",
+  "Bank of India",
+  "Indian Bank",
+  "Central Bank of India",
+];
+const MINOR_BANKS = [
+  "IDFC FIRST Bank",
+  "Federal Bank",
+  "South Indian Bank",
+  "Karnataka Bank",
+  "RBL Bank",
+  "City Union Bank",
+  "DCB Bank",
+  "Karur Vysya Bank",
+  "Tamilnad Mercantile Bank",
+  "Bank of Maharashtra",
+  "UCO Bank",
+  "Punjab & Sind Bank",
+  "AU Small Finance Bank",
+  "Equitas Small Finance Bank",
+  "Ujjivan Small Finance Bank",
+];
+const OTHER_BANK_VALUE = "__other__";
 
 const modeIcon = (mode: string) => {
   if (mode === "Cash")
@@ -351,7 +394,7 @@ function EmptyState() {
   return (
     <div className="text-center py-14 text-muted-foreground text-sm">
       <AlertCircle size={18} className="mx-auto mb-2 opacity-30" />
-      No received payments yet. Click "Add Payment" to get started.
+      No received payments yet. Click "Add Received Payment" to get started.
     </div>
   );
 }
@@ -376,12 +419,31 @@ export default function ReceivedPaymentPage() {
   const [apiLoading, setApiLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [submitTarget, setSubmitTarget] = useState<ReceivedPayment | null>(
-    null,
-  );
   const [viewingPayment, setViewingPayment] = useState<ReceivedPayment | null>(
     null,
   );
+  const [detailTab, setDetailTab] = useState<"details" | "posting">("details");
+  const [postingData, setPostingData] = useState<ReceivedPaymentPosting | null>(null);
+  const [postingLoading, setPostingLoading] = useState(false);
+
+  // Always reopen on Details, never leave the modal stuck on a stale
+  // Posting tab from whichever payment was viewed previously.
+  useEffect(() => {
+    setDetailTab("details");
+  }, [viewingPayment?.id]);
+
+  // Fetch GL posting details when the Posting tab opens — same on-demand
+  // fetch pattern Payment.tsx's own Posting tab uses.
+  useEffect(() => {
+    if (detailTab !== "posting" || !viewingPayment?.id) return;
+    setPostingLoading(true);
+    setPostingData(null);
+    getReceivedPaymentPosting(Number(viewingPayment.id))
+      .then(setPostingData)
+      .catch(() => setPostingData(null))
+      .finally(() => setPostingLoading(false));
+  }, [detailTab, viewingPayment?.id]);
+
   const PAGE_SIZE = 20;
 
   // Deep-link support — Trial Balance's ledger drill-down navigates here as
@@ -406,6 +468,13 @@ export default function ReceivedPaymentPage() {
   const [form, setForm] = useDraftForm("received-payment", EMPTY_FORM, {
     skip: editingId !== null,
   });
+  // Customer Bank Name's free-text fallback only activates once "Other" is
+  // explicitly picked from the dropdown — not by default, and not just
+  // because form.bankName happens to be empty (which is also the initial,
+  // nothing-selected state).
+  const [customBank, setCustomBank] = useState(
+    !!form.bankName && !MAJOR_BANKS.includes(form.bankName) && !MINOR_BANKS.includes(form.bankName),
+  );
 
   // ── Loan Repayment (Customer Loan only) ─────────────────────────────────
   // A Customer Loan repayment is cash coming IN from the customer who
@@ -650,6 +719,7 @@ export default function ReceivedPaymentPage() {
 
   const handleReset = () => {
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
+    setCustomBank(false);
     setDate(new Date());
     setDocNoPreview("");
   };
@@ -658,12 +728,14 @@ export default function ReceivedPaymentPage() {
     setView("list");
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
+    setCustomBank(false);
   };
 
   // ── Open add form ─────────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
+    setCustomBank(false);
     setDate(new Date());
     setDocNoPreview("");
     setView("form");
@@ -692,6 +764,9 @@ export default function ReceivedPaymentPage() {
       remarks: p.remarks ?? "",
       contractId: String((p as { ContractId?: number }).ContractId ?? ""),
     });
+    setCustomBank(
+      !!p.bankName && !MAJOR_BANKS.includes(p.bankName) && !MINOR_BANKS.includes(p.bankName),
+    );
     setDate(p.docDate ? new Date(p.docDate) : new Date());
     setDocNoPreview(p.docNo);
     setView("form");
@@ -800,27 +875,6 @@ export default function ReceivedPaymentPage() {
     }
   };
 
-  const handleSubmitForApproval = async () => {
-    if (!submitTarget) return;
-    setActionLoading(true);
-    try {
-      const res = await fetchWithAuth(
-        `/api/received-payment/${submitTarget.id}/submit`,
-        { method: "PATCH" },
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Submit failed");
-      }
-      toast.success("Sent to Approval Inbox ✓");
-      setSubmitTarget(null);
-      await loadPayments(currentPage);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to submit");
-    } finally {
-      setActionLoading(false);
-    }
-  };
 
   const deletePayment = async (id: string) => {
     try {
@@ -1012,7 +1066,7 @@ export default function ReceivedPaymentPage() {
                   className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-3 sm:px-4 py-1.5 text-xs h-auto"
                 >
                   <Plus size={13} className="sm:mr-1" />
-                  <span className="hidden sm:inline">Add Payment</span>
+                  <span className="hidden sm:inline">Add Received Payment</span>
                 </Button>
               )}
               <ExportMenu
@@ -1218,15 +1272,6 @@ export default function ReceivedPaymentPage() {
                                 <Pencil size={12} />
                               </button>
                             )}
-                            {p.status === "Draft" && (
-                              <button
-                                onClick={() => setSubmitTarget(p)}
-                                title="Submit for Approval"
-                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-primary hover:bg-primary/10 transition-colors"
-                              >
-                                <SendHorizontal size={13} />
-                              </button>
-                            )}
                             {p.status === "Pending" && (
                               <span
                                 title="Awaiting admin approval"
@@ -1310,15 +1355,6 @@ export default function ReceivedPaymentPage() {
                             title="Edit"
                           >
                             <Pencil size={13} />
-                          </button>
-                        )}
-                        {p.status === "Draft" && (
-                          <button
-                            onClick={() => setSubmitTarget(p)}
-                            className="p-1.5 text-muted-foreground/50 hover:text-primary"
-                            title="Submit for Approval"
-                          >
-                            <SendHorizontal size={13} />
                           </button>
                         )}
                         {p.status === "Pending" && (
@@ -1823,12 +1859,52 @@ export default function ReceivedPaymentPage() {
                     )}
                     <div>
                       <FieldLabel>Customer Bank Name</FieldLabel>
-                      <Input
-                        className="h-9 text-sm"
-                        placeholder="Bank of customer"
-                        value={form.bankName}
-                        onChange={(e) => setField("bankName", e.target.value)}
-                      />
+                      <Select
+                        value={
+                          customBank
+                            ? OTHER_BANK_VALUE
+                            : MAJOR_BANKS.includes(form.bankName) || MINOR_BANKS.includes(form.bankName)
+                              ? form.bankName
+                              : ""
+                        }
+                        onValueChange={(v) => {
+                          if (v === OTHER_BANK_VALUE) {
+                            setCustomBank(true);
+                            setField("bankName", "");
+                          } else {
+                            setCustomBank(false);
+                            setField("bankName", v);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-9 text-sm">
+                          <SelectValue placeholder="Select customer's bank…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectLabel>Major Banks</SelectLabel>
+                            {MAJOR_BANKS.map((b) => (
+                              <SelectItem key={b} value={b}>{b}</SelectItem>
+                            ))}
+                          </SelectGroup>
+                          <SelectGroup>
+                            <SelectLabel>Other Banks</SelectLabel>
+                            {MINOR_BANKS.map((b) => (
+                              <SelectItem key={b} value={b}>{b}</SelectItem>
+                            ))}
+                          </SelectGroup>
+                          <SelectItem value={OTHER_BANK_VALUE}>Other (type below)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {customBank && (
+                        <Input
+                          className="h-9 text-sm mt-1.5"
+                          placeholder="Bank of customer"
+                          value={form.bankName}
+                          onChange={(e) => setField("bankName", e.target.value)}
+                          autoFocus
+                        />
+                      )}
                     </div>
                   </div>
                 )}
@@ -1998,66 +2074,6 @@ export default function ReceivedPaymentPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Submit for Approval Confirm ─────────────────────────────────────── */}
-      <Dialog
-        open={!!submitTarget}
-        onOpenChange={(o) => {
-          if (!o) setSubmitTarget(null);
-        }}
-      >
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="font-heading text-base flex items-center gap-2">
-              <SendHorizontal size={16} className="text-primary" />
-              Submit for Approval
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              This will send the payment to the admin Approval Inbox. You won't
-              be able to edit it until it's reviewed.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-3 space-y-2">
-            <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 space-y-1">
-              <p className="text-xs text-muted-foreground font-heading uppercase tracking-wide">
-                Payment
-              </p>
-              <p className="text-sm font-semibold text-foreground">
-                {submitTarget?.docNo}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {submitTarget?.customerName || submitTarget?.receivedFrom}
-              </p>
-              <p className="text-sm font-mono font-bold text-emerald-600">
-                +{submitTarget ? fmt(submitTarget.amount) : ""}
-              </p>
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSubmitTarget(null)}
-              disabled={actionLoading}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleSubmitForApproval}
-              disabled={actionLoading}
-              className="gap-1.5"
-            >
-              {actionLoading ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <SendHorizontal size={13} />
-              )}
-              Submit
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* ── View Receipt Modal ───────────────────────────────────────────────── */}
       {viewingPayment && (
         <div
@@ -2104,6 +2120,25 @@ export default function ReceivedPaymentPage() {
               </div>
             </div>
 
+            {/* Tabs */}
+            <div className="flex items-center gap-1 px-5 pt-3 border-b border-border">
+              {(["details", "posting"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setDetailTab(t)}
+                  className={`px-3 py-2 text-xs font-heading font-semibold border-b-2 -mb-px transition-colors ${
+                    detailTab === t
+                      ? "border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t === "details" ? "Details" : "Posting"}
+                </button>
+              ))}
+            </div>
+
+            {detailTab === "details" && (
+              <>
             {/* Amount highlight */}
             <div className="px-5 pt-4 pb-2">
               <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-5 py-4 flex items-center justify-between">
@@ -2195,6 +2230,75 @@ export default function ReceivedPaymentPage() {
                 </div>
               </div>
             )}
+              </>
+            )}
+
+            {detailTab === "posting" && (
+              <div className="px-5 py-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <BookOpen size={13} className="text-primary" />
+                  <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                    GL Posting
+                  </span>
+                </div>
+
+                {postingLoading ? (
+                  <div className="rounded-xl border border-border py-8 text-center text-xs text-muted-foreground">
+                    Loading posting details…
+                  </div>
+                ) : !postingData ? (
+                  <div className="rounded-xl border border-dashed border-border py-8 text-center text-xs text-muted-foreground">
+                    Could not load posting data.
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted/40">
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        {postingData.entries[0]?.docNo}
+                      </span>
+                      {postingData.isPosted ? (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
+                          ✓ {postingData.jvNo}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 font-medium whitespace-nowrap">
+                          Not yet posted
+                        </span>
+                      )}
+                    </div>
+                    <div className="divide-y divide-border/50">
+                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+                        <span>Account</span>
+                        <span className="text-right">Debit (₹)</span>
+                        <span className="text-right">Credit (₹)</span>
+                      </div>
+                      {[
+                        { label: postingData.accounts.bank?.label ?? "Bank A/c", side: "debit" as const },
+                        { label: postingData.accounts.customer?.label ?? "Customer A/c", side: "credit" as const },
+                      ].map((row, i) => (
+                        <div key={i} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2.5 items-center gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                            <span className="text-xs text-foreground truncate">{row.label}</span>
+                          </div>
+                          <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                            {row.side === "debit" ? fmt(postingData.amount) : ""}
+                          </span>
+                          <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                            {row.side === "credit" ? fmt(postingData.amount) : ""}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
+                        <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                        <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(postingData.amount)}</span>
+                        <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(postingData.amount)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Footer */}
             <div className="px-5 py-3 border-t border-border bg-muted/10 flex items-center justify-between">
@@ -2216,30 +2320,16 @@ export default function ReceivedPaymentPage() {
                   Awaiting admin approval
                 </span>
               )}
-              {viewingPayment.status === "Draft" && (
-                <div className="flex items-center gap-2">
-                  {rights.canEdit && (
-                    <button
-                      onClick={() => {
-                        setViewingPayment(null);
-                        openEdit(viewingPayment);
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
-                    >
-                      <Pencil size={12} /> Edit
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      const p = viewingPayment;
-                      setViewingPayment(null);
-                      setSubmitTarget(p);
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors"
-                  >
-                    <SendHorizontal size={12} /> Submit
-                  </button>
-                </div>
+              {viewingPayment.status === "Draft" && rights.canEdit && (
+                <button
+                  onClick={() => {
+                    setViewingPayment(null);
+                    openEdit(viewingPayment);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                >
+                  <Pencil size={12} /> Edit
+                </button>
               )}
               {viewingPayment.status === "Approved" && rights.canEdit && (
                 <button
