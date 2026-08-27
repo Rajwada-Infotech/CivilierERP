@@ -205,7 +205,7 @@ const CrmMutation: React.FC = () => {
         </div>
       }
     >
-      <Breadcrumbs items={[{ label: "CRM" }, { label: "Legal" }, { label: "Mutation" }]} />
+      <Breadcrumbs items={[{ label: "CRM" }, { label: "Legal" }, { label: "Property Mutation" }]} />
 
       <DataTable
         data={rows as any[]}

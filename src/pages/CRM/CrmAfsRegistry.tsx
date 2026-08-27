@@ -191,7 +191,7 @@ const CrmAfsRegistry: React.FC = () => {
         </div>
       }
     >
-      <Breadcrumbs items={[{ label: "CRM" }, { label: "Legal" }, { label: "AFS Registry" }]} />
+      <Breadcrumbs items={[{ label: "CRM" }, { label: "Legal" }, { label: "Agreement Registration Visit" }]} />
 
       <DataTable
         data={rows as any[]}

@@ -180,7 +180,7 @@ const CrmOcCc: React.FC = () => {
         </div>
       }
     >
-      <Breadcrumbs items={[{ label: "CRM" }, { label: "Closure" }, { label: "OC / CC" }]} />
+      <Breadcrumbs items={[{ label: "CRM" }, { label: "Closure" }, { label: "Occupancy Certificate" }]} />
 
       <DataTable
         data={rows as any[]}

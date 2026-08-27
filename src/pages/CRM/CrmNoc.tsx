@@ -222,7 +222,7 @@ const CrmNoc: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "CRM", "NOC"]} />
+      <Breadcrumbs items={["Dashboard", "CRM", "No Objection Certificates"]} />
       <CrmShell
         title="No Objection Certificates (NOC)"
         subtitle="Organisation NOC confirming no outstanding dues, and Bank NOC releasing the lender's charge on the property after the loan is cleared"

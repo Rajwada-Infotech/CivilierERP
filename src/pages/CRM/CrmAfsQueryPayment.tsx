@@ -349,7 +349,7 @@ const CrmAfsQueryPayment: React.FC = () => {
         </div>
       }
     >
-      <Breadcrumbs items={[{ label: "CRM" }, { label: "Legal" }, { label: "AFS Query Payment" }]} />
+      <Breadcrumbs items={[{ label: "CRM" }, { label: "Legal" }, { label: "Agreement Registration Fees" }]} />
 
       <DataTable
         data={rows as any[]}
