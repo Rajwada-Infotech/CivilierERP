@@ -193,8 +193,13 @@ router.get("/:id", requirePageRight("crm-applications", "view"), async (req, res
     const [appRes, bookRes, logRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${APP_SELECT} WHERE a.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
-        SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.Status, b.BookingDate
-        FROM dbo.CrmBooking b WHERE b.ApplicationId = @id AND b.IsActive = 1
+        SELECT b.Id, b.BookingNo,
+               COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+               COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+               b.TotalValue, b.Status, b.BookingDate
+        FROM dbo.CrmBooking b
+        LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+        WHERE b.ApplicationId = @id AND b.IsActive = 1
       `),
       pool.request().input("id", sql.Int, id).query(`
         SELECT s.*, u.name AS ActorName

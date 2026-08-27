@@ -17,10 +17,12 @@ router.use(authMiddleware);
 router.use(apiRateLimit);
 
 const DEED_SELECT = `
-  SELECT d.*, b.BookingNo, b.UnitNo, b.TotalValue AS BookingValue, b.Status AS BookingStatus, a.ApplicantName, a.Mobile
+  SELECT d.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+         b.TotalValue AS BookingValue, b.Status AS BookingStatus, a.ApplicantName, a.Mobile
   FROM dbo.CrmSalesDeed d
   JOIN dbo.CrmBooking b ON b.Id = d.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
 `;
 
 // Status is never a free pick — it is derived, level by level:
@@ -74,9 +76,12 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-sales-deed", "vi
     const bookingId = parseInt(req.params.bookingId);
 
     const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT b.Id, b.BookingNo, b.UnitNo, b.Status AS BookingStatus, b.FinancingType, a.ApplicantName, a.Mobile,
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+             b.Status AS BookingStatus, b.FinancingType, a.ApplicantName, a.Mobile,
              ISNULL(b.GrandTotal, b.TotalValue) AS GrandTotal
-      FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.Id = @bid
     `);
     if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });

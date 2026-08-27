@@ -13,10 +13,11 @@ router.use(authMiddleware);
 router.use(apiRateLimit);
 
 const PN_SELECT = `
-  SELECT n.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile
+  SELECT n.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile
   FROM dbo.CrmPossessionNotice n
   JOIN dbo.CrmBooking b ON b.Id = n.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
 `;
 
 router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, res) => {

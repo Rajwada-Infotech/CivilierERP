@@ -31,12 +31,23 @@ function hasValue(value) {
 // below if it fails. Returns null when the booking is fine to act on.
 async function requireActiveBooking(pool, bookingId) {
   const row = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Status, IsActive FROM dbo.CrmBooking WHERE Id = @bid");
+    .query("SELECT Status, IsActive, IsFrozen, FreezeReason, FreezeExpiresAt FROM dbo.CrmBooking WHERE Id = @bid");
   if (!row.recordset.length) return "Booking not found";
   const b = row.recordset[0];
   if (!b.IsActive) return "This booking is no longer active";
   if (["Cancelled", "Rejected"].includes(b.Status)) {
     return `This booking has been ${b.Status} — no further workflow actions are allowed on it`;
+  }
+  if (b.IsFrozen) {
+    // Auto-lift the freeze if its expiry has passed — fire-and-forget, don't
+    // block the request on the UPDATE completing.
+    if (b.FreezeExpiresAt && new Date(b.FreezeExpiresAt) < new Date()) {
+      pool.request().input("bid", sql.Int, bookingId).query(
+        "UPDATE dbo.CrmBooking SET IsFrozen=0, FrozenAt=NULL, FrozenBy=NULL, FreezeReason=NULL, FreezeExpiresAt=NULL, UpdatedAt=SYSDATETIME() WHERE Id=@bid"
+      ).catch(() => {});
+      return null;
+    }
+    return `Booking is currently frozen${b.FreezeReason ? ": " + b.FreezeReason : ""}. Contact an admin to unfreeze before making changes.`;
   }
   return null;
 }

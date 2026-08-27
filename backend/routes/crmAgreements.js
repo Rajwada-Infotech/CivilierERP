@@ -1440,11 +1440,12 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
         ag.AgreementNo, ag.Status AS AgreementStatus,
         ag.SeniorApprovalStatus, ag.SentToCustomerAt, ag.CustomerApprovalStatus, ag.AgreementDate,
         ag.LegalExecutiveId, le.name AS LegalExecutiveName,
-        b.BookingNo, b.UnitNo, a.ApplicantName
+        b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName
       FROM dbo.CrmAgreementDocument d
       JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       LEFT JOIN dbo.Users le ON le.id = ag.LegalExecutiveId
       ${where}
       ORDER BY d.CreatedAt DESC

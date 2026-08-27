@@ -19,10 +19,13 @@ router.use(apiRateLimit);
 const NOC_TYPES = ["Organisation", "Bank"];
 
 const NOC_SELECT = `
-  SELECT n.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile
+  SELECT n.*, b.BookingNo,
+         COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+         a.ApplicantName, a.Mobile
   FROM dbo.CrmNoc n
   JOIN dbo.CrmBooking b ON b.Id = n.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
 `;
 
 // GET / — all NOCs
@@ -54,9 +57,11 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-noc", "view"), a
     const bookingId = parseInt(req.params.bookingId);
 
     const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT b.Id, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile,
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
              ISNULL(b.GrandTotal, b.TotalValue) AS GrandTotal
-      FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.Id = @bid
     `);
     if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });

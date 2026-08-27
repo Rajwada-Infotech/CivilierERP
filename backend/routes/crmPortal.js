@@ -162,7 +162,9 @@ router.get("/applications", async (req, res) => {
       SELECT
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Status AS ApplicationStatus,
         a.InterestedProject, a.CreatedAt AS ApplicationDate,
-        b.Id AS BookingId, b.BookingNo, b.UnitNo, b.ProjectName,
+        b.Id AS BookingId, b.BookingNo,
+        COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+        COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
         b.Status AS BookingStatus, b.GrandTotal, b.BookingDate,
         ag.Status AS AgreementStatus, ag.SentToCustomerAt,
         ag.CustomerApprovalStatus, ag.SeniorApprovalStatus,
@@ -170,6 +172,7 @@ router.get("/applications", async (req, res) => {
         h.Status AS HandoverStatus, h.ActualHandoverDate
       FROM dbo.CrmApplication a
       LEFT JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id AND b.IsActive = 1
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
       LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id
       LEFT JOIN dbo.CrmHandover h ON h.BookingId = b.Id
@@ -208,10 +211,16 @@ router.get("/timeline", async (req, res) => {
     if (appId === null) return;
 
     const booking = await pool.request().input("aid", sql.Int, appId).query(`
-      SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectId, b.ProjectName, b.TotalValue, b.BookingAmount,
+      SELECT b.Id, b.BookingNo,
+             COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+             b.ProjectId,
+             COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+             b.TotalValue, b.BookingAmount,
              b.TokenType, b.TokenValue, b.Status AS BookingStatus, b.BookingDate,
              b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal
-      FROM dbo.CrmBooking b WHERE b.ApplicationId = @aid AND b.IsActive = 1
+      FROM dbo.CrmBooking b
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      WHERE b.ApplicationId = @aid AND b.IsActive = 1
     `);
     const bk = booking.recordset[0];
 
@@ -334,9 +343,10 @@ router.get("/invoices", async (req, res) => {
     if (appId === null) return;
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.Status, inv.CreatedAt,
-             b.BookingNo, b.UnitNo
+             b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo
       FROM dbo.CrmInvoice inv
       JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.ApplicationId = @aid
       ORDER BY inv.CreatedAt DESC
     `);
@@ -386,9 +396,10 @@ router.get("/receipts", async (req, res) => {
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT mr.Id, mr.ReceiptNo, mr.Amount, mr.PaymentMode, mr.ChequeNo,
              mr.TransactionRef, mr.ReceivedDate, mr.CreatedAt,
-             b.BookingNo, b.UnitNo
+             b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo
       FROM dbo.CrmMoneyReceipt mr
       JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.ApplicationId = @aid AND mr.Status = 'Approved'
       ORDER BY mr.ReceivedDate DESC
     `);
@@ -441,9 +452,13 @@ router.get("/agreement", async (req, res) => {
              ag.CustomerApprovalStatus, ag.CustomerApprovedAt, ag.RecheckCount,
              ag.ProposedDate, ag.ProposedDateStatus, ag.DateApprovalStatus,
              ag.SentToCustomerAt, ag.LastRecheckRemarks,
-             b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.BookingDate
+             b.BookingNo,
+             COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+             COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+             b.TotalValue, b.BookingDate
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
     `);
     // Not having an agreement shared yet is a normal, expected state — 200 + null.

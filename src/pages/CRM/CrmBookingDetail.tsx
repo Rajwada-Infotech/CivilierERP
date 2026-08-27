@@ -1,5 +1,6 @@
 import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -137,23 +138,32 @@ function PdfPreviewDialog({ pdfUrl, title, subtitle, filename, onClose }: {
   pdfUrl: string; title: string; subtitle?: string; filename: string; onClose: () => void;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   useEffect(() => {
     let objectUrl: string | null = null;
     let cancelled = false;
+    setLoadError(null);
+    setBlobUrl(null);
     fetchWithAuth(pdfUrl)
-      .then((r) => (r.ok ? r.blob() : null))
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed to load PDF (${r.status})`);
+        return r.blob();
+      })
       .then((blob) => {
-        if (cancelled || !blob) return;
+        if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setBlobUrl(objectUrl);
       })
-      .catch(() => {});
+      .catch((e) => {
+        if (!cancelled) setLoadError(e?.message || "Failed to load PDF");
+      });
     return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [pdfUrl]);
 
-  return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
-      onClick={onClose}>
+  return createPortal(
+    <div data-overlay-portal className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4"
+      style={{ pointerEvents: "auto" }}
+      onClick={onClose} onPointerDown={(e) => e.stopPropagation()}>
       <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
@@ -175,12 +185,15 @@ function PdfPreviewDialog({ pdfUrl, title, subtitle, filename, onClose }: {
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center min-h-[300px] bg-muted/20 overflow-hidden">
-          {!blobUrl
-            ? <span className="text-sm text-muted-foreground flex items-center gap-2"><RefreshCw size={14} className="animate-spin" /> Loading preview…</span>
-            : <iframe src={blobUrl} title={title} className="w-full h-[65vh] border-0" />}
+          {loadError
+            ? <span className="text-sm text-destructive flex items-center gap-2"><AlertTriangle size={14} /> {loadError}</span>
+            : !blobUrl
+              ? <span className="text-sm text-muted-foreground flex items-center gap-2"><RefreshCw size={14} className="animate-spin" /> Loading preview…</span>
+              : <iframe src={blobUrl} title={title} className="w-full h-[65vh] border-0" />}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1171,7 +1184,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
   return (<>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto thin-scroll">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto thin-scroll"
+        onPointerDownOutside={(e) => {
+          if ((e.target as HTMLElement)?.closest?.("[data-overlay-portal]")) e.preventDefault();
+        }}
+        onInteractOutside={(e) => {
+          if ((e.target as HTMLElement)?.closest?.("[data-overlay-portal]")) e.preventDefault();
+        }}>
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
               <DialogTitle className="font-heading flex items-center gap-2">
@@ -2886,12 +2905,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         onClose={() => setPreviewApplicationForm(null)}
       />
     )}
-    {/* Plain div overlay — avoids nested Radix Dialog focus-trap conflict
-        (same fix as CoApplicant: two Radix Dialogs open at once leave buttons
-        in the outer dialog unresponsive after the inner one closes). */}
-    {previewAttachment && (
-      <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4"
-        onClick={() => setPreviewAttachment(null)}>
+    {previewAttachment && createPortal(
+      <div data-overlay-portal className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4"
+        style={{ pointerEvents: "auto" }}
+        onClick={() => setPreviewAttachment(null)} onPointerDown={(e) => e.stopPropagation()}>
         <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
           onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
@@ -2931,11 +2948,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             </p>
           )}
         </div>
-      </div>
+      </div>,
+      document.body,
     )}
-    {reasonDialog && (
-      <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
-        onClick={() => setReasonDialog(null)}>
+    {reasonDialog && createPortal(
+      <div data-overlay-portal className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4"
+        style={{ pointerEvents: "auto" }}
+        onClick={() => setReasonDialog(null)} onPointerDown={(e) => e.stopPropagation()}>
         <div className="bg-background border border-border rounded-xl shadow-xl w-full max-w-md p-5 space-y-4"
           onClick={(e) => e.stopPropagation()}>
           <div>
@@ -2956,7 +2975,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             </div>
           </form>
         </div>
-      </div>
+      </div>,
+      document.body,
     )}
   </>);
 }

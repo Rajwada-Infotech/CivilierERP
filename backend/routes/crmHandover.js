@@ -19,13 +19,17 @@ const HANDOVER_SELECT = `
     h.Id, h.BookingId, h.ScheduledDate, h.ActualHandoverDate, h.KeyHandoverBy,
     h.FinalDuesCleared, h.CustomerAcknowledged, h.Status, h.Notes,
     h.CreatedAt, h.UpdatedAt,
-    b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.AssignedTo,
+    b.BookingNo,
+    COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+    COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+    b.TotalValue, b.AssignedTo,
     a.ApplicantName, a.Mobile,
     kh.name AS KeyHandoverByName,
     (SELECT COUNT(*) FROM dbo.CrmSnagItem s WHERE s.HandoverId = h.Id AND s.Status IN ('${CrmStatus.OPEN}','${CrmStatus.IN_PROGRESS}')) AS OpenSnagCount
   FROM dbo.CrmHandover h
   JOIN  dbo.CrmBooking b     ON b.Id = h.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.Users kh     ON kh.id = h.KeyHandoverBy
 `;
 
@@ -56,9 +60,10 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
     const pool = getPool();
     // Candidates: active bookings with no handover yet
     const candidates = await pool.request().query(`
-      SELECT b.Id, b.BookingNo, b.UnitNo, a.ApplicantName
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id)
       ORDER BY b.BookingNo

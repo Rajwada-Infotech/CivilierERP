@@ -32,7 +32,7 @@ const MANUAL_STEPS = new Set(["DirectorMeeting"]);
 // without duplicating any of their own create/update logic, which stays on
 // their own dedicated pages (this page only links out to them).
 const LM_SELECT = `
-  SELECT m.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile,
+  SELECT m.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
     sd.Id AS SalesDeedId, sd.DeedNo, sd.ExecutedBy AS DeedExecutedBy, sd.RegistrationNo AS DeedRegistrationNo,
     qp.Id AS QueryPaymentId, qp.QPNo, qp.Status AS QueryPaymentStatus,
     reg.Id AS RegistryId, reg.RegNo, reg.Status AS RegistryStatus,
@@ -41,6 +41,7 @@ const LM_SELECT = `
   FROM dbo.CrmLegalMilestone m
   JOIN dbo.CrmBooking b ON b.Id = m.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = m.BookingId
   LEFT JOIN dbo.CrmQueryPayment qp ON qp.BookingId = m.BookingId
   LEFT JOIN dbo.CrmRegistry reg ON reg.BookingId = m.BookingId

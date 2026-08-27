@@ -37,12 +37,13 @@ function decodeBase64File(f, label) {
 // Payment only tracks whether that amount has been communicated to the
 // customer and, later, whether they've actually paid it to the government.
 const QP_SELECT = `
-  SELECT qp.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile,
+  SELECT qp.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
          sd.DeedNo, sd.StampDuty, sd.RegistrationFee,
          ISNULL(sd.StampDuty, 0) + ISNULL(sd.RegistrationFee, 0) AS RequiredAmount
   FROM dbo.CrmQueryPayment qp
   JOIN dbo.CrmBooking b ON b.Id = qp.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
 `;
 

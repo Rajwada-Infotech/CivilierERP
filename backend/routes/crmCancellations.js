@@ -44,16 +44,33 @@ const CANCEL_SELECT = `
     c.DeductionPercent, c.DeductionAmount, c.RefundAmount, c.Status,
     c.RequestedBy, c.ApprovedBy, c.ApprovedAt, c.RefundDate, c.RefundMode,
     c.RefundRef, c.RefundBankId, c.Notes, c.CreatedAt, c.UpdatedAt,
-    b.BookingNo, b.UnitNo, b.ProjectName, b.ProjectId, b.TotalValue, b.AssignedTo,
+    b.BookingNo,
+    COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+    COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+    b.ProjectId, b.TotalValue, b.AssignedTo,
     a.ApplicantName, a.Mobile,
     rb.name AS RequestedByName, ab.name AS ApprovedByName,
+    c.SettlementStatus, c.RefundDueDate, c.SettledAt, c.SettledBy, c.SettlementNotes,
+    sb.name AS SettledByName,
+    CASE
+      WHEN c.RefundDueDate IS NOT NULL AND c.SettlementStatus = 'RefundPending'
+           AND CAST(SYSDATETIME() AS DATE) > c.RefundDueDate
+      THEN 1 ELSE 0
+    END AS IsRefundOverdue,
+    CASE
+      WHEN c.RefundDueDate IS NOT NULL AND c.SettlementStatus = 'RefundPending'
+      THEN DATEDIFF(day, CAST(SYSDATETIME() AS DATE), c.RefundDueDate)
+      ELSE NULL
+    END AS RefundDaysRemaining,
     (SELECT COUNT(DISTINCT x.DepositBankId) FROM ${DEPOSIT_BANKS_FOR_BOOKING}) AS DistinctDepositBankCount,
     (SELECT TOP 1 x.DepositBankId FROM ${DEPOSIT_BANKS_FOR_BOOKING}) AS SingleDepositBankId
   FROM dbo.CrmCancellation c
   JOIN  dbo.CrmBooking b     ON b.Id = c.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.Users rb ON rb.id = c.RequestedBy
   LEFT JOIN dbo.Users ab ON ab.id = c.ApprovedBy
+  LEFT JOIN dbo.Users sb ON sb.id = c.SettledBy
 `;
 
 // GET /policy — returns the applicable cancellation penalty slab for a given
@@ -459,6 +476,26 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       }
     }
 
+    // RERA Section 18: promoter must refund within 45 days. Stamp the due date
+    // now so finance dashboards and overdue escalation queries can check it.
+    // If RefundAmount = 0 (full forfeiture), there is nothing to refund —
+    // mark as ForfeitureDocumented immediately so the pool shows it as settled.
+    const finalAmts = await pool.request().input("id", sql.Int, id)
+      .query("SELECT RefundAmount FROM dbo.CrmCancellation WHERE Id = @id");
+    const refundAmt = Number(finalAmts.recordset[0]?.RefundAmount || 0);
+    const newSettlementStatus = refundAmt === 0 ? "ForfeitureDocumented" : "RefundPending";
+    await pool.request()
+      .input("id",  sql.Int, id)
+      .input("ss",  sql.NVarChar(30), newSettlementStatus)
+      .input("rdd", sql.Date, refundAmt > 0 ? new Date(Date.now() + 45 * 86400000) : null)
+      .query(`
+        UPDATE dbo.CrmCancellation SET
+          SettlementStatus = @ss,
+          RefundDueDate    = @rdd,
+          UpdatedAt        = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
     res.json({ success: true, status: result.newStatus === CrmStatus.APPROVED ? "FinancePending" : result.newStatus });
   } catch (e) {
     console.error("[crm-cancellations] approve error:", e.message);
@@ -615,11 +652,13 @@ router.put("/:id/mark-refunded", requirePageRight("crm-cancellations", "edit"), 
       .input("rmode", sql.NVarChar(50),  b.RefundMode || null)
       .input("rref",  sql.NVarChar(200), b.RefundRef  || null)
       .input("rbank", sql.Int,           b.RefundBankId ? parseInt(b.RefundBankId) : null)
+      .input("actor", sql.Int,           actorId(req))
       .query(`
         UPDATE dbo.CrmCancellation SET
           Status = '${CrmStatus.REFUNDED}',
           RefundDate = ISNULL(@rdate, CAST(SYSDATETIME() AS DATE)),
           RefundMode = @rmode, RefundRef = @rref, RefundBankId = @rbank,
+          SettlementStatus = 'Settled', SettledAt = SYSDATETIME(), SettledBy = @actor,
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
@@ -637,6 +676,55 @@ router.put("/:id/mark-refunded", requirePageRight("crm-cancellations", "edit"), 
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-cancellations] mark-refunded error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/settle — finance/admin only. Explicitly marks a cancellation as
+// settled when there is no cash refund to disburse (full forfeiture, or the
+// buyer has acknowledged and agreed). This closes the RERA 45-day loop for
+// zero-refund cancellations and moves the record out of the overdue queue.
+const SETTLE_ROLES = ["accounts_head", "finance_head", "admin", "super_admin"];
+router.put("/:id/settle", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const role = (req.user?.role || "").toLowerCase();
+    if (!SETTLE_ROLES.includes(role)) {
+      return res.status(403).json({ error: "Only accounts/finance heads or admins can mark a cancellation as settled" });
+    }
+    const { notes } = req.body || {};
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, SettlementStatus, RefundAmount FROM dbo.CrmCancellation WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation not found" });
+    const { Status, SettlementStatus, RefundAmount } = cur.recordset[0];
+    if (!["Approved", "FinancePending", "Refunded"].includes(Status)) {
+      return res.status(400).json({ error: `Cannot settle — cancellation must be Approved or FinancePending (currently '${Status}')` });
+    }
+    if (SettlementStatus === "Settled") {
+      return res.status(409).json({ error: "Cancellation is already settled" });
+    }
+    if (Number(RefundAmount || 0) > 0 && Status !== "Refunded") {
+      return res.status(400).json({
+        error: "A refund is owed on this cancellation — use mark-refunded to settle it, not manual settle",
+      });
+    }
+    await pool.request()
+      .input("id",    sql.Int,          id)
+      .input("actor", sql.Int,          actorId(req))
+      .input("notes", sql.NVarChar(500), notes ? String(notes).trim() : null)
+      .query(`
+        UPDATE dbo.CrmCancellation SET
+          SettlementStatus = 'Settled',
+          SettledAt        = SYSDATETIME(),
+          SettledBy        = @actor,
+          SettlementNotes  = @notes,
+          UpdatedAt        = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    res.json({ success: true, message: "Cancellation marked as settled" });
+  } catch (e) {
+    console.error("[crm-cancellations] settle error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

@@ -12,10 +12,11 @@ router.use(authMiddleware);
 router.use(apiRateLimit);
 
 const PP_SELECT = `
-  SELECT p.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile
+  SELECT p.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile
   FROM dbo.CrmPrePossession p
   JOIN dbo.CrmBooking b ON b.Id = p.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
 `;
 
 router.get("/", requirePageRight("crm-pre-possession", "view"), async (req, res) => {
