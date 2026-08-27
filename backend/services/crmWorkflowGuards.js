@@ -329,15 +329,17 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
     .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
   if (existing.recordset.length) return null;
 
+  // Sale Deed is prepared after possession handover in the under-construction
+  // workflow — agreement alone is not sufficient. Handover must be Completed
+  // before the Sale Deed shell is created.
+  const handover = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+  if (!handover.recordset.length || handover.recordset[0].Status !== "Completed") return null;
+
   const agreement = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT TOP 1 Id, Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC
   `);
-  if (!agreement.recordset.length || agreement.recordset[0].Status !== "Executed") return null;
-
-  const pendingMilestones = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND Status NOT IN ('Paid', 'Waived')
-  `);
-  if (pendingMilestones.recordset[0]?.Cnt > 0) return null;
+  if (!agreement.recordset.length || agreement.recordset[0].Status !== "Registered") return null;
 
   // Do not auto-create a Sales Deed if the loan financing is unresolved —
   // the deed would precede loan confirmation, creating a legal/accounting conflict.
@@ -357,7 +359,7 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
     .input("no",   sql.NVarChar(30), deedNo)
     .input("bid",  sql.Int, bookingId)
     .input("agid", sql.Int, agreement.recordset[0].Id)
-    .input("note", sql.NVarChar(sql.MAX), "Auto-created — agreement executed and all milestones settled")
+    .input("note", sql.NVarChar(sql.MAX), "Auto-created — handover completed and AFS registered")
     .input("cb",   sql.Int, actorUserId || null)
     .query(`
       INSERT INTO dbo.CrmSalesDeed (DeedNo, BookingId, AgreementId, Status, Notes, CreatedBy, CreatedAt)
@@ -369,7 +371,7 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   if (bookingRow.AssignedTo) {
     await emitNotification(pool, bookingRow.AssignedTo, "crm_sales_deed_ready",
       "Sales Deed Ready",
-      `${deedNo} auto-created for booking ${bookingRow.BookingNo} — agreement is executed and all milestones are settled. Fill in deed/registration details to proceed.`,
+      `${deedNo} auto-created for booking ${bookingRow.BookingNo} — handover is complete. Fill in deed value, stamp duty, and registration details to proceed.`,
       deedId, "crm_sales_deed");
   }
 

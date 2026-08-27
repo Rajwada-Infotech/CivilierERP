@@ -7,7 +7,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, maybeAutoCreateSalesDeed } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -264,6 +264,10 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
       }
     }
 
+    const hRow = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId FROM dbo.CrmHandover WHERE Id = @id");
+    const handoverBookingId = hRow.recordset[0]?.BookingId;
+
     await pool.request()
       .input("id",   sql.Int,  id)
       .input("sdt",  sql.Date, b.ScheduledDate || null)
@@ -284,6 +288,14 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+
+    // Auto-create the Sale Deed shell when handover is completed — the deed
+    // is now the next legal document in the sequence (post-possession).
+    if (b.Status === "Completed" && handoverBookingId) {
+      try { await maybeAutoCreateSalesDeed(pool, handoverBookingId, actorId(req)); } catch (e) {
+        console.error("[crm-handover] maybeAutoCreateSalesDeed failed:", e.message);
+      }
+    }
 
     res.json({ success: true });
   } catch (e) {

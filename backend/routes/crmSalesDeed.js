@@ -120,22 +120,26 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), async (req, res) 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    // Sale Deed (Conveyance Deed) is prepared after key handover — not before.
+    // The correct sequence for under-construction: AFS registered → possession
+    // → handover → Sale Deed drafted → registered.
+    const handover = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+    if (!handover.recordset.length || handover.recordset[0].Status !== "Completed") {
+      return res.status(400).json({ error: "Sale Deed can only be prepared after Handover is Completed" });
+    }
+
     const agreement = await pool.request().input("bid", sql.Int, bookingId).query(`
       SELECT TOP 1 Id, Status
       FROM dbo.CrmAgreement
       WHERE BookingId = @bid
       ORDER BY CreatedAt DESC
     `);
-    if (!agreement.recordset.length || agreement.recordset[0].Status !== CrmStatus.EXECUTED) {
-      return res.status(400).json({ error: "Agreement must be executed before a sales deed can be prepared" });
+    if (!agreement.recordset.length || agreement.recordset[0].Status !== CrmStatus.REGISTERED) {
+      return res.status(400).json({ error: "Sale Deed requires the Agreement for Sale to be Registered first" });
     }
 
-    // Loan Processing runs in parallel with the agreement/legal track, not
-    // after it — but it must be resolved before the Deed, per the pipeline:
-    // AGREEMENT -> PARALLEL LOAN PROCESS -> DEED -> QUERY PAYMENT -> REGISTRY.
-    // Construction milestone payments (Foundation, Slab Casting, etc.) are a
-    // separate, genuinely parallel track and never gate this — only the
-    // loan does.
+    // Loan processing must be resolved before the Deed is prepared.
     const loanErr = await checkLoanProcessingCleared(pool, bookingId);
     if (loanErr) return res.status(400).json({ error: loanErr });
 
