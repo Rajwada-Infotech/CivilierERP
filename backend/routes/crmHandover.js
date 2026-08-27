@@ -51,9 +51,9 @@ router.get("/", requirePageRight("crm-handover", "view"), async (req, res) => {
 });
 
 // GET /eligible-bookings — bookings that satisfy every handover prerequisite
-// (executed/registered agreement, sales deed customer+director approved, no
-// pending/approved-but-not-issued NOCs). Mirrors the POST / guard exactly so
-// the frontend dropdown never shows bookings that will fail on submit.
+// (AFS Registered, Possession Notice Acknowledged, no pending NOCs). Mirrors
+// the POST / guard exactly so the frontend dropdown never shows bookings that
+// will fail on submit.
 // Registered ahead of GET /:id so "eligible-bookings" is not swallowed by :id.
 router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), async (req, res) => {
   try {
@@ -72,17 +72,15 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
     const eligible = [];
     for (const c of candidates.recordset) {
       const bid = c.Id;
-      // 1. Agreement must be Executed or Registered
+      // 1. Agreement must be Registered (AFS physically registered at Sub-Registrar)
       const agr = await pool.request().input("bid", sql.Int, bid)
         .query("SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
-      if (!agr.recordset.length || ![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.recordset[0].Status)) continue;
+      if (!agr.recordset.length || agr.recordset[0].Status !== CrmStatus.REGISTERED) continue;
 
-      // 2. Sales deed must exist, customer-approved, and director-approved
-      const deed = await pool.request().input("bid", sql.Int, bid)
-        .query("SELECT TOP 1 CustomerApprovalStatus, DirectorApprovalStatus FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC");
-      if (!deed.recordset.length) continue;
-      if (deed.recordset[0].CustomerApprovalStatus !== CrmStatus.APPROVED) continue;
-      if (deed.recordset[0].DirectorApprovalStatus !== CrmStatus.APPROVED) continue;
+      // 2. Possession Notice must be Acknowledged by the customer
+      const pn = await pool.request().input("bid", sql.Int, bid)
+        .query("SELECT TOP 1 Status FROM dbo.CrmPossessionNotice WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+      if (!pn.recordset.length || pn.recordset[0].Status !== "Acknowledged") continue;
 
       // 3. No NOC left in Pending or Approved (must be Issued or never requested)
       const openNoc = await pool.request().input("bid", sql.Int, bid)
@@ -122,7 +120,7 @@ router.get("/:id", requirePageRight("crm-handover", "view"), async (req, res) =>
   }
 });
 
-// POST / — schedule handover for a booking (requires agreement executed)
+// POST / — schedule handover for a booking
 router.post("/", requirePageRight("crm-handover", "create"), async (req, res) => {
   try {
     const pool = getPool();
@@ -132,31 +130,24 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     const activeErr = await requireActiveBooking(pool, parseInt(b.BookingId));
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    // Workflow guard: booking must have an executed/registered agreement first
+    // Workflow guard: Agreement for Sale must be Registered (physically
+    // registered at Sub-Registrar, own Doc No recorded). Executed alone is
+    // not sufficient — the AFS registration is the binding legal anchor.
     const agr = await pool.request()
       .input("bid", sql.Int, parseInt(b.BookingId))
       .query(`SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid`);
-    if (!agr.recordset.length || ![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.recordset[0].Status)) {
-      return res.status(400).json({ error: "Handover requires an Executed or Registered agreement first" });
+    if (!agr.recordset.length || agr.recordset[0].Status !== CrmStatus.REGISTERED) {
+      return res.status(400).json({ error: "Handover requires the Agreement for Sale to be Registered (AFS registered at Sub-Registrar) first" });
     }
 
-    // Workflow guard: the sales deed itself must exist, be customer-
-    // approved, AND director-approved before handover — matching the spec's
-    // SALES DEED -> APPROVAL FROM BOTH SIDES -> DIRECTOR APPROVAL -> SALES
-    // DEED COMPLETE -> KEY HANDOVER chain. An Executed agreement alone used
-    // to be enough to schedule a handover, which let staff skip past both
-    // the sales deed and director sign-off steps entirely.
-    const deed = await pool.request()
+    // Workflow guard: Possession Notice must be Acknowledged by the customer
+    // before keys are handed over — the customer's written acceptance of the
+    // possession offer is the trigger for the physical handover event.
+    const pn = await pool.request()
       .input("bid", sql.Int, parseInt(b.BookingId))
-      .query(`SELECT TOP 1 CustomerApprovalStatus, DirectorApprovalStatus FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
-    if (!deed.recordset.length) {
-      return res.status(400).json({ error: "Handover requires the sales deed to be created first" });
-    }
-    if (deed.recordset[0].CustomerApprovalStatus !== CrmStatus.APPROVED) {
-      return res.status(400).json({ error: "Handover requires the customer to approve the sales deed first" });
-    }
-    if (deed.recordset[0].DirectorApprovalStatus !== CrmStatus.APPROVED) {
-      return res.status(400).json({ error: "Handover requires director approval of the sales deed first" });
+      .query(`SELECT TOP 1 Status FROM dbo.CrmPossessionNotice WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+    if (!pn.recordset.length || pn.recordset[0].Status !== "Acknowledged") {
+      return res.status(400).json({ error: "Handover requires the Possession Notice to be Acknowledged by the customer first" });
     }
 
     // Workflow guard: if an NOC (Org or Bank) was ever requested for this

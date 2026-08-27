@@ -31,11 +31,12 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
   }
 });
 
-// Workflow guard: a possession notice is an offer to hand over — it can't
-// legitimately go out before the deed is legally executed, and shouldn't go
-// out before the unit itself has passed its pre-possession inspection
-// (mirrors crmHandover.js's own Sales-Deed guard, extended one step earlier
-// in the same Closure sequence).
+// Workflow guard: a possession notice is a formal offer to hand over the
+// unit. It requires the pre-possession inspection to be Ready — the unit
+// must physically pass before the offer goes out. The Sale Deed is prepared
+// and registered separately, usually at or after possession for under-
+// construction projects; gating this notice on Sale Deed execution was
+// sequentially inverted.
 router.post("/", requirePageRight("crm-possession-notice", "create"), async (req, res) => {
   try {
     const pool = getPool();
@@ -46,11 +47,6 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    const deed = await pool.request().input("bid", sql.Int, bookingId)
-      .query(`SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
-    if (!deed.recordset.length || ![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(deed.recordset[0].Status)) {
-      return res.status(400).json({ error: "Possession notice requires an Executed or Registered sales deed first" });
-    }
     const pp = await pool.request().input("bid", sql.Int, bookingId)
       .query(`SELECT TOP 1 Status FROM dbo.CrmPrePossession WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
     if (!pp.recordset.length || pp.recordset[0].Status !== "Ready") {
