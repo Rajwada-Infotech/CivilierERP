@@ -45,6 +45,7 @@ export const crmNavItems: NavItem[] = [
     label: "Documents",
     icon: FileText,
     children: [
+      { label: "Allotment Letter", path: "/crm/allotment-letter", pageKey: "crm-allotment-letter" },
       { label: "Agreements",       path: "/crm/agreements",        pageKey: "crm-agreements" },
       { label: "Agreement Papers", path: "/crm/agreement-papers",  pageKey: "crm-documents"  },
     ],

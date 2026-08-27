@@ -317,6 +317,7 @@ const ALL_ROUTES = [
   { path: "/api/crm/cancellations",  file: "./routes/crmCancellations"  },
   { path: "/api/crm/customer-360",   file: "./routes/crmCustomer360"    },
   { path: "/api/crm/oc-cc",                file: "./routes/crmOcCc"               },
+  { path: "/api/crm/allotment-letter",     file: "./routes/crmAllotmentLetter"    },
   { path: "/api/crm/legal-milestones",     file: "./routes/crmLegalMilestones"     },
   { path: "/api/crm/noc",                  file: "./routes/crmNoc"                 },
   { path: "/api/crm/sales-deed",           file: "./routes/crmSalesDeed"           },

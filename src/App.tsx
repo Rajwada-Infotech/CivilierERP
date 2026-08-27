@@ -406,6 +406,7 @@ const CrmLeads             = lazy(() => import("./pages/CRM/CrmLeads"));
 const CrmAfsQueryPayment   = lazy(() => import("./pages/CRM/CrmAfsQueryPayment"));
 const CrmAfsRegistry       = lazy(() => import("./pages/CRM/CrmAfsRegistry"));
 const CrmOcCc              = lazy(() => import("./pages/CRM/CrmOcCc"));
+const CrmAllotmentLetter   = lazy(() => import("./pages/CRM/CrmAllotmentLetter"));
 const CrmQueryPayment      = lazy(() => import("./pages/CRM/CrmQueryPayment"));
 const CrmRegistry          = lazy(() => import("./pages/CRM/CrmRegistry"));
 const CrmPrePossession     = lazy(() => import("./pages/CRM/CrmPrePossession"));
@@ -2080,6 +2081,7 @@ function AppRoutes() {
       <Route path="/crm/applications"    element={<ProtectedRoute pageKey="crm-applications"><CrmApplication /></ProtectedRoute>} />
       <Route path="/crm/bookings"        element={<ProtectedRoute pageKey="crm-bookings"><CrmBooking /></ProtectedRoute>} />
       <Route path="/crm/welcome-calls"   element={<ProtectedRoute pageKey="crm-welcome-calls"><CrmWelcomeCall /></ProtectedRoute>} />
+      <Route path="/crm/allotment-letter" element={<ProtectedRoute pageKey="crm-allotment-letter"><CrmAllotmentLetter /></ProtectedRoute>} />
       <Route path="/crm/agreements"      element={<ProtectedRoute pageKey="crm-agreements"><CrmAgreement /></ProtectedRoute>} />
       <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-documents"><CrmAgreementPapers /></ProtectedRoute>} />
       <Route path="/crm/payments"         element={<ProtectedRoute pageKey="crm-payments"><CrmPaymentMilestones /></ProtectedRoute>} />
