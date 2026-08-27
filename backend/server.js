@@ -320,6 +320,7 @@ const ALL_ROUTES = [
   { path: "/api/crm/noc",                  file: "./routes/crmNoc"                 },
   { path: "/api/crm/sales-deed",           file: "./routes/crmSalesDeed"           },
   { path: "/api/crm/afs-query-payment",    file: "./routes/crmAfsQueryPayment"     },
+  { path: "/api/crm/afs-registry",        file: "./routes/crmAfsRegistry"         },
   { path: "/api/crm/query-payment",        file: "./routes/crmQueryPayment"        },
   { path: "/api/crm/registry",             file: "./routes/crmRegistry"            },
   { path: "/api/crm/pre-possession",       file: "./routes/crmPrePossession"       },

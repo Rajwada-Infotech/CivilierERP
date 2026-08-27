@@ -62,6 +62,7 @@ export const crmNavItems: NavItem[] = [
       //   Handover → Sale Deed → Sale Deed Query Payment (Visit 2: net
       //   payable = Stamp Duty + Reg Fee − AFS credit) → Registry → NOC.
       { label: "AFS Query Payment", path: "/crm/afs-query-payment", pageKey: "crm-afs-query-payment" },
+      { label: "AFS Registry",     path: "/crm/afs-registry",     pageKey: "crm-afs-registry"     },
       { label: "Sale Deed",         path: "/crm/sales-deed",        pageKey: "crm-sales-deed"        },
       { label: "Query Payment",     path: "/crm/query-payment",     pageKey: "crm-query-payment"     },
       { label: "Registry",          path: "/crm/registry",          pageKey: "crm-registry"          },
