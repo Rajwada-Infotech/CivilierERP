@@ -12,7 +12,7 @@ React Hook Form + Zod · expo-secure-store · socket.io-client
 ## Getting started
 
 ```bash
-cd mobile
+cd mobile-finance-material
 cp .env.example .env   # set EXPO_PUBLIC_API_URL to your backend
 npm install
 npm start
@@ -52,7 +52,7 @@ Metro bundle export (`npx expo export --platform android`), not just typed.
 ## Porting a new module from web
 
 1. Copy the relevant `src/api/*Api.ts` file from the web app into
-   `mobile/src/api/` — only the `fetchWithAuth` import path changes
+   `mobile-finance-material/src/api/` — only the `fetchWithAuth` import path changes
    (`@/lib/fetchWithAuth` → `@/services/fetchWithAuth`).
 2. Reuse the same `useQuery`/`useMutation` calls from the web page —
    TanStack Query code is framework-agnostic.

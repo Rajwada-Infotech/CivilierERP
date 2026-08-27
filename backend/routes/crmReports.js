@@ -40,11 +40,12 @@ router.get("/booking-register", requirePageRight("crm-bookings", "view"), async 
     const r = pool.request();
     dr.bind(r);
     const result = await r.query(`
-      SELECT b.BookingNo, a.ApplicantName, a.Mobile, b.ProjectName, b.UnitNo, b.UnitType,
+      SELECT b.BookingNo, a.ApplicantName, a.Mobile, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, COALESCE(bn.UnitType, b.UnitType) AS UnitType,
         b.AreaSqFt, b.TotalValue AS TotalValue, b.BookingAmount, b.Status,
         CAST(b.BookingDate AS DATE) AS BookingDate
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE ${conds.join(" AND ")}
       ORDER BY b.BookingDate DESC
     `);
@@ -61,12 +62,13 @@ router.get("/payment-collection", requirePageRight("crm-payments", "view"), asyn
     const r = pool.request();
     dr.bind(r);
     const result = await r.query(`
-      SELECT b.BookingNo, a.ApplicantName, b.ProjectName, m.MilestoneName,
+      SELECT b.BookingNo, a.ApplicantName, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, m.MilestoneName,
         CAST(m.DueDate AS DATE) AS DueDate, m.AmountDue, m.AmountPaid,
         (m.AmountDue - m.AmountPaid) AS Balance, m.Status
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE ${conds.join(" AND ")}
       ORDER BY m.DueDate DESC
     `);
@@ -83,12 +85,13 @@ router.get("/receipt-register", requirePageRight("crm-payments", "view"), async 
     const req0 = pool.request();
     dr.bind(req0);
     const result = await req0.query(`
-      SELECT r.ReceiptNo, b.BookingNo, b.ProjectName, a.ApplicantName, m.MilestoneName,
+      SELECT r.ReceiptNo, b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, m.MilestoneName,
         r.Amount, CAST(r.ReceivedDate AS DATE) AS ReceivedDate, r.PaymentMode, r.TransactionRef
       FROM dbo.CrmPaymentReceipt r
       JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       ${conds.length ? "WHERE " + conds.join(" AND ") : ""}
       ORDER BY r.ReceivedDate DESC
     `);
@@ -101,13 +104,14 @@ router.get("/overdue-payments", requirePageRight("crm-payments", "view"), async 
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT b.BookingNo, b.ProjectName, a.ApplicantName, a.Mobile, m.MilestoneName,
+      SELECT b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, a.Mobile, m.MilestoneName,
         CAST(m.DueDate AS DATE) AS DueDate, m.AmountDue, m.AmountPaid,
         (m.AmountDue - m.AmountPaid) AS OverdueAmount,
         DATEDIFF(DAY, m.DueDate, SYSDATETIME()) AS DaysOverdue
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate < CAST(SYSDATETIME() AS DATE)
         AND b.IsActive = 1
@@ -127,7 +131,7 @@ router.get("/brokerage-report", requirePageRight("crm-brokerage", "view"), async
     const r = pool.request();
     dr.bind(r);
     const result = await r.query(`
-      SELECT br.BrokerName, br.BrokerFirm, b.BookingNo, b.ProjectName, a.ApplicantName,
+      SELECT br.BrokerName, br.BrokerFirm, b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName,
         br.RateType, br.RateValue, br.ComputedAmount,
         br.TDSName, br.TDSPercentage, ISNULL(br.TDSAmount, 0) AS TDSAmount,
         ISNULL(br.NetPayable, br.ComputedAmount) AS NetPayable,
@@ -137,6 +141,7 @@ router.get("/brokerage-report", requirePageRight("crm-brokerage", "view"), async
       FROM dbo.CrmBrokerageMaster br
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       ${conds.length ? "WHERE " + conds.join(" AND ") : ""}
       ORDER BY br.CreatedAt DESC
     `);
@@ -153,12 +158,13 @@ router.get("/cancellation-report", requirePageRight("crm-cancellations", "view")
     const r = pool.request();
     dr.bind(r);
     const result = await r.query(`
-      SELECT c.CancellationNo, b.BookingNo, b.ProjectName, a.ApplicantName, c.Reason,
+      SELECT c.CancellationNo, b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, c.Reason,
         c.AmountPaidTillDate, c.DeductionPercent, c.DeductionAmount, c.RefundAmount, c.Status,
         CAST(c.CreatedAt AS DATE) AS RequestedDate
       FROM dbo.CrmCancellation c
       JOIN dbo.CrmBooking b ON b.Id = c.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       ${conds.length ? "WHERE " + conds.join(" AND ") : ""}
       ORDER BY c.CreatedAt DESC
     `);
@@ -233,12 +239,13 @@ router.get("/service-tickets", requirePageRight("crm-service-tickets", "view"), 
     const r = pool.request();
     dr.bind(r);
     const result = await r.query(`
-      SELECT t.TicketNo, b.BookingNo, b.ProjectName, a.ApplicantName, t.Category, t.Priority,
+      SELECT t.TicketNo, b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, t.Category, t.Priority,
         t.Subject, t.Status, CAST(t.SlaDueDate AS DATE) AS SlaDueDate,
         CAST(t.ResolvedAt AS DATE) AS ResolvedDate, CAST(t.CreatedAt AS DATE) AS CreatedDate
       FROM dbo.CrmServiceTicket t
       JOIN dbo.CrmBooking b ON b.Id = t.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       ${conds.length ? "WHERE " + conds.join(" AND ") : ""}
       ORDER BY t.CreatedAt DESC
     `);
@@ -251,11 +258,12 @@ router.get("/legal-milestones", requirePageRight("crm-legal-milestones", "view")
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT b.BookingNo, b.ProjectName, a.ApplicantName, m.CurrentStep, m.OverallStatus,
+      SELECT b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, m.CurrentStep, m.OverallStatus,
         CAST(m.CreatedAt AS DATE) AS CreatedDate, CAST(m.UpdatedAt AS DATE) AS LastUpdated
       FROM dbo.CrmLegalMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       ORDER BY m.UpdatedAt DESC
     `);
     res.json(result.recordset);
@@ -271,11 +279,12 @@ router.get("/noc-report", requirePageRight("crm-noc", "view"), async (req, res) 
     const r = pool.request();
     dr.bind(r);
     const result = await r.query(`
-      SELECT n.NocNo, b.BookingNo, b.ProjectName, a.ApplicantName, n.NocType,
+      SELECT n.NocNo, b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, n.NocType,
         CAST(n.NocDate AS DATE) AS NocDate, n.BankName, n.LoanAmount, n.Status
       FROM dbo.CrmNoc n
       JOIN dbo.CrmBooking b ON b.Id = n.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       ${conds.length ? "WHERE " + conds.join(" AND ") : ""}
       ORDER BY n.CreatedAt DESC
     `);
@@ -288,7 +297,7 @@ router.get("/sales-deed-report", requirePageRight("crm-sales-deed", "view"), asy
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT d.DeedNo, b.BookingNo, b.ProjectName, a.ApplicantName,
+      SELECT d.DeedNo, b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName,
         d.DeedValue, d.StampDuty, d.RegistrationFee,
         CAST(d.DeedDate AS DATE) AS DeedDate, d.RegistrationNo,
         CASE
@@ -302,6 +311,7 @@ router.get("/sales-deed-report", requirePageRight("crm-sales-deed", "view"), asy
       FROM dbo.CrmSalesDeed d
       JOIN dbo.CrmBooking b ON b.Id = d.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       ORDER BY d.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -313,7 +323,7 @@ router.get("/handover-report", requirePageRight("crm-handover", "view"), async (
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT b.BookingNo, b.ProjectName, a.ApplicantName,
+      SELECT b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName,
         CAST(h.ScheduledDate AS DATE) AS ScheduledDate,
         CAST(h.ActualHandoverDate AS DATE) AS ActualHandoverDate,
         h.Status, h.FinalDuesCleared, h.CustomerAcknowledged,
@@ -321,6 +331,7 @@ router.get("/handover-report", requirePageRight("crm-handover", "view"), async (
       FROM dbo.CrmHandover h
       JOIN dbo.CrmBooking b ON b.Id = h.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       ORDER BY h.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -332,12 +343,13 @@ router.get("/agreement-report", requirePageRight("crm-agreements", "view"), asyn
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT ag.AgreementNo, b.BookingNo, b.ProjectName, a.ApplicantName,
+      SELECT ag.AgreementNo, b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName,
         CAST(ag.AgreementDate AS DATE) AS AgreementDate,
         ag.Status, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       ORDER BY ag.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -353,12 +365,13 @@ router.get("/welcome-call-report", requirePageRight("crm-welcome-calls", "view")
     const r = pool.request();
     dr.bind(r);
     const result = await r.query(`
-      SELECT b.BookingNo, b.ProjectName, a.ApplicantName,
+      SELECT b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName,
         CAST(wc.CallDate AS DATE) AS CallDate, wc.Outcome,
         CAST(wc.NextCallDate AS DATE) AS NextCallDate, wc.PaymentPlanConfirmed
       FROM dbo.CrmWelcomeCall wc
       JOIN dbo.CrmBooking b ON b.Id = wc.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       ${conds.length ? "WHERE " + conds.join(" AND ") : ""}
       ORDER BY wc.CreatedAt DESC
     `);
@@ -372,11 +385,12 @@ router.get("/parking-report", requirePageRight("crm-parking-booking", "view"), a
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT ISNULL(b.BookingNo, '(Standalone)') AS BookingNo,
-        b.ProjectName, a.ApplicantName, pa.ParkingSlotNo, pa.Quantity,
+        COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, pa.ParkingSlotNo, pa.Quantity,
         pa.TotalAmount, pa.PaymentStatus, CAST(pa.CreatedAt AS DATE) AS AllotmentDate
       FROM dbo.CrmParkingAllotment pa
       LEFT JOIN dbo.CrmBooking b ON b.Id = pa.BookingId
       LEFT JOIN dbo.CrmApplication a ON a.Id = ISNULL(pa.ApplicationId, b.ApplicationId)
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE pa.IsActive = 1
       ORDER BY pa.CreatedAt DESC
     `);
@@ -389,13 +403,14 @@ router.get("/possession-notice-report", requirePageRight("crm-possession-notice"
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT n.NoticeNo, b.BookingNo, b.ProjectName, a.ApplicantName,
+      SELECT n.NoticeNo, b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName,
         CAST(n.OfferedDate AS DATE) AS OfferedDate,
         CAST(n.ResponseDeadline AS DATE) AS ResponseDeadline,
         n.DeliveryMode, n.Status
       FROM dbo.CrmPossessionNotice n
       JOIN dbo.CrmBooking b ON b.Id = n.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       ORDER BY n.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -407,13 +422,14 @@ router.get("/pre-possession-report", requirePageRight("crm-pre-possession", "vie
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT b.BookingNo, b.ProjectName, a.ApplicantName,
+      SELECT b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName,
         CAST(p.ScheduledInspectionDate AS DATE) AS InspectionDate,
         p.DuesClearedCheck, p.DocumentationCheck, p.QualityInspectionCheck, p.UtilityReadinessCheck,
         p.Status, CAST(p.CreatedAt AS DATE) AS CreatedDate
       FROM dbo.CrmPrePossession p
       JOIN dbo.CrmBooking b ON b.Id = p.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       ORDER BY p.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -444,7 +460,7 @@ router.get("/aging-analysis", requirePageRight("crm-payments", "view"), async (r
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT b.BookingNo, b.ProjectName, a.ApplicantName, a.Mobile,
+      SELECT b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, a.Mobile,
         m.MilestoneName, CAST(m.DueDate AS DATE) AS DueDate,
         (m.AmountDue - m.AmountPaid) AS Balance,
         DATEDIFF(DAY, m.DueDate, SYSDATETIME()) AS DaysOverdue,
@@ -457,6 +473,7 @@ router.get("/aging-analysis", requirePageRight("crm-payments", "view"), async (r
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate < CAST(SYSDATETIME() AS DATE)
         AND b.IsActive = 1

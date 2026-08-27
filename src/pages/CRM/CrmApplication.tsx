@@ -2105,16 +2105,16 @@ const CrmApplication: React.FC = () => {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
+                  <div className="grid grid-cols-10 gap-3">
+                    <div className="col-span-4 lg:col-span-4">
                       <label className={labelCls}>Date of Apply</label>
                       <input type="date" value={form.DateOfApply} onChange={(e) => setForm((f) => ({ ...f, DateOfApply: e.target.value }))} className={inputCls} />
                     </div>
-                    <div>
+                    <div className="col-span-3 lg:col-span-3">
                       <label className={labelCls}>Rate (₹/sqft) <span className="text-destructive">*</span></label>
                       <input type="number" value={form.RatePerSqFt} onChange={(e) => setForm((f) => ({ ...f, RatePerSqFt: e.target.value }))} className={inputCls} />
                     </div>
-                    <div>
+                    <div className="col-span-3 lg:col-span-3">
                       <label className={labelCls}>Est. Total Value</label>
                       <input type="text" readOnly value={computedTotal ? `₹${computedTotal.toLocaleString("en-IN")}` : "—"}
                         className={`${inputCls} bg-muted/30 text-muted-foreground`} />
@@ -2919,7 +2919,7 @@ const CrmApplication: React.FC = () => {
             )}
             {viewingAppDetail && (isResumable(viewingAppDetail.application) || isEditableApplication(viewingAppDetail.application)) && (
               <button
-                onClick={() => { const id = viewingAppDetail.application.Id; closeApplication(); loadApplicationIntoWizard(id); }}
+                onClick={() => { const id = viewingAppDetail.application.Id; closeApplication(); setTimeout(() => loadApplicationIntoWizard(id), 180); }}
                 disabled={loadingApplication}
                 className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40"
               >
@@ -2936,52 +2936,53 @@ const CrmApplication: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Cancel is one-way (no "un-cancel" on the backend) — always confirm
-          before firing it, and explain what actually happens (hold release)
-          so staff aren't surprised the unit shows as available again right
-          after. */}
-      <Dialog open={!!cancellingApp} onOpenChange={(o) => { if (!o) { setCancellingApp(null); setCancelRemarks(""); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-heading">Cancel Application?</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              <span className="font-mono text-foreground">{cancellingApp?.ApplicationNo}</span> for{" "}
-              <span className="font-medium text-foreground">{cancellingApp?.ApplicantName}</span> will be moved to Cancelled.
-              {(cancellingApp?.PreferredUnitName || cancellingApp?.InterestedUnit) && (
-                " Any hold on the picked unit — and any parking slot tied to it — is released immediately, so it's available for another application right away."
-              )}
-              {" "}This can't be undone; file a new application to reapply.
-            </p>
-            <div>
-              <label className={labelCls}>Remarks (optional)</label>
-              <textarea
-                value={cancelRemarks}
-                onChange={(e) => setCancelRemarks(e.target.value)}
-                rows={2}
-                className={`${inputCls} resize-none`}
-                placeholder="e.g. Applied by mistake, customer changed their mind..."
-              />
+      {/* Plain div overlay — avoids nested Radix Dialog focus-trap conflict
+          when Cancel is opened from inside the view dialog (same fix pattern
+          as CoApplicant: two Radix Dialogs open at once freeze outer buttons). */}
+      {cancellingApp && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => { setCancellingApp(null); setCancelRemarks(""); }}>
+          <div className="bg-background border border-border rounded-xl shadow-xl w-full max-w-md p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold font-heading">Cancel Application?</h3>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                <span className="font-mono text-foreground">{cancellingApp?.ApplicationNo}</span> for{" "}
+                <span className="font-medium text-foreground">{cancellingApp?.ApplicantName}</span> will be moved to Cancelled.
+                {(cancellingApp?.PreferredUnitName || cancellingApp?.InterestedUnit) && (
+                  " Any hold on the picked unit — and any parking slot tied to it — is released immediately, so it's available for another application right away."
+                )}
+                {" "}This can't be undone; file a new application to reapply.
+              </p>
+              <div>
+                <label className={labelCls}>Remarks (optional)</label>
+                <textarea
+                  value={cancelRemarks}
+                  onChange={(e) => setCancelRemarks(e.target.value)}
+                  rows={2}
+                  className={`${inputCls} resize-none`}
+                  placeholder="e.g. Applied by mistake, customer changed their mind..."
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setCancellingApp(null); setCancelRemarks(""); }}
+                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted"
+              >
+                Keep Application
+              </button>
+              <button
+                onClick={handleCancelApplication}
+                disabled={cancelling}
+                className="px-4 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40"
+              >
+                {cancelling ? "Cancelling..." : "Cancel Application"}
+              </button>
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              onClick={() => { setCancellingApp(null); setCancelRemarks(""); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted"
-            >
-              Keep Application
-            </button>
-            <button
-              onClick={handleCancelApplication}
-              disabled={cancelling}
-              className="px-4 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40"
-            >
-              {cancelling ? "Cancelling..." : "Cancel Application"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
       {pdfDialogApp && (
         <ApplicationFormPdfDialog
           applicationId={pdfDialogApp.id}
@@ -3768,22 +3769,27 @@ const AttachmentsStep: React.FC<{
           )}
         </div>
       </div>
+      {/* Plain div overlay — avoids nested Radix Dialog focus-trap conflict
+          (this preview opens while the parent wizard Dialog is still open). */}
       {previewDoc && (
-        <Dialog open onOpenChange={(o) => { if (!o) setPreviewDoc(null); }}>
-          <DialogContent className="max-w-6xl w-[94vw] max-h-[90vh] p-0 overflow-hidden">
-            <DialogHeader className="px-4 py-3 border-b border-border">
-              <div className="flex items-center justify-between gap-3 pr-8">
-                <DialogTitle className="flex min-w-0 items-center gap-2 text-sm font-medium">
-                  <FileText size={15} className="text-primary shrink-0" />
-                  <span className="truncate">{previewDoc.DocumentType} — {previewDoc.FileName}</span>
-                </DialogTitle>
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setPreviewDoc(null)}>
+          <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
+              <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                <FileText size={15} className="text-primary shrink-0" />
+                <span className="truncate">{previewDoc.DocumentType} — {previewDoc.FileName}</span>
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
                 <a href={previewBlobUrl || `${DOC_API}/file/${previewDoc.Id}`} download={previewDoc.FileName}
-                  className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted font-medium">
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted font-medium">
                   <Download size={13} /> Download
                 </a>
+                <button onClick={() => setPreviewDoc(null)} className="p-1 rounded-md hover:bg-muted text-muted-foreground"><X size={16} /></button>
               </div>
-            </DialogHeader>
-            <div className="h-[76vh] bg-neutral-950 flex items-center justify-center">
+            </div>
+            <div className="flex-1 h-[76vh] bg-neutral-950 flex items-center justify-center">
               {previewLoading ? (
                 <div className="text-xs text-neutral-300">Loading preview...</div>
               ) : previewError ? (
@@ -3800,8 +3806,8 @@ const AttachmentsStep: React.FC<{
                 <img src={previewBlobUrl} alt={previewDoc.FileName} className="max-w-full max-h-full object-contain" />
               )}
             </div>
-          </DialogContent>
-        </Dialog>
+          </div>
+        </div>
       )}
     </div>
   );

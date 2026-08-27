@@ -21,16 +21,10 @@ const CO_API = "/api/crm/co-applicants";
 const DOC_API = "/api/crm/booking-documents";
 const BKG_API = "/api/crm/bookings";
 const SA_LEADS_API = "/api/sa/leads";
-const BANK_DETAIL_API = "/api/crm/customer-bank-details";
 const PARKING_API = "/api/crm/parking";
 const EXTRA_CHARGE_API = "/api/crm/extra-charges";
 const VC_API = "/api/crm/welcome-checklist"; // per-item verification checklist: checkbox + remarks + recheck + submit
 
-const EMPTY_BANK = {
-  BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
-  PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "",
-  NomineeName: "", NomineeRelation: "", NomineeDob: "", NomineeContact: "", NomineeAddress: "",
-};
 
 const OUTCOMES = ["Welcomed", "NotReachable", "RequestedCallback", "VoiceMail", "Busy", "SwitchedOff"];
 const outcomeColor: Record<string, string> = {
@@ -93,9 +87,6 @@ async function fetchBookingById(bookingId: number): Promise<any | null> {
 async function fetchCallContext(bookingId: number): Promise<any | null> {
   try { const r = await fetchWithAuth(`${API}/${bookingId}/call-context`); return r.ok ? r.json() : null; } catch { return null; }
 }
-async function fetchBankDetail(bookingId: number): Promise<any | null> {
-  try { const r = await fetchWithAuth(`${BANK_DETAIL_API}/booking/${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
-}
 // Full loan/bank-preference record — the call-context endpoint only carries
 // a trimmed subset (BankName/LoanAmount/SanctionStatus/LoanAccountNo); this
 // is the same GET the Home Loan Tracking page itself uses, so the expanded
@@ -131,6 +122,12 @@ async function fetchParkingAllotments(bookingId: number): Promise<any[]> {
 }
 async function fetchExtraCharges(bookingId: number): Promise<any[]> {
   try { const r = await fetchWithAuth(`${EXTRA_CHARGE_API}/${bookingId}`); return r.ok ? r.json() : []; } catch { return []; }
+}
+// Preferred banks the customer expressed during the welcome call — separate
+// from CrmLoanDetail (the actual sanctioned loan) and CrmCustomerBankDetail
+// (KYC/refund account). Multiple entries per booking are expected.
+async function fetchBankPreferences(bookingId: number): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${API}/${bookingId}/bank-preferences`); return r.ok ? r.json() : []; } catch { return []; }
 }
 // ─── Verification checklist (per-item checkbox + remarks + recheck) ────────
 type VcItem = {
@@ -715,19 +712,36 @@ const ChecklistSubmitFooter: React.FC<{
 };
 
 // ─── Intake dialog: log the call + work through the rest of the checklist ──
-const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking, onClose }) => {
+const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelEdit?: () => void; onClose: () => void }> = ({ booking, editingCall, onCancelEdit, onClose }) => {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { currentUser } = useAuth();
+  // Editing a past call is a correction of what happened (outcome, notes,
+  // follow-up dates), never a rewrite of when it happened — CalledBy/
+  // CallDate/DurationSeconds are the factual record and stay locked/
+  // display-only below whenever editingCall is set.
+  const isEditingCall = !!editingCall;
   // Auto-fetched, locked by default: the call is almost always logged by
   // whoever is on this screen right now, and the moment it happens — not
   // something staff should have to re-pick/re-type every single time.
   // "Change" unlocks both for the (rarer) case someone is logging a call on
   // a colleague's behalf, or after the fact.
-  const [form, setForm] = useState({ ...EMPTY_FORM, CalledBy: currentUser?.id || "", CallDate: nowLocal() });
+  const [form, setForm] = useState(() => isEditingCall ? {
+    CalledBy: editingCall.CalledBy ? String(editingCall.CalledBy) : "",
+    CallDate: editingCall.CallDate ? String(editingCall.CallDate).slice(0, 16) : "",
+    DurationSeconds: editingCall.DurationSeconds != null ? String(editingCall.DurationSeconds) : "",
+    Outcome: editingCall.Outcome || "",
+    NextCallDate: editingCall.NextCallDate ? String(editingCall.NextCallDate).slice(0, 10) : "",
+    Notes: editingCall.Notes || "",
+    PreferredAgreementDate: editingCall.PreferredAgreementDate ? String(editingCall.PreferredAgreementDate).slice(0, 10) : "",
+  } : { ...EMPTY_FORM, CalledBy: currentUser?.id || "", CallDate: nowLocal() });
   const [calledByLocked, setCalledByLocked] = useState(true);
-  const [customFields, setCustomFields] = useState<{ key: string; value: string }[]>([]);
+  const [customFields, setCustomFields] = useState<{ key: string; value: string }[]>(() => {
+    if (!isEditingCall) return [];
+    try { return editingCall.CustomFields ? JSON.parse(editingCall.CustomFields) : []; } catch { return []; }
+  });
   const [saving, setSaving] = useState(false);
+  const [deletingCall, setDeletingCall] = useState(false);
   const [docType, setDocType] = useState("");
   const [docUrl, setDocUrl] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -736,7 +750,8 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   // Live call-duration timer — a real "dynamic" touch for a page whose whole
   // job is timing/logging a phone call: start it when the call begins, and
   // Duration auto-fills from the elapsed time when stopped (still editable
-  // afterward, in case it needs correcting).
+  // afterward, in case it needs correcting). Not relevant once reviewing a
+  // past call — that call already happened and its timing is locked.
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(0);
   useEffect(() => {
@@ -750,17 +765,11 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   const [coForm, setCoForm] = useState({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "" });
   const [addingCo, setAddingCo] = useState(false);
 
-  // Nominee & Bank Details — done inline here now instead of a "go to
-  // Customer Bank & Nominee page" link, same shape/API CrmBookingDetail.tsx's
-  // own Bank Details tab uses (both read/write the one CrmCustomerBankDetail
-  // row keyed by BookingId). Starts locked/read-only — same "re-verify"
-  // pattern as this file's own EditCallDialog — since this is often already
-  // on file from the Application stage; the point of showing it here is to
-  // confirm it out loud with the customer on the call, not silently retype it.
-  const [bank, setBank] = useState({ ...EMPTY_BANK });
-  const [bankLoaded, setBankLoaded] = useState(false);
-  const [bankSaving, setBankSaving] = useState(false);
-  const [bankLocked, setBankLocked] = useState(true);
+  // Bank Preference tab — telecaller captures which bank(s) the customer
+  // prefers for their home loan during the call; multiple entries allowed.
+  const [bpBankName, setBpBankName] = useState("");
+  const [bpRemarks, setBpRemarks] = useState("");
+  const [bpSaving, setBpSaving] = useState(false);
 
   // Which Financial Summary card is expanded — Payment Plan and Bank
   // Preference are collapsed by default; tapping either flexes it open to
@@ -774,7 +783,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   // call timer, a tri-state readiness stepper) but unreadable. Same fix as
   // CrmBookingDetail.tsx: tabs, with each checklist section still dropped in
   // right next to the data card it verifies — just given actual room.
-  const WC_TABS = ["Overview", "Documents", "Co-Applicant", "Bank & Nominee"] as const;
+  const WC_TABS = ["Overview", "Documents", "Co-Applicant", "Bank Preference"] as const;
   type WcTab = typeof WC_TABS[number];
   const [wcTab, setWcTab] = useState<WcTab>("Overview");
 
@@ -816,54 +825,20 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
     queryFn: () => fetchLoanDetail(booking.BookingId),
     enabled: expandedCard === "bank",
   });
+  // Bank Preference tab — fetched on demand when the tab is first opened,
+  // same lazy pattern as loanDetail above.
+  const { data: bankPreferences = [], refetch: refetchBankPreferences } = useQuery({
+    queryKey: ["crm-welcome-bank-preferences", booking.BookingId],
+    queryFn: () => fetchBankPreferences(booking.BookingId),
+    enabled: wcTab === "Bank Preference",
+  });
   // Single shared source for the verification checklist — every
   // ChecklistSectionBlock dropped in near its matching data card below
   // reads from this same vc/refetch pair, so ticking an item in one place
   // and the progress bar / submit gate elsewhere always agree.
   const vcState = useVerificationChecklist(booking.BookingId);
-  useEffect(() => {
-    let cancelled = false;
-    setBankLoaded(false);
-    fetchBankDetail(booking.BookingId).then((d) => {
-      if (cancelled) return;
-      setBank({
-        BankName: d?.BankName || "", BranchName: d?.BranchName || "", AccountNo: d?.AccountNo || "",
-        IfscCode: d?.IfscCode || "", AccountHolderName: d?.AccountHolderName || "",
-        PanNo: d?.PanNo || "", AadhaarNo: d?.AadhaarNo || "",
-        Occupation: d?.Occupation || "", AnnualIncome: d?.AnnualIncome != null ? String(d.AnnualIncome) : "",
-        NomineeName: d?.NomineeName || "", NomineeRelation: d?.NomineeRelation || "",
-        NomineeDob: d?.NomineeDob ? String(d.NomineeDob).slice(0, 10) : "",
-        NomineeContact: d?.NomineeContact || "", NomineeAddress: d?.NomineeAddress || "",
-      });
-    }).finally(() => { if (!cancelled) setBankLoaded(true); });
-    return () => { cancelled = true; };
-  }, [booking.BookingId]);
 
   const invalidateQueue = () => qc.invalidateQueries({ queryKey: ["crm-welcome-queue"] });
-
-  // Saving here also refetches the checklist — Bank/Nominee completeness
-  // feeds both the checklist strip AND (server-side) the Agreement
-  // auto-creation gate (maybeAutoCreateAgreement), so this is the one save
-  // that can silently unlock a Draft Agreement the moment it lands.
-  const handleSaveBank = async () => {
-    setBankSaving(true);
-    try {
-      const res = await fetchWithAuth(`${BANK_DETAIL_API}/booking/${booking.BookingId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bank),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Save failed");
-      toast.success("Bank & Nominee details saved");
-      setBankLocked(true);
-      refetchChecklist();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setBankSaving(false);
-    }
-  };
 
   // Full invoice rows aren't in call-context's trimmed projection — fetch
   // the real list (same endpoint CrmBookingDetail.tsx's own Invoices tab
@@ -940,6 +915,59 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
       toast.error(translateError(e.message));
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Correcting a past call: only outcome/follow-up/notes/custom fields are
+  // ever sent — CalledBy, CallDate and DurationSeconds are the factual
+  // record of when the call happened and are never part of this payload,
+  // matching the backend, which ignores them on this endpoint too.
+  const handleSaveEditedCall = async () => {
+    if (!editingCall) return;
+    if (!form.Outcome) { toast.error("Select an outcome before saving"); return; }
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${editingCall.Id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          Outcome: form.Outcome || null,
+          NextCallDate: form.NextCallDate || null,
+          Notes: form.Notes || null,
+          PreferredAgreementDate: form.PreferredAgreementDate || null,
+          CustomFields: customFields,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to update call");
+      toast.success("Call updated");
+      refetchChecklist();
+      invalidateQueue();
+      qc.invalidateQueries({ queryKey: ["crm-welcome-calls-history"] });
+      onCancelEdit?.();
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteEditedCall = async () => {
+    if (!editingCall) return;
+    setDeletingCall(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${editingCall.Id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to remove call log");
+      toast.success("Call log removed");
+      refetchChecklist();
+      invalidateQueue();
+      qc.invalidateQueries({ queryKey: ["crm-welcome-calls-history"] });
+      onCancelEdit?.();
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setDeletingCall(false);
     }
   };
 
@@ -1034,6 +1062,40 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
     }
   };
 
+  const handleAddBankPreference = async () => {
+    if (!bpBankName.trim()) { toast.error("Enter a bank name before adding"); return; }
+    setBpSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${booking.BookingId}/bank-preferences`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ BankName: bpBankName.trim(), Remarks: bpRemarks.trim() || null }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to save");
+      setBpBankName("");
+      setBpRemarks("");
+      refetchBankPreferences();
+      toast.success(`Bank preference saved — ${bpBankName.trim()}`);
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setBpSaving(false);
+    }
+  };
+
+  const handleRemoveBankPreference = async (id: number, bankName: string) => {
+    try {
+      const res = await fetchWithAuth(`${API}/${booking.BookingId}/bank-preferences/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to remove");
+      refetchBankPreferences();
+      toast.success(`Removed — ${bankName}`);
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    }
+  };
+
   return (
     <>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -1107,28 +1169,45 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
             tabs on the right. */}
         <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-5 items-start">
           <div className="lg:sticky lg:top-0 space-y-4">
-            {/* ── Log Call ── */}
+            {/* ── Log Call / Edit Call ── */}
             <div className="rounded-xl border border-border p-4 space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold flex items-center gap-1.5"><Phone size={14} className="text-primary" /> Log This Call</h3>
+                <div>
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                    <Phone size={14} className="text-primary" /> {isEditingCall ? "Edit Call Log" : "Log This Call"}
+                  </h3>
+                  {isEditingCall && (
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {editingCall.CalledByName && <>Logged by <span className="font-medium text-foreground">{editingCall.CalledByName}</span></>}
+                      {editingCall.CreatedAt && <> on {new Date(editingCall.CreatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</>}
+                    </p>
+                  )}
+                </div>
                 {/* Live duration timer — a genuinely dynamic touch: start it the
                     moment the call connects, it counts up on-screen, and Duration
-                    below auto-fills from it when stopped. */}
-                <div className="flex items-center gap-2">
-                  {timerRunning && <span className="font-mono text-sm font-semibold text-primary tabular-nums">{fmtTimer(timerSeconds)}</span>}
-                  <button type="button" onClick={() => setTimerRunning((r) => !r)}
-                    className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium ${
-                      timerRunning ? "border-red-200 bg-red-50 text-red-600 hover:bg-red-100" : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                    }`}>
-                    <Timer size={13} /> {timerRunning ? "Stop Timer" : "Start Call Timer"}
-                  </button>
-                </div>
+                    below auto-fills from it when stopped. Only relevant while
+                    logging a call that's happening right now. */}
+                {!isEditingCall && (
+                  <div className="flex items-center gap-2">
+                    {timerRunning && <span className="font-mono text-sm font-semibold text-primary tabular-nums">{fmtTimer(timerSeconds)}</span>}
+                    <button type="button" onClick={() => setTimerRunning((r) => !r)}
+                      className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium ${
+                        timerRunning ? "border-red-200 bg-red-50 text-red-600 hover:bg-red-100" : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                      }`}>
+                      <Timer size={13} /> {timerRunning ? "Stop Timer" : "Start Call Timer"}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Called By</label>
-                  {calledByLocked ? (
+                  {isEditingCall ? (
+                    <div className="bg-muted/30 rounded px-2 py-1.5 border border-border">
+                      <span className="text-sm text-foreground truncate">{editingCall.CalledByName || "—"}</span>
+                    </div>
+                  ) : calledByLocked ? (
                     <div className="flex items-center justify-between gap-2 bg-muted/30 rounded px-2 py-1.5 border border-border">
                       <span className="text-sm text-foreground truncate">{currentUser?.name || "Self"} <span className="text-xs text-muted-foreground">(you)</span></span>
                       <button type="button" onClick={() => setCalledByLocked(false)} className="text-xs text-primary hover:underline shrink-0">Change</button>
@@ -1143,15 +1222,28 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Call Date & Time</label>
-                  <input type="datetime-local" value={form.CallDate}
-                    onChange={(e) => setForm((f) => ({ ...f, CallDate: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                  {isEditingCall ? (
+                    <div className="bg-muted/30 rounded px-2 py-1.5 border border-border">
+                      <span className="text-sm text-foreground">{form.CallDate ? form.CallDate.replace("T", " ") : "—"}</span>
+                    </div>
+                  ) : (
+                    <input type="datetime-local" value={form.CallDate}
+                      onChange={(e) => setForm((f) => ({ ...f, CallDate: e.target.value }))}
+                      className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                  )}
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs text-muted-foreground block mb-1">
-                    Duration {timerSeconds > 0 && !form.DurationSeconds ? <span className="text-emerald-600">(from timer — edit if needed)</span> : ""}
+                    Duration {!isEditingCall && timerSeconds > 0 && !form.DurationSeconds ? <span className="text-emerald-600">(from timer — edit if needed)</span> : ""}
                   </label>
-                  {/* MM:SS picker — converts to seconds on change */}
+                  {isEditingCall ? (
+                    <div className="bg-muted/30 rounded px-2 py-1.5 border border-border inline-block">
+                      <span className="text-sm text-foreground">
+                        {form.DurationSeconds ? `${Math.floor(Number(form.DurationSeconds) / 60)}m ${Number(form.DurationSeconds) % 60}s` : "—"}
+                      </span>
+                    </div>
+                  ) : (
+                  /* MM:SS picker — converts to seconds on change */
                   <div className="flex items-center gap-1.5">
                     <input type="number" min={0} max={999}
                       value={form.DurationSeconds ? String(Math.floor(Number(form.DurationSeconds) / 60)) : timerSeconds > 0 ? String(Math.floor(timerSeconds / 60)) : ""}
@@ -1177,6 +1269,7 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                       <span className="text-xs text-muted-foreground ml-auto">{Number(form.DurationSeconds)}s total</span>
                     )}
                   </div>
+                  )}
                 </div>
               </div>
 
@@ -1252,11 +1345,31 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
                 ))}
               </div>
 
-              <button onClick={handleLogCall} disabled={saving || !form.Outcome}
-                title={!form.Outcome ? "Select an outcome above first" : undefined}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                {saving ? "Logging..." : "Log Call"}
-              </button>
+              {isEditingCall ? (
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <button onClick={handleDeleteEditedCall} disabled={deletingCall || saving}
+                    className="text-xs px-3 py-1.5 border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-40">
+                    {deletingCall ? "Removing..." : "Delete Call"}
+                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={() => onCancelEdit?.()} disabled={saving || deletingCall}
+                      className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-40">
+                      Cancel
+                    </button>
+                    <button onClick={handleSaveEditedCall} disabled={saving || deletingCall || !form.Outcome}
+                      title={!form.Outcome ? "Select an outcome above first" : undefined}
+                      className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                      {saving ? "Saving..." : "Save Changes"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={handleLogCall} disabled={saving || !form.Outcome}
+                  title={!form.Outcome ? "Select an outcome above first" : undefined}
+                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                  {saving ? "Logging..." : "Log Call"}
+                </button>
+              )}
             </div>
           </div>
 
@@ -1656,126 +1769,86 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
         </div>
         )}
 
-        {wcTab === "Bank & Nominee" && (
+        {wcTab === "Bank Preference" && (
         <div className="space-y-4 pt-1">
-            {/* ── Nominee & Bank Details — done here, not a link to another
-                page. Starts locked/read-only (this is usually already on
-                file from the Application stage) — "Edit" unlocks it for a
-                genuine re-verify-on-the-call correction, and saving re-locks
-                automatically. Saving also refetches the checklist so "Bank &
-                Nominee" on the left updates immediately, and (server-side)
-                can unlock the Agreement auto-creation the moment this is the
-                last prerequisite still missing. ── */}
-            <div className="rounded-xl border border-border p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold flex items-center gap-1.5"><Landmark size={14} /> Nominee & Bank Details</h3>
-                <div className="flex items-center gap-2">
-                  {checklist?.bankDetails.complete && (
-                    <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">Complete</span>
-                  )}
-                  {bankLoaded && bankLocked && (
-                    <button onClick={() => setBankLocked(false)}
-                      className="flex items-center gap-1 text-xs px-2 py-1 border border-border rounded-lg font-medium hover:bg-muted">
-                      <Pencil size={11} /> Edit / Re-verify
-                    </button>
-                  )}
-                </div>
-              </div>
-              {/* Portal hint — customer already has a login since booking was
-                  confirmed. If they prefer to self-fill bank/nominee details,
-                  tell them to log in. Staff still verify the data here during
-                  the welcome call either way. */}
-              {!checklist?.bankDetails.complete && (
-                <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/40 px-3 py-2 text-xs text-sky-700 dark:text-sky-300">
-                  <Send size={12} className="shrink-0 mt-0.5" />
-                  <span>
-                    <span className="font-medium">Tip:</span> The customer already has a portal login (auto-created at booking confirmation). If they prefer to self-enter their bank &amp; nominee details, ask them to log in at the Customer Portal — their entries will reflect here automatically.
-                  </span>
-                </div>
-              )}
-              {bankLocked && (
-                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground bg-muted/30 border border-border rounded-lg px-2.5 py-1.5">
-                  <Lock size={10} /> Locked for viewing — read this back to the customer to confirm, or click "Edit / Re-verify" to correct it.
-                </p>
-              )}
-              {!bankLoaded ? (
-                <p className="text-xs text-muted-foreground py-2">Loading...</p>
-              ) : (
-                <>
-                  {/* Grouped exactly the way the checklist items themselves
-                      are defined (e.g. "Bank name & account number" is one
-                      tick covering two fields) — the tick sits once, right
-                      under the group of fields it actually confirms. */}
-                  {[
-                    { itemKey: "bank_account", fields: [{ key: "BankName", label: "Bank Name" }, { key: "AccountNo", label: "Account Number" }, { key: "AccountHolderName", label: "Account Holder Name" }] },
-                    { itemKey: "ifsc_branch", fields: [{ key: "IfscCode", label: "IFSC Code" }, { key: "BranchName", label: "Branch Name" }] },
-                    { itemKey: "pan", fields: [{ key: "PanNo", label: "PAN Number" }] },
-                    { itemKey: "aadhaar", fields: [{ key: "AadhaarNo", label: "Aadhaar Number" }] },
-                    { itemKey: "occupation_income", fields: [{ key: "Occupation", label: "Occupation" }, { key: "AnnualIncome", label: "Annual Income", type: "number" }] },
-                  ].map((group) => (
-                    <div key={group.itemKey} className="relative rounded-lg border border-border/60 p-2.5">
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
-                        {group.fields.map((f) => (
-                          <div key={f.key}>
-                            <label className="text-[11px] text-muted-foreground block mb-1">{f.label}</label>
-                            <input type={f.type || "text"} value={(bank as any)[f.key] || ""}
-                              disabled={bankLocked}
-                              onChange={(e) => setBank((b) => ({ ...b, [f.key]: e.target.value }))}
-                              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background disabled:opacity-60 disabled:cursor-not-allowed" />
-                          </div>
-                        ))}
-                      </div>
-                      <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === group.itemKey)} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
-                    </div>
-                  ))}
-
-                  {[
-                    { itemKey: "nominee_details", fields: [{ key: "NomineeName", label: "Nominee Name" }, { key: "NomineeRelation", label: "Relation" }, { key: "NomineeDob", label: "Nominee DOB", type: "date" }] },
-                    { itemKey: "nominee_contact", fields: [{ key: "NomineeContact", label: "Nominee Contact" }] },
-                  ].map((group) => (
-                    <div key={group.itemKey} className="relative rounded-lg border border-border/60 p-2.5">
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
-                        {group.fields.map((f) => (
-                          <div key={f.key}>
-                            <label className="text-[11px] text-muted-foreground block mb-1">{f.label}</label>
-                            <input type={f.type || "text"} value={(bank as any)[f.key] || ""}
-                              disabled={bankLocked}
-                              onChange={(e) => setBank((b) => ({ ...b, [f.key]: e.target.value }))}
-                              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background disabled:opacity-60 disabled:cursor-not-allowed" />
-                          </div>
-                        ))}
-                        {group.itemKey === "nominee_contact" && (
-                          <div className="col-span-2">
-                            <label className="text-[11px] text-muted-foreground block mb-1">Nominee Address</label>
-                            <textarea value={bank.NomineeAddress} disabled={bankLocked}
-                              onChange={(e) => setBank((b) => ({ ...b, NomineeAddress: e.target.value }))}
-                              rows={1} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none disabled:opacity-60 disabled:cursor-not-allowed" />
-                          </div>
-                        )}
-                      </div>
-                      <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === group.itemKey)} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
-                    </div>
-                  ))}
-                  {!bankLocked && (
-                    <div className="flex gap-2">
-                      <button onClick={handleSaveBank} disabled={bankSaving}
-                        className="px-4 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
-                        {bankSaving ? "Saving..." : "Save Bank & Nominee Details"}
-                      </button>
-                      <button onClick={() => setBankLocked(true)}
-                        className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-                        Cancel
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
+          {/* ── Bank Preference ── */}
+          <div className="rounded-xl border border-border p-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold flex items-center gap-1.5"><Landmark size={14} className="text-primary" /> Customer's Preferred Banks (Home Loan)</h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Banks the customer prefers for their home loan — not the finalised/sanctioned loan.
+                Multiple banks can be recorded.
+              </p>
             </div>
 
-            <ChecklistSubmitFooter
-              vc={vcState.vc} locked={vcState.locked} submitting={vcState.submitting} reopening={vcState.reopening}
-              onSubmit={vcState.handleSubmit} onReopen={vcState.handleReopen}
-            />
+            {/* Saved preference bank cards */}
+            {bankPreferences.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No bank preferences recorded yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {bankPreferences.map((bp: any) => (
+                  <div key={bp.Id} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Landmark size={13} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                        <span className="text-sm font-medium truncate">{bp.BankName}</span>
+                      </div>
+                      {bp.Remarks && (
+                        <p className="text-[11px] text-muted-foreground mt-0.5 ml-5">{bp.Remarks}</p>
+                      )}
+                      <p className="text-[10px] text-muted-foreground mt-0.5 ml-5">
+                        Added by {bp.CreatedByName || "—"} · {bp.CreatedAt ? String(bp.CreatedAt).slice(0, 16).replace("T", " ") : ""}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveBankPreference(bp.Id, bp.BankName)}
+                      className="text-muted-foreground hover:text-red-600 shrink-0 mt-0.5"
+                      title="Remove this bank preference"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Add new preference */}
+            <div className="space-y-2 pt-1 border-t border-border">
+              <label className="text-xs text-muted-foreground font-medium">Add a Bank Preference</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Bank name (e.g. SBI, HDFC, ICICI...)"
+                  value={bpBankName}
+                  onChange={(e) => setBpBankName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddBankPreference()}
+                  className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddBankPreference}
+                  disabled={bpSaving || !bpBankName.trim()}
+                  className="shrink-0 px-3 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 flex items-center gap-1.5"
+                >
+                  <Plus size={13} />
+                  {bpSaving ? "Adding..." : "Add"}
+                </button>
+              </div>
+              <input
+                type="text"
+                placeholder="Remarks (optional) — e.g. customer already has an account here"
+                value={bpRemarks}
+                onChange={(e) => setBpRemarks(e.target.value)}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+              />
+            </div>
+          </div>
+
+          <ChecklistSubmitFooter
+            vc={vcState.vc} locked={vcState.locked} submitting={vcState.submitting} reopening={vcState.reopening}
+            onSubmit={vcState.handleSubmit} onReopen={vcState.handleReopen}
+          />
         </div>
         )}
           </div>
@@ -1797,248 +1870,6 @@ const IntakeDialog: React.FC<{ booking: any; onClose: () => void }> = ({ booking
   );
 };
 
-// ─── Edit dialog: correct a previously-logged call from Call History ───────
-const EditCallDialog: React.FC<{ call: any; onClose: () => void; onSaved: () => void }> = ({ call, onClose, onSaved }) => {
-  const [form, setForm] = useState({
-    CalledBy: call.CalledBy ? String(call.CalledBy) : "",
-    CallDate: call.CallDate ? String(call.CallDate).slice(0, 16) : "",
-    DurationSeconds: call.DurationSeconds != null ? String(call.DurationSeconds) : "",
-    Outcome: call.Outcome || "",
-    NextCallDate: call.NextCallDate ? String(call.NextCallDate).slice(0, 10) : "",
-    Notes: call.Notes || "",
-    PreferredAgreementDate: call.PreferredAgreementDate ? String(call.PreferredAgreementDate).slice(0, 10) : "",
-  });
-  const [customFields, setCustomFields] = useState<{ key: string; value: string }[]>(() => {
-    try { return call.CustomFields ? JSON.parse(call.CustomFields) : []; } catch { return []; }
-  });
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  // Always opens on an existing logged call, so always opens locked.
-  const [locked, setLocked] = useState(true);
-  const inputCls = `w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
-
-  const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${call.Id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          CalledBy: form.CalledBy || null,
-          CallDate: form.CallDate || null,
-          DurationSeconds: form.DurationSeconds || null,
-          Outcome: form.Outcome || null,
-          NextCallDate: form.NextCallDate || null,
-          Notes: form.Notes || null,
-          PreferredAgreementDate: form.PreferredAgreementDate || null,
-          CustomFields: customFields,
-        }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Call updated");
-      setLocked(true);
-      onSaved();
-      onClose();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    setDeleting(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${call.Id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Call log removed");
-      onSaved();
-      onClose();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const selectedOutcomeStyle = form.Outcome ? outcomeColor[form.Outcome] : "";
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
-            <span className="flex items-center gap-2">
-              <Phone size={16} className="text-amber-600 dark:text-amber-400" /> Edit Welcome Call
-            </span>
-            {locked && (
-              <button onClick={() => setLocked(false)}
-                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
-                <Pencil size={12} /> Edit
-              </button>
-            )}
-          </DialogTitle>
-        </DialogHeader>
-        {locked && (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5">
-            <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
-          </div>
-        )}
-
-        {/* ── Customer / booking context ── */}
-        <div className="rounded-xl border border-border bg-muted/20 p-3.5 flex items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-foreground">{call.ApplicantName}</span>
-              <span className="text-xs font-mono text-muted-foreground">{call.BookingNo}</span>
-            </div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              {call.Mobile} · {call.ProjectName || "—"}{call.UnitNo ? ` · Unit ${call.UnitNo}` : ""}
-            </div>
-            {call.CalledByName && (
-              <div className="text-[11px] text-muted-foreground mt-1">
-                Originally logged by <span className="font-medium">{call.CalledByName}</span>
-                {call.CreatedAt && <> on {new Date(call.CreatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</>}
-              </div>
-            )}
-          </div>
-          {call.Outcome && (
-            <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold whitespace-nowrap ${outcomeColor[call.Outcome] || ""}`}>
-              {call.Outcome}
-            </span>
-          )}
-        </div>
-
-        <div className="space-y-4">
-          {/* ── Call details ── */}
-          <div className="rounded-xl border border-border p-4 space-y-3">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-foreground"><Phone size={14} /> Call Details</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Called By</label>
-                <select value={form.CalledBy} disabled={locked} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
-                  className={inputCls}>
-                  <option value="">—</option>
-                  {users.map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Call Date/Time</label>
-                <input type="datetime-local" value={form.CallDate} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, CallDate: e.target.value }))}
-                  className={inputCls} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Outcome</label>
-                <select value={form.Outcome} disabled={locked} onChange={(e) => setForm((f) => ({ ...f, Outcome: e.target.value }))}
-                  className={`w-full text-sm border rounded-lg px-2.5 py-2 font-medium ${selectedOutcomeStyle || "bg-background border-border"} ${locked ? "opacity-70 cursor-not-allowed" : ""}`}>
-                  <option value="">—</option>
-                  {OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Duration</label>
-                <div className="flex items-center gap-1.5">
-                  <input type="number" min={0} max={999} disabled={locked}
-                    value={form.DurationSeconds ? String(Math.floor(Number(form.DurationSeconds) / 60)) : ""}
-                    onChange={(e) => {
-                      const mm = Math.max(0, Number(e.target.value) || 0);
-                      const ss = form.DurationSeconds ? Number(form.DurationSeconds) % 60 : 0;
-                      setForm((f) => ({ ...f, DurationSeconds: String(mm * 60 + ss) }));
-                    }}
-                    placeholder="MM"
-                    className={`w-14 text-sm border border-border rounded px-2 py-1.5 bg-background text-center ${locked ? "opacity-70 cursor-not-allowed" : ""}`} />
-                  <span className="text-muted-foreground font-semibold">:</span>
-                  <input type="number" min={0} max={59} disabled={locked}
-                    value={form.DurationSeconds ? String(Number(form.DurationSeconds) % 60).padStart(2, "0") : ""}
-                    onChange={(e) => {
-                      const ss = Math.min(59, Math.max(0, Number(e.target.value) || 0));
-                      const mm = form.DurationSeconds ? Math.floor(Number(form.DurationSeconds) / 60) : 0;
-                      setForm((f) => ({ ...f, DurationSeconds: String(mm * 60 + ss) }));
-                    }}
-                    placeholder="SS"
-                    className={`w-14 text-sm border border-border rounded px-2 py-1.5 bg-background text-center ${locked ? "opacity-70 cursor-not-allowed" : ""}`} />
-                  <span className="text-xs text-muted-foreground">m:s</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ── Follow-up & agreement scheduling ── */}
-          <div className="rounded-xl border border-border p-4 space-y-3">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-foreground"><Check size={14} /> Follow-up & Agreement</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Next Call Date</label>
-                <input type="date" value={form.NextCallDate} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, NextCallDate: e.target.value }))}
-                  className={inputCls} />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Discussed Agreement Date (note only)</label>
-                <input type="date" value={form.PreferredAgreementDate} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, PreferredAgreementDate: e.target.value }))}
-                  className={inputCls} />
-              </div>
-            </div>
-          </div>
-
-          {/* ── Notes ── */}
-          <div className="rounded-xl border border-border p-4 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-foreground"><FileCheck size={14} /> Notes</h3>
-            <textarea value={form.Notes} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-              rows={3} placeholder="What was discussed on this call..."
-              className={`${inputCls} resize-none`} />
-          </div>
-
-          {/* ── Custom fields ── */}
-          <div className="rounded-xl border border-border p-4 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-foreground"><Users size={14} /> Custom Fields</h3>
-            {customFields.length === 0 && <p className="text-xs text-muted-foreground">No custom fields added for this call.</p>}
-            {customFields.map((f, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <input placeholder="Field name" value={f.key} readOnly={locked}
-                  onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, key: e.target.value } : x))}
-                  className={`flex-1 ${inputCls}`} />
-                <input placeholder="Value" value={f.value} readOnly={locked}
-                  onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
-                  className={`flex-1 ${inputCls}`} />
-                <button onClick={() => setCustomFields((cf) => cf.filter((_, j) => j !== i))} disabled={locked}
-                  className="text-muted-foreground hover:text-red-600 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed">
-                  <X size={14} />
-                </button>
-              </div>
-            ))}
-            <button onClick={() => setCustomFields((cf) => [...cf, { key: "", value: "" }])} disabled={locked}
-              className="text-xs text-amber-600 dark:text-amber-400 hover:underline font-medium disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed">+ Add field</button>
-          </div>
-        </div>
-
-        <div className="flex justify-between items-center pt-3 border-t border-border">
-          <button onClick={handleDelete} disabled={deleting}
-            className="text-xs px-3 py-1.5 border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-40">
-            {deleting ? "Removing..." : "Delete Call"}
-          </button>
-          <div className="flex gap-2">
-            {locked ? (
-              <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-            ) : (
-              <>
-                <button onClick={() => { setLocked(true); onClose(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-                <button onClick={handleSave} disabled={saving}
-                  className="px-4 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
-                  {saving ? "Saving..." : "Save Changes"}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
 const CrmWelcomeCall: React.FC = () => {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
@@ -2046,7 +1877,11 @@ const CrmWelcomeCall: React.FC = () => {
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"queue" | "recheck" | "history">("queue");
   const [activeBooking, setActiveBooking] = useState<any | null>(null);
-  const [editingCall, setEditingCall] = useState<any | null>(null);
+  // Set only when opening a booking from Call History for a specific past
+  // call — carries that call's Id/Outcome/Notes/etc into IntakeDialog so it
+  // opens in "Edit Call Log" mode instead of "Log This Call". Queue/Recheck
+  // rows never set this, so they always open in normal logging mode.
+  const [activeCall, setActiveCall] = useState<any | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
 
   // Opening from a row click used to only ever set local state — the URL
@@ -2055,8 +1890,9 @@ const CrmWelcomeCall: React.FC = () => {
   // customer's call. The deep-link *read* side (?bookingId=X on page load,
   // below) already existed; this is the missing write side, keeping the URL
   // in sync the same way closing the dialog already does.
-  const openBooking = (row: any) => {
+  const openBooking = (row: any, call: any | null = null) => {
     setActiveBooking(row);
+    setActiveCall(call);
     if (row?.BookingId) navigate(`/crm/welcome-calls?bookingId=${row.BookingId}`, { replace: true });
   };
 
@@ -2260,7 +2096,7 @@ const CrmWelcomeCall: React.FC = () => {
             return (
               <button
                 key={c.Id}
-                onClick={() => setEditingCall(c)}
+                onClick={() => openBooking(c, c)}
                 className="w-full text-left rounded-xl border border-border p-4 hover:bg-muted/10 hover:border-amber-500/40 transition-colors cursor-pointer"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -2306,13 +2142,17 @@ const CrmWelcomeCall: React.FC = () => {
           deliberately NOT reset here, since bkgFilter itself clears once
           the URL updates and the effect above already guards on `!bkgFilter`. */}
       {activeBooking && (
-        <IntakeDialog booking={activeBooking} onClose={() => {
-          setActiveBooking(null);
-          if (bkgFilter) navigate("/crm/welcome-calls", { replace: true });
-        }} />
-      )}
-      {editingCall && (
-        <EditCallDialog call={editingCall} onClose={() => setEditingCall(null)} onSaved={() => refetchHistory()} />
+        <IntakeDialog
+          key={activeCall ? `call-${activeCall.Id}` : `booking-${activeBooking.BookingId}`}
+          booking={activeBooking}
+          editingCall={activeCall}
+          onCancelEdit={() => setActiveCall(null)}
+          onClose={() => {
+            setActiveBooking(null);
+            setActiveCall(null);
+            if (bkgFilter) navigate("/crm/welcome-calls", { replace: true });
+          }}
+        />
       )}
     </CrmShell>
     </>

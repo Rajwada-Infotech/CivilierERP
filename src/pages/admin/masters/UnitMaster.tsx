@@ -31,7 +31,7 @@ const UNIT_TYPES = [
 async function fetchUnits(): Promise<any[]> {
   const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch units");
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 }
 
 // ── Fields — Company -> Project -> Block, each filtered by its parent via
@@ -42,6 +42,8 @@ async function fetchUnits(): Promise<any[]> {
 // behind Company first; this page previously jumped straight to a flat
 // Project list.
 const fields: FieldDef[] = [
+  // ── Unit Identity ────────────────────────────────────────────────────────────
+  { name: "_s1", label: "Unit Identity", type: "section", fullWidth: true },
   {
     name: "companyId",
     label: "Company",
@@ -57,8 +59,6 @@ const fields: FieldDef[] = [
     label: "Project",
     type: "select",
     required: true,
-    // Strict cascade — disabledWhen (MasterPage.tsx) locks this field until
-    // its Company is picked instead of ever falling back to "show everything".
     disabledWhen: (form) => !form?.companyId,
     disabledPlaceholder: "Select a Company first",
     optionsProvider: (_data, _currentId, form) => {
@@ -75,7 +75,6 @@ const fields: FieldDef[] = [
     label: "Block",
     type: "select",
     required: true,
-    // Same strict cascade one tier down — locked until a Project is picked.
     disabledWhen: (form) => !form?.projectId,
     disabledPlaceholder: "Select a Project first",
     optionsProvider: (_data, _currentId, form) => {
@@ -94,14 +93,20 @@ const fields: FieldDef[] = [
     type: "text",
     required: true,
   },
+  // ── Configuration ────────────────────────────────────────────────────────────
+  { name: "_s2", label: "Configuration", type: "section", fullWidth: true },
   {
-    // Payment plans are created independently in Payment Plan Master, then
-    // tagged Project -> Block -> Unit (see crmEntityCreation.js's
-    // getApplicablePaymentPlans). This picker only offers the Block's own
-    // tagged plans if any; else falls back to the Project's tagged plans;
-    // else every active plan. Not required: a unit with zero tags of its
-    // own just inherits whatever the cascade resolves to (see
-    // resolveApplicationPaymentPlan).
+    name: "floorNo",
+    label: "Floor No.",
+    type: "number",
+  },
+  {
+    name: "unitType",
+    label: "Type of Unit",
+    type: "select",
+    options: UNIT_TYPES,
+  },
+  {
     name: "paymentPlanIds",
     label: "Payment Plans",
     type: "custom",
@@ -131,10 +136,6 @@ const fields: FieldDef[] = [
         plans = allPlans;
       }
 
-      // Dropdown rather than an inline pill wrap: a project can carry 50+
-      // active plans, and the old wrap grew until it pushed the rest of the
-      // form off screen. Collapsed height is now fixed regardless of count,
-      // and the list is searchable.
       return (
         <MultiSelectDropdown
           options={plans.map((p: any) => ({ id: p.Id, label: p.PlanName }))}
@@ -149,22 +150,98 @@ const fields: FieldDef[] = [
       );
     },
   },
+  // ── Area Breakdown ────────────────────────────────────────────────────────────
+  // Carpet, Built-up, SBU are authoritative at Block+UnitType level (BlockUnitTypeSpec).
+  // They are shown as inherited read-only here so staff can confirm the values
+  // without being able to enter conflicting per-unit overrides.
+  // Open Terrace is the one area that can differ per unit (corner units etc.) and
+  // stays editable.
+  { name: "_s3", label: "Area Breakdown", type: "section", fullWidth: true },
   {
-    name: "floorNo",
-    label: "Floor No.",
+    name: "_areaInherited",
+    label: "Structural Areas",
+    type: "custom",
+    fullWidth: true,
+    render: ({ formData }) => {
+      const carpet = formData?.carpetAreaSqFt as string;
+      const builtUp = formData?.builtUpAreaSqFt as string;
+      const sbu = formData?.superBuiltUpAreaSqFt as string;
+      const hasAny = carpet || builtUp || sbu;
+      const blockId = formData?.blockId as string;
+      const unitType = formData?.unitType as string;
+      const fmt = (v: string) => v ? `${parseFloat(v).toLocaleString("en-IN")} sq ft` : "—";
+      return (
+        <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">Inherited from Block Type Spec</span>
+            {blockId && unitType && (
+              <span className="text-xs text-muted-foreground italic">Set these in Block Master → Unit Type Specifications</span>
+            )}
+          </div>
+          {hasAny ? (
+            <div className="grid grid-cols-3 gap-3 mt-1">
+              <div>
+                <div className="text-xs text-muted-foreground mb-0.5">Carpet</div>
+                <div className="font-medium tabular-nums">{fmt(carpet)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-0.5">Built-up</div>
+                <div className="font-medium tabular-nums">{fmt(builtUp)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-0.5">Super Built-up (Saleable)</div>
+                <div className="font-medium tabular-nums">{fmt(sbu)}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-muted-foreground italic text-xs">
+              No spec defined for this Block + Unit Type yet.
+              {blockId && unitType
+                ? " Go to Block Master → Unit Type Specifications to define areas."
+                : " Select a Block and Unit Type first."}
+            </div>
+          )}
+        </div>
+      );
+    },
+  },
+  {
+    name: "openTerraceAreaSqFt",
+    label: "Open Terrace Area (sq ft)",
     type: "number",
   },
+  // ── Pricing ───────────────────────────────────────────────────────────────────
+  // Rate × Super Built-up Area = Base Price. areaSqFt is the legacy field kept
+  // in sync server-side with SuperBuiltUpAreaSqFt — not user-editable here.
+  { name: "_s4", label: "Pricing", type: "section", fullWidth: true },
   {
-    name: "unitType",
-    label: "Type of Unit",
-    type: "select",
-    options: UNIT_TYPES,
-  },
-  {
-    name: "areaSqFt",
-    label: "Area (sq ft)",
+    name: "ratePerSqFt",
+    label: "Rate per sq ft (₹)",
     type: "number",
+    prefix: "₹",
   },
+  {
+    name: "_basePrice",
+    label: "Base Price",
+    type: "custom",
+    fullWidth: true,
+    render: ({ formData }) => {
+      const rate = parseFloat(formData?.ratePerSqFt as string);
+      const sbu = parseFloat(formData?.superBuiltUpAreaSqFt as string);
+      const price = !isNaN(rate) && !isNaN(sbu) && rate > 0 && sbu > 0
+        ? Math.round(rate * sbu)
+        : null;
+      return (
+        <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+          {price != null
+            ? <span className="font-semibold tabular-nums">₹ {price.toLocaleString("en-IN")}</span>
+            : <span className="text-muted-foreground italic">Enter Rate and Super Built-up Area to see Base Price</span>}
+        </div>
+      );
+    },
+  },
+  // ── Settings ──────────────────────────────────────────────────────────────────
+  { name: "_s5", label: "Settings", type: "section", fullWidth: true },
   {
     name: "isActive",
     label: "Status",
@@ -177,9 +254,10 @@ const columns = [
   { key: "projectName", label: "Project" },
   { key: "blockName", label: "Block" },
   { key: "unitName", label: "Unit Name" },
-  { key: "floorNo", label: "Floor No." },
-  { key: "unitType", label: "Type of Unit" },
-  { key: "areaSqFt", label: "Area (sq ft)" },
+  { key: "floorNo", label: "Floor" },
+  { key: "unitType", label: "Type" },
+  { key: "saleableAreaSqFt", label: "Saleable Area" },
+  { key: "ratePerSqFt", label: "Inclusive Rate/sqft" },
   { key: "paymentPlanNames", label: "Payment Plans" },
   { key: "status", label: "Status" },
 ];
@@ -190,7 +268,12 @@ const exportColumns: ExportColumn[] = [
   { header: "Unit Name", accessor: "unitName" },
   { header: "Floor No.", accessor: "floorNo" },
   { header: "Type of Unit", accessor: "unitType" },
-  { header: "Area (sq ft)", accessor: "areaSqFt" },
+  { header: "Saleable Area (sq ft)", accessor: "areaSqFt" },
+  { header: "Carpet Area (sq ft)", accessor: "carpetAreaSqFt" },
+  { header: "Built-up Area (sq ft)", accessor: "builtUpAreaSqFt" },
+  { header: "Inclusive Saleable / Super Built-up Area (sq ft)", accessor: "superBuiltUpAreaSqFt" },
+  { header: "Open Terrace Area (sq ft)", accessor: "openTerraceAreaSqFt" },
+  { header: "Rate per sq ft (₹)", accessor: "ratePerSqFt" },
   { header: "Payment Plans", accessor: "paymentPlanNames" },
   { header: "Status", accessor: "status" },
 ];
@@ -218,7 +301,7 @@ const UnitMaster: React.FC = () => {
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/blocks`);
       if (!res.ok) throw new Error("Failed to fetch blocks");
-      return res.json().catch(() => ({}));
+      return res.json().catch(() => []);
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -288,6 +371,14 @@ const UnitMaster: React.FC = () => {
       floorNo: item.FloorNo != null ? String(item.FloorNo) : "",
       unitType: item.UnitType ?? "",
       areaSqFt: item.AreaSqFt != null ? String(item.AreaSqFt) : "",
+      // 2-tier: unit's own explicit value → block spec default → empty
+      carpetAreaSqFt:       (item.CarpetAreaSqFt       ?? item.SpecCarpetAreaSqFt)       != null ? String(item.CarpetAreaSqFt       ?? item.SpecCarpetAreaSqFt)       : "",
+      builtUpAreaSqFt:      (item.BuiltUpAreaSqFt      ?? item.SpecBuiltUpAreaSqFt)      != null ? String(item.BuiltUpAreaSqFt      ?? item.SpecBuiltUpAreaSqFt)      : "",
+      superBuiltUpAreaSqFt: (item.SuperBuiltUpAreaSqFt ?? item.SpecSuperBuiltUpAreaSqFt) != null ? String(item.SuperBuiltUpAreaSqFt ?? item.SpecSuperBuiltUpAreaSqFt) : "",
+      openTerraceAreaSqFt:  item.OpenTerraceAreaSqFt   != null ? String(item.OpenTerraceAreaSqFt) : "",
+      ratePerSqFt:          (item.RatePerSqFt          ?? item.SpecBaseRatePerSqFt)      != null ? String(item.RatePerSqFt          ?? item.SpecBaseRatePerSqFt)      : "",
+      // SBU is the saleable/priced area; AreaSqFt is the legacy fallback.
+      saleableAreaSqFt: item.SuperBuiltUpAreaSqFt ?? item.AreaSqFt ?? null,
       // PaymentPlanIds comes back as a comma-joined string from the
       // STRING_AGG in unitMaster.js's GET / — split into the string[] the
       // multi-select chip picker (and toPayload) expect.
@@ -330,7 +421,11 @@ const UnitMaster: React.FC = () => {
     UnitName: r.unitName?.trim() || null,
     FloorNo: r.floorNo !== "" && r.floorNo != null ? parseInt(r.floorNo) : null,
     UnitType: r.unitType || null,
-    AreaSqFt: r.areaSqFt !== "" && r.areaSqFt != null ? parseFloat(r.areaSqFt) : null,
+    CarpetAreaSqFt: r.carpetAreaSqFt !== "" && r.carpetAreaSqFt != null ? parseFloat(r.carpetAreaSqFt) : null,
+    BuiltUpAreaSqFt: r.builtUpAreaSqFt !== "" && r.builtUpAreaSqFt != null ? parseFloat(r.builtUpAreaSqFt) : null,
+    SuperBuiltUpAreaSqFt: r.superBuiltUpAreaSqFt !== "" && r.superBuiltUpAreaSqFt != null ? parseFloat(r.superBuiltUpAreaSqFt) : null,
+    OpenTerraceAreaSqFt: r.openTerraceAreaSqFt !== "" && r.openTerraceAreaSqFt != null ? parseFloat(r.openTerraceAreaSqFt) : null,
+    RatePerSqFt: r.ratePerSqFt !== "" && r.ratePerSqFt != null ? parseFloat(r.ratePerSqFt) : null,
     PaymentPlanIds: Array.isArray(r.paymentPlanIds) ? r.paymentPlanIds.map((x: any) => parseInt(x)).filter(Number.isFinite) : [],
     IsActive: r.isActive !== false,
   });
@@ -382,6 +477,14 @@ const UnitMaster: React.FC = () => {
         columns={columns}
         columnRenderers={{
           status: (value) => <StatusBadge status={value as string} />,
+          saleableAreaSqFt: (value) =>
+            value != null && value !== ""
+              ? <span className="tabular-nums">{Number(value).toLocaleString("en-IN")} sqft</span>
+              : <span className="text-muted-foreground">—</span>,
+          ratePerSqFt: (value) =>
+            value && value !== ""
+              ? <span className="tabular-nums">₹ {Number(value).toLocaleString("en-IN")}</span>
+              : <span className="text-muted-foreground">—</span>,
         }}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
@@ -420,7 +523,25 @@ const UnitMaster: React.FC = () => {
             { key: "unitName", label: "Unit Name" },
             { key: "floorNo", label: "Floor No." },
             { key: "unitType", label: "Type of Unit" },
-            { key: "areaSqFt", label: "Area (sq ft)" },
+            { key: "carpetAreaSqFt", label: "Carpet Area (sq ft)" },
+            { key: "builtUpAreaSqFt", label: "Built-up Area (sq ft)" },
+            { key: "superBuiltUpAreaSqFt", label: "Super Built-up / Saleable Area (sq ft)" },
+            { key: "openTerraceAreaSqFt", label: "Open Terrace Area (sq ft)" },
+            { key: "ratePerSqFt", label: "Rate per sq ft (₹)" },
+            {
+              key: "saleableAreaSqFt",
+              label: "Base Price",
+              render: (_, row) => {
+                const rate = parseFloat(row.ratePerSqFt as string);
+                const sbu = parseFloat(row.superBuiltUpAreaSqFt as string);
+                const price = !isNaN(rate) && !isNaN(sbu) && rate > 0 && sbu > 0
+                  ? Math.round(rate * sbu)
+                  : null;
+                return price != null
+                  ? <span className="font-semibold tabular-nums">₹ {price.toLocaleString("en-IN")}</span>
+                  : <span className="text-muted-foreground">—</span>;
+              },
+            },
             { key: "paymentPlanNames", label: "Payment Plans" },
             { key: "status", label: "Status" },
           ],
@@ -437,7 +558,12 @@ const UnitMaster: React.FC = () => {
               <tr><td>Unit Name</td><td>${row.unitName || "—"}</td></tr>
               <tr><td>Floor No.</td><td>${row.floorNo || "—"}</td></tr>
               <tr><td>Type of Unit</td><td>${row.unitType || "—"}</td></tr>
-              <tr><td>Area (sq ft)</td><td>${row.areaSqFt || "—"}</td></tr>
+              <tr><td>Carpet Area (sq ft)</td><td>${row.carpetAreaSqFt || "—"}</td></tr>
+              <tr><td>Built-up Area (sq ft)</td><td>${row.builtUpAreaSqFt || "—"}</td></tr>
+              <tr><td>Super Built-up / Saleable Area (sq ft)</td><td>${row.superBuiltUpAreaSqFt || "—"}</td></tr>
+              <tr><td>Open Terrace Area (sq ft)</td><td>${row.openTerraceAreaSqFt || "—"}</td></tr>
+              <tr><td>Rate per sq ft (₹)</td><td>${row.ratePerSqFt ? "₹ " + Number(row.ratePerSqFt).toLocaleString("en-IN") : "—"}</td></tr>
+              <tr><td>Base Price</td><td>${(() => { const r = parseFloat(row.ratePerSqFt as string); const s = parseFloat(row.superBuiltUpAreaSqFt as string); return !isNaN(r) && !isNaN(s) && r > 0 && s > 0 ? "₹ " + Math.round(r * s).toLocaleString("en-IN") : "—"; })()}</td></tr>
               <tr><td>Payment Plans</td><td>${row.paymentPlanNames || "—"}</td></tr>
               <tr><td>Status</td><td>${row.status || "—"}</td></tr>
             </table></body></html>

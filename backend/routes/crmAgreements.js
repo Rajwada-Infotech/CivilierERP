@@ -54,7 +54,10 @@ const AGR_SELECT = `
     ag.RecheckCount, ag.LastRecheckRemarks,
     ag.ProposedDate, ag.ProposedDateStatus, ag.SentToCustomerAt, ag.DateApprovalStatus,
     ag.LegalExecutiveId, le.name AS LegalExecutiveName,
-    b.BookingNo, b.UnitNo, b.ProjectName, b.TotalValue, b.GrandTotal, b.TotalGstAmount,
+    b.BookingNo,
+    COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+    COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+    b.TotalValue, b.GrandTotal, b.TotalGstAmount,
     b.UnitGstAmount, b.ParkingTotal, b.ParkingGstAmount, b.ExtraChargesTotal, b.ExtraWorkGstAmount,
     b.Status AS BookingStatus, b.IsActive AS BookingIsActive,
     a.ApplicantName, a.Mobile, a.Email,
@@ -63,6 +66,7 @@ const AGR_SELECT = `
   FROM dbo.CrmAgreement ag
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.Users cu     ON cu.id = ag.CreatedBy
   LEFT JOIN dbo.Users le     ON le.id = ag.LegalExecutiveId
   LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = a.CustomerId

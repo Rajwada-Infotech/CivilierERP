@@ -55,13 +55,50 @@ const upload = multer({
   },
 });
 
+const bookingDownstreamSql = `
+  SELECT
+    (SELECT COUNT(*) FROM dbo.CrmWelcomeCall WHERE BookingId = @bid) AS WelcomeCalls,
+    (SELECT COUNT(*) FROM dbo.CrmAgreement WHERE BookingId = @bid) AS Agreements,
+    (SELECT COUNT(*) FROM dbo.CrmLegalMilestone WHERE BookingId = @bid) AS LegalMilestones,
+    (SELECT COUNT(*) FROM dbo.CrmSalesDeed WHERE BookingId = @bid) AS SalesDeeds,
+    (SELECT COUNT(*) FROM dbo.CrmLoanDetail WHERE BookingId = @bid AND SanctionStatus NOT IN ('NotApplied', 'Rejected')) AS ActiveLoans,
+    (SELECT COUNT(*) FROM dbo.CrmNoc WHERE BookingId = @bid AND Status NOT IN ('Rejected')) AS Nocs,
+    (SELECT COUNT(*) FROM dbo.CrmPrePossession WHERE BookingId = @bid) AS PrePossession,
+    (SELECT COUNT(*) FROM dbo.CrmPossessionNotice WHERE BookingId = @bid) AS PossessionNotices,
+    (SELECT COUNT(*) FROM dbo.CrmHandover WHERE BookingId = @bid) AS Handovers,
+    (SELECT COUNT(*) FROM dbo.CrmServiceTicket WHERE BookingId = @bid) AS ServiceTickets,
+    (SELECT COUNT(*) FROM dbo.CrmQueryPayment WHERE BookingId = @bid) AS QueryPayments,
+    (SELECT COUNT(*) FROM dbo.CrmRegistry WHERE BookingId = @bid) AS RegistryRecords,
+    (SELECT COUNT(*) FROM dbo.CrmInvoice WHERE BookingId = @bid AND Status <> 'Void') AS Invoices,
+    (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Rejected') AS MoneyReceipts,
+    (SELECT COUNT(*) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS OnAccountPayments,
+    (SELECT COUNT(*) FROM dbo.CrmPaymentReceipt r JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid) AS PaymentReceipts,
+    (SELECT COUNT(*) FROM dbo.ReceivedPayment rp
+      WHERE (rp.CrmBookingId = @bid OR rp.CrmMilestoneId IN (SELECT Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid))
+        AND ISNULL(rp.RPStatus, '') <> 'Rejected') AS ReceivedPayments,
+    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))) AS PaidMilestones,
+    (SELECT COUNT(*) FROM dbo.CrmCancellation WHERE BookingId = @bid AND Status IN ('Pending', 'FinancePending')) AS ActiveCancellations,
+    (SELECT COUNT(*) FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid AND Status = 'Pending') AS PendingAmendments
+`;
+
 // Flow-progress flags (HasWelcomeCall / BankDetailsComplete / Agreement*)
 // drive the list page's single "next step" action — the UI is never allowed
 // to jump ahead to a later step than the record has actually reached.
 const BOOKING_SELECT = `
   SELECT
-    b.Id, b.BookingNo, b.ApplicationId, b.UnitId, b.ProjectId, b.ProjectName, b.CompanyId,
-    b.UnitNo, b.BlockName, um.BlockId, b.FloorName, b.UnitType, b.AreaSqFt,
+    b.Id, b.BookingNo, b.ApplicationId, b.UnitId, b.ProjectId,
+    -- Display names: always read from master tables so a rename in Block/Project
+    -- Master is immediately reflected on every booking without a data migration.
+    -- The stored snapshot column is the COALESCE fallback for legacy rows only.
+    COALESCE(proj.name,     b.ProjectName) AS ProjectName,
+    b.CompanyId,
+    COALESCE(um.UnitName,   b.UnitNo)    AS UnitNo,
+    COALESCE(blk.BlockName, b.BlockName) AS BlockName,
+    um.BlockId,
+    b.FloorName,
+    COALESCE(um.UnitType,   b.UnitType)  AS UnitType,
+    b.AreaSqFt,
+    b.CarpetAreaSqFt, b.BuiltUpAreaSqFt, b.SuperBuiltUpAreaSqFt, b.OpenTerraceAreaSqFt,
     b.RatePerSqFt, b.TotalValue, b.BookingAmount, b.TokenType, b.TokenValue,
     b.PaymentPlanId, b.BookingDate, b.HsnCode,
     b.PaymentMode, b.AssignedTo, b.Status, b.Notes, b.IsActive,
@@ -104,7 +141,9 @@ const BOOKING_SELECT = `
     (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmMoneyReceipt WHERE BookingId = b.Id AND Status IN ('${CrmStatus.PENDING}','${CrmStatus.APPROVED}')) AS MRReceivedTotal
   FROM dbo.CrmBooking b
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
-  LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+  LEFT JOIN dbo.UnitMaster um   ON um.Id   = b.UnitId
+  LEFT JOIN dbo.BlockMaster blk ON blk.Id  = um.BlockId
+  LEFT JOIN dbo.enterprise  proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
   LEFT JOIN dbo.Users u  ON u.id  = b.AssignedTo
   LEFT JOIN dbo.Users cu ON cu.id = b.CreatedBy
   LEFT JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = b.PaymentPlanId
@@ -397,6 +436,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     // must be real, active, and not already locked by another booking.
     const unit = await pool.request().input("uid", sql.Int, newUnitId).query(`
       SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
+             u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
              proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
@@ -433,7 +473,9 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
         newPlanId = null;
       }
     }
-    const rate = oldRow.RatePerSqFt != null ? Number(oldRow.RatePerSqFt) : null;
+    // Keep existing rate if the booking already has one; fall back to new unit's master rate.
+    const rate = oldRow.RatePerSqFt != null ? Number(oldRow.RatePerSqFt)
+               : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
     const area = unitRow.AreaSqFt != null ? Number(unitRow.AreaSqFt) : null;
     const total = area && rate ? Math.round(area * rate) : oldRow.TotalValue;
     await pool.request()
@@ -445,7 +487,12 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
       .input("unit",  sql.NVarChar(100), unitRow.UnitName)
       .input("blk",   sql.NVarChar(100), unitRow.BlockName || null)
       .input("utype", sql.NVarChar(100), unitRow.UnitType || null)
-      .input("area",  sql.Decimal(18,2), unitRow.AreaSqFt || null)
+      .input("area",  sql.Decimal(18,2), area)
+      .input("carpetArea",       sql.Decimal(18,2), unitRow.CarpetAreaSqFt != null ? Number(unitRow.CarpetAreaSqFt) : null)
+      .input("builtUpArea",      sql.Decimal(18,2), unitRow.BuiltUpAreaSqFt != null ? Number(unitRow.BuiltUpAreaSqFt) : null)
+      .input("superBuiltUpArea", sql.Decimal(18,2), unitRow.SuperBuiltUpAreaSqFt != null ? Number(unitRow.SuperBuiltUpAreaSqFt) : null)
+      .input("openTerraceArea",  sql.Decimal(18,2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
+      .input("rate",             sql.Decimal(18,2), rate)
       .input("tot",   sql.Decimal(18,2), total)
       .input("ppid",  sql.Int, newPlanId)
       .input("ub",    sql.Int, actor)
@@ -453,6 +500,8 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
         UPDATE dbo.CrmBooking SET
           UnitId = @uid, ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
           CompanyId = @cid, UnitNo = @unit, BlockName = @blk, UnitType = @utype, AreaSqFt = @area,
+          CarpetAreaSqFt = @carpetArea, BuiltUpAreaSqFt = @builtUpArea, SuperBuiltUpAreaSqFt = @superBuiltUpArea, OpenTerraceAreaSqFt = @openTerraceArea,
+          RatePerSqFt = ISNULL(@rate, RatePerSqFt),
           TotalValue = @tot,
           PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
           GrandTotal = @tot + ParkingTotal + ExtraChargesTotal,
@@ -882,18 +931,7 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     if (booking.ReadyForApprovalAt) progressedReasons.push("booking has been submitted for approval");
     if (booking.MarketingHeadApprovedAt || booking.DirectorApprovedAt || booking.ConfirmedAt) progressedReasons.push("approval stamps already exist");
 
-    const downstream = await pool.request().input("bid", sql.Int, id).query(`
-      SELECT
-        (SELECT COUNT(*) FROM dbo.CrmAgreement WHERE BookingId = @bid) AS Agreements,
-        (SELECT COUNT(*) FROM dbo.CrmLegalMilestone WHERE BookingId = @bid) AS LegalMilestones,
-        (SELECT COUNT(*) FROM dbo.CrmSalesDeed WHERE BookingId = @bid) AS SalesDeeds,
-        (SELECT COUNT(*) FROM dbo.CrmInvoice WHERE BookingId = @bid AND Status <> 'Void') AS Invoices,
-        (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Rejected') AS MoneyReceipts,
-        (SELECT COUNT(*) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS OnAccountPayments,
-        (SELECT COUNT(*) FROM dbo.CrmPaymentReceipt r JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid) AS PaymentReceipts,
-        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))) AS PaidMilestones,
-        (SELECT COUNT(*) FROM dbo.CrmCancellation WHERE BookingId = @bid AND Status IN ('Pending', 'FinancePending')) AS ActiveCancellations
-    `);
+    const downstream = await pool.request().input("bid", sql.Int, id).query(bookingDownstreamSql);
     const d = downstream.recordset[0] || {};
     for (const [label, count] of Object.entries(d)) {
       if (Number(count) > 0) progressedReasons.push(label);
@@ -905,7 +943,10 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     }
 
     const actor = actorId(req);
-    await pool.request()
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
       .input("id", sql.Int, id)
       .input("ub", sql.Int, actor)
       .query(`
@@ -919,23 +960,41 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     // Parking allotments are fully deactivated (IsActive = 0) rather than just
     // orphaned (BookingId = NULL) — a NULL-BookingId row with IsActive = 1
     // permanently blocks the slot in the availability matrix for everyone.
-    await pool.request().input("bid", sql.Int, id).input("aid", sql.Int, booking.ApplicationId).query(`
+      await tx.request().input("bid", sql.Int, id).input("aid", sql.Int, booking.ApplicationId).query(`
       UPDATE dbo.CrmCustomerBankDetail SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
       UPDATE dbo.CrmBookingDocument SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
       UPDATE dbo.CrmParkingAllotment SET BookingId = NULL, IsActive = 0 WHERE BookingId = @bid AND ApplicationId = @aid;
       UPDATE dbo.CrmCoApplicant SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
       UPDATE dbo.CrmExtraCharge SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+      UPDATE dbo.CrmCommunicationLog SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+      UPDATE dbo.SaLead SET CrmBookingId = NULL WHERE CrmBookingId = @bid;
+      UPDATE dbo.ReceivedPayment SET CrmBookingId = NULL, CrmMilestoneId = NULL
+      WHERE (CrmBookingId = @bid OR CrmMilestoneId IN (SELECT Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid))
+        AND ISNULL(RPStatus, '') = 'Rejected';
+
+      DELETE FROM dbo.CrmWelcomeCallBankPreference WHERE BookingId = @bid;
+      DELETE FROM dbo.CrmWelcomeChecklistItem WHERE BookingId = @bid;
+      DELETE FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid;
+      DELETE FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid AND Status IN ('Rejected', 'Cancelled');
+      DELETE FROM dbo.CrmBookingAttachment WHERE BookingId = @bid;
+      DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid;
     `);
 
     // Void any pending brokerage tranches — orphaned Pending tranches would
     // inflate the brokerage liability reports and confuse clawback tracking
     // if the application is later re-booked with fresh brokerage.
-    await pool.request().input("bid", sql.Int, id).query(`
+      await tx.request().input("bid", sql.Int, id).query(`
       UPDATE dbo.CrmBrokerageMaster
       SET Status = 'Voided', UpdatedAt = SYSDATETIME(),
           Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided — booking deleted by admin.'
       WHERE BookingId = @bid AND Status = 'Pending'
     `);
+
+      await tx.commit();
+    } catch (txErr) {
+      await tx.rollback().catch(() => {});
+      throw txErr;
+    }
 
     // Revert the Application from Approved → back to a cancellable/re-bookable
     // state. createCrmBookingRecord force-advanced Application to Approved when
@@ -980,7 +1039,7 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
   try {
     const pool = getPool();
     const rowRes = await pool.request().input("id", sql.Int, id).query(`
-      SELECT Id, BookingNo, Status, IsActive, WorkflowStage,
+      SELECT Id, BookingNo, ApplicationId, Status, IsActive, WorkflowStage,
              ReadyForApprovalAt, MarketingHeadApprovedAt, DirectorApprovedAt, ConfirmedAt
       FROM dbo.CrmBooking
       WHERE Id = @id
@@ -995,17 +1054,7 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
     if (booking.ReadyForApprovalAt) progressedReasons.push("booking has been submitted for approval");
     if (booking.MarketingHeadApprovedAt || booking.DirectorApprovedAt || booking.ConfirmedAt) progressedReasons.push("approval stamps already exist");
 
-    const downstream = await pool.request().input("bid", sql.Int, id).query(`
-      SELECT
-        (SELECT COUNT(*) FROM dbo.CrmAgreement WHERE BookingId = @bid) AS Agreements,
-        (SELECT COUNT(*) FROM dbo.CrmLegalMilestone WHERE BookingId = @bid) AS LegalMilestones,
-        (SELECT COUNT(*) FROM dbo.CrmSalesDeed WHERE BookingId = @bid) AS SalesDeeds,
-        (SELECT COUNT(*) FROM dbo.CrmInvoice WHERE BookingId = @bid AND Status <> 'Void') AS Invoices,
-        (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Rejected') AS MoneyReceipts,
-        (SELECT COUNT(*) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS OnAccountPayments,
-        (SELECT COUNT(*) FROM dbo.CrmPaymentReceipt r JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid) AS PaymentReceipts,
-        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))) AS PaidMilestones
-    `);
+    const downstream = await pool.request().input("bid", sql.Int, id).query(bookingDownstreamSql);
     const d = downstream.recordset[0] || {};
     for (const [label, count] of Object.entries(d)) {
       if (Number(count) > 0) progressedReasons.push(label);
@@ -1019,7 +1068,24 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
     const tx = pool.transaction();
     await tx.begin();
     try {
+      await tx.request().input("bid", sql.Int, id).input("aid", sql.Int, booking.ApplicationId).query(`
+        UPDATE dbo.CrmCustomerBankDetail SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+        UPDATE dbo.CrmBookingDocument SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+        UPDATE dbo.CrmParkingAllotment SET BookingId = NULL, IsActive = 0 WHERE BookingId = @bid AND ApplicationId = @aid;
+        UPDATE dbo.CrmCoApplicant SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+        UPDATE dbo.CrmExtraCharge SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
+      `);
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingAttachment WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeCallBankPreference WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeChecklistItem WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("UPDATE dbo.CrmCommunicationLog SET BookingId = NULL WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("UPDATE dbo.SaLead SET CrmBookingId = NULL WHERE CrmBookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query(`
+        UPDATE dbo.ReceivedPayment SET CrmBookingId = NULL, CrmMilestoneId = NULL
+        WHERE CrmBookingId = @bid OR CrmMilestoneId IN (SELECT Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid)
+      `);
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingStageLog WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmUnitChangeLog WHERE BookingId = @bid");
