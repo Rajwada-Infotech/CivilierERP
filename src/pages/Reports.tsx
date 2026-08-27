@@ -55,6 +55,7 @@ import {
   PhoneCall,
   MapPinned,
   Percent,
+  Repeat,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -536,6 +537,30 @@ const ALL_REPORTS: ReportDef[] = [
       { header: "GRN", accessor: (r) => String(r.GRNId ?? "—") },
       { header: "Expense", accessor: (r) => String(r.ExpenseBookingId ?? "—") },
       { header: "Status", accessor: "Status" },
+    ],
+  },
+  {
+    id: "asset-transfer-report",
+    label: "Asset Transfer Report",
+    description: "Fixed asset custody transfers between users, department-wise",
+    icon: Repeat,
+    color: "#eab308",
+    apiPath: "/api/asset-transfer",
+    // GET / on assetTransfer.js filters on TransferDate; no finYear-by-id.
+    filterConfig: {
+      companyParam: "companyId",
+      finYearParam: "finYear",
+      singleDateParam: null,
+      dateFromParam: "fromDate",
+      dateToParam: "toDate",
+    },
+    columns: [
+      { header: "FA Item Code", accessor: (r) => (r.FAItemCode ?? "—") as string },
+      { header: "Item Name", accessor: (r) => (r.AssetName ?? "—") as string },
+      { header: "Date of Transfer", accessor: (r) => (r.TransferDate ? String(r.TransferDate).slice(0, 10) : "—") },
+      { header: "From User", accessor: (r) => (r.FromUserName ?? "—") as string },
+      { header: "To User", accessor: (r) => (r.ToUserName ?? "—") as string },
+      { header: "Department", accessor: (r) => (r.DepartmentName ?? "—") as string },
     ],
   },
   {
@@ -1665,6 +1690,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "issue-register",
       "stock-summary",
       "inter-company-transfer-report",
+      "asset-transfer-report",
       "work-order-register",
       "boq-register",
       "work-done",

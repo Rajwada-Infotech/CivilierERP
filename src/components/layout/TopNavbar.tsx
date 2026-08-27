@@ -333,6 +333,13 @@ const fixedAssetSetupItems = [
     color: "text-yellow-500",
     pageKey: "depreciation-setup",
   },
+  {
+    icon: Hash,
+    label: "ID Template Master",
+    path: "/fixed-asset/id-template-master",
+    color: "text-yellow-500",
+    pageKey: "id-template-master",
+  },
 ];
 
 const followupSetupItems = [
