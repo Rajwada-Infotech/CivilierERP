@@ -37,17 +37,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const inputCls =
+export const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30";
 
-const STATUS_LABEL: Record<AttendanceStatus, string> = { P: "Present", A: "Absent", H: "Half Day" };
-const STATUS_CLS: Record<AttendanceStatus, string> = {
+export const STATUS_LABEL: Record<AttendanceStatus, string> = { P: "Present", A: "Absent", H: "Half Day" };
+export const STATUS_CLS: Record<AttendanceStatus, string> = {
   P: "bg-emerald-500/15 border-emerald-500/40 text-emerald-700 dark:text-emerald-400",
   A: "bg-red-500/15 border-red-500/40 text-red-700 dark:text-red-400",
   H: "bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-400",
 };
 
-function todayIso() {
+export function todayIso() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -55,7 +55,7 @@ function todayIso() {
 interface ContractorOption { id: number; label: string }
 
 // ─── "+ Add Worker" picker ───────────────────────────────────────────────────
-function AddWorkerDialog({
+export function AddWorkerDialog({
   open,
   onOpenChange,
   rungId,

@@ -22,6 +22,10 @@ import {
   UserRound,
   CalendarDays,
   RotateCcw,
+  Users2,
+  Plus,
+  Save,
+  UserX,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -36,12 +40,19 @@ import {
   type ActivityPhotoMeta,
   type ReportedAssignment,
 } from "@/api/dependencyActivityAssignmentApi";
+import {
+  getAttendance,
+  saveAttendance,
+  removeFromRoster,
+  type AttendanceStatus,
+} from "@/api/workerAttendanceApi";
+import { AddWorkerDialog, inputCls, STATUS_LABEL, STATUS_CLS, todayIso } from "@/pages/civilworkdpr/WorkerAttendance";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
 import { useCameraCapture } from "@/hooks/useCameraCapture";
 
-type DetailTab = "overview" | "blueprint" | "photos";
+type DetailTab = "overview" | "blueprint" | "photos" | "attendance";
 
 const TAG_META: Record<PhotoPhase, { label: string; icon: LucideIcon; color: string }> = {
   before: { label: "Before", icon: Clock, color: "#f59e0b" },
@@ -507,6 +518,139 @@ function BlueprintTab({ rungId, roomId }: { rungId: number; roomId: number }) {
   );
 }
 
+// ── Attendance tab ───────────────────────────────────────────────────────
+// Same activity-scoped roster + day-wise attendance as the standalone
+// Worker Attendance page (src/pages/civilworkdpr/WorkerAttendance.tsx),
+// just pinned to this rung — the natural place to check "who worked on
+// this activity" alongside its Overview/Photos.
+function AttendanceTab({ rungId }: { rungId: number }) {
+  const queryClient = useQueryClient();
+  const [date, setDate] = useState(todayIso());
+  const [addWorkerOpen, setAddWorkerOpen] = useState(false);
+  const [statusByWorker, setStatusByWorker] = useState<Record<number, AttendanceStatus>>({});
+  const [saving, setSaving] = useState(false);
+
+  const { data: attendanceRows = [], isFetching } = useQuery({
+    queryKey: ["workerAttendanceAttendance", rungId, date],
+    queryFn: () => getAttendance(rungId, date),
+    staleTime: 10 * 1000,
+  });
+
+  useEffect(() => {
+    const next: Record<number, AttendanceStatus> = {};
+    for (const row of attendanceRows) next[row.workerId] = row.status ?? "P";
+    setStatusByWorker(next);
+  }, [attendanceRows]);
+
+  const existingWorkerIds = useMemo(() => new Set(attendanceRows.map((r) => r.workerId)), [attendanceRows]);
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["workerAttendanceAttendance", rungId, date] });
+
+  const handleRemoveWorker = async (workerId: number) => {
+    try {
+      await removeFromRoster(rungId, workerId);
+      toast.success("Worker removed from this activity");
+      refresh();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to remove worker");
+    }
+  };
+
+  const handleSave = async () => {
+    const entries = attendanceRows.map((r) => ({ workerId: r.workerId, status: statusByWorker[r.workerId] ?? "P" }));
+    if (!entries.length) return;
+    setSaving(true);
+    try {
+      await saveAttendance({ rungId, date, entries });
+      toast.success("Attendance saved");
+      refresh();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save attendance");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <label className="flex items-center gap-1.5 text-xs font-heading font-semibold uppercase tracking-wide text-muted-foreground">
+          <CalendarDays size={12} /> Date
+        </label>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} w-auto`} />
+      </div>
+
+      {isFetching ? (
+        <div className="flex items-center justify-center py-10 text-muted-foreground gap-2">
+          <Loader2 size={16} className="animate-spin" /> Loading attendance…
+        </div>
+      ) : attendanceRows.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground">
+          <Users2 size={22} className="mx-auto opacity-30 mb-2" />
+          <p className="text-sm">No workers assigned to this activity yet.</p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border divide-y divide-border/60 overflow-hidden">
+          {attendanceRows.map((row) => {
+            const status = statusByWorker[row.workerId] ?? "P";
+            return (
+              <div key={row.workerId} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-sm text-foreground truncate">{row.workerName}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{row.contractorName || row.skillType}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <select
+                    value={status}
+                    onChange={(e) => setStatusByWorker((prev) => ({ ...prev, [row.workerId]: e.target.value as AttendanceStatus }))}
+                    className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border ${STATUS_CLS[status]} focus:outline-none`}
+                  >
+                    {(Object.keys(STATUS_LABEL) as AttendanceStatus[]).map((s) => (
+                      <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => handleRemoveWorker(row.workerId)}
+                    title="Remove from activity"
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
+                  >
+                    <UserX size={13} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between gap-3">
+        <button
+          onClick={() => setAddWorkerOpen(true)}
+          className="flex items-center gap-1.5 text-sm text-cyan-600 hover:text-cyan-500 font-medium"
+        >
+          <Plus size={14} /> Add Worker
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving || attendanceRows.length === 0}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-40"
+        >
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          Save Attendance
+        </button>
+      </div>
+
+      <AddWorkerDialog
+        open={addWorkerOpen}
+        onOpenChange={setAddWorkerOpen}
+        rungId={rungId}
+        existingWorkerIds={existingWorkerIds}
+        onAdded={refresh}
+      />
+    </div>
+  );
+}
+
 // ── Overview tab ─────────────────────────────────────────────────────────
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -599,6 +743,7 @@ const TABS: Array<{ id: DetailTab; label: string; icon: LucideIcon }> = [
   { id: "overview", label: "Overview", icon: ActivityIcon },
   { id: "blueprint", label: "Blueprint", icon: ScanLine },
   { id: "photos", label: "Photos", icon: CameraIcon },
+  { id: "attendance", label: "Attendance", icon: Users2 },
 ];
 
 export default function ActivityDetailModal({
@@ -675,6 +820,7 @@ export default function ActivityDetailModal({
               {tab === "overview" && <OverviewTab row={row} />}
               {tab === "blueprint" && row.roomId != null && <BlueprintTab rungId={row.rungId} roomId={row.roomId} />}
               {tab === "photos" && <PhotosTab rungId={row.rungId} />}
+              {tab === "attendance" && <AttendanceTab rungId={row.rungId} />}
             </div>
           </div>
         </CivilWorkDprShell>
