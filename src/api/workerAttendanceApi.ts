@@ -15,25 +15,60 @@ async function handle<T = unknown>(res: Response): Promise<T> {
 
 export type AttendanceStatus = "P" | "A" | "H";
 
-export interface WorkerSummary {
+export interface ActivityOption {
+  rungId: number;
+  sequenceNo: number;
+  activityName: string;
+  dependencyMasterId: number;
+  alias: string;
+  projectId: number;
+  towerName: string | null;
+  floor: string | null;
+  flatName: string | null;
+  roomName: string | null;
+  label: string;
+  rosterCount: number;
+}
+
+export interface WorkerSearchResult {
   id: number;
   name: string;
   skillType: string;
-  companyName: string | null;
-  projectId: number | null;
-  projectName: string | null;
-  activityId: number | null;
-  activityName: string | null;
-  presentCount: number;
-  absentCount: number;
-  halfDayCount: number;
+  contractorName: string | null;
 }
 
-export interface WorkerListResponse {
-  data: WorkerSummary[];
-  total: number;
-  page: number;
-  pageSize: number;
+export interface RosterWorker {
+  id: number;
+  name: string;
+  skillType: string;
+  contractorName: string | null;
+}
+
+export interface AttendanceRow {
+  workerId: number;
+  workerName: string;
+  skillType: string;
+  contractorName: string | null;
+  attendanceId: number | null;
+  status: AttendanceStatus | null;
+  remarks: string | null;
+}
+
+export interface AttendanceReportRow {
+  id: number;
+  date: string;
+  status: AttendanceStatus;
+  workerId: number;
+  workerName: string;
+  contractorName: string | null;
+  activityId: number;
+  activityName: string;
+  dependencyAlias: string;
+  activityLabel: string;
+  projectId: number | null;
+  projectName: string | null;
+  companyId: number | null;
+  companyName: string | null;
 }
 
 export interface AttendanceDay {
@@ -41,7 +76,7 @@ export interface AttendanceDay {
   date: string;
   status: AttendanceStatus;
   remarks: string | null;
-  activityName: string | null;
+  activityLabel: string | null;
   projectName: string | null;
 }
 
@@ -50,36 +85,86 @@ export interface WorkerCalendarResponse {
   days: AttendanceDay[];
 }
 
-export interface MarkAttendancePayload {
-  name: string;
-  contractorId: number;
-  skillType?: string;
-  allocationId: number;
-  date: string;
-  status: AttendanceStatus;
-  remarks?: string | null;
-}
+export const getActivitiesForProject = async (projectId: number): Promise<ActivityOption[]> => {
+  const res = await fetchWithAuth(`${BASE}/activities?projectId=${projectId}`);
+  return handle<ActivityOption[]>(res);
+};
 
-export const getWorkers = async (filters?: {
+export const searchWorkers = async (filters?: { search?: string; contractorId?: number }): Promise<WorkerSearchResult[]> => {
+  const params = new URLSearchParams();
+  if (filters?.search) params.set("search", filters.search);
+  if (filters?.contractorId) params.set("contractorId", String(filters.contractorId));
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetchWithAuth(`${BASE}/workers${qs}`);
+  return handle<WorkerSearchResult[]>(res);
+};
+
+export const createWorker = async (payload: { name: string; contractorId: number; skillType?: string }): Promise<{ id: number; existed: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/workers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+};
+
+export const getRoster = async (rungId: number): Promise<RosterWorker[]> => {
+  const res = await fetchWithAuth(`${BASE}/roster/${rungId}`);
+  return handle<RosterWorker[]>(res);
+};
+
+export const addToRoster = async (rungId: number, workerIds: number[]): Promise<{ success: boolean; added: number }> => {
+  const res = await fetchWithAuth(`${BASE}/roster/${rungId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workerIds }),
+  });
+  return handle(res);
+};
+
+export const removeFromRoster = async (rungId: number, workerId: number): Promise<{ success: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/roster/${rungId}/${workerId}`, { method: "DELETE" });
+  return handle(res);
+};
+
+export const getAttendance = async (rungId: number, date: string): Promise<AttendanceRow[]> => {
+  const res = await fetchWithAuth(`${BASE}/attendance?rungId=${rungId}&date=${date}`);
+  return handle<AttendanceRow[]>(res);
+};
+
+export const saveAttendance = async (payload: {
+  rungId: number;
+  date: string;
+  entries: { workerId: number; status: AttendanceStatus; remarks?: string | null }[];
+}): Promise<{ success: boolean; saved: number }> => {
+  const res = await fetchWithAuth(`${BASE}/attendance`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+};
+
+export const getAttendanceReport = async (filters?: {
   companyId?: number;
   projectId?: number;
-  contractorId?: number;
   activityId?: number;
-  search?: string;
-  page?: number;
-  pageSize?: number;
-}): Promise<WorkerListResponse> => {
+  workerId?: number;
+  status?: AttendanceStatus;
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<AttendanceReportRow[]> => {
   const params = new URLSearchParams();
   if (filters?.companyId) params.set("companyId", String(filters.companyId));
   if (filters?.projectId) params.set("projectId", String(filters.projectId));
-  if (filters?.contractorId) params.set("contractorId", String(filters.contractorId));
   if (filters?.activityId) params.set("activityId", String(filters.activityId));
-  if (filters?.search) params.set("search", filters.search);
-  if (filters?.page) params.set("page", String(filters.page));
-  if (filters?.pageSize) params.set("pageSize", String(filters.pageSize));
+  if (filters?.workerId) params.set("workerId", String(filters.workerId));
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters?.dateTo) params.set("dateTo", filters.dateTo);
   const qs = params.toString() ? `?${params.toString()}` : "";
-  const res = await fetchWithAuth(`${BASE}/workers${qs}`);
-  return handle<WorkerListResponse>(res);
+  const res = await fetchWithAuth(`${BASE}/report${qs}`);
+  return handle<AttendanceReportRow[]>(res);
 };
 
 export const getWorkerCalendar = async (
@@ -88,15 +173,4 @@ export const getWorkerCalendar = async (
 ): Promise<WorkerCalendarResponse> => {
   const res = await fetchWithAuth(`${BASE}/workers/${workerId}/calendar?month=${month}`);
   return handle<WorkerCalendarResponse>(res);
-};
-
-export const markAttendance = async (
-  payload: MarkAttendancePayload,
-): Promise<{ success: boolean; workerId: number; attendanceId: number }> => {
-  const res = await fetchWithAuth(BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return handle(res);
 };

@@ -74,7 +74,8 @@ router.get("/filters", cache("brs-filters", 300), async (req, res) => {
         ahm.LHeadId            AS BId,
         ahm.LHeadName          AS BName,
         ahm.${companyCol}      AS CompanyName,
-        ent.id                 AS CompanyId
+        ent.id                 AS CompanyId,
+        RIGHT(ahm.LAccountNo, 4) AS AccountNoLast4
       FROM dbo.AccountHeadMaster ahm
       LEFT JOIN dbo.enterprise ent
         ON  ent.business_type = 'C'
@@ -84,11 +85,16 @@ router.get("/filters", cache("brs-filters", 300), async (req, res) => {
       ORDER BY ahm.LHeadName
     `);
 
+    // Same bank can have several ledger heads (e.g. two branches/accounts
+    // both named "HDFC Bank") — the dropdown otherwise shows indistinguishable
+    // duplicate labels, same fix already applied to Journal Voucher's account
+    // picker.
     const banks = bankResult.recordset.map((b) => ({
       id: b.BId,
       name: b.BName,
       companyId: b.CompanyId ?? null,
       companyName: b.CompanyName ?? null,
+      accountNoLast4: b.AccountNoLast4 || null,
     }));
 
     res.json({ companies: companyResult.recordset, banks });
@@ -154,7 +160,21 @@ router.get("/", cache("brs", 60), async (req, res) => {
         SELECT
           np.PPaymentID            AS SourceID,
           'PAYMENT'                AS SourceType,
-          np.PPaymentName          AS PaymentName,
+          -- Party/payee name — NOT np.PPaymentName, which is the free-text
+          -- "Payment Purpose"/reason field (e.g. "Material Purchase"), not
+          -- who the payment was made to. Same resolution chain newPayment.js
+          -- itself uses for its own party column (GRN/PO-linked invoice ->
+          -- supplier head, else the direct party picked on the payment).
+          -- Using PPaymentName here showed the payment's reason instead of
+          -- its party in this report.
+          COALESCE(
+            CASE
+              WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
+              WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
+              ELSE grn2_sup.LHeadName
+            END,
+            party_head.LHeadName
+          )                         AS PaymentName,
           ISNULL(ent.name, np.PCompany) AS CompanyName,
           ent.id                   AS CompanyID,
           np.PBankID               AS BankID,
@@ -198,6 +218,18 @@ router.get("/", cache("brs", 60), async (req, res) => {
           AND repl.Status NOT IN ('Draft', 'Rejected')
         LEFT JOIN dbo.NewPayment orig
           ON  orig.PPaymentID = np.ReplacesPaymentId
+        -- Party resolution chain — mirrors newPayment.js's own PSupplierName join exactly.
+        LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+        LEFT JOIN dbo.PurchaseOrders po
+          ON eb.ESourceType = 'PO' AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.GoodsReceiptNotes grn_eb
+          ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster grn_sup ON grn_sup.LHeadId = grn_eb.SupplierID
+        LEFT JOIN dbo.AccountHeadMaster po_sup  ON po_sup.LHeadId  = po.SupplierID
+        LEFT JOIN dbo.GoodsReceiptNotes grn2
+          ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
+        LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
+        LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
         LEFT JOIN dbo.enterprise ent
           ON  ent.business_type = 'C'
           AND (
@@ -477,6 +509,25 @@ router.put("/:sourceType/:sourceId/unclear", async (req, res) => {
 
   try {
     const pool = getPool();
+
+    // A cleared entry is locked — once the bank has confirmed a payment in
+    // the passbook, un-clearing it here would silently disagree with a
+    // reconciliation that's already happened. Guard server-side, not just
+    // by hiding the checkbox client-side, so no caller (including a stale
+    // page, or a direct API call) can slip a matched entry back to unclear.
+    const existing = await pool
+      .request()
+      .input("SourceType", sql.NVarChar(20), sourceType)
+      .input("SourceID", sql.Int, parseInt(sourceId))
+      .query(`
+        SELECT IsMatched FROM BankReconciliation
+        WHERE SourceType = @SourceType AND SourceID = @SourceID
+      `);
+    if (existing.recordset[0]?.IsMatched) {
+      return res.status(409).json({
+        error: "This entry is already marked Clear and cannot be reverted to Unclear.",
+      });
+    }
 
     await pool
       .request()

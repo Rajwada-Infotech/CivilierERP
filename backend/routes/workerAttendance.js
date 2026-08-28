@@ -6,120 +6,368 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
-// dbo.Worker — stable worker identity tied to a Contractor/company, so
-// attendance can be searched/summarized across days without relying on
-// free-text names re-typed on every Daily Labour entry.
+// dbo.Worker — stable worker identity tied to a Contractor/company.
+//
 // dbo.WorkerAttendance — one Present/Absent/Half-day status per worker per
-// calendar day, referencing whichever Activity allocation they worked that
-// day (for display context only — uniqueness is per worker+date, not
-// per activity, since a worker is either in or out for the day).
+// calendar day PER ACTIVITY (dbo.DependencyMasterActivity — a "rung" in the
+// Company -> Project -> Tower/Floor/Flat/Room -> Activity dependency chain,
+// same entity Civil Work DPR's "Assigned Activities" page shows). A worker
+// on two activities the same day gets two independent attendance rows —
+// see migration 364's UQ_WorkerAttendance_Worker_Activity_Date.
+//
+// dbo.WorkerActivityRoster — the persistent "which workers are assigned to
+// this activity" list, populated via "+ Add Worker" — a worker added once
+// keeps showing up on every subsequent day's attendance form without being
+// re-added, matching a real labour roster rather than re-picking daily.
+
+router.use(authMiddleware);
+
+const PAGE_KEY = "civilworkdpr-worker-attendance";
+const STATUS_VALUES = new Set(["P", "A", "H"]);
 
 const cleanStr = (v, len = 300) => {
   if (!v || String(v).trim() === "") return null;
   return String(v).trim().slice(0, len);
 };
 
-// ─── GET /workers — list, filterable by project/company/activity, with
-//     attendance summary + search + pagination ────────────────────────────
-router.get("/workers", authMiddleware, async (req, res) => {
+function actorOf(req) {
+  return req.user?.email || req.user?.name || "system";
+}
+
+// ─── GET /activities — rungs (DependencyMasterActivity) for a project, for
+//     the Activity dropdown. Same join shape as dependencyActivityAssignment
+//     .js's GET / — reused here rather than re-derived, so the Activity
+//     label ("Electrical — Room 101") matches what Activity Reporting shows.
+router.get("/activities", async (req, res) => {
+  const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+  if (!projectId) return res.status(400).json({ error: "projectId is required" });
+  try {
+    const pool = getPool();
+    const r = await pool.request().input("projectId", sql.Int, projectId).query(`
+      SELECT
+        dma.Id AS rungId,
+        dma.SequenceNo AS sequenceNo,
+        am.activity_name AS activityName,
+        dm.Id AS dependencyMasterId, dm.Alias AS alias,
+        dm.ProjectId AS projectId,
+        bm.BlockName AS towerName, dm.Floor AS floor,
+        um.UnitName AS flatName, rm.RoomName AS roomName,
+        CONCAT(
+          dm.Alias, ' — ', am.activity_name, ' (',
+          ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor, ' > ',
+          ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—'), ')'
+        ) AS label,
+        (SELECT COUNT(*) FROM dbo.WorkerActivityRoster war WHERE war.DependencyMasterActivityId = dma.Id AND war.IsActive = 1) AS rosterCount
+      FROM dbo.DependencyMasterActivity dma
+      JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+      JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+      LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+      LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+      LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
+      WHERE dm.ProjectId = @projectId AND dm.IsActive = 1
+      ORDER BY dm.Alias, dma.SequenceNo
+    `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("WorkerAttendance /activities error:", err);
+    res.status(500).json({ error: "Failed to fetch activities" });
+  }
+});
+
+// ─── GET /workers — search across all workers (for the "+ Add Worker"
+//     picker) — not activity-scoped, since the point is finding a worker to
+//     ADD to an activity's roster in the first place.
+router.get("/workers", async (req, res) => {
+  try {
+    const pool = getPool();
+    const search = req.query.search ? `%${req.query.search}%` : null;
+    const contractorId = req.query.contractorId ? parseInt(req.query.contractorId, 10) : null;
+    const r = await pool.request()
+      .input("search", sql.NVarChar, search)
+      .input("contractorId", sql.Int, contractorId)
+      .query(`
+        SELECT TOP 100 w.WorkerId AS id, w.Name AS name, w.SkillType AS skillType,
+               ahm.LHeadName AS contractorName
+        FROM dbo.Worker w
+        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = w.ContractorLHeadId
+        WHERE w.IsActive = 1
+          AND (@search IS NULL OR w.Name LIKE @search)
+          AND (@contractorId IS NULL OR w.ContractorLHeadId = @contractorId)
+        ORDER BY w.Name
+      `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("WorkerAttendance /workers error:", err);
+    res.status(500).json({ error: "Failed to search workers" });
+  }
+});
+
+// ─── POST /workers — create a new Worker (used by the "+ Add Worker"
+//     picker when the search finds no existing match) ───────────────────────
+router.post("/workers", requirePageRight(PAGE_KEY, "create"), async (req, res) => {
+  const { name, contractorId, skillType } = req.body;
+  if (!name || !contractorId) return res.status(400).json({ error: "Worker name and contractor are required" });
+  try {
+    const pool = getPool();
+    const existing = await pool.request()
+      .input("name", sql.NVarChar, cleanStr(name, 150))
+      .input("contractorId", sql.Int, contractorId)
+      .query(`SELECT WorkerId AS id FROM dbo.Worker WHERE Name = @name AND ContractorLHeadId = @contractorId`);
+    if (existing.recordset.length) return res.status(200).json({ id: existing.recordset[0].id, existed: true });
+
+    const inserted = await pool.request()
+      .input("name", sql.NVarChar, cleanStr(name, 150))
+      .input("contractorId", sql.Int, contractorId)
+      .input("skillType", sql.NVarChar, cleanStr(skillType, 20) || "Skilled")
+      .input("createdBy", sql.NVarChar, actorOf(req))
+      .query(`
+        INSERT INTO dbo.Worker (Name, ContractorLHeadId, SkillType, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.WorkerId AS id
+        VALUES (@name, @contractorId, @skillType, @createdBy, GETDATE())
+      `);
+    res.status(201).json({ id: inserted.recordset[0].id, existed: false });
+  } catch (err) {
+    console.error("WorkerAttendance POST /workers error:", err);
+    res.status(500).json({ error: "Failed to create worker" });
+  }
+});
+
+// ─── GET /roster/:rungId — workers currently assigned to this activity ─────
+router.get("/roster/:rungId", requirePageRight(PAGE_KEY, "view"), async (req, res) => {
+  const rungId = parseInt(req.params.rungId, 10);
+  if (!rungId) return res.status(400).json({ error: "Invalid rungId" });
+  try {
+    const pool = getPool();
+    const r = await pool.request().input("rungId", sql.Int, rungId).query(`
+      SELECT w.WorkerId AS id, w.Name AS name, w.SkillType AS skillType,
+             ahm.LHeadName AS contractorName
+      FROM dbo.WorkerActivityRoster war
+      JOIN dbo.Worker w ON w.WorkerId = war.WorkerId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = w.ContractorLHeadId
+      WHERE war.DependencyMasterActivityId = @rungId AND war.IsActive = 1
+      ORDER BY w.Name
+    `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("WorkerAttendance /roster error:", err);
+    res.status(500).json({ error: "Failed to fetch roster" });
+  }
+});
+
+// ─── POST /roster/:rungId — add worker(s) to an activity's roster ──────────
+router.post("/roster/:rungId", requirePageRight(PAGE_KEY, "create"), async (req, res) => {
+  const rungId = parseInt(req.params.rungId, 10);
+  if (!rungId) return res.status(400).json({ error: "Invalid rungId" });
+  const workerIds = Array.isArray(req.body?.workerIds) ? req.body.workerIds.map((n) => parseInt(n, 10)).filter(Boolean) : [];
+  if (!workerIds.length) return res.status(400).json({ error: "workerIds is required" });
+
+  try {
+    const pool = getPool();
+    const actor = actorOf(req);
+    for (const workerId of workerIds) {
+      const already = await pool.request()
+        .input("workerId", sql.Int, workerId)
+        .input("rungId", sql.Int, rungId)
+        .query(`SELECT RosterId FROM dbo.WorkerActivityRoster WHERE WorkerId = @workerId AND DependencyMasterActivityId = @rungId`);
+      if (already.recordset.length) {
+        await pool.request().input("id", sql.Int, already.recordset[0].RosterId)
+          .query(`UPDATE dbo.WorkerActivityRoster SET IsActive = 1 WHERE RosterId = @id`);
+      } else {
+        await pool.request()
+          .input("workerId", sql.Int, workerId)
+          .input("rungId", sql.Int, rungId)
+          .input("createdBy", sql.NVarChar, actor)
+          .query(`
+            INSERT INTO dbo.WorkerActivityRoster (WorkerId, DependencyMasterActivityId, CreatedBy, CreatedAt)
+            VALUES (@workerId, @rungId, @createdBy, GETDATE())
+          `);
+      }
+    }
+    res.status(201).json({ success: true, added: workerIds.length });
+  } catch (err) {
+    console.error("WorkerAttendance POST /roster error:", err);
+    res.status(500).json({ error: "Failed to add worker(s) to roster" });
+  }
+});
+
+// ─── DELETE /roster/:rungId/:workerId — remove a worker from an activity's
+//     roster (soft — keeps past attendance history intact) ─────────────────
+router.delete("/roster/:rungId/:workerId", requirePageRight(PAGE_KEY, "delete"), async (req, res) => {
+  const rungId = parseInt(req.params.rungId, 10);
+  const workerId = parseInt(req.params.workerId, 10);
+  if (!rungId || !workerId) return res.status(400).json({ error: "Invalid rungId/workerId" });
+  try {
+    const pool = getPool();
+    await pool.request().input("rungId", sql.Int, rungId).input("workerId", sql.Int, workerId).query(`
+      UPDATE dbo.WorkerActivityRoster SET IsActive = 0
+      WHERE DependencyMasterActivityId = @rungId AND WorkerId = @workerId
+    `);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("WorkerAttendance DELETE /roster error:", err);
+    res.status(500).json({ error: "Failed to remove worker from roster" });
+  }
+});
+
+// ─── GET /attendance?rungId=&date=YYYY-MM-DD — the activity's roster merged
+//     with that date's saved attendance (roster members with no saved row
+//     yet come back with status: null, so the frontend can default them). ──
+router.get("/attendance", requirePageRight(PAGE_KEY, "view"), async (req, res) => {
+  const rungId = parseInt(req.query.rungId, 10);
+  const date = req.query.date;
+  if (!rungId) return res.status(400).json({ error: "rungId is required" });
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+
+  try {
+    const pool = getPool();
+    const r = await pool.request()
+      .input("rungId", sql.Int, rungId)
+      .input("date", sql.Date, date)
+      .query(`
+        SELECT w.WorkerId AS workerId, w.Name AS workerName, w.SkillType AS skillType,
+               ahm.LHeadName AS contractorName,
+               wa.AttendanceId AS attendanceId, wa.Status AS status, wa.Remarks AS remarks
+        FROM dbo.WorkerActivityRoster war
+        JOIN dbo.Worker w ON w.WorkerId = war.WorkerId
+        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = w.ContractorLHeadId
+        LEFT JOIN dbo.WorkerAttendance wa
+          ON wa.WorkerId = war.WorkerId AND wa.DependencyMasterActivityId = war.DependencyMasterActivityId
+          AND wa.AttendanceDate = @date
+        WHERE war.DependencyMasterActivityId = @rungId AND war.IsActive = 1
+        ORDER BY w.Name
+      `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("WorkerAttendance GET /attendance error:", err);
+    res.status(500).json({ error: "Failed to fetch attendance" });
+  }
+});
+
+// ─── POST /attendance — bulk upsert one day's statuses for an activity ─────
+router.post("/attendance", requirePageRight(PAGE_KEY, "create"), async (req, res) => {
+  const { rungId, date, entries } = req.body;
+  const rungIdVal = parseInt(rungId, 10);
+  if (!rungIdVal) return res.status(400).json({ error: "rungId is required" });
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+  if (!Array.isArray(entries) || !entries.length) return res.status(400).json({ error: "entries is required" });
+  for (const e of entries) {
+    if (!STATUS_VALUES.has(e.status)) return res.status(400).json({ error: "Each entry's status must be P, A, or H" });
+  }
+
+  try {
+    const pool = getPool();
+    const actor = actorOf(req);
+    let saved = 0;
+    for (const entry of entries) {
+      const workerId = parseInt(entry.workerId, 10);
+      if (!workerId) continue;
+      const remarks = cleanStr(entry.remarks);
+
+      const existing = await pool.request()
+        .input("workerId", sql.Int, workerId)
+        .input("rungId", sql.Int, rungIdVal)
+        .input("date", sql.Date, date)
+        .query(`
+          SELECT AttendanceId FROM dbo.WorkerAttendance
+          WHERE WorkerId = @workerId AND DependencyMasterActivityId = @rungId AND AttendanceDate = @date
+        `);
+
+      if (existing.recordset.length) {
+        await pool.request()
+          .input("id", sql.Int, existing.recordset[0].AttendanceId)
+          .input("status", sql.Char(1), entry.status)
+          .input("remarks", sql.NVarChar, remarks)
+          .input("updatedBy", sql.NVarChar, actor)
+          .query(`
+            UPDATE dbo.WorkerAttendance SET Status = @status, Remarks = @remarks,
+              UpdatedBy = @updatedBy, UpdatedAt = GETDATE()
+            WHERE AttendanceId = @id
+          `);
+      } else {
+        await pool.request()
+          .input("workerId", sql.Int, workerId)
+          .input("rungId", sql.Int, rungIdVal)
+          .input("date", sql.Date, date)
+          .input("status", sql.Char(1), entry.status)
+          .input("remarks", sql.NVarChar, remarks)
+          .input("createdBy", sql.NVarChar, actor)
+          .query(`
+            INSERT INTO dbo.WorkerAttendance
+              (WorkerId, DependencyMasterActivityId, AttendanceDate, Status, Remarks, CreatedBy, CreatedAt)
+            VALUES (@workerId, @rungId, @date, @status, @remarks, @createdBy, GETDATE())
+          `);
+      }
+      saved++;
+    }
+    res.json({ success: true, saved });
+  } catch (err) {
+    console.error("WorkerAttendance POST /attendance error:", err);
+    res.status(500).json({ error: "Failed to save attendance" });
+  }
+});
+
+// ─── GET /report — flat rows for the Reports page (Activity-wise /
+//     Worker-wise / Project-wise summaries are all derivable client-side
+//     from this one flat list, same as Reports.tsx's other ReportDefs). ────
+router.get("/report", requirePageRight(PAGE_KEY, "view"), async (req, res) => {
   try {
     const pool = getPool();
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const contractorId = req.query.contractorId ? parseInt(req.query.contractorId, 10) : null;
-    const activityId = req.query.activityId ? parseInt(req.query.activityId, 10) : null;
-    const search = req.query.search ? `%${req.query.search}%` : null;
-    const page = req.query.page ? Math.max(1, parseInt(req.query.page, 10)) : 1;
-    const pageSize = req.query.pageSize ? Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10))) : 20;
-    const offset = (page - 1) * pageSize;
+    const rungId = req.query.activityId ? parseInt(req.query.activityId, 10) : null;
+    const workerId = req.query.workerId ? parseInt(req.query.workerId, 10) : null;
+    const status = req.query.status ? String(req.query.status).toUpperCase() : null;
+    const dateFrom = req.query.dateFrom || null;
+    const dateTo = req.query.dateTo || null;
 
-    // Company isn't a column on ContractorAllocation — it's the parent of
-    // whichever Project the allocation belongs to, so it's filtered via the
-    // Project's own company_id rather than a direct join condition.
-    const baseWhere = `
-      WHERE (@projectId IS NULL OR ca.ProjectId = @projectId)
-        AND (@companyId IS NULL OR ca.ProjectId IN (
-              SELECT id FROM dbo.enterprise WHERE company_id = @companyId
-            ))
-        AND (@contractorId IS NULL OR w.ContractorLHeadId = @contractorId)
-        AND (@activityId IS NULL OR ca.ActivityId = @activityId)
-        AND (@search IS NULL OR w.Name LIKE @search)
-    `;
-
-    const request = () =>
-      pool.request()
-        .input("companyId", sql.Int, companyId)
-        .input("projectId", sql.Int, projectId)
-        .input("contractorId", sql.Int, contractorId)
-        .input("activityId", sql.Int, activityId)
-        .input("search", sql.NVarChar, search);
-
-    // Workers are scoped to a (Worker, latest allocation matching filters)
-    // pair — pick the most recent matching allocation per worker so each
-    // worker shows up once with a representative project/activity.
-    const countResult = await request().query(`
-      SELECT COUNT(DISTINCT w.WorkerId) AS total
-      FROM dbo.Worker w
-      JOIN dbo.WorkerAttendance wa ON wa.WorkerId = w.WorkerId
-      JOIN dbo.ContractorAllocation ca ON ca.AllocationId = wa.AllocationId
-      ${baseWhere}
-    `);
-    const total = countResult.recordset[0]?.total ?? 0;
-
-    const listResult = await request()
-      .input("offset", sql.Int, offset)
-      .input("pageSize", sql.Int, pageSize)
+    const r = await pool.request()
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
+      .input("rungId", sql.Int, rungId)
+      .input("workerId", sql.Int, workerId)
+      .input("status", sql.Char(1), status)
+      .input("dateFrom", sql.Date, dateFrom)
+      .input("dateTo", sql.Date, dateTo)
       .query(`
-        WITH LatestAlloc AS (
-          SELECT wa.WorkerId, ca.ProjectId, ca.ActivityId, ca.AllocationId,
-                 ROW_NUMBER() OVER (PARTITION BY wa.WorkerId ORDER BY wa.AttendanceDate DESC) AS rn
-          FROM dbo.WorkerAttendance wa
-          JOIN dbo.ContractorAllocation ca ON ca.AllocationId = wa.AllocationId
-        )
         SELECT
-          w.WorkerId           AS id,
-          w.Name               AS name,
-          w.SkillType          AS skillType,
-          ahm.LHeadName        AS companyName,
-          la.ProjectId         AS projectId,
-          pr.name              AS projectName,
-          la.ActivityId        AS activityId,
-          act.activity_name    AS activityName,
-          ISNULL(sum_p.cnt, 0) AS presentCount,
-          ISNULL(sum_a.cnt, 0) AS absentCount,
-          ISNULL(sum_h.cnt, 0) AS halfDayCount
-        FROM dbo.Worker w
-        JOIN dbo.WorkerAttendance wa ON wa.WorkerId = w.WorkerId
-        JOIN dbo.ContractorAllocation ca ON ca.AllocationId = wa.AllocationId
-        JOIN LatestAlloc la ON la.WorkerId = w.WorkerId AND la.rn = 1
+          wa.AttendanceId AS id,
+          wa.AttendanceDate AS date,
+          wa.Status AS status,
+          w.WorkerId AS workerId, w.Name AS workerName,
+          ahm.LHeadName AS contractorName,
+          dma.Id AS activityId, am.activity_name AS activityName,
+          dm.Alias AS dependencyAlias,
+          CONCAT(dm.Alias, ' — ', am.activity_name) AS activityLabel,
+          dm.ProjectId AS projectId, ep.name AS projectName,
+          ep.company_id AS companyId, ec.name AS companyName
+        FROM dbo.WorkerAttendance wa
+        JOIN dbo.Worker w ON w.WorkerId = wa.WorkerId
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = w.ContractorLHeadId
-        LEFT JOIN dbo.enterprise pr ON pr.id = la.ProjectId
-        LEFT JOIN dbo.ActivityMaster act ON act.id = la.ActivityId
-        LEFT JOIN (
-          SELECT WorkerId, COUNT(*) AS cnt FROM dbo.WorkerAttendance WHERE Status = 'P' GROUP BY WorkerId
-        ) sum_p ON sum_p.WorkerId = w.WorkerId
-        LEFT JOIN (
-          SELECT WorkerId, COUNT(*) AS cnt FROM dbo.WorkerAttendance WHERE Status = 'A' GROUP BY WorkerId
-        ) sum_a ON sum_a.WorkerId = w.WorkerId
-        LEFT JOIN (
-          SELECT WorkerId, COUNT(*) AS cnt FROM dbo.WorkerAttendance WHERE Status = 'H' GROUP BY WorkerId
-        ) sum_h ON sum_h.WorkerId = w.WorkerId
-        ${baseWhere}
-        GROUP BY w.WorkerId, w.Name, w.SkillType, ahm.LHeadName, la.ProjectId, pr.name,
-                 la.ActivityId, act.activity_name, sum_p.cnt, sum_a.cnt, sum_h.cnt
-        ORDER BY w.Name
-        OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = wa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        LEFT JOIN dbo.enterprise ec ON ec.id = ep.company_id AND ec.business_type = 'C'
+        WHERE wa.DependencyMasterActivityId IS NOT NULL
+          AND (@projectId IS NULL OR dm.ProjectId = @projectId)
+          AND (@companyId IS NULL OR ep.company_id = @companyId)
+          AND (@rungId IS NULL OR dma.Id = @rungId)
+          AND (@workerId IS NULL OR w.WorkerId = @workerId)
+          AND (@status IS NULL OR wa.Status = @status)
+          AND (@dateFrom IS NULL OR wa.AttendanceDate >= @dateFrom)
+          AND (@dateTo IS NULL OR wa.AttendanceDate <= @dateTo)
+        ORDER BY wa.AttendanceDate DESC, w.Name
       `);
-
-    res.json({ data: listResult.recordset, total, page, pageSize });
+    res.json(r.recordset);
   } catch (err) {
-    console.error("WorkerAttendance /workers error:", err);
-    res.status(500).json({ error: "Failed to fetch workers" });
+    console.error("WorkerAttendance /report error:", err);
+    res.status(500).json({ error: "Failed to fetch attendance report" });
   }
 });
 
-// ─── GET /workers/:id/calendar?month=YYYY-MM — one worker's attendance for a month ──
-router.get("/workers/:id/calendar", authMiddleware, async (req, res) => {
+// ─── GET /workers/:id/calendar?month=YYYY-MM — one worker's attendance for
+//     a month, across every activity ─────────────────────────────────────
+router.get("/workers/:id/calendar", requirePageRight(PAGE_KEY, "view"), async (req, res) => {
   const workerId = parseInt(req.params.id, 10);
   if (isNaN(workerId)) return res.status(400).json({ error: "Invalid worker id" });
 
@@ -139,12 +387,13 @@ router.get("/workers/:id/calendar", authMiddleware, async (req, res) => {
           wa.AttendanceDate AS date,
           wa.Status         AS status,
           wa.Remarks        AS remarks,
-          act.activity_name AS activityName,
-          pr.name            AS projectName
+          CONCAT(dm.Alias, ' — ', am.activity_name) AS activityLabel,
+          ep.name           AS projectName
         FROM dbo.WorkerAttendance wa
-        JOIN dbo.ContractorAllocation ca ON ca.AllocationId = wa.AllocationId
-        LEFT JOIN dbo.ActivityMaster act ON act.id = ca.ActivityId
-        LEFT JOIN dbo.enterprise pr ON pr.id = ca.ProjectId
+        LEFT JOIN dbo.DependencyMasterActivity dma ON dma.Id = wa.DependencyMasterActivityId
+        LEFT JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        LEFT JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
         WHERE wa.WorkerId = @workerId
           AND wa.AttendanceDate >= @from
           AND wa.AttendanceDate < DATEADD(MONTH, 1, @from)
@@ -167,88 +416,5 @@ router.get("/workers/:id/calendar", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch attendance calendar" });
   }
 });
-
-// ─── POST / — upsert one day's attendance for a worker (find-or-create
-//     the Worker by name+contractor, then upsert the day's status) ────────
-router.post(
-  "/",
-  authMiddleware,
-  requirePageRight("civilworkdpr-contractor-register", "create"),
-  async (req, res) => {
-    const { name, contractorId, skillType, allocationId, date, status, remarks } = req.body;
-    const actor = req.user?.email || req.user?.name || "system";
-
-    if (!name || !contractorId) return res.status(400).json({ error: "Worker name and contractor are required" });
-    if (!allocationId) return res.status(400).json({ error: "Allocation is required" });
-    if (!date) return res.status(400).json({ error: "Date is required" });
-    if (!["P", "A", "H"].includes(status)) {
-      return res.status(400).json({ error: "status must be P, A, or H" });
-    }
-
-    try {
-      const pool = getPool();
-
-      let workerRow = await pool.request()
-        .input("name", sql.NVarChar, cleanStr(name, 150))
-        .input("contractorId", sql.Int, contractorId)
-        .query(`SELECT WorkerId FROM dbo.Worker WHERE Name = @name AND ContractorLHeadId = @contractorId`);
-
-      let workerId;
-      if (workerRow.recordset.length) {
-        workerId = workerRow.recordset[0].WorkerId;
-      } else {
-        const inserted = await pool.request()
-          .input("name", sql.NVarChar, cleanStr(name, 150))
-          .input("contractorId", sql.Int, contractorId)
-          .input("skillType", sql.NVarChar, cleanStr(skillType, 20) || "Skilled")
-          .input("createdBy", sql.NVarChar, actor)
-          .query(`
-            INSERT INTO dbo.Worker (Name, ContractorLHeadId, SkillType, CreatedBy, CreatedAt)
-            OUTPUT INSERTED.WorkerId AS id
-            VALUES (@name, @contractorId, @skillType, @createdBy, GETDATE())
-          `);
-        workerId = inserted.recordset[0].id;
-      }
-
-      const existing = await pool.request()
-        .input("workerId", sql.Int, workerId)
-        .input("date", sql.Date, date)
-        .query(`SELECT AttendanceId FROM dbo.WorkerAttendance WHERE WorkerId = @workerId AND AttendanceDate = @date`);
-
-      if (existing.recordset.length) {
-        await pool.request()
-          .input("id", sql.Int, existing.recordset[0].AttendanceId)
-          .input("allocationId", sql.Int, allocationId)
-          .input("status", sql.Char(1), status)
-          .input("remarks", sql.NVarChar, cleanStr(remarks))
-          .input("updatedBy", sql.NVarChar, actor)
-          .query(`
-            UPDATE dbo.WorkerAttendance SET
-              AllocationId = @allocationId, Status = @status, Remarks = @remarks,
-              UpdatedBy = @updatedBy, UpdatedAt = GETDATE()
-            WHERE AttendanceId = @id
-          `);
-        return res.json({ success: true, workerId, attendanceId: existing.recordset[0].AttendanceId });
-      }
-
-      const result = await pool.request()
-        .input("workerId", sql.Int, workerId)
-        .input("allocationId", sql.Int, allocationId)
-        .input("date", sql.Date, date)
-        .input("status", sql.Char(1), status)
-        .input("remarks", sql.NVarChar, cleanStr(remarks))
-        .input("createdBy", sql.NVarChar, actor)
-        .query(`
-          INSERT INTO dbo.WorkerAttendance (WorkerId, AllocationId, AttendanceDate, Status, Remarks, CreatedBy, CreatedAt)
-          OUTPUT INSERTED.AttendanceId AS id
-          VALUES (@workerId, @allocationId, @date, @status, @remarks, @createdBy, GETDATE())
-        `);
-      res.status(201).json({ success: true, workerId, attendanceId: result.recordset[0].id });
-    } catch (err) {
-      console.error("WorkerAttendance POST error:", err);
-      res.status(500).json({ error: "Failed to record attendance" });
-    }
-  },
-);
 
 module.exports = router;

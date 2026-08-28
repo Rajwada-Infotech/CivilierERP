@@ -148,5 +148,37 @@ export async function approveReceivedPayment(
   if (!res.ok) throw new Error("Approval action failed");
 }
 
+export interface ReceivedPaymentPostingAccount {
+  id: number;
+  label: string;
+  code: string | null;
+}
+export interface ReceivedPaymentPostingEntry {
+  date: string | null;
+  docNo: string;
+  pmtId: number;
+  type: "receipt";
+  amount: number;
+  mode: string;
+  accounts: { bank: ReceivedPaymentPostingAccount | null; customer: ReceivedPaymentPostingAccount | null };
+  isPosted: boolean;
+  jvNo: string | null;
+}
+export interface ReceivedPaymentPosting {
+  amount: number;
+  mode: string;
+  status: string;
+  accounts: { bank: ReceivedPaymentPostingAccount | null; customer: ReceivedPaymentPostingAccount | null };
+  isPosted: boolean;
+  jvNo: string | null;
+  entries: ReceivedPaymentPostingEntry[];
+}
+
+export async function getReceivedPaymentPosting(id: number): Promise<ReceivedPaymentPosting> {
+  const res = await fetchWithAuth(`${BASE}/${id}/posting`);
+  if (!res.ok) throw await readError(res, "Failed to fetch posting details");
+  return res.json();
+}
+
 // Alias used by ReceivedPayment.tsx
 export const addReceivedPayment = createReceivedPayment;
