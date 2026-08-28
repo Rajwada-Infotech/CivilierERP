@@ -46,6 +46,7 @@ export interface FixedAssetDetail extends FixedAssetListItem {
   SaleRemarks: string | null;
   Remarks: string | null;
   PurchaseInvoiceRef: string | null;
+  PictureBase64: string | null;
   SupplierCode: string | null;
   CreatedBy: string | null;
   CreatedAt: string;
@@ -82,6 +83,7 @@ export interface FixedAssetPayload {
   saleRemarks?: string;
   remarks?: string;
   status?: string;
+  pictureBase64?: string | null;
 }
 
 async function handleError(res: Response, fallback: string) {

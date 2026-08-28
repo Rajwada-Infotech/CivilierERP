@@ -149,7 +149,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       purchaseDate, activationDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity,
       location, department, custodianUserId,
       depreciationSetupId, depreciationType, depreciationRate, usefulLife,
-      remarks, sourceTagId,
+      remarks, sourceTagId, pictureBase64,
     } = req.body;
 
     if (!assetCategory)
@@ -222,6 +222,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
         .input("DepreciationRate",    sql.Decimal(5,2),  depreciationRate != null ? parseFloat(depreciationRate) : null)
         .input("UsefulLife",          sql.Int,           usefulLife  ? parseInt(usefulLife, 10)  : null)
         .input("Remarks",             sql.NVarChar(sql.MAX), remarks || null)
+        .input("PictureBase64",       sql.NVarChar(sql.MAX), pictureBase64 || null)
         .input("CreatedBy",           sql.NVarChar(200), email)
         .input("GodownId",            sql.Int,           sourceGodownId)
         .input("SourceTagId",         sql.Int,           sourceTagIdVal)
@@ -233,7 +234,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
              PurchaseDate, ActivationDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, Quantity,
              Location, Department, Custodian, CustodianUserId,
              DepreciationSetupId, DepreciationType, DepreciationRate, UsefulLife,
-             AssetStatus, Status, Remarks, CreatedBy, CreatedAt,
+             AssetStatus, Status, Remarks, PictureBase64, CreatedBy, CreatedAt,
              GodownID, SourceTagId, FAItemCode)
           VALUES
             (@DocNo, @DocDate, @CompanyId, @ProjectId, @FinYear,
@@ -241,7 +242,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
              @PurchaseDate, @ActivationDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @Quantity,
              @Location, @Department, @Custodian, @CustodianUserId,
              @DepreciationSetupId, @DepreciationType, @DepreciationRate, @UsefulLife,
-             'Active', 'Draft', @Remarks, @CreatedBy, SYSDATETIME(),
+             'Active', 'Draft', @Remarks, @PictureBase64, @CreatedBy, SYSDATETIME(),
              @GodownId, @SourceTagId, @FAItemCode);
           SELECT SCOPE_IDENTITY() AS AssetId;
         `);
@@ -283,7 +284,7 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
       location, department, custodianUserId,
       depreciationSetupId, depreciationType, depreciationRate, usefulLife,
       assetStatus, sellingPrice, saleDate, buyerName, saleRemarks,
-      remarks, status,
+      remarks, status, pictureBase64,
     } = req.body;
 
     const custodianUserIdVal = custodianUserId ? parseInt(custodianUserId, 10) : null;
@@ -320,6 +321,8 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
       .input("BuyerName",          sql.NVarChar(200), buyerName || null)
       .input("SaleRemarks",        sql.NVarChar(sql.MAX), saleRemarks || null)
       .input("Remarks",            sql.NVarChar(sql.MAX), remarks || null)
+      .input("PictureBase64",      sql.NVarChar(sql.MAX), pictureBase64 !== undefined ? (pictureBase64 || null) : null)
+      .input("PictureProvided",    sql.Bit,           pictureBase64 !== undefined ? 1 : 0)
       .input("Status",             sql.NVarChar(30),  status || null)
       .input("UpdatedBy",          sql.NVarChar(200), email)
       .query(`
@@ -353,6 +356,7 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
           BuyerName          = @BuyerName,
           SaleRemarks        = @SaleRemarks,
           Remarks            = @Remarks,
+          PictureBase64      = CASE WHEN @PictureProvided = 1 THEN @PictureBase64 ELSE PictureBase64 END,
           Status             = ISNULL(@Status,             Status),
           UpdatedBy          = @UpdatedBy,
           UpdatedAt          = SYSDATETIME()

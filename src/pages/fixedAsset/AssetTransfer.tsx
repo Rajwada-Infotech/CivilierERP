@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Plus, ArrowLeft, Search, Building2, Package, Calendar, FileText, Hash,
   ArrowRight, Check, X, Boxes, User, Circle, CheckCircle2, ChevronsUpDown, Loader2,
-  Eye, Pencil, Trash2, AlertCircle,
+  Eye, Pencil, Trash2, AlertCircle, Image as ImageIcon, Upload, RefreshCw,
 } from "lucide-react";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -22,7 +22,7 @@ import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import {
   getTransferUsers, getTransferableAssets, getAssetTransfers, getAssetTransfer,
-  createAssetTransfer, updateAssetTransfer, deleteAssetTransfer,
+  createAssetTransfer, updateAssetTransfer, deleteAssetTransfer, setAssetPicture,
   type TransferUser, type TransferableAsset, type TransferListItem, type TransferDetail,
 } from "@/api/assetTransferApi";
 import { getDepartmentOptions, type DepartmentOption } from "@/api/departmentMasterApi";
@@ -149,6 +149,76 @@ function SectionHeader({ icon: Icon, children }: { icon: React.ElementType; chil
         <Icon size={14} />
       </span>
       <p className="text-sm font-semibold text-foreground">{children}</p>
+    </div>
+  );
+}
+
+// ── Item Picture (asset-specific, stored on dbo.FixedAssetRecord) ─────────────
+const PICTURE_ACCEPT = "image/jpeg,image/jpg,image/png,image/webp";
+const PICTURE_MAX_BYTES = 4 * 1024 * 1024;
+
+function ItemPicturePicker({
+  image, disabled, busy, onPick, onRemove,
+}: {
+  image: string | null;
+  disabled: boolean;
+  busy: boolean;
+  onPick: (dataUrl: string) => void;
+  onRemove: () => void;
+}) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFile = (file: File | undefined) => {
+    if (!file) return;
+    if (!/\.(jpe?g|png|webp)$/i.test(file.name) && !PICTURE_ACCEPT.includes(file.type)) {
+      toast.error("Unsupported format — use JPG, JPEG, PNG or WEBP");
+      return;
+    }
+    if (file.size > PICTURE_MAX_BYTES) {
+      toast.error("Image too large — max 4 MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => onPick(String(reader.result || ""));
+    reader.onerror = () => toast.error("Could not read the image file");
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="sm:col-span-2">
+      <label className={labelCls}><ImageIcon size={11} /> Item Picture</label>
+      <input ref={inputRef} type="file" accept={PICTURE_ACCEPT} className="hidden"
+        onChange={(e) => { handleFile(e.target.files?.[0]); e.target.value = ""; }} />
+      {disabled ? (
+        <div className="flex items-center justify-center rounded-lg border border-dashed border-border bg-muted/20 py-6 text-xs text-muted-foreground">
+          Select an FA Item Code to view its picture
+        </div>
+      ) : image ? (
+        <div className="flex items-center gap-4 rounded-lg border border-border bg-background p-3">
+          <img src={image} alt="Asset" className="h-20 w-20 shrink-0 rounded-lg border border-border object-cover" />
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-muted-foreground">Linked to this FA Item Code.</p>
+            <div className="flex gap-2">
+              <button type="button" disabled={busy} onClick={() => inputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50">
+                <RefreshCw size={12} /> Change
+              </button>
+              <button type="button" disabled={busy} onClick={onRemove}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50">
+                <Trash2 size={12} /> Remove
+              </button>
+            </div>
+          </div>
+          {busy && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
+        </div>
+      ) : (
+        <button type="button" disabled={busy} onClick={() => inputRef.current?.click()}
+          className="flex w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border bg-background py-6 text-muted-foreground hover:border-yellow-500/40 hover:bg-yellow-500/[0.03] transition-colors disabled:opacity-50">
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+          <span className="text-xs font-medium">Upload Item Picture</span>
+          <span className="text-[10px] text-muted-foreground/70">No picture found for this asset · JPG, JPEG, PNG or WEBP · max 4 MB</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -284,6 +354,10 @@ export default function AssetTransfer() {
   const [filterProject, setFilterProject] = useState("");
   const [filterFinYear, setFilterFinYear] = useState("");
   const [search, setSearch] = useState("");
+  // undefined → show whatever picture the selected asset already has;
+  // string/null → a change the user just made on this form (already persisted
+  // to the asset record via pictureMut).
+  const [localPicture, setLocalPicture] = useState<string | null | undefined>(undefined);
 
   const setField = useCallback(<K extends keyof FormState>(k: K, v: FormState[K]) => {
     setForm((p) => ({ ...p, [k]: v }));
@@ -379,6 +453,13 @@ export default function AssetTransfer() {
     [transferableAssets, form.assetId],
   );
 
+  // Asset-specific Item Picture: a pending local change wins, otherwise the
+  // picture already stored on this exact FA Item Code's record. Never any
+  // other asset's image.
+  const assetPicture = localPicture !== undefined
+    ? localPicture
+    : (selectedAsset?.PictureBase64 || null);
+
   const fromUser = useMemo(
     () => ensureArray<TransferUser>(users).find((u) => String(u.id) === form.fromUserId) || null,
     [users, form.fromUserId],
@@ -448,9 +529,25 @@ export default function AssetTransfer() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const resetForm = () => { setForm(emptyForm(activeFinYear)); setEditingId(null); };
+  const pictureMut = useMutation({
+    mutationFn: ({ assetId, value }: { assetId: number; value: string | null }) => setAssetPicture(assetId, value),
+    onSuccess: (_r, vars) => {
+      setLocalPicture(vars.value);
+      toast.success(vars.value ? "Item picture saved" : "Item picture removed");
+      qc.invalidateQueries({ queryKey: ["asset-transfer-transferable-assets"] });
+      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const savePicture = (value: string | null) => {
+    if (!form.assetId) return toast.error("Select an FA Item Code first");
+    pictureMut.mutate({ assetId: Number(form.assetId), value });
+  };
+
+  const resetForm = () => { setForm(emptyForm(activeFinYear)); setEditingId(null); setLocalPicture(undefined); };
   const goToCreate = () => { resetForm(); setViewMode("form"); };
-  const goToEdit = (t: TransferListItem) => { setEditingId(t.Id); setViewMode("form"); };
+  const goToEdit = (t: TransferListItem) => { setEditingId(t.Id); setLocalPicture(undefined); setViewMode("form"); };
   const goToView = (t: TransferListItem) => setViewingId(t.Id);
 
   const handleSave = () => {
@@ -570,6 +667,7 @@ export default function AssetTransfer() {
                   loading={loadingAssets}
                   disabled={!form.projectId}
                   onSelect={(asset) => {
+                    setLocalPicture(undefined);
                     setForm((p) => ({
                       ...p,
                       assetId: String(asset.AssetId),
@@ -585,6 +683,14 @@ export default function AssetTransfer() {
                   </p>
                 )}
               </div>
+
+              <ItemPicturePicker
+                image={assetPicture}
+                disabled={!form.assetId}
+                busy={pictureMut.isPending}
+                onPick={(dataUrl) => savePicture(dataUrl)}
+                onRemove={() => savePicture(null)}
+              />
 
               <div>
                 <label className={labelCls}><User size={11} /> From User {editingId && "*"}</label>
