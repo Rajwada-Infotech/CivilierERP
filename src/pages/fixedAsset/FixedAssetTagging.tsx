@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Plus, ArrowLeft, AlertCircle, Search,
   Building2, Package, Calendar, FileText, Hash, Tag as TagIcon, X, Boxes,
-  Download, Upload, Loader2, Check,
+  Download, Upload, Loader2, Check, Pencil, Trash2,
 } from "lucide-react";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -18,6 +19,7 @@ import { getItems } from "@/api/itemMasterApi";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import {
   getEligibleAssetItems, getFixedAssetTaggings, createFixedAssetTagging,
+  updateFixedAssetTagging, deleteFixedAssetTagging,
   type EligibleAssetItem, type TaggingListItem,
 } from "@/api/fixedAssetTaggingApi";
 
@@ -146,6 +148,12 @@ export default function FixedAssetTagging() {
   const [filterToDate, setFilterToDate] = useState("");
   const [search, setSearch] = useState("");
 
+  // ── edit / delete (cancel) ──
+  const [editTag, setEditTag] = useState<TaggingListItem | null>(null);
+  const [editDocDate, setEditDocDate] = useState("");
+  const [editRemarks, setEditRemarks] = useState("");
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+
   // ── bulk import (Excel/CSV) ──
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importPreview, setImportPreview] = useState<ImportRow[] | null>(null);
@@ -216,8 +224,12 @@ export default function FixedAssetTagging() {
   );
 
   // ── filtered list ─────────────────────────────────────────────────────────
+  // Cancelled entries are deleted from this view the moment they're
+  // cancelled — the row itself is kept server-side (soft-cancel, see
+  // DELETE /:id) so its FA Item Code and stock stay auditable, but it no
+  // longer clutters the working Tagging Transaction History list.
   const filtered = useMemo(() => {
-    let r = ensureArray<TaggingListItem>(taggings);
+    let r = ensureArray<TaggingListItem>(taggings).filter((t) => t.Status !== "Cancelled");
     if (filterCompany) r = r.filter((t) => String(t.CompanyId) === filterCompany);
     if (filterProject) r = r.filter((t) => String(t.ProjectId) === filterProject);
     if (filterFromDate) r = r.filter((t) => t.DocDate && new Date(t.DocDate) >= new Date(filterFromDate));
@@ -257,6 +269,41 @@ export default function FixedAssetTagging() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: { docDate?: string; remarks?: string } }) =>
+      updateFixedAssetTagging(id, data),
+    onSuccess: () => {
+      toast.success("Tagging entry updated");
+      qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      setEditTag(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: deleteFixedAssetTagging,
+    onSuccess: () => {
+      toast.success("Tagging entry cancelled");
+      qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });
+      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+      setDeleteId(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const openEdit = (t: TaggingListItem) => {
+    setEditTag(t);
+    setEditDocDate(t.DocDate?.slice(0, 10) || "");
+    setEditRemarks(t.Remarks || "");
+  };
+  const handleSaveEdit = () => {
+    if (!editTag) return;
+    if (!editDocDate) return toast.error("Date is required");
+    updateMut.mutate({ id: editTag.TagId, data: { docDate: editDocDate, remarks: editRemarks || undefined } });
+  };
 
   const resetForm = () => setForm(emptyForm());
   const goToCreate = () => { resetForm(); setViewMode("form"); };
@@ -722,7 +769,7 @@ export default function FixedAssetTagging() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[900px]">
+              <table className="w-full text-sm min-w-[1020px]">
                 <thead>
                   <tr className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
                     <th className="px-4 py-3 text-left">Doc No</th>
@@ -733,10 +780,14 @@ export default function FixedAssetTagging() {
                     <th className="px-4 py-3 text-left">Status</th>
                     <th className="px-4 py-3 text-left">Record</th>
                     <th className="px-4 py-3 text-left">Remarks</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filtered.map((t) => (
+                  {filtered.map((t) => {
+                    const alreadyCancelled = t.Status === "Cancelled";
+                    const hasRecord = t.RecordStatus === "Done";
+                    return (
                     <tr key={t.TagId} className="hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3 font-mono text-xs">{t.DocNo || "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(t.DocDate)}</td>
@@ -763,14 +814,95 @@ export default function FixedAssetTagging() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate">{t.Remarks || "—"}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          {rights.canEdit && (
+                            <button onClick={() => openEdit(t)}
+                              className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="Edit">
+                              <Pencil size={13} />
+                            </button>
+                          )}
+                          {rights.canDelete && (
+                            <button
+                              onClick={() => setDeleteId(t.TagId)}
+                              disabled={alreadyCancelled || hasRecord}
+                              title={alreadyCancelled ? "Already cancelled" : hasRecord ? "Has a Fixed Asset Record — delete that first" : "Cancel"}
+                              className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground disabled:cursor-not-allowed">
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* ── edit dialog ── */}
+      <Dialog open={!!editTag} onOpenChange={(open) => { if (!open) setEditTag(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-base">Edit Tagging Entry</DialogTitle>
+          </DialogHeader>
+          {editTag && (
+            <div className="space-y-4 pt-1">
+              <p className="text-xs text-muted-foreground -mt-2">
+                {editTag.DocNo} · <span className="font-mono text-yellow-600 dark:text-yellow-400">{editTag.FAItemCode}</span>
+              </p>
+              <div>
+                <label className={labelCls}><Calendar size={11} /> Date *</label>
+                <input type="date" value={editDocDate} onChange={(e) => setEditDocDate(e.target.value)} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Remarks</label>
+                <input type="text" value={editRemarks} onChange={(e) => setEditRemarks(e.target.value)}
+                  placeholder="Optional remarks…" className={inputCls} />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-border">
+                <button onClick={() => setEditTag(null)}
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+                  Cancel
+                </button>
+                <button onClick={handleSaveEdit} disabled={updateMut.isPending}
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+                  <Check size={13} /> {updateMut.isPending ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── delete (cancel) confirm ── */}
+      {deleteId && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
+            <div className="flex items-start gap-3 mb-4">
+              <AlertCircle size={20} className="text-destructive mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold text-sm">Cancel this tagging entry?</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Its FA Item Code will be released back to untagged stock.</p>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteId(null)}
+                className="shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+                Keep
+              </button>
+              <button onClick={() => deleteMut.mutate(deleteId!)} disabled={deleteMut.isPending}
+                className="shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive transition-all disabled:opacity-50">
+                {deleteMut.isPending ? "Cancelling…" : "Cancel Entry"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       <Dialog open={!!importPreview} onOpenChange={(open) => { if (!open) closeImportDialog(); }}>
         <DialogContent className="max-w-4xl">

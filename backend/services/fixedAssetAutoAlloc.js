@@ -238,4 +238,4 @@ async function autoCreateFixedAssetsFromGRN(pool, grnId, userEmail) {
   return { created, tagged };
 }
 
-module.exports = { autoCreateFixedAssetsFromGRN };
+module.exports = { autoCreateFixedAssetsFromGRN, autoTagBatch, deriveFinYear };

@@ -227,13 +227,14 @@ const syncLineItems = async (
       .input("Sort", sqlRef.Int, i)
       .input("ReceivedQty", sqlRef.Decimal(18, 4), 0)
       .input("MRItemId", sqlRef.Int, it.mrItemId ? parseInt(it.mrItemId, 10) : null)
+      .input("CostCenterId", sqlRef.Int, it.costCenterId ? parseInt(it.costCenterId, 10) : null)
       .input("Now", sqlRef.DateTime2, new Date()).query(`
         INSERT INTO dbo.PurchaseOrderItems
           (PurchaseOrderID, ItemId, ItemName, ItemCode, Description,
-           Quantity, ReceivedQty, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder, MRItemId, CreatedAt)
+           Quantity, ReceivedQty, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder, MRItemId, CostCenterId, CreatedAt)
         VALUES
           (@POID, @ItemId, @ItemName, @ItemCode, @Desc,
-           @Qty, @ReceivedQty, @UomId, @UomName, @Rate, @TaxPct, @LineAmt, @Sort, @MRItemId, @Now)
+           @Qty, @ReceivedQty, @UomId, @UomName, @Rate, @TaxPct, @LineAmt, @Sort, @MRItemId, @CostCenterId, @Now)
       `);
   }
 };
@@ -825,12 +826,14 @@ router.get("/:id", async (req, res) => {
     // Also return normalised line items for the new form
     const lineItems = await pool.request().input("POID", sql.Int, id).query(`
         SELECT
-          Id, PurchaseOrderID, ItemId, ItemName, ItemCode, Description,
-          Quantity, ReceivedQty, UomId, UomName, Rate, Discount, TaxPct,
-          LineAmount, SortOrder
-        FROM dbo.PurchaseOrderItems
-        WHERE PurchaseOrderID = @POID
-        ORDER BY SortOrder
+          poi.Id, poi.PurchaseOrderID, poi.ItemId, poi.ItemName, poi.ItemCode, poi.Description,
+          poi.Quantity, poi.ReceivedQty, poi.UomId, poi.UomName, poi.Rate, poi.Discount, poi.TaxPct,
+          poi.LineAmount, poi.SortOrder, poi.CostCenterId,
+          cc.Name AS CostCenterName, cc.Code AS CostCenterCode
+        FROM dbo.PurchaseOrderItems poi
+        LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = poi.CostCenterId
+        WHERE poi.PurchaseOrderID = @POID
+        ORDER BY poi.SortOrder
       `);
 
     // Sum of all non-rejected GRNs already submitted against this PO.

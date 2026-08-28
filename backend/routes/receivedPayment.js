@@ -179,7 +179,7 @@ router.get("/:id/posting", async (req, res) => {
     const result = await pool.request().input("id", sql.Int, rpId).query(`
       SELECT RPPaymentID, RPDocNo, RPDocDate, RPAmount, RPMode, RPStatus,
              RPDepositBankId, RPDepositBankName, RPCustomerName, RPReceivedFrom,
-             SourceSaleInvoiceId
+             SourceSaleInvoiceId, CrmMilestoneId, CrmBookingId
       FROM dbo.ReceivedPayment
       WHERE RPPaymentID = @id
     `);
@@ -210,9 +210,32 @@ router.get("/:id/posting", async (req, res) => {
         : null,
     };
 
-    const postedRes = await pool.request().input("SrcId", sql.Int, rpId).query(
-      `SELECT TOP 1 VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='ReceivedPayment' AND SourceId=@SrcId AND IsReversed=0`
-    );
+    // CRM-linked receipts (CrmMilestoneId/CrmBookingId set) never post GL
+    // under SourceType='ReceivedPayment' — applyCrmMilestonePaymentApproval /
+    // applyCrmOnAccountPaymentApproval post via postCrmReceiptToGL /
+    // postCrmOnAccountToGL instead, under SourceType='CrmPaymentReceipt' /
+    // 'CrmOnAccountPayment' keyed by the CrmPaymentReceipt/CrmOnAccountPayment
+    // row's own id (see crmLedger.js). Checking only 'ReceivedPayment' left
+    // every CRM-linked receipt showing "Not yet posted" even once approved
+    // and actually posted — same join trialBalance.js already uses.
+    const postedRes = (rp.CrmMilestoneId || rp.CrmBookingId)
+      ? await pool.request().input("SrcId", sql.Int, rpId).query(`
+          SELECT TOP 1 gle.VoucherNo
+          FROM dbo.GeneralLedgerEntry gle
+          WHERE gle.IsReversed = 0
+            AND (
+              (gle.SourceType = 'CrmPaymentReceipt' AND gle.SourceId IN (
+                SELECT Id FROM dbo.CrmPaymentReceipt WHERE SourceReceivedPaymentId = @SrcId
+              ))
+              OR (gle.SourceType = 'CrmOnAccountPayment' AND gle.SourceId IN (
+                SELECT Id FROM dbo.CrmOnAccountPayment WHERE SourceReceivedPaymentId = @SrcId
+              ))
+            )
+          ORDER BY gle.EntryId DESC
+        `)
+      : await pool.request().input("SrcId", sql.Int, rpId).query(
+          `SELECT TOP 1 VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='ReceivedPayment' AND SourceId=@SrcId AND IsReversed=0`
+        );
     const isPosted = postedRes.recordset.length > 0;
 
     const toDateStr = (v) => (v ? (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10)) : null);

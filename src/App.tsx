@@ -202,6 +202,8 @@ const GRN = lazy(() => import("./pages/material/GRN"));
 const FixedAssetDashboard = lazy(() => import("./pages/fixedAsset/FixedAssetDashboard"));
 const FixedAssetRecord = lazy(() => import("./pages/fixedAsset/FixedAssetRecord"));
 const FixedAssetTagging = lazy(() => import("./pages/fixedAsset/FixedAssetTagging"));
+const FixedAssetInventoryImport = lazy(() => import("./pages/fixedAsset/FixedAssetInventoryImport"));
+const FixedAssetAssignment = lazy(() => import("./pages/fixedAsset/FixedAssetAssignment"));
 const AssetTransfer = lazy(() => import("./pages/fixedAsset/AssetTransfer"));
 const IDTemplateMaster = lazy(() => import("./pages/fixedAsset/IDTemplateMaster"));
 const ShortClose = lazy(() => import("./pages/material/ShortClose"));
@@ -1136,6 +1138,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="asset-transfer">
             <AssetTransfer />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/inventory-import"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-inventory-import">
+            <FixedAssetInventoryImport />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/assignment"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-assignment">
+            <FixedAssetAssignment />
           </ProtectedRoute>
         }
       />

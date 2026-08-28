@@ -403,6 +403,20 @@ router.delete("/:id", requirePageRight("fixed-asset-tagging", "delete"), async (
       if (!tag) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
       if (tag.Status === "Cancelled") { await tx.rollback(); return res.json({ ok: true }); }
 
+      // A tag that's already been completed into a Fixed Asset Record
+      // can't be cancelled out from under it — that would leave a live
+      // asset record referencing a "Cancelled" tag in its own history.
+      // Delete the Fixed Asset Record first (frees the FA Item Code back
+      // to "unassigned"), then the tag can be cancelled.
+      const recordRes = await tx.request().input("TagId", sql.Int, id).query(`
+        SELECT AssetId FROM dbo.FixedAssetRecord WITH (UPDLOCK, HOLDLOCK)
+        WHERE SourceTagId = @TagId AND Status <> 'Deleted'
+      `);
+      if (recordRes.recordset.length > 0) {
+        await tx.rollback();
+        return res.status(400).json({ error: "This FA Item Code already has a Fixed Asset Record — delete that record first, then cancel the tag." });
+      }
+
       await tx.request()
         .input("TagId",     sql.Int, id)
         .input("UpdatedBy", sql.NVarChar(200), email)

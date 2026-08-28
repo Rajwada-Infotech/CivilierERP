@@ -4,9 +4,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Plus, ArrowLeft, Eye, Pencil, Trash2, AlertCircle, Search,
-  Building2, Package, TrendingDown, TrendingUp, IndianRupee, Calendar, User,
-  FileText, MapPin, Hash, Cpu, Check, X, ChevronsUpDown, Loader2, Warehouse,
-  Boxes, Wallet, PackageCheck, Circle, CheckCircle2, PlayCircle,
+  Building2, Package, TrendingDown, TrendingUp, IndianRupee, Calendar,
+  FileText, Hash, Cpu, Check, X, ChevronsUpDown, Loader2, Warehouse,
+  Boxes, Wallet, PackageCheck, Circle, CheckCircle2, PlayCircle, Undo2, ShieldAlert,
 } from "lucide-react";
 import { GlassShell, GlassCard } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -18,10 +18,9 @@ import { getSuppliers } from "@/api/grnApi";
 import { getActiveDepreciationSetups, type DepreciationSetup } from "@/api/depreciationApi";
 import {
   getFixedAssets, getFixedAsset, createFixedAsset, updateFixedAsset, deleteFixedAsset,
+  getFixedAssetReversalPlan, reverseFixedAsset,
   type FixedAssetListItem, type FixedAssetDetail,
 } from "@/api/fixedAssetApi";
-import { getTransferUsers } from "@/api/assetTransferApi";
-import { getDepartmentOptions } from "@/api/departmentMasterApi";
 import { getUnassignedFAItemCodes, type UnassignedFAItemCode } from "@/api/fixedAssetTaggingApi";
 import { ASSET_CATEGORIES, CATEGORY_ICONS, CATEGORY_COLORS } from "./assetCategories";
 import { Button } from "@/components/ui/button";
@@ -166,9 +165,6 @@ interface FormState {
   supplierId: string;
   purchaseCost: string;
   quantity: string;
-  location: string;
-  department: string;
-  custodianUserId: string;
   depreciationSetupId: string;
   depreciationType: string;
   depreciationRate: string;
@@ -201,9 +197,6 @@ const emptyForm = (finYear = ""): FormState => ({
   supplierId:         "",
   purchaseCost:       "",
   quantity:           "1",
-  location:           "",
-  department:         "",
-  custodianUserId:    "",
   depreciationSetupId:"",
   depreciationType:   "",
   depreciationRate:   "",
@@ -282,7 +275,7 @@ function CategoryBadge({ category }: { category: string }) {
   );
 }
 
-function LivePreviewCard({ form, saving, custodianName, glassStyle }: { form: FormState; saving: boolean; custodianName: string; glassStyle: React.CSSProperties }) {
+function LivePreviewCard({ form, saving, glassStyle }: { form: FormState; saving: boolean; glassStyle: React.CSSProperties }) {
   const Icon = CATEGORY_ICONS[form.assetCategory] || FileText;
   const fields = [
     { label: "Asset Name",     value: form.assetName || "—", done: !!form.assetName },
@@ -291,8 +284,6 @@ function LivePreviewCard({ form, saving, custodianName, glassStyle }: { form: Fo
     { label: "Purchase Cost",  value: form.purchaseCost ? fmtCur(parseFloat(form.purchaseCost)) : "—", done: !!form.purchaseCost },
     { label: "Purchase Date",  value: form.purchaseDate ? fmtDate(form.purchaseDate) : "—", done: !!form.purchaseDate },
     { label: "Activation Date",value: form.activationDate ? fmtDate(form.activationDate) : "—", done: !!form.activationDate },
-    { label: "Location",       value: form.location || "—", done: !!form.location },
-    { label: "Custodian",      value: custodianName || "—", done: !!custodianName },
   ];
   const doneCount = fields.filter((f) => f.done).length;
   const pct = Math.round((doneCount / fields.length) * 100);
@@ -364,6 +355,7 @@ export default function FixedAssetRecord() {
   const [editingId,  setEditingId]  = useState<number | null>(null);
   const [viewingId,  setViewingId]  = useState<number | null>(null);
   const [deleteId,   setDeleteId]   = useState<number | null>(null);
+  const [reverseId,  setReverseId]  = useState<number | null>(null);
   const [form,       setForm]       = useState<FormState>(emptyForm(activeFinYear));
 
   // ── filters ──
@@ -400,18 +392,6 @@ export default function FixedAssetRecord() {
     queryKey: ["depreciation-setups-active"],
     queryFn:  getActiveDepreciationSetups,
   });
-  const { data: users = [] } = useQuery({
-    queryKey: ["asset-transfer-users"],
-    queryFn:  getTransferUsers,
-  });
-  const { data: departments = [] } = useQuery({
-    queryKey: ["department-master"],
-    queryFn:  getDepartmentOptions,
-  });
-  const departmentNames = useMemo(
-    () => departments.filter((d) => d.IsActive).map((d) => d.DepartmentName),
-    [departments],
-  );
   const { data: unassignedCodes = [], isLoading: codesLoading } = useQuery({
     queryKey: ["fa-unassigned-codes"],
     queryFn:  getUnassignedFAItemCodes,
@@ -539,6 +519,26 @@ export default function FixedAssetRecord() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Delete & Reverse GRN — distinct from the plain soft-delete above.
+  const { data: reversePlan, isLoading: loadingReversePlan } = useQuery({
+    queryKey: ["fa-reversal-plan", reverseId],
+    queryFn:  () => getFixedAssetReversalPlan(reverseId!),
+    enabled:  reverseId != null,
+  });
+  const reverseMut = useMutation({
+    mutationFn: reverseFixedAsset,
+    onSuccess: (r) => {
+      toast.success(r.grnDeleted ? "Asset reversed — GRN and inventory removed" : "Asset reversed — inventory removed");
+      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+      qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
+      setReverseId(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const resetForm = () => {
     setForm(emptyForm(activeFinYear));
     setEditingId(null);
@@ -584,9 +584,6 @@ export default function FixedAssetRecord() {
         supplierId:          String(d.SupplierId || ""),
         purchaseCost:        String(d.PurchaseCost || ""),
         quantity:            String(d.Quantity || "1"),
-        location:            d.Location || "",
-        department:          d.Department || "",
-        custodianUserId:     String(d.CustodianUserId || ""),
         depreciationSetupId: String(d.DepreciationSetupId || ""),
         depreciationType:    d.DepreciationType || "",
         depreciationRate:    String(d.DepreciationRate || ""),
@@ -664,9 +661,6 @@ export default function FixedAssetRecord() {
       supplierId:          form.supplierId ? Number(form.supplierId) : undefined,
       purchaseCost:        parseFloat(form.purchaseCost) || 0,
       quantity:            parseFloat(form.quantity) || 1,
-      location:            form.location || undefined,
-      department:          form.department || undefined,
-      custodianUserId:     form.custodianUserId ? Number(form.custodianUserId) : undefined,
       depreciationSetupId: form.depreciationSetupId ? Number(form.depreciationSetupId) : undefined,
       depreciationType:    form.depreciationType || undefined,
       depreciationRate:    form.depreciationRate ? parseFloat(form.depreciationRate) : undefined,
@@ -1039,41 +1033,6 @@ export default function FixedAssetRecord() {
               </div>
             </SubGroup>
 
-            <SubGroup label="Assignment">
-              <div>
-                <label className={labelCls}><MapPin size={11} /> Location</label>
-                <input type="text" value={form.location} onChange={(e) => setField("location", e.target.value)} placeholder="Office / Site…" className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}><User size={11} /> Custodian / Assigned To</label>
-                <select
-                  value={form.custodianUserId}
-                  onChange={(e) => {
-                    const userId = e.target.value;
-                    const selectedUser = users.find((u) => String(u.id) === userId);
-                    setForm((p) => ({
-                      ...p,
-                      custodianUserId: userId,
-                      department:      selectedUser?.DepartmentName || "",
-                    }));
-                  }}
-                  className={inputCls}
-                >
-                  <option value="">Unassigned…</option>
-                  {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>Department</label>
-                <select value={form.department} onChange={(e) => setField("department", e.target.value)} className={inputCls}>
-                  <option value="">Select department…</option>
-                  {form.department && !departmentNames.includes(form.department) && (
-                    <option value={form.department}>{form.department}</option>
-                  )}
-                  {departmentNames.map((d) => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-            </SubGroup>
           </div>
 
           {/* ── Depreciation Details ── */}
@@ -1172,7 +1131,6 @@ export default function FixedAssetRecord() {
         <LivePreviewCard
           form={form}
           saving={saving}
-          custodianName={users.find((u) => String(u.id) === form.custodianUserId)?.name || ""}
           glassStyle={glassSection}
         />
         </div>
@@ -1185,9 +1143,9 @@ export default function FixedAssetRecord() {
   // ═══════════════════════════════════════════════════════════════════════════
   return (
     <>
-    <Breadcrumbs items={["Dashboard", "Fixed Asset", "Fixed Asset Record"]} />
+    <Breadcrumbs items={["Dashboard", "Fixed Asset", "Fixed Asset Depreciation Tag"]} />
     <GlassShell
-      title="Fixed Asset Record"
+      title="Fixed Asset Depreciation Tag"
       subtitle="Track and manage all fixed assets with depreciation"
       icon={Cpu}
       accentColor="#eab308"
@@ -1435,6 +1393,12 @@ export default function FixedAssetRecord() {
                             <Trash2 size={13} />
                           </button>
                         )}
+                        {rights.canReverse && (
+                          <button onClick={() => setReverseId(a.AssetId)}
+                            className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500" title="Delete & Reverse GRN">
+                            <Undo2 size={13} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1467,6 +1431,67 @@ export default function FixedAssetRecord() {
                 {deleteMut.isPending ? "Deleting…" : "Delete"}
               </button>
             </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── delete & reverse confirm / blocked ── */}
+      {reverseId && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-card border border-border rounded-xl p-6 w-[26rem] shadow-xl">
+            {loadingReversePlan ? (
+              <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground text-sm">
+                <Loader2 size={14} className="animate-spin" /> Checking dependencies…
+              </div>
+            ) : reversePlan && !reversePlan.reversible ? (
+              <>
+                <div className="flex items-start gap-3 mb-4">
+                  <ShieldAlert size={20} className="text-destructive mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold text-sm">Can't reverse this asset</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{reversePlan.message}</p>
+                  </div>
+                </div>
+                <div className="flex justify-end">
+                  <button onClick={() => setReverseId(null)}
+                    className="shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : reversePlan?.reversible ? (
+              <>
+                <div className="flex items-start gap-3 mb-4">
+                  <Undo2 size={20} className="text-destructive mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold text-sm">Delete &amp; Reverse GRN?</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      This will permanently remove{" "}
+                      {reversePlan.sourceType === "GRN"
+                        ? <>the received quantity from GRN <span className="font-mono">{reversePlan.grnDocNo}</span></>
+                        : "the manually-imported inventory"}
+                      , its {reversePlan.taggedCount} FA Item Code{reversePlan.taggedCount === 1 ? "" : "s"}
+                      {reversePlan.unitCount > 0 ? ` and ${reversePlan.unitCount} completed Fixed Asset Record${reversePlan.unitCount === 1 ? "" : "s"}` : ""} derived from it.
+                      {reversePlan.sourceType === "GRN" && (
+                        <> The GRN itself is only deleted if no other item on it still has stock — otherwise just this item's stock is removed.</>
+                      )}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1.5">Do this only if the asset needs to be re-received via a new GRN or Inventory Import.</p>
+                  </div>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => setReverseId(null)}
+                    className="shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+                    Cancel
+                  </button>
+                  <button onClick={() => reverseMut.mutate(reverseId!)} disabled={reverseMut.isPending}
+                    className="shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive transition-all disabled:opacity-50">
+                    {reverseMut.isPending ? "Reversing…" : "Delete & Reverse"}
+                  </button>
+                </div>
+              </>
+            ) : null}
           </div>
         </div>,
         document.body

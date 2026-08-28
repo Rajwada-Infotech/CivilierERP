@@ -186,6 +186,7 @@ interface POLineItem {
   uomLocked?: boolean; // true for quotation-sourced lines — UOM must match what was quoted
   mrItemId?: number | null; // source MaterialRequestItems row, when this line came from an MR
   mrPendingQty?: number | null; // cap for this line's quantity — remaining balance on that MR item
+  costCenterId?: string; // from the selected item's own Item Master tag — persisted per-line (not per-PO), since one PO can mix e.g. a fixed-asset item with a consumption item
 }
 
 interface POForm {
@@ -1623,16 +1624,18 @@ const PurchaseOrderMaster: React.FC = () => {
       sgstRate,
       igstRate,
       gstRate,
+      // Cost Centre is per-line, not per-PO — a single PO can legitimately
+      // mix a fixed-asset item with a consumption item, each keeping its
+      // own Item Master cost centre tag. GRN/Invoice GL posting resolves
+      // this per line (by ItemId) to build a cost-centre-wise breakdown.
+      costCenterId: item.costCenterId || "",
     });
 
-    // Auto-fill the PO's Cost Centre from the item's own Item Master tag —
-    // only when the PO doesn't already have one set (first-tagged-item-wins;
-    // never silently overrides a Cost Centre the user already picked). A
-    // later item tagged with a *different* centre just gets left alone
-    // rather than fought over — the user can always change it manually.
+    // Also mirror it onto the legacy PO-header field (first-tagged-item-
+    // wins) purely for old code paths that still read form.costCenterId —
+    // the real per-line value above is what GL posting actually uses now.
     if (item.costCenterId && !form.costCenterId) {
       setField("costCenterId", item.costCenterId);
-      toast.info("Cost Centre auto-filled from this item's Item Master tag.");
     }
   };
 
@@ -1730,6 +1733,7 @@ const PurchaseOrderMaster: React.FC = () => {
         gstType: li.igstRate > 0 ? "igst" : "cgst_sgst",
         amount: li.amount,
         mrItemId: li.mrItemId ?? null,
+        costCenterId: li.costCenterId || null,
       })),
       PaymentTerms:
         selectedTCs.length > 0
@@ -2301,6 +2305,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
             gstRate,
             taxAmount,
             amount: qty * rate + taxAmount,
+            costCenterId: pi.costCenterId ? String(pi.costCenterId) : (pi.CostCenterId ? String(pi.CostCenterId) : ""),
           };
         }),
       );

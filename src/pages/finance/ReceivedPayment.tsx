@@ -1216,7 +1216,7 @@ export default function ReceivedPaymentPage() {
                         <td className="px-4 py-3 text-foreground whitespace-nowrap text-xs">
                           {p.docDate ? format(new Date(p.docDate), "dd/MM/yyyy") : "—"}
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground text-xs">
+                        <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">
                           {p.finYear || "—"}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
@@ -1249,29 +1249,11 @@ export default function ReceivedPaymentPage() {
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => setViewingPayment(p)}
-                              title="View"
+                              title="View (print & edit are here too)"
                               className="p-1.5 rounded-md text-muted-foreground/50 hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors"
                             >
                               <Eye size={13} />
                             </button>
-                            {rights.canPrint && (
-                              <button
-                                onClick={() => handlePrintPayment(p)}
-                                title="Print"
-                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-sky-600 hover:bg-sky-500/10 transition-colors"
-                              >
-                                <Printer size={13} />
-                              </button>
-                            )}
-                            {rights.canEdit && (p.status === "Draft" || p.status === "Approved") && (
-                              <button
-                                onClick={() => openEdit(p)}
-                                title="Edit"
-                                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                              >
-                                <Pencil size={12} />
-                              </button>
-                            )}
                             {p.status === "Pending" && (
                               <span
                                 title="Awaiting admin approval"
@@ -1335,28 +1317,10 @@ export default function ReceivedPaymentPage() {
                         <button
                           onClick={() => setViewingPayment(p)}
                           className="p-1.5 text-muted-foreground/50 hover:text-emerald-600"
-                          title="View"
+                          title="View (print & edit are here too)"
                         >
                           <Eye size={13} />
                         </button>
-                        {rights.canPrint && (
-                          <button
-                            onClick={() => handlePrintPayment(p)}
-                            className="p-1.5 text-muted-foreground/50 hover:text-sky-600"
-                            title="Print"
-                          >
-                            <Printer size={13} />
-                          </button>
-                        )}
-                        {rights.canEdit && (p.status === "Draft" || p.status === "Approved") && (
-                          <button
-                            onClick={() => openEdit(p)}
-                            className="p-1.5 text-muted-foreground/50 hover:text-foreground"
-                            title="Edit"
-                          >
-                            <Pencil size={13} />
-                          </button>
-                        )}
                         {p.status === "Pending" && (
                           <span
                             title="Awaiting admin approval"
