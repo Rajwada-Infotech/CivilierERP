@@ -78,6 +78,8 @@ export interface TransferPayload {
   remarks: string;
 }
 
+export type UpdateTransferPayload = TransferPayload;
+
 async function handleError(res: Response, fallback: string) {
   const err = await res.json().catch(() => ({}));
   throw new Error((err as { error?: string }).error || fallback);
@@ -159,11 +161,17 @@ export const createAssetTransfer = async (data: TransferPayload): Promise<{ id: 
   return res.json();
 };
 
-export const updateAssetTransfer = async (id: number, data: { transferDate?: string; remarks?: string }): Promise<void> => {
+export const updateAssetTransfer = async (id: number, data: UpdateTransferPayload): Promise<{ ok: true }> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) await handleError(res, "Failed to update asset transfer");
+  return res.json();
+};
+
+export const deleteAssetTransfer = async (id: number): Promise<void> => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
+  if (!res.ok) await handleError(res, "Failed to delete asset transfer");
 };

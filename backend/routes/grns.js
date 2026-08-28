@@ -2643,3 +2643,4 @@ router.delete(
 
 module.exports = router;
 module.exports.createGRNInternal = createGRNInternal;
+module.exports.syncPOItemReceivedQty = syncPOItemReceivedQty;

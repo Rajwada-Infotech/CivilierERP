@@ -140,3 +140,43 @@ export const deleteFixedAsset = async (id: number): Promise<void> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   if (!res.ok) await handleError(res, "Failed to delete fixed asset");
 };
+
+// ── Delete & Reverse GRN ────────────────────────────────────────────────────
+// A distinct, more destructive action from deleteFixedAsset above — see
+// backend/services/fixedAssetReversal.js for exactly what it does.
+export interface ReversalPlan {
+  reversible: boolean;
+  reason?: "not_source_linked" | "already_deleted" | "disposed" | "transferred" | "has_expense" | "grn_missing";
+  message: string;
+  sourceType?: "GRN" | "IMPORT";
+  sourceId?: number;
+  batchAssetId?: number;
+  batchAssetName?: string;
+  grnDocNo?: string | null;
+  unitCount?: number;
+  taggedCount?: number;
+  units?: { assetId: number; assetName: string; faItemCode: string | null }[];
+  blockedAssetIds?: number[];
+}
+
+export interface ReversalResult {
+  ok: true;
+  sourceType: "GRN" | "IMPORT";
+  sourceId: number;
+  grnDeleted: boolean;
+  linkedPOId: number | null;
+  unitsRemoved: number;
+  tagsRemoved: number;
+}
+
+export const getFixedAssetReversalPlan = async (id: number): Promise<ReversalPlan> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/can-reverse`);
+  if (!res.ok) await handleError(res, "Failed to check reversal eligibility");
+  return res.json();
+};
+
+export const reverseFixedAsset = async (id: number): Promise<ReversalResult> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/reverse`, { method: "POST" });
+  if (!res.ok) await handleError(res, "Failed to reverse this asset");
+  return res.json();
+};

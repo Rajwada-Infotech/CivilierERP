@@ -8,6 +8,7 @@ const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
+const { buildReversalPlan, executeReversal } = require("../services/fixedAssetReversal");
 
 router.use(authenticateToken);
 
@@ -58,7 +59,13 @@ router.get("/", async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
-    let where = [];
+    // GRN/Inventory-Import auto-allocation (services/fixedAssetAutoAlloc.js,
+    // routes/fixedAssetInventoryImport.js) creates an internal "batch" row
+    // here purely so FA Inventory has untagged stock to tag — it is NEVER a
+    // Fixed Asset on its own (no AssetCode/DocNo are ever assigned to one).
+    // A GRN alone must never surface in the Asset Register; only a row a
+    // user explicitly created (always AssetCode-bearing) qualifies.
+    let where = ["fa.AssetCode IS NOT NULL"];
 
     if (req.query.companyId)  { request.input("CompanyId",  sql.Int,          parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }
     if (req.query.projectId)  { request.input("ProjectId",  sql.Int,          parseInt(req.query.projectId, 10)); where.push("fa.ProjectId = @ProjectId"); }
@@ -119,8 +126,12 @@ router.get("/:id", async (req, res) => {
       LEFT JOIN dbo.Godowns gd ON gd.GodownID = fa.GodownID
       WHERE fa.AssetId = @AssetId
     `);
-    if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
-    res.json(result.recordset[0]);
+    const row = result.recordset[0];
+    // A batch row (no AssetCode) is FA Inventory's internal bookkeeping,
+    // never a Fixed Asset — treat it as not-found here exactly like the
+    // list above hides it, so it can't be viewed/edited by guessing an id.
+    if (!row || !row.AssetCode) return res.status(404).json({ error: "Not found" });
+    res.json(row);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -256,6 +267,15 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
   if (!email) return;
   try {
     const pool = getPool();
+
+    // A batch row (no AssetCode) is FA Inventory bookkeeping, not a Fixed
+    // Asset — it must never be editable through this endpoint.
+    const guard = await pool.request().input("AssetId", sql.Int, id).query(
+      `SELECT AssetCode FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId`,
+    );
+    if (!guard.recordset.length) return res.status(404).json({ error: "Not found" });
+    if (!guard.recordset[0].AssetCode) return res.status(404).json({ error: "Not found" });
+
     const {
       docDate, companyId, projectId, finYear,
       assetName, assetCategory, brand, model, serialNumber,
@@ -369,12 +389,17 @@ router.delete("/:id", requirePageRight("fixed-asset-record", "delete"), async (r
     await tx.begin();
     try {
       const assetRes = await tx.request().input("AssetId", sql.Int, id).query(`
-        SELECT AssetId, Status
+        SELECT AssetId, Status, AssetCode
         FROM dbo.FixedAssetRecord WITH (UPDLOCK, HOLDLOCK)
         WHERE AssetId = @AssetId
       `);
       const asset = assetRes.recordset[0];
       if (!asset) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
+      // A batch row (no AssetCode) is FA Inventory bookkeeping, not a Fixed
+      // Asset — this endpoint only deletes real records; use the "Delete &
+      // Reverse GRN" reversal flow (or Inventory Import's own reverse) for
+      // batches instead.
+      if (!asset.AssetCode) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
       if (asset.Status === "Deleted") { await tx.rollback(); return res.json({ ok: true }); }
 
       // A batch record (auto-allocated from a GRN, or manually entered) that
@@ -406,6 +431,39 @@ router.delete("/:id", requirePageRight("fixed-asset-record", "delete"), async (r
   } catch (err) {
     console.error("[fixedAssets] DELETE /:id:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/can-reverse — dependency check for "Delete & Reverse GRN" ───────
+// Separate, more destructive action from the plain DELETE above — see
+// services/fixedAssetReversal.js for exactly what it does and why.
+router.get("/:id/can-reverse", requirePageRight("fixed-asset-record", "reverse"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const plan = await buildReversalPlan(pool, id);
+    res.json(plan);
+  } catch (err) {
+    console.error("[fixedAssets] GET /:id/can-reverse:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /:id/reverse — hard-reverses the GRN/Import + tagging + records ─────
+router.post("/:id/reverse", requirePageRight("fixed-asset-record", "reverse"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  const email = requireUser(req, res);
+  if (!email) return;
+  try {
+    const pool = getPool();
+    const result = await executeReversal(pool, id, email);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[fixedAssets] POST /:id/reverse:", err.message);
+    const status = err.code === "BLOCKED" || err.code === "NOT_SOURCE_LINKED" || err.code === "ALREADY_DELETED" ? 409 : 500;
+    res.status(status).json({ error: err.message, reason: err.reason || err.code });
   }
 });
 

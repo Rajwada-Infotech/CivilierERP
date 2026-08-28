@@ -22,6 +22,49 @@ function toInt(val) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// Sets FixedAssetRecord.CustodianUserId/Custodian for an asset, from an
+// already-known ToUserId (no lookup query needed for the id itself).
+async function applyCustodian(tx, assetId, custodianUserId) {
+  const userRes = await tx.request()
+    .input("Id", sql.Int, custodianUserId)
+    .query(`SELECT name FROM dbo.users WHERE id = @Id`);
+  const custodianName = userRes.recordset[0]?.name || null;
+  await tx.request()
+    .input("AssetId", sql.Int, assetId)
+    .input("CustodianUserId", sql.Int, custodianUserId)
+    .input("CustodianName", sql.NVarChar(200), custodianName)
+    .query(`
+      UPDATE dbo.FixedAssetRecord
+      SET CustodianUserId = @CustodianUserId, Custodian = @CustodianName, UpdatedAt = SYSDATETIME()
+      WHERE AssetId = @AssetId
+    `);
+}
+
+// Recomputes an asset's current custodian purely from its (non-deleted)
+// transfer history — the ToUserId of the most recent remaining row wins.
+// Used by both PUT (asset reassigned away/into, or same-asset edit) and
+// DELETE, so "undo a transfer" and "redo a transfer" are the same operation:
+// re-derive the answer from whatever history is left, rather than trying to
+// track and reverse individual deltas.
+//
+// Returns the resolved custodian id, or null if no history rows are left
+// for this asset at all — callers fall back to whatever "before this
+// transfer" value they have on hand (the edited/deleted row's FromUserId).
+async function recomputeCustodianForAsset(tx, assetId) {
+  const latest = await tx.request()
+    .input("AssetId", sql.Int, assetId)
+    .query(`
+      SELECT TOP 1 ToUserId
+      FROM dbo.AssetTransferHistory
+      WHERE AssetId = @AssetId AND Status <> 'Deleted'
+      ORDER BY TransferDate DESC, CreatedAt DESC, Id DESC
+    `);
+  if (!latest.recordset.length) return null;
+  const custodianUserId = latest.recordset[0].ToUserId;
+  await applyCustodian(tx, assetId, custodianUserId);
+  return custodianUserId;
+}
+
 // ── GET /users — active users for the From/To pickers ────────────────────────
 router.get("/users", requirePageRight("asset-transfer", "view"), async (req, res) => {
   try {
@@ -108,7 +151,7 @@ router.get("/", requirePageRight("asset-transfer", "view"), async (req, res) => 
   try {
     const pool = getPool();
     const request = pool.request();
-    let where = [];
+    let where = ["h.Status <> 'Deleted'"];
 
     if (req.query.companyId)  { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10));  where.push("h.CompanyId = @CompanyId"); }
     if (req.query.projectId)  { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10));  where.push("h.ProjectId = @ProjectId"); }
@@ -160,7 +203,9 @@ router.get("/:id", requirePageRight("asset-transfer", "view"), async (req, res) 
         h.*,
         co.name AS CompanyName, pr.name AS ProjectName,
         fa.AssetName, fa.AssetCode, fa.AssetCategory, fa.FAItemCode,
-        fu.name AS FromUserName, tu.name AS ToUserName, bu.name AS TransferredByName,
+        fu.name AS FromUserName, fu.avatar_url AS FromUserAvatar,
+        tu.name AS ToUserName, tu.avatar_url AS ToUserAvatar,
+        bu.name AS TransferredByName,
         dm.DepartmentName
       FROM dbo.AssetTransferHistory h
       LEFT JOIN dbo.enterprise co ON co.id = h.CompanyId
@@ -307,30 +352,204 @@ router.post("/", requirePageRight("asset-transfer", "create"), async (req, res) 
   }
 });
 
-// ── PUT /:id — edit remarks/transfer date only (ownership is immutable) ──────
+// ── PUT /:id — full edit of a transfer transaction ────────────────────────────
+// Edits the stored row in place (never inserts a new one) and immediately
+// re-syncs FixedAssetRecord.CustodianUserId for whichever asset(s) are
+// affected — the one being edited, and if the asset itself was reassigned,
+// the one it moved away from too. See recomputeCustodianForAsset() above.
 router.put("/:id", requirePageRight("asset-transfer", "edit"), async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   const email = requireUser(req, res);
   if (!email) return;
+
+  const {
+    docDate, transferDate, companyId, projectId, finYear,
+    assetId, fromUserId, toUserId, departmentId, remarks,
+  } = req.body;
+
+  const assetIdVal = toInt(assetId);
+  const projectIdVal = toInt(projectId);
+  const fromUserIdVal = toInt(fromUserId);
+  const toUserIdVal = toInt(toUserId);
+  const departmentIdVal = toInt(departmentId);
+
+  if (!assetIdVal) return res.status(400).json({ error: "assetId is required" });
+  if (!projectIdVal) return res.status(400).json({ error: "projectId is required" });
+  if (!fromUserIdVal || !toUserIdVal) return res.status(400).json({ error: "fromUserId and toUserId are required" });
+  if (fromUserIdVal === toUserIdVal) return res.status(400).json({ error: "From User and To User must be different" });
+  if (!departmentIdVal) return res.status(400).json({ error: "departmentId is required" });
+  if (!remarks || !String(remarks).trim()) return res.status(400).json({ error: "Remarks are required" });
+
   try {
     const pool = getPool();
-    const { transferDate, remarks } = req.body;
-    await pool.request()
-      .input("Id", sql.Int, id)
-      .input("TransferDate", sql.Date, transferDate || null)
-      .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
+
+    const userCheck = await pool.request()
+      .input("FromUserId", sql.Int, fromUserIdVal)
+      .input("ToUserId", sql.Int, toUserIdVal)
       .query(`
-        UPDATE dbo.AssetTransferHistory SET
-          TransferDate = ISNULL(@TransferDate, TransferDate),
-          Remarks = @Remarks
-        WHERE Id = @Id
+        SELECT id, name FROM dbo.users
+        WHERE id IN (@FromUserId, @ToUserId) AND ISNULL(discontinue, 0) = 0
       `);
-    await bumpCacheVersion("asset-transfer");
-    res.json({ ok: true });
+    if (userCheck.recordset.length !== 2) {
+      return res.status(400).json({ error: "Both From User and To User must be active accounts" });
+    }
+
+    const deptCheck = await pool.request().input("DepartmentId", sql.Int, departmentIdVal).query(`
+      SELECT DepartmentName FROM dbo.DepartmentMaster WHERE Id = @DepartmentId AND IsActive = 1
+    `);
+    if (!deptCheck.recordset[0]?.DepartmentName) return res.status(400).json({ error: "Selected department is not valid" });
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const rowRes = await tx.request()
+        .input("Id", sql.Int, id)
+        .query(`
+          SELECT Id, AssetId, FromUserId, ToUserId, Status
+          FROM dbo.AssetTransferHistory WITH (UPDLOCK, HOLDLOCK)
+          WHERE Id = @Id
+        `);
+      const row = rowRes.recordset[0];
+      if (!row) { await tx.rollback(); return res.status(404).json({ error: "Transfer not found" }); }
+      if (row.Status === "Deleted") { await tx.rollback(); return res.status(400).json({ error: "This transfer has been deleted and can no longer be edited" }); }
+
+      const oldAssetId = row.AssetId;
+      const assetChanged = oldAssetId !== assetIdVal;
+
+      // Lock + validate the asset the row will point to after this edit —
+      // same checks POST applies to a brand-new transfer.
+      const newAssetRes = await tx.request()
+        .input("AssetId", sql.Int, assetIdVal)
+        .query(`
+          SELECT AssetId, AssetName, ProjectId, AssetStatus
+          FROM dbo.FixedAssetRecord WITH (UPDLOCK, HOLDLOCK)
+          WHERE AssetId = @AssetId
+        `);
+      const newAsset = newAssetRes.recordset[0];
+      if (!newAsset) { await tx.rollback(); return res.status(404).json({ error: "Asset not found" }); }
+      if (newAsset.ProjectId !== projectIdVal) {
+        await tx.rollback();
+        return res.status(400).json({ error: `"${newAsset.AssetName}" does not belong to the selected project` });
+      }
+      if (newAsset.AssetStatus !== "Active") {
+        await tx.rollback();
+        return res.status(400).json({ error: `"${newAsset.AssetName}" is ${newAsset.AssetStatus} and can't be transferred` });
+      }
+
+      // Also lock the old asset up front (before any writes) if it differs,
+      // so both rows are held for the rest of the transaction.
+      if (assetChanged) {
+        await tx.request()
+          .input("AssetId", sql.Int, oldAssetId)
+          .query(`SELECT AssetId FROM dbo.FixedAssetRecord WITH (UPDLOCK, HOLDLOCK) WHERE AssetId = @AssetId`);
+      }
+
+      const toUserName = userCheck.recordset.find((u) => u.id === toUserIdVal)?.name || null;
+
+      await tx.request()
+        .input("Id", sql.Int, id)
+        .input("DocDate", sql.Date, docDate || null)
+        .input("TransferDate", sql.Date, transferDate || docDate || null)
+        .input("CompanyId", sql.Int, companyId ? parseInt(companyId, 10) : null)
+        .input("ProjectId", sql.Int, projectIdVal)
+        .input("FinYear", sql.NVarChar(20), finYear || null)
+        .input("AssetId", sql.Int, assetIdVal)
+        .input("FromUserId", sql.Int, fromUserIdVal)
+        .input("ToUserId", sql.Int, toUserIdVal)
+        .input("DepartmentId", sql.Int, departmentIdVal)
+        .input("Remarks", sql.NVarChar(sql.MAX), remarks.trim())
+        .input("UpdatedBy", sql.NVarChar(200), email)
+        .query(`
+          UPDATE dbo.AssetTransferHistory SET
+            DocDate = @DocDate, TransferDate = @TransferDate,
+            CompanyId = @CompanyId, ProjectId = @ProjectId, FinYear = @FinYear,
+            AssetId = @AssetId, FromUserId = @FromUserId, ToUserId = @ToUserId,
+            DepartmentId = @DepartmentId, Remarks = @Remarks,
+            UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+          WHERE Id = @Id
+        `);
+
+      // Re-sync current custodian(s) from history — never from the delta,
+      // so this stays correct regardless of how many other transfers exist.
+      if (assetChanged) {
+        const oldStillHasHistory = await recomputeCustodianForAsset(tx, oldAssetId);
+        if (oldStillHasHistory == null) {
+          // No transfers left pointing at the old asset — it reverts to
+          // whoever held it before this (now relocated) transfer.
+          await applyCustodian(tx, oldAssetId, row.FromUserId);
+        }
+        await recomputeCustodianForAsset(tx, assetIdVal);
+      } else {
+        await recomputeCustodianForAsset(tx, assetIdVal);
+      }
+
+      await tx.commit();
+      await bumpCacheVersion("asset-transfer");
+      await bumpCacheVersion("fixed-assets");
+      res.json({ ok: true, toUserName });
+    } catch (e) { await tx.rollback(); throw e; }
   } catch (err) {
     console.error("[assetTransfer] PUT /:id:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── DELETE /:id — soft-delete a transfer transaction ──────────────────────────
+// Rows are never hard-deleted (audit trail); Status flips to 'Deleted' and
+// the affected asset's current custodian is recalculated from whatever
+// transfer history remains, falling back to the deleted row's own FromUserId
+// (the holder before this transfer ever happened) if none is left.
+router.delete("/:id", requirePageRight("asset-transfer", "delete"), async (req, res) => {
+  const id = toInt(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  const email = requireUser(req, res);
+  if (!email) return;
+
+  try {
+    const pool = getPool();
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const rowRes = await tx.request()
+        .input("Id", sql.Int, id)
+        .query(`
+          SELECT Id, AssetId, FromUserId, Status
+          FROM dbo.AssetTransferHistory WITH (UPDLOCK, HOLDLOCK)
+          WHERE Id = @Id
+        `);
+      const row = rowRes.recordset[0];
+      if (!row) { await tx.rollback(); return res.status(404).json({ error: "Transfer not found" }); }
+      if (row.Status === "Deleted") { await tx.rollback(); return res.status(400).json({ error: "This transfer has already been deleted" }); }
+
+      await tx.request()
+        .input("AssetId", sql.Int, row.AssetId)
+        .query(`SELECT AssetId FROM dbo.FixedAssetRecord WITH (UPDLOCK, HOLDLOCK) WHERE AssetId = @AssetId`);
+
+      await tx.request()
+        .input("Id", sql.Int, id)
+        .input("DeletedBy", sql.NVarChar(200), email)
+        .query(`
+          UPDATE dbo.AssetTransferHistory SET
+            Status = 'Deleted', DeletedBy = @DeletedBy, DeletedAt = SYSDATETIME()
+          WHERE Id = @Id
+        `);
+
+      const remainingCustodian = await recomputeCustodianForAsset(tx, row.AssetId);
+      if (remainingCustodian == null) {
+        // This was the only (remaining) transfer for the asset — restore
+        // whoever held it beforehand.
+        await applyCustodian(tx, row.AssetId, row.FromUserId);
+      }
+
+      await tx.commit();
+      await bumpCacheVersion("asset-transfer");
+      await bumpCacheVersion("fixed-assets");
+      res.json({ ok: true });
+    } catch (e) { await tx.rollback(); throw e; }
+  } catch (err) {
+    console.error("[assetTransfer] DELETE /:id:", err.message);
+    res.status(400).json({ error: err.message });
   }
 });
 
