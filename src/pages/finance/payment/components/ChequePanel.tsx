@@ -67,7 +67,14 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
   }, [form.chequeLotId]);
 
   const activeLot = lots.find((l) => l.CId === form.chequeLotId) ?? null;
-  const availableCheques = chequeNumbers.filter((c) => !c.used && !c.bounced);
+  // A cheque already carried in from elsewhere (e.g. auto-filled from a
+  // loan's own sanction entry, which recorded — and consumed — this exact
+  // cheque number at sanction time) must still show up as the selected
+  // option even though it's no longer "available" in this lot, otherwise
+  // the <select> silently renders blank despite form.chequeNo being set.
+  const availableCheques = chequeNumbers.filter(
+    (c) => (!c.used && !c.bounced) || c.number === form.chequeNo,
+  );
 
   const handleChequeSelect = async (chequeNo: string) => {
     set("chequeNo", chequeNo);

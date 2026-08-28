@@ -87,6 +87,29 @@ export interface FundTransferDetail extends FundTransferSummary {
   PostedToGL: boolean;
 }
 
+export interface FundTransferPostingRow {
+  label: string;
+  side: "debit" | "credit";
+  amount: number;
+}
+
+export interface FundTransferPostingVoucher {
+  jvNo: string | null;
+  companyName?: string | null;
+  rows: FundTransferPostingRow[];
+}
+
+export interface FundTransferPosting {
+  docNo: string;
+  transferType: FundTransferType;
+  amount: number;
+  sourceCompanyName: string | null;
+  destinationCompanyName: string | null;
+  linkedLoanNo: string | null;
+  isPosted: boolean;
+  vouchers: FundTransferPostingVoucher[];
+}
+
 export const getFundTransfers = async (params: {
   status?: string;
   transferType?: FundTransferType;
@@ -116,6 +139,11 @@ export const createFundTransfer = async (
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  return handleResponse(res);
+};
+
+export const getFundTransferPosting = async (id: number): Promise<FundTransferPosting> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/posting`);
   return handleResponse(res);
 };
 
