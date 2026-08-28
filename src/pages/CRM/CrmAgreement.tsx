@@ -8,7 +8,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, FolderClock, Download } from "lucide-react";
+import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, FolderClock, Download, CheckCircle2, AlertCircle, Info, CalendarDays, BarChart3 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -915,58 +915,94 @@ const CrmAgreement: React.FC = () => {
                     const a = detail.agreement;
                     const pendingDocs = unverifiedMandatoryDocs(detail.documents);
                     const cancelled = isBookingCancelled(a);
+                    type BannerVariant = "error" | "warning" | "info" | "success" | "action";
+                    let variant: BannerVariant = "info";
                     let text = "";
+                    let subtext = "";
                     let cta: { label: string; onClick: () => void } | null = null;
                     if (cancelled) {
-                      text = `The underlying booking is ${a?.BookingStatus || "inactive"} — this agreement is locked. Cancel it to close it out.`;
+                      variant = "error";
+                      text = `Booking is ${a?.BookingStatus || "inactive"} — this agreement is locked.`;
+                      subtext = "Cancel the agreement to formally close it out.";
                     } else if (a?.Status === CrmStatus.REGISTERED) {
-                      text = "Registered — this agreement is fully complete.";
+                      variant = "success";
+                      text = "Agreement fully complete — Registered at Sub-Registrar.";
                     } else if (a?.Status === CrmStatus.EXECUTED) {
-                      text = "Executed — mark it Registered once the Sales Deed carries a Registration No.";
+                      variant = "info";
+                      text = "Agreement executed.";
+                      subtext = "Record the Sub-Registrar Registration No. to mark it Registered.";
                     } else if (!a?.LegalExecutiveId) {
-                      // Advisory, not a hard block on this step specifically —
-                      // Senior Approval doesn't actually require it — but
-                      // surfaced first to match its position in the stepper
-                      // above and get it assigned early rather than only
-                      // being discovered as a blocker at the very last step.
-                      text = "Assign a Legal Executive to take ownership of preparing this agreement's paperwork — required before it can be marked executed.";
+                      variant = "warning";
+                      text = "No Legal Executive assigned.";
+                      subtext = "Assign someone responsible for preparing the paperwork — required before execution (server-enforced).";
                     } else if (a?.SeniorApprovalStatus !== CrmStatus.APPROVED) {
-                      text = "Awaiting senior approval — visit the Admin Approval Inbox to approve or reject it.";
+                      variant = "warning";
+                      text = "Awaiting senior approval.";
+                      subtext = "Submit via the Legal & Approval tab, then an admin approves from the Admin Approval Inbox.";
                     } else if (!a?.SentToCustomerAt) {
-                      text = "Senior-approved — ready to send to the customer for their review.";
+                      variant = "action";
+                      text = "Senior-approved — ready to share with the customer.";
                       cta = { label: "Send to Customer Portal", onClick: () => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : ""); setSendDialog(true); } };
                     } else if (a?.CustomerApprovalStatus === "RecheckRequested") {
-                      text = `Customer requested a recheck${a?.LastRecheckRemarks ? `: "${a.LastRecheckRemarks}"` : ""} — address it and resend.`;
+                      variant = "error";
+                      text = "Customer requested a recheck.";
+                      subtext = a?.LastRecheckRemarks ? `"${a.LastRecheckRemarks}"` : "Address the issue and resend.";
                       cta = { label: "Resend After Recheck", onClick: () => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : ""); setSendDialog(true); } };
                     } else if (a?.CustomerApprovalStatus !== CrmStatus.APPROVED) {
-                      text = "Sent to the customer — awaiting their review and approval.";
+                      variant = "info";
+                      text = "Sent to customer — awaiting their review and approval.";
+                      subtext = a?.SentToCustomerAt ? `Sent ${String(a.SentToCustomerAt).slice(0, 10)}` : "";
                     } else if (!a?.AgreementDate) {
                       if (a?.DateApprovalStatus === CrmStatus.PENDING) {
-                        text = "Both sides agreed on a date — awaiting super admin sign-off.";
+                        variant = "warning";
+                        text = "Date agreed by both sides — awaiting super admin confirmation.";
                       } else if (a?.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW) {
-                        text = `We proposed ${a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "a date"} — awaiting the customer's response.`;
+                        variant = "info";
+                        text = `We proposed ${a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "a date"} — waiting for customer's response.`;
                       } else if (a?.ProposedDateStatus === "PendingCompanyReview") {
-                        text = `Customer ${a?.ProposedDate ? `proposed ${String(a.ProposedDate).slice(0, 10)}` : "revised the date"} — accept it or propose a different one.`;
+                        variant = "action";
+                        text = `Customer proposed ${a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "a date"} — your turn to accept or counter.`;
                         cta = { label: "Accept Date", onClick: handleAcceptDate };
                       } else {
-                        text = "Customer approved — propose an agreement date.";
+                        variant = "action";
+                        text = "Customer approved — now propose an agreement signing date.";
                         cta = { label: "Propose Agreement Date", onClick: () => { setSendDate(""); setProposeDateDialog(true); } };
                       }
                     } else if (pendingDocs.length) {
-                      text = `${pendingDocs.length} mandatory document(s) still need verification before this can be executed: ${pendingDocs.map((d: any) => d.Label || d.DocumentType).join(", ")}.`;
+                      variant = "warning";
+                      text = `${pendingDocs.length} mandatory document${pendingDocs.length > 1 ? "s" : ""} still need verification.`;
+                      subtext = pendingDocs.map((d: any) => d.Label || d.DocumentType).join(", ");
                     } else {
-                      text = "Everything is ready — mark this agreement executed.";
+                      variant = "action";
+                      text = "All checks passed — ready to mark this agreement executed.";
                       cta = { label: "Mark Executed", onClick: () => handleAgreementAction("mark-executed") };
                     }
+                    const variantCls: Record<BannerVariant, string> = {
+                      error:   "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/40",
+                      warning: "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40",
+                      info:    "border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/40",
+                      success: "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/40",
+                      action:  "border-primary/30 bg-primary/8",
+                    };
+                    const iconMap: Record<BannerVariant, React.ReactNode> = {
+                      error:   <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" />,
+                      warning: <AlertCircle size={16} className="text-amber-500 shrink-0 mt-0.5" />,
+                      info:    <Info size={16} className="text-blue-500 shrink-0 mt-0.5" />,
+                      success: <CheckCircle2 size={16} className="text-green-500 shrink-0 mt-0.5" />,
+                      action:  <ArrowRight size={16} className="text-primary shrink-0 mt-0.5" />,
+                    };
                     return (
-                      <div className="flex items-center justify-between gap-3 flex-wrap rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
-                        <div className="flex items-start gap-2 text-sm">
-                          <ArrowRight size={15} className="text-primary shrink-0 mt-0.5" />
-                          <span>{text}</span>
+                      <div className={`flex items-start justify-between gap-3 flex-wrap rounded-lg border px-3.5 py-2.5 ${variantCls[variant]}`}>
+                        <div className="flex items-start gap-2">
+                          {iconMap[variant]}
+                          <div>
+                            <p className="text-sm font-medium">{text}</p>
+                            {subtext && <p className="text-xs text-muted-foreground mt-0.5">{subtext}</p>}
+                          </div>
                         </div>
                         {cta && (
                           <button onClick={cta.onClick}
-                            className="shrink-0 px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                            className="shrink-0 px-3.5 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 whitespace-nowrap">
                             {cta.label}
                           </button>
                         )}
@@ -1216,204 +1252,331 @@ const CrmAgreement: React.FC = () => {
               </div>
               )}
 
-              {agrTab === "Legal & Approval" && (
-              <div className="space-y-4">
-              <div className="rounded-xl border border-border p-4 space-y-2">
-                <h3 className="text-sm font-semibold flex items-center gap-1.5"><UserCircle2 size={15} className="text-primary" /> Legal Executive</h3>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-muted-foreground">Responsible for preparing this agreement's paperwork: </span>
-                  {["Registered", "Cancelled"].includes(detail.agreement?.Status) || isBookingCancelled(detail.agreement) ? (
-                    <span className="font-medium">
-                      {detail.agreement?.LegalExecutiveName || <span className="text-amber-600">Unassigned</span>}
-                    </span>
-                  ) : (
-                    <select
-                      value={detail.agreement?.LegalExecutiveId ? String(detail.agreement.LegalExecutiveId) : ""}
-                      disabled={assigningLegal}
-                      onChange={(e) => handleAssignLegal(e.target.value)}
-                      className={`text-sm border rounded px-1.5 py-0.5 bg-background disabled:opacity-40 ${
-                        detail.agreement?.LegalExecutiveId ? "border-border" : "border-amber-300 text-amber-600"}`}>
-                      <option value="">— Unassigned —</option>
-                      {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                    </select>
-                  )}
-                </div>
-                {!detail.agreement?.LegalExecutiveId && !["Registered", "Cancelled"].includes(detail.agreement?.Status) && (
-                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-                    No Legal Executive assigned yet — this is required before the agreement can be marked executed (server-enforced, not just a reminder). Assign someone above once it's clear who's preparing the paperwork.
-                  </div>
-                )}
-              </div>
+              {agrTab === "Legal & Approval" && (() => {
+                const a = detail.agreement;
+                const cancelled = isBookingCancelled(a);
+                const legalAssigned = !!a?.LegalExecutiveId;
+                const seniorStatus = a?.SeniorApprovalStatus;
+                const seniorApproved = seniorStatus === CrmStatus.APPROVED;
+                const seniorPending  = seniorStatus === CrmStatus.PENDING;
+                const seniorRejected = seniorStatus === CrmStatus.REJECTED;
+                const sent        = !!a?.SentToCustomerAt;
+                const custStatus  = a?.CustomerApprovalStatus;
+                const custApproved = custStatus === CrmStatus.APPROVED;
+                const custRecheck  = custStatus === "RecheckRequested";
+                const dated   = !!a?.AgreementDate;
+                const executed = [CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(a?.Status);
+                const stepsComplete = [seniorApproved, sent, custApproved, dated, executed].filter(Boolean).length;
 
-              {/* Approval Workflow */}
-              <div className="rounded-xl border border-border p-4 space-y-3">
-                <h3 className="text-sm font-semibold flex items-center gap-1.5"><ShieldAlert size={15} className="text-primary" /> Approval Workflow</h3>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <span className="text-xs text-muted-foreground block mb-1">Senior Approval</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
-                      detail.agreement?.SeniorApprovalStatus === CrmStatus.APPROVED ? "text-green-600 bg-green-50 border-green-200"
-                      : detail.agreement?.SeniorApprovalStatus === CrmStatus.REJECTED ? "text-red-600 bg-red-50 border-red-200"
-                      : "text-orange-600 bg-orange-50 border-orange-200"}`}>
-                      {detail.agreement?.SeniorApprovalStatus || "Pending"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-muted-foreground block mb-1">Customer Approval</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
-                      detail.agreement?.CustomerApprovalStatus === CrmStatus.APPROVED ? "text-green-600 bg-green-50 border-green-200"
-                      : detail.agreement?.CustomerApprovalStatus === "RecheckRequested" ? "text-red-600 bg-red-50 border-red-200"
-                      : "text-orange-600 bg-orange-50 border-orange-200"}`}>
-                      {detail.agreement?.CustomerApprovalStatus || "Pending"}
-                    </span>
-                  </div>
-                </div>
-                {(detail.agreement?.ProposedDate || detail.agreement?.AgreementDate) && (
-                  <div className="flex flex-wrap gap-1.5">
-                    <DateStatusBadge
-                      label={
-                        detail.agreement?.AgreementDate ? "Agreed by Both"
-                        : detail.agreement?.ProposedDateStatus === "Matched" ? "Matched"
-                        : detail.agreement?.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW ? "Proposed by Company — awaiting Customer"
-                        : detail.agreement?.ProposedDateStatus === "PendingCompanyReview" ? "Proposed by Customer — awaiting Company"
-                        : "Proposed"
-                      }
-                      date={detail.agreement?.AgreementDate || detail.agreement?.ProposedDate}
-                      color={detail.agreement?.AgreementDate ? "green" : detail.agreement?.ProposedDateStatus === "PendingCompanyReview" ? "blue" : "purple"}
-                      active
-                    />
-                  </div>
-                )}
-                {!detail.agreement?.AgreementDate && detail.agreement?.ProposedDateStatus === "Matched" && (
-                  <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded p-2">
-                    Both sides agree on this date — awaiting super admin sign-off before it's confirmed.
-                  </div>
-                )}
-                {dateHistory.length > 0 && (
-                  <div className="text-xs">
-                    <div className="text-muted-foreground mb-1">Reschedule History</div>
-                    <div className="space-y-1">
-                      {(dateHistory as any[]).map((h) => (
-                        <div key={h.Id} className="flex items-center gap-2 text-muted-foreground">
-                          <span className={`px-1.5 py-0.5 rounded-full border text-[10px] font-medium ${h.ProposedBy === "Company" ? "text-purple-600 bg-purple-50 border-purple-200" : "text-blue-600 bg-blue-50 border-blue-200"}`}>
-                            {h.ProposedBy}
-                          </span>
-                          <span>proposed {String(h.ProposedDate).slice(0,10)}</span>
-                          <span className="text-[10px]">({String(h.CreatedAt).slice(0,16).replace("T"," ")}{h.CreatedByName ? ` · ${h.CreatedByName}` : ""})</span>
+                const circleCls = (s: "done"|"active"|"warn"|"upcoming") =>
+                  s === "done"     ? "bg-green-500 text-white ring-2 ring-green-200 dark:ring-green-900" :
+                  s === "active"   ? "bg-primary text-primary-foreground ring-2 ring-primary/30" :
+                  s === "warn"     ? "bg-red-500 text-white ring-2 ring-red-200 dark:ring-red-900" :
+                  "bg-muted text-muted-foreground";
+
+                return (
+                  <div className="space-y-4">
+                    {/* Legal Executive */}
+                    <div className="rounded-xl border border-border overflow-hidden">
+                      <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
+                        <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                          <UserCircle2 size={15} className="text-primary" /> Legal Executive
+                        </h3>
+                        {legalAssigned
+                          ? <span className="text-[11px] text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full font-semibold">Assigned</span>
+                          : <span className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full font-semibold">Unassigned</span>
+                        }
+                      </div>
+                      <div className="px-4 py-3 space-y-2">
+                        <p className="text-xs text-muted-foreground">The person responsible for preparing this agreement's paperwork. Required before execution (server-enforced).</p>
+                        {["Registered", "Cancelled"].includes(a?.Status) || cancelled ? (
+                          <div className="font-medium text-sm">{a?.LegalExecutiveName || <span className="text-amber-600">Unassigned</span>}</div>
+                        ) : (
+                          <select
+                            value={a?.LegalExecutiveId ? String(a.LegalExecutiveId) : ""}
+                            disabled={assigningLegal}
+                            onChange={(e) => handleAssignLegal(e.target.value)}
+                            className={`text-sm border rounded-lg px-2 py-1.5 bg-background disabled:opacity-40 ${
+                              a?.LegalExecutiveId ? "border-border" : "border-amber-300 text-amber-600"}`}>
+                            <option value="">— Unassigned —</option>
+                            {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                          </select>
+                        )}
+                        {!a?.LegalExecutiveId && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled && (
+                          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                            Assign someone now so they receive an immediate notification and can start preparing the paperwork.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Approval Timeline */}
+                    <div className="rounded-xl border border-border overflow-hidden">
+                      <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
+                        <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                          <ShieldAlert size={15} className="text-primary" /> Approval Timeline
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          <div className="flex gap-1">
+                            {[0,1,2,3,4].map((i) => (
+                              <div key={i} className={`w-2 h-2 rounded-full ${i < stepsComplete ? "bg-green-500" : "bg-muted"}`} />
+                            ))}
+                          </div>
+                          <span className="text-xs text-muted-foreground">{stepsComplete}/5</span>
                         </div>
-                      ))}
+                      </div>
+
+                      {/* Step 1 — Senior Review */}
+                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${seniorApproved ? "bg-green-500/[0.04]" : seniorRejected ? "bg-red-500/[0.04]" : ""}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5 ${circleCls(seniorApproved ? "done" : seniorRejected ? "warn" : seniorPending ? "active" : "upcoming")}`}>
+                          {seniorApproved ? <Check size={14} /> : seniorRejected ? <AlertCircle size={13} /> : 1}
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-sm font-semibold">Senior Review</span>
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${
+                              seniorApproved ? "text-green-600 bg-green-50 border-green-200"
+                              : seniorRejected ? "text-red-600 bg-red-50 border-red-200"
+                              : "text-amber-600 bg-amber-50 border-amber-200"
+                            }`}>{seniorStatus || "Pending"}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            An admin or super-admin approves this agreement before it's shared with the customer. Once submitted, review happens from the <strong>Admin Approval Inbox</strong>.
+                          </p>
+                          {seniorApproved && a?.SeniorApprovedAt && (
+                            <p className="text-xs text-green-700 flex items-center gap-1">
+                              <CheckCircle2 size={11} /> Approved {String(a.SeniorApprovedAt).slice(0,10)}
+                              {a?.SeniorApprovalRemarks && <span className="text-muted-foreground ml-1">· {a.SeniorApprovalRemarks}</span>}
+                            </p>
+                          )}
+                          {seniorRejected && a?.SeniorApprovalRemarks && (
+                            <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                              <strong>Rejection reason:</strong> {a.SeniorApprovalRemarks}
+                            </div>
+                          )}
+                          {!cancelled && !seniorApproved && (
+                            <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                              <ApprovalActions
+                                status={a?.SeniorApprovalStatus}
+                                recordId={a?.Id}
+                                endpoint={API}
+                                submitOnly
+                                onSuccess={() => {
+                                  qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+                                  qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+                                }}
+                              />
+                              {seniorPending && <span className="text-xs text-muted-foreground">Awaiting review in Admin Inbox</span>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Step 2 — Shared with Customer */}
+                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${sent ? "bg-blue-500/[0.04]" : ""}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5 ${circleCls(sent ? "done" : seniorApproved ? "active" : "upcoming")}`}>
+                          {sent ? <Check size={14} /> : 2}
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-sm font-semibold">Shared with Customer</span>
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${
+                              sent ? "text-blue-600 bg-blue-50 border-blue-200" : "text-muted-foreground bg-muted/30 border-border"
+                            }`}>{sent ? "Sent" : "Not sent"}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            The customer can view this agreement in their portal and approve it or request a recheck.
+                          </p>
+                          {sent && a?.SentToCustomerAt && (
+                            <p className="text-xs text-blue-600 flex items-center gap-1">
+                              <Send size={11} /> Sent {String(a.SentToCustomerAt).slice(0,16).replace("T"," ")}
+                            </p>
+                          )}
+                          {seniorApproved && !sent && !cancelled && (
+                            <button onClick={() => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0,10) : ""); setSendDialog(true); }}
+                              className="mt-0.5 text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90">
+                              Send to Customer Portal
+                            </button>
+                          )}
+                          {custRecheck && seniorApproved && !cancelled && (
+                            <div className="space-y-1.5 pt-0.5">
+                              <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                                <strong>Recheck requested ({a.RecheckCount}x):</strong> {a.LastRecheckRemarks || "No remark provided"}
+                              </div>
+                              <button onClick={() => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0,10) : ""); setSendDialog(true); }}
+                                className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90">
+                                Resend After Recheck
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Step 3 — Customer Approval */}
+                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${custApproved ? "bg-green-500/[0.04]" : custRecheck ? "bg-red-500/[0.04]" : ""}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5 ${circleCls(custApproved ? "done" : custRecheck ? "warn" : sent ? "active" : "upcoming")}`}>
+                          {custApproved ? <Check size={14} /> : custRecheck ? <AlertCircle size={13} /> : 3}
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-sm font-semibold">Customer Approval</span>
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${
+                              custApproved ? "text-green-600 bg-green-50 border-green-200"
+                              : custRecheck ? "text-red-600 bg-red-50 border-red-200"
+                              : "text-amber-600 bg-amber-50 border-amber-200"
+                            }`}>{custStatus || "Pending"}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Customer reviews the agreement from their portal and approves it or flags issues.
+                          </p>
+                          {custApproved && a?.CustomerApprovedAt && (
+                            <p className="text-xs text-green-700 flex items-center gap-1">
+                              <CheckCircle2 size={11} /> Approved by customer {String(a.CustomerApprovedAt).slice(0,10)}
+                            </p>
+                          )}
+                          {a?.RecheckCount > 0 && !custApproved && (
+                            <p className="text-xs text-red-600">Recheck count: {a.RecheckCount} · Last remark: {a.LastRecheckRemarks || "—"}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Step 4 — Agreement Date */}
+                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${dated ? "bg-green-500/[0.04]" : ""}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5 ${circleCls(dated ? "done" : a?.DateApprovalStatus === CrmStatus.PENDING ? "warn" : custApproved ? "active" : "upcoming")}`}>
+                          {dated ? <Check size={14} /> : <CalendarDays size={13} />}
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-sm font-semibold">Agreement Date</span>
+                            {dated ? (
+                              <span className="text-[11px] px-2 py-0.5 rounded-full border font-semibold text-green-600 bg-green-50 border-green-200">
+                                Confirmed: {String(a.AgreementDate).slice(0,10)}
+                              </span>
+                            ) : a?.ProposedDate ? (
+                              <span className="text-[11px] px-2 py-0.5 rounded-full border font-semibold text-purple-600 bg-purple-50 border-purple-200">
+                                Proposed: {String(a.ProposedDate).slice(0,10)}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] px-2 py-0.5 rounded-full border font-semibold text-muted-foreground bg-muted/30 border-border">Not set</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Both sides negotiate a mutually acceptable signing date through the portal. A super-admin confirms the final agreed date.
+                          </p>
+                          {!dated && custApproved && !cancelled && (() => {
+                            if (a?.DateApprovalStatus === CrmStatus.PENDING) return (
+                              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 flex items-center gap-1.5">
+                                <Clock size={11} /> Date matched — awaiting super admin sign-off
+                              </p>
+                            );
+                            if (a?.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW) return (
+                              <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock size={11} /> Awaiting customer's response</p>
+                            );
+                            if (a?.ProposedDateStatus === "PendingCompanyReview") return (
+                              <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                                <button onClick={handleAcceptDate} disabled={saving}
+                                  className="text-xs px-3 py-1.5 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:opacity-40">
+                                  Accept {String(a.ProposedDate).slice(0,10)}
+                                </button>
+                                <button onClick={() => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0,10) : ""); setProposeDateDialog(true); }}
+                                  className="text-xs px-3 py-1.5 border border-border rounded-lg font-medium hover:bg-muted">
+                                  Propose Different Date
+                                </button>
+                              </div>
+                            );
+                            return (
+                              <button onClick={() => { setSendDate(""); setProposeDateDialog(true); }}
+                                className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 mt-0.5">
+                                Propose Agreement Date
+                              </button>
+                            );
+                          })()}
+                          {dateHistory.length > 0 && (
+                            <div className="mt-1 space-y-1 border-t border-border/60 pt-2">
+                              <p className="text-[11px] text-muted-foreground font-medium flex items-center gap-1"><FolderClock size={11} /> Negotiation history</p>
+                              {(dateHistory as any[]).map((h) => (
+                                <div key={h.Id} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                  <span className={`px-1.5 py-0.5 rounded-full border font-medium ${h.ProposedBy === "Company" ? "text-purple-600 bg-purple-50 border-purple-200" : "text-blue-600 bg-blue-50 border-blue-200"}`}>
+                                    {h.ProposedBy}
+                                  </span>
+                                  proposed {String(h.ProposedDate).slice(0,10)}
+                                  <span className="text-[10px]">· {String(h.CreatedAt).slice(0,10)}{h.CreatedByName ? ` by ${h.CreatedByName}` : ""}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Step 5 — Execution & Registration */}
+                      <div className={`px-4 py-4 flex items-start gap-3 ${executed ? "bg-green-500/[0.04]" : ""}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5 ${circleCls(a?.Status === CrmStatus.REGISTERED ? "done" : a?.Status === CrmStatus.EXECUTED ? "active" : dated ? "active" : "upcoming")}`}>
+                          {a?.Status === CrmStatus.REGISTERED ? <Check size={14} /> : <BarChart3 size={13} />}
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-sm font-semibold">Execution &amp; Registration</span>
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${
+                              a?.Status === CrmStatus.REGISTERED ? "text-green-600 bg-green-50 border-green-200"
+                              : a?.Status === CrmStatus.EXECUTED ? "text-blue-600 bg-blue-50 border-blue-200"
+                              : "text-muted-foreground bg-muted/30 border-border"
+                            }`}>
+                              {a?.Status === CrmStatus.REGISTERED ? "Registered" : a?.Status === CrmStatus.EXECUTED ? "Executed" : "Pending"}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            All mandatory documents verified → signed &amp; executed → registered at the Sub-Registrar's office with a Doc No.
+                          </p>
+                          {a?.Status === CrmStatus.EXECUTED && (
+                            <p className="text-xs text-blue-600">Agreement executed. Record the Sub-Registrar Doc No. to mark it Registered.</p>
+                          )}
+                          {a?.Status === CrmStatus.REGISTERED && a?.AfsRegistrationNo && (
+                            <p className="text-xs text-green-700 flex items-center gap-1">
+                              <CheckCircle2 size={11} /> Reg. No. {a.AfsRegistrationNo} · {a?.AfsRegistrationDate ? String(a.AfsRegistrationDate).slice(0,10) : ""}
+                            </p>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                )}
-                {detail.agreement?.RecheckCount > 0 && (
-                  <div className="text-xs bg-red-50 border border-red-200 rounded p-2 text-red-700">
-                    Rechecked {detail.agreement.RecheckCount}x — latest remark: {detail.agreement.LastRecheckRemarks || "—"}
-                  </div>
-                )}
-                <div className="flex gap-2 flex-wrap items-center">
-                  {/* submitOnly: senior Approve/Reject only ever happen from the
-                      Admin Approval Inbox (admin/super_admin/dba) — no self-approve here */}
-                  <ApprovalActions
-                    status={detail.agreement?.SeniorApprovalStatus}
-                    recordId={detail.agreement?.Id}
-                    endpoint={API}
-                    submitOnly
-                    onSuccess={() => {
-                      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-                      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
-                    }}
-                  />
-                  {detail.agreement?.SeniorApprovalStatus === CrmStatus.PENDING && (
-                    <span className="text-xs text-muted-foreground">Pending admin approval</span>
-                  )}
-                  {detail.agreement?.SeniorApprovalStatus === CrmStatus.APPROVED && !detail.agreement?.SentToCustomerAt && (
-                    isBookingCancelled(detail.agreement) ? (
-                      <span title="Booking is cancelled — cannot send to customer" className="text-xs px-3 py-1.5 border border-dashed border-border rounded-lg text-muted-foreground/40 cursor-not-allowed">
-                        Send to Customer Portal
-                      </span>
-                    ) : (
-                      <button onClick={() => { setSendDate(detail.agreement?.ProposedDate ? String(detail.agreement.ProposedDate).slice(0, 10) : ""); setSendDialog(true); }}
-                        className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
-                        Send to Customer Portal
-                      </button>
-                    )
-                  )}
-                  {detail.agreement?.CustomerApprovalStatus === "RecheckRequested" && detail.agreement?.SeniorApprovalStatus === CrmStatus.APPROVED && (
-                    isBookingCancelled(detail.agreement) ? (
-                      <span title="Booking is cancelled — cannot resend" className="text-xs px-3 py-1.5 border border-dashed border-border rounded-lg text-muted-foreground/40 cursor-not-allowed">
-                        Resend After Recheck
-                      </span>
-                    ) : (
-                      <button onClick={() => { setSendDate(detail.agreement?.ProposedDate ? String(detail.agreement.ProposedDate).slice(0, 10) : ""); setSendDialog(true); }}
-                        className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
-                        Resend After Recheck
-                      </button>
-                    )
-                  )}
-                  {/* Date negotiation is the step AFTER both ends approve the
-                      agreement's content (spec: "...CUSTOMER APPROVAL ->
-                      APPROVAL FROM BOTH END -> DATE OF AGREEMENT..."), so
-                      this shows once CustomerApprovalStatus is Approved —
-                      not "Pending", which is the state *before* that.
-                      Turn-based: company can act (Accept or Revise) only
-                      when ProposedDateStatus shows it's waiting on them
-                      ('PendingCompanyReview') or nothing's been proposed
-                      yet; while waiting on the customer, no button shows. */}
-                  {detail.agreement?.SentToCustomerAt && detail.agreement?.CustomerApprovalStatus === CrmStatus.APPROVED && !detail.agreement?.AgreementDate && (
-                    detail.agreement?.DateApprovalStatus === CrmStatus.PENDING ? (
-                      <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-amber-600 bg-amber-50 border-amber-200">
-                        Awaiting Super Admin Approval
-                      </span>
-                    ) : detail.agreement?.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW ? (
-                      <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">
-                        Awaiting customer's response
-                      </span>
-                    ) : isBookingCancelled(detail.agreement) ? (
-                      <span title="Booking is cancelled — cannot act on a date" className="text-xs px-3 py-1.5 border border-dashed border-border rounded-lg text-muted-foreground/40 cursor-not-allowed">
-                        {detail.agreement?.ProposedDateStatus === "PendingCompanyReview" ? "Accept Date" : "Propose Agreement Date"}
-                      </span>
-                    ) : detail.agreement?.ProposedDateStatus === "PendingCompanyReview" ? (
-                      <>
-                        <button onClick={handleAcceptDate} disabled={saving}
-                          className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                          Accept Date
-                        </button>
-                        <button onClick={() => { setSendDate(detail.agreement?.ProposedDate ? String(detail.agreement.ProposedDate).slice(0, 10) : ""); setProposeDateDialog(true); }}
-                          className="text-xs px-3 py-1.5 border border-border rounded-lg font-medium hover:bg-muted">
-                          Propose a Different Date
-                        </button>
-                      </>
-                    ) : (
-                      <button onClick={() => { setSendDate(""); setProposeDateDialog(true); }}
-                        className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
-                        Propose Agreement Date
-                      </button>
-                    )
-                  )}
-                  {detail.agreement?.SentToCustomerAt && (
-                    <span className="text-xs text-muted-foreground">
-                      Sent to customer {String(detail.agreement.SentToCustomerAt).slice(0, 16).replace("T", " ")}
-                    </span>
-                  )}
-                </div>
-              </div>
-              </div>
-              )}
+                );
+              })()}
 
-              {agrTab === "Documents" && (
+              {agrTab === "Documents" && (() => {
+                const fp = followupProgress(detail.documents);
+                const allVerified = (detail.documents || []).filter((d: any) => d.IsMandatory).every((d: any) => d.Status === "Verified");
+                return (
               <div className="rounded-xl border border-border overflow-hidden">
-                <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><ScrollText size={15} className="text-primary" /> Agreement Documents ({detail.documents?.length || 0})</h3>
-                  <div className="flex items-center gap-3">
-                    <button onClick={() => setDocRequestDialog(true)}
-                      className="flex items-center gap-1 text-xs text-primary hover:underline">
-                      <Send size={12} /> Request from Customer
-                    </button>
-                    <button onClick={() => setDocDialog(true)}
-                      className="flex items-center gap-1 text-xs text-primary hover:underline">
-                      <Upload size={12} /> Add Document
-                    </button>
+                <div className="px-4 py-3 bg-muted/30 border-b border-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ScrollText size={15} className="text-primary" /> Agreement Documents ({detail.documents?.length || 0})</h3>
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => setDocRequestDialog(true)}
+                        className="flex items-center gap-1 text-xs text-primary hover:underline">
+                        <Send size={12} /> Request from Customer
+                      </button>
+                      <button onClick={() => setDocDialog(true)}
+                        className="flex items-center gap-1 text-xs text-primary hover:underline">
+                        <Upload size={12} /> Add Document
+                      </button>
+                    </div>
                   </div>
+                  {fp.required > 0 && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-muted-foreground">Mandatory docs: {fp.uploaded}/{fp.required} uploaded{allVerified ? "" : ` · ${(detail.documents || []).filter((d: any) => d.IsMandatory && d.Status === "Verified").length} verified`}</span>
+                        <span className={`font-semibold ${fp.percent === 100 && allVerified ? "text-green-600" : fp.percent === 100 ? "text-amber-600" : "text-muted-foreground"}`}>{fp.percent}%</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            allVerified ? "bg-green-500" : fp.percent === 100 ? "bg-amber-500" : "bg-primary"
+                          }`}
+                          style={{ width: `${fp.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {!detail.documents?.length ? (
                   <div className="p-4 text-center text-muted-foreground text-sm">No documents uploaded yet</div>
@@ -1474,7 +1637,8 @@ const CrmAgreement: React.FC = () => {
                   );
                 })}
               </div>
-              )}
+                );
+              })()}
             </>
           )}
         </div>
