@@ -64,7 +64,8 @@ const AGR_SELECT = `
     b.Status AS BookingStatus, b.IsActive AS BookingIsActive,
     a.ApplicantName, a.Mobile, a.Email,
     cu.name AS CreatedByName,
-    pu.Email AS PortalEmail, pu.IsActive AS PortalActive, pu.MustChangePassword AS PortalMustChangePassword
+    pu.Email AS PortalEmail, pu.IsActive AS PortalActive, pu.MustChangePassword AS PortalMustChangePassword,
+    al.Status AS AllotmentLetterStatus, al.IssuedOn AS AllotmentLetterIssuedOn
   FROM dbo.CrmAgreement ag
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -72,6 +73,7 @@ const AGR_SELECT = `
   LEFT JOIN dbo.Users cu     ON cu.id = ag.CreatedBy
   LEFT JOIN dbo.Users le     ON le.id = ag.LegalExecutiveId
   LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = a.CustomerId
+  LEFT JOIN dbo.CrmAllotmentLetter al    ON al.BookingId  = b.Id
 `;
 
 // Shared lock check — nothing here previously checked whether the Booking
@@ -917,6 +919,21 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
     // agreement date can only ever come from both sides' proposals matching.
     const touchesLegalContent = b.LegalName != null
       || b.LegalAddress != null || b.PanNo != null || b.AadhaarNo != null;
+
+    // Once the Allotment Letter is Issued, the legal identity fields in this
+    // agreement are formally committed — the customer holds a document citing
+    // them. Any subsequent change is a legal amendment that must carry a
+    // traceable reason, not a silent correction.
+    if (touchesLegalContent && !b.RevisionReason?.trim()) {
+      const alRow = await pool.request().input("bid", sql.Int, oldRow.BookingId)
+        .query("SELECT TOP 1 Status FROM dbo.CrmAllotmentLetter WHERE BookingId = @bid");
+      if (alRow.recordset[0]?.Status === "Issued") {
+        return res.status(400).json({
+          error: "Amendment reason required — the Allotment Letter for this booking has been issued. These legal details are formally committed. You must provide a reason for this amendment.",
+        });
+      }
+    }
+
     if (touchesLegalContent) {
       await pool.request()
         .input("agid", sql.Int, id)
