@@ -18,8 +18,10 @@ const { cache } = require("../middleware/cache");
  *   - Recent sale invoices         : last 8 rows
  */
 router.get("/", cache("sales-dashboard", 60), async (req, res) => {
+  // companyId is optional — omitting it (the dashboard's own default, no
+  // company picker on the page anymore) aggregates across every company
+  // instead of requiring one to be chosen before anything loads.
   const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-  if (!companyId) return res.status(400).json({ error: "companyId is required" });
   try {
     const pool = getPool();
 
@@ -41,7 +43,7 @@ router.get("/", cache("sales-dashboard", 60), async (req, res) => {
           COUNT(CASE WHEN Status = 'Approved' THEN 1 END)                      AS ApprovedCount,
           COUNT(CASE WHEN Status = 'Rejected' THEN 1 END)                      AS RejectedCount
         FROM dbo.SaleOrders
-        WHERE FromCompanyID = @CompanyId
+        WHERE (@CompanyId IS NULL OR FromCompanyID = @CompanyId)
       `),
 
       // ── Sale Invoices ────────────────────────────────────────────────────────
@@ -56,7 +58,7 @@ router.get("/", cache("sales-dashboard", 60), async (req, res) => {
           COUNT(CASE WHEN ISNULL(PaymentStatus, 'Pending Payment') <> 'Paid' THEN 1 END)
                                                                                 AS PendingCount
         FROM dbo.SaleInvoices
-        WHERE ISNULL(IsDeleted, 0) = 0 AND CompanyId = @CompanyId
+        WHERE ISNULL(IsDeleted, 0) = 0 AND (@CompanyId IS NULL OR CompanyId = @CompanyId)
       `),
 
       // ── Recent Sale Orders (last 8) ──────────────────────────────────────────
@@ -71,7 +73,7 @@ router.get("/", cache("sales-dashboard", 60), async (req, res) => {
           so.CreatedAt
         FROM dbo.SaleOrders so
         LEFT JOIN dbo.enterprise tc ON tc.id = so.ToCompanyID
-        WHERE so.FromCompanyID = @CompanyId
+        WHERE (@CompanyId IS NULL OR so.FromCompanyID = @CompanyId)
         ORDER BY so.CreatedAt DESC
       `),
 
@@ -88,7 +90,7 @@ router.get("/", cache("sales-dashboard", 60), async (req, res) => {
           si.CreatedAt
         FROM dbo.SaleInvoices si
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = si.CustomerID
-        WHERE ISNULL(si.IsDeleted, 0) = 0 AND si.CompanyId = @CompanyId
+        WHERE ISNULL(si.IsDeleted, 0) = 0 AND (@CompanyId IS NULL OR si.CompanyId = @CompanyId)
         ORDER BY si.CreatedAt DESC
       `),
     ]);
