@@ -33,10 +33,12 @@ import {
   getFundTransfers,
   getFundTransfer,
   createFundTransfer,
+  getFundTransferPosting,
   type FundTransferSummary,
   type FundTransferDetail,
   type FundTransferType,
   type FundTransferMode,
+  type FundTransferPosting,
 } from "@/api/fundTransferApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
@@ -185,6 +187,9 @@ function TransferDetailDialog({
   const [detail, setDetail] = useState<FundTransferDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const rights = usePageRights("fund-transfer");
+  const [detailTab, setDetailTab] = useState<"details" | "posting">("details");
+  const [posting, setPosting] = useState<FundTransferPosting | null>(null);
+  const [postingLoading, setPostingLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,6 +200,15 @@ function TransferDetailDialog({
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [ftId]);
+
+  useEffect(() => {
+    if (detailTab !== "posting" || posting) return;
+    setPostingLoading(true);
+    getFundTransferPosting(ftId)
+      .then(setPosting)
+      .catch((err: any) => toast.error(err?.message || "Failed to load posting details"))
+      .finally(() => setPostingLoading(false));
+  }, [detailTab, ftId, posting]);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -219,10 +233,99 @@ function TransferDetailDialog({
           </div>
         </DialogHeader>
 
+        {!loading && detail && (
+          <div className="flex items-center gap-1 px-6 pt-3 border-b border-border">
+            {(["details", "posting"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setDetailTab(tab)}
+                className={cn(
+                  "px-3 py-2 text-xs font-heading font-semibold border-b-2 -mb-px transition-colors capitalize",
+                  detailTab === tab
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {tab === "posting" ? "Posting" : "Details"}
+              </button>
+            ))}
+          </div>
+        )}
+
         {loading || !detail ? (
           <div className="py-16 text-center">
             <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
             <p className="text-sm text-muted-foreground mt-2">Loading…</p>
+          </div>
+        ) : detailTab === "posting" ? (
+          <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
+            <div className="flex items-center gap-2">
+              <BookOpen size={14} className="text-primary" />
+              <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                Journal Entry — Fund Transfer Posting
+              </span>
+            </div>
+
+            {postingLoading || !posting ? (
+              <div className="rounded-xl border border-border py-10 text-center text-xs text-muted-foreground">
+                Loading posting details…
+              </div>
+            ) : (
+              <>
+                {posting.vouchers.map((v, vi) => {
+                  const totalDebit = v.rows.filter((r) => r.side === "debit").reduce((s, r) => s + r.amount, 0);
+                  const totalCredit = v.rows.filter((r) => r.side === "credit").reduce((s, r) => s + r.amount, 0);
+                  return (
+                    <div key={vi} className="rounded-xl border border-border overflow-hidden">
+                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-4 py-2.5 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+                        <span>
+                          {v.companyName ? `${v.companyName} — ` : ""}Account
+                          {v.jvNo ? ` · ${v.jvNo}` : ""}
+                        </span>
+                        <span className="text-right">Debit (₹)</span>
+                        <span className="text-right">Credit (₹)</span>
+                      </div>
+                      {v.rows.map((row, ri) => (
+                        <div key={ri} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-3 border-b border-border/50 last:border-0 items-center gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={cn("inline-block w-1.5 h-1.5 rounded-full flex-shrink-0", row.side === "debit" ? "bg-emerald-500" : "bg-rose-500")} />
+                            <span className="text-xs text-foreground truncate">{row.label}</span>
+                          </div>
+                          <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                            {row.side === "debit" ? formatINR(row.amount) : ""}
+                          </span>
+                          <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                            {row.side === "credit" ? formatINR(row.amount) : ""}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-2">
+                        <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                        <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{formatINR(totalDebit)}</span>
+                        <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{formatINR(totalCredit)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {posting.isPosted ? (
+                  <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                    <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
+                    <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                      Posted to General Ledger. Entries are visible in the Trial Balance.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-4 py-3">
+                    <AlertCircle size={13} className="text-muted-foreground flex-shrink-0" />
+                    <p className="text-xs text-muted-foreground">
+                      Not yet posted — this is a preview of what will post once the transfer is Approved.
+                      {posting.transferType === "Inter" && " Inter-company transfers post two vouchers, one per company."}
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         ) : (
           <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
