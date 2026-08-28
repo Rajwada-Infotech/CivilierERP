@@ -35,6 +35,11 @@ export interface AssignmentListItem {
   UserId: number;
   UserName: string | null;
   UserAvatar: string | null;
+  ResponsibleUserId: number | null;
+  ResponsibleUserName: string | null;
+  ResponsibleUserAvatar: string | null;
+  SourceTransferId: number | null;
+  SourceTransferDocNo: string | null;
   IsCurrent: boolean;
 }
 
@@ -47,6 +52,7 @@ export interface AssignmentPayload {
   finYear: string;
   assetId: number;
   userId: number;
+  responsibleUserId: number;
   userImage?: string | null;
   remarks?: string;
 }
@@ -91,5 +97,30 @@ export const createAssignment = async (data: AssignmentPayload): Promise<{ assig
     body: JSON.stringify(data),
   });
   if (!res.ok) await handleError(res, "Failed to create assignment");
+  return res.json();
+};
+
+export interface AssignmentUpdatePayload {
+  docDate: string;
+  finYear: string;
+  userId: number;
+  responsibleUserId: number;
+  userImage?: string | null;
+  remarks?: string;
+}
+
+export const updateAssignment = async (id: number, data: AssignmentUpdatePayload): Promise<{ ok: true }> => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) await handleError(res, "Failed to update assignment");
+  return res.json();
+};
+
+export const deleteAssignment = async (id: number): Promise<{ ok: true }> => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
+  if (!res.ok) await handleError(res, "Failed to delete assignment");
   return res.json();
 };

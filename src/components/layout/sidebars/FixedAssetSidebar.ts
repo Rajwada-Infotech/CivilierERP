@@ -1,4 +1,4 @@
-import { Cpu, Tag, ArrowSwapHorizontal, Import, UserTag } from "iconsax-react";
+import { Cpu, Tag, ArrowSwapHorizontal, Import, UserTag, ShieldTick } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const fixedAssetNavItems: NavItem[] = [
@@ -8,4 +8,5 @@ export const fixedAssetNavItems: NavItem[] = [
   { label: "Inventory Import", icon: Import, path: "/fixed-asset/inventory-import", pageKey: "fixed-asset-inventory-import" },
   { label: "Assignment", icon: UserTag, path: "/fixed-asset/assignment", pageKey: "fixed-asset-assignment" },
   { label: "User-Wise Asset Transfer", icon: ArrowSwapHorizontal, path: "/fixed-asset/transfer", pageKey: "asset-transfer" },
+  { label: "Owner & Quality Checking", icon: ShieldTick, path: "/fixed-asset/quality-check", pageKey: "fixed-asset-quality-check" },
 ];
