@@ -1591,6 +1591,212 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
   }
 });
 
+// ─── Staff Proxy Actions ────────────────────────────────────────────────────
+// These endpoints let CRM staff perform portal-side customer actions on behalf
+// of a customer who doesn't use (or won't log into) the customer portal.
+// Every proxy action is permanently stamped with ProxyMethod (how the customer
+// communicated) and the acting staff member — the audit trail is identical to
+// a real portal action, just with ActorType = 'StaffProxy' instead of 'Customer'.
+//
+// Supported proxy actions:
+//   PUT /:id/proxy-customer-approve     — record customer approval (Phone/InPerson/Email/etc.)
+//   PUT /:id/proxy-date-accept          — record customer acceptance of a company-proposed date
+//   POST /:id/documents/:docId/proxy-attach — upload a document on behalf of the customer
+
+const PROXY_METHODS = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
+
+// PUT /:id/proxy-customer-approve — CRM staff records that the customer
+// approved this agreement off-portal (by phone, in-person, etc.).
+// Mirrors exactly what the customer's own portal approve endpoint does,
+// but stamps the action as StaffProxy so the audit trail is unambiguous.
+router.put("/:id/proxy-customer-approve", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) {
+      return res.status(400).json({ error: "ProxyRemarks is required — describe how the customer communicated their approval (e.g. verbal confirmation in office, WhatsApp message)." });
+    }
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: lockReason });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, SentToCustomerAt, CustomerApprovalStatus, BookingId, AgreementNo FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const a = cur.recordset[0];
+
+    if (!a.SentToCustomerAt) {
+      return res.status(400).json({ error: "Agreement must be sent to the customer first before their approval can be recorded." });
+    }
+    if (a.CustomerApprovalStatus === CrmStatus.APPROVED) {
+      return res.status(400).json({ error: "Customer has already approved this agreement." });
+    }
+
+    const actorRow = await pool.request().input("uid", sql.Int, actor)
+      .query("SELECT name FROM dbo.Users WHERE id = @uid");
+    const actorName = actorRow.recordset[0]?.name || "Staff";
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("ub", sql.Int, actor)
+      .query(`
+        UPDATE dbo.CrmAgreement SET
+          CustomerApprovalStatus = '${CrmStatus.APPROVED}',
+          CustomerApprovedAt = SYSDATETIME(),
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    await pool.request()
+      .input("agid",   sql.Int,           id)
+      .input("actor",  sql.Int,           actor)
+      .input("aname",  sql.NVarChar(200), actorName)
+      .input("method", sql.NVarChar(30),  ProxyMethod)
+      .input("rem",    sql.NVarChar(sql.MAX), ProxyRemarks.trim())
+      .query(`
+        INSERT INTO dbo.CrmAgreementApprovalLog
+          (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+        VALUES (@agid, 'CustomerApprove', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+      `);
+
+    if (a.BookingId) {
+      await syncLegalMilestoneStep(pool, a.BookingId, "MutualAgreement", actor);
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] proxy-customer-approve error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/proxy-date-accept — CRM staff records that the customer accepted
+// the company's proposed agreement date off-portal.
+// Only valid when ProposedDateStatus = 'PendingCustomerReview' (company proposed,
+// customer's turn to respond) — any other state is a logic error.
+router.put("/:id/proxy-date-accept", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) {
+      return res.status(400).json({ error: "ProxyRemarks is required — describe how the customer communicated their acceptance." });
+    }
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: lockReason });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT ProposedDate, ProposedDateStatus, CustomerApprovalStatus, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const a = cur.recordset[0];
+
+    if (a.CustomerApprovalStatus !== CrmStatus.APPROVED) {
+      return res.status(400).json({ error: "Customer must approve the agreement content before a date can be accepted." });
+    }
+    if (a.ProposedDateStatus !== "PendingCustomerReview") {
+      return res.status(400).json({
+        error: `Cannot proxy-accept date — ProposedDateStatus is '${a.ProposedDateStatus || "none"}'. A company-proposed date must be awaiting the customer's response.`,
+      });
+    }
+
+    const actorRow = await pool.request().input("uid", sql.Int, actor)
+      .query("SELECT name FROM dbo.Users WHERE id = @uid");
+    const actorName = actorRow.recordset[0]?.name || "Staff";
+
+    // Treat this as if the customer called acceptAgreementDate — same DB
+    // mutations, same DateApprovalStatus transition, just logged differently.
+    await acceptAgreementDate(pool, id, actor);
+
+    await pool.request()
+      .input("agid",   sql.Int,           id)
+      .input("actor",  sql.Int,           actor)
+      .input("aname",  sql.NVarChar(200), actorName)
+      .input("method", sql.NVarChar(30),  ProxyMethod)
+      .input("rem",    sql.NVarChar(sql.MAX), ProxyRemarks.trim())
+      .query(`
+        INSERT INTO dbo.CrmAgreementApprovalLog
+          (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+        VALUES (@agid, 'DateAccept', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+      `);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] proxy-date-accept error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/documents/:docId/proxy-attach — upload a document on behalf of a
+// customer who handed it in physically, emailed it, or sent it via WhatsApp.
+// The file is stored identically to a customer-uploaded file, but the audit
+// trail records ActorType = 'StaffProxy' + ProxyMethod so it's clear who
+// actually submitted the physical copy.
+router.post("/:id/documents/:docId/proxy-attach",
+  requirePageRight("crm-agreements", "edit"),
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const agreementId = parseInt(req.params.id);
+      const docId       = parseInt(req.params.docId);
+      const actor       = actorId(req);
+      const { ProxyMethod, ProxyRemarks } = req.body;
+
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+        return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+      }
+
+      const doc = await pool.request().input("id", sql.Int, docId)
+        .query("SELECT AgreementId, Status FROM dbo.CrmAgreementDocument WHERE Id = @id");
+      if (!doc.recordset.length || doc.recordset[0].AgreementId !== agreementId) {
+        return res.status(404).json({ error: "Document not found on this agreement" });
+      }
+
+      const fileBase64 = req.file.buffer.toString("base64");
+      const proxyNote  = ProxyRemarks?.trim()
+        ? `[Submitted on behalf of customer via ${ProxyMethod}] ${ProxyRemarks.trim()}`
+        : `[Submitted on behalf of customer via ${ProxyMethod}]`;
+
+      await pool.request()
+        .input("id",     sql.Int,           docId)
+        .input("b64",    sql.NVarChar(sql.MAX), fileBase64)
+        .input("fname",  sql.NVarChar(255), req.file.originalname)
+        .input("fsize",  sql.Int,           req.file.size)
+        .input("mime",   sql.NVarChar(100), req.file.mimetype)
+        .input("rem",    sql.NVarChar(sql.MAX), proxyNote)
+        .input("ub",     sql.Int,           actor)
+        .query(`
+          UPDATE dbo.CrmAgreementDocument SET
+            FileBase64 = @b64, FileName = @fname, FileSize = @fsize, MimeType = @mime,
+            Status = 'Uploaded', Remarks = @rem, UploadedAt = SYSDATETIME(),
+            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+
+      await logCrmAudit(pool, "CrmAgreementDocument", docId, "Status", "Requested", "Uploaded",
+        actor, `StaffProxy:${ProxyMethod}${ProxyRemarks ? " — " + ProxyRemarks.trim() : ""}`);
+
+      res.json({ success: true });
+    } catch (e) {
+      console.error("[crm-agreements] proxy-attach error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
+
 // PUT /:id/portal/deactivate, PUT /:id/portal/reactivate — flip the
 // customer's portal account IsActive flag. Was previously a display-only
 // column (AGR_SELECT already surfaces PortalActive above) with no route

@@ -172,6 +172,93 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
     return d.map((u) => ({ value: String(u.id), label: u.name }));
   } catch { return []; }
 }
+const PROXY_METHODS = ["Phone", "InPerson", "Email", "WhatsApp", "Other"] as const;
+type ProxyMethod = typeof PROXY_METHODS[number];
+const PROXY_METHOD_LABELS: Record<ProxyMethod, string> = {
+  Phone:    "Phone call",
+  InPerson: "In-person visit",
+  Email:    "Email / document",
+  WhatsApp: "WhatsApp / SMS",
+  Other:    "Other",
+};
+
+// Reusable modal for any staff-proxy action on behalf of a non-portal customer.
+// Captures HOW the customer communicated (ProxyMethod) and a short description
+// (ProxyRemarks) — both permanently stamped in the audit trail.
+function ProxyActionDialog({
+  title, description, confirmLabel, onConfirm, onClose, saving,
+}: {
+  title: string; description: string; confirmLabel: string;
+  onConfirm: (method: ProxyMethod, remarks: string) => void;
+  onClose: () => void; saving: boolean;
+}) {
+  const [method, setMethod] = React.useState<ProxyMethod>("Phone");
+  const [remarks, setRemarks] = React.useState("");
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-heading flex items-center gap-2">
+            <UserCircle2 size={16} className="text-primary" /> {title}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+          <strong>Proxy action</strong> — {description} This will be permanently stamped as a staff-proxy record in the audit trail.
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-foreground block mb-1.5">
+              How did the customer communicate? <span className="text-red-500">*</span>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {PROXY_METHODS.map((m) => (
+                <button key={m} type="button" onClick={() => setMethod(m)}
+                  className={`text-xs px-3 py-2 rounded-lg border font-medium transition-colors text-left ${
+                    method === m
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border hover:bg-muted"
+                  }`}>
+                  {PROXY_METHOD_LABELS[m]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-foreground block mb-1">
+              Notes for the record <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              rows={3}
+              placeholder={
+                method === "Phone"    ? "e.g. Customer called on 28 Aug, confirmed approval verbally" :
+                method === "InPerson" ? "e.g. Customer visited office, signed physical confirmation" :
+                method === "Email"    ? "e.g. Email received from customer@example.com at 10:30 AM" :
+                method === "WhatsApp" ? "e.g. WhatsApp message confirming approval, screenshot saved" :
+                "e.g. Describe how the customer confirmed"
+              }
+              className="w-full text-sm border border-border rounded-lg px-2 py-1.5 bg-background resize-none"
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            The customer's portal access remains active. They can still log in and view the status.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2 pt-3 border-t border-border">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+          <button
+            onClick={() => remarks.trim() && onConfirm(method, remarks.trim())}
+            disabled={saving || !remarks.trim()}
+            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40">
+            {saving ? "Saving..." : confirmLabel}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 const EMPTY_DOC_FORM = {
   DocumentType: "SaleAgreement", DocumentUrl: "", IssuedBy: "", Remarks: "",
 };
@@ -216,6 +303,12 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
   const [saving, setSaving] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const attachInputRef = useRef<HTMLInputElement>(null);
+  const proxyAttachRef = useRef<HTMLInputElement>(null);
+  const [proxyUploadOpen, setProxyUploadOpen] = useState(false);
+  const [proxyUploadMethod, setProxyUploadMethod] = useState<ProxyMethod>("Phone");
+  const [proxyUploadRemarks, setProxyUploadRemarks] = useState("");
+  const [proxyUploadFile, setProxyUploadFile] = useState<File | null>(null);
+  const [proxyUploading, setProxyUploading] = useState(false);
 
   const attachFile = async (files: FileList | null) => {
     const file = files?.[0];
@@ -233,6 +326,26 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
       toast.error(translateError(e.message));
     } finally {
       setAttaching(false);
+    }
+  };
+
+  const handleProxyAttach = async () => {
+    if (!proxyUploadFile || !proxyUploadRemarks.trim()) return;
+    setProxyUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", proxyUploadFile);
+      formData.append("ProxyMethod", proxyUploadMethod);
+      formData.append("ProxyRemarks", proxyUploadRemarks.trim());
+      const res = await fetchWithAuth(`${API}/${agreementId}/documents/${doc.Id}/proxy-attach`, { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      toast.success("Document submitted on customer's behalf");
+      onReviewed();
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setProxyUploading(false);
     }
   };
 
@@ -298,7 +411,52 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
                 <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">
                   <Clock size={22} />
                   {doc.UploadedByType === "Customer" ? (
-                    "Awaiting upload from customer — nothing to preview yet."
+                    <div className="flex flex-col items-center gap-3 text-center w-full px-4">
+                      <p className="text-sm text-muted-foreground">Awaiting upload from customer — nothing to preview yet.</p>
+                      {!proxyUploadOpen ? (
+                        <button
+                          onClick={() => setProxyUploadOpen(true)}
+                          className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 flex items-center gap-1.5"
+                        >
+                          <UserCircle2 size={12} /> Submit on Customer's Behalf
+                        </button>
+                      ) : (
+                        <div className="w-full text-left space-y-3 border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 rounded-lg p-3">
+                          <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-400">Proxy document submission</p>
+                          <div>
+                            <p className="text-[11px] text-muted-foreground mb-1.5">How did the customer provide this document?</p>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {PROXY_METHODS.map((m) => (
+                                <button key={m} onClick={() => setProxyUploadMethod(m)}
+                                  className={`text-[11px] px-2 py-1.5 rounded-md border font-medium ${proxyUploadMethod === m ? "bg-amber-600 text-white border-amber-600" : "border-border text-muted-foreground hover:bg-muted"}`}>
+                                  {PROXY_METHOD_LABELS[m]}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <textarea
+                            value={proxyUploadRemarks} onChange={(e) => setProxyUploadRemarks(e.target.value)}
+                            placeholder="Brief description of how/when the document was received…"
+                            rows={2}
+                            className="w-full text-xs border border-border rounded-md px-2.5 py-2 bg-background resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                          <div className="flex items-center gap-2">
+                            <input type="file" ref={proxyAttachRef} className="hidden"
+                              onChange={(e) => setProxyUploadFile(e.target.files?.[0] || null)} />
+                            <button onClick={() => proxyAttachRef.current?.click()}
+                              className="text-xs px-2.5 py-1.5 border border-border rounded-md font-medium hover:bg-muted flex items-center gap-1">
+                              <Upload size={11} /> {proxyUploadFile ? proxyUploadFile.name : "Choose file…"}
+                            </button>
+                            <button onClick={handleProxyAttach}
+                              disabled={proxyUploading || !proxyUploadFile || !proxyUploadRemarks.trim()}
+                              className="text-xs px-3 py-1.5 bg-amber-600 text-white rounded-md font-semibold hover:bg-amber-700 disabled:opacity-40">
+                              {proxyUploading ? "Uploading…" : "Submit"}
+                            </button>
+                            <button onClick={() => setProxyUploadOpen(false)} className="text-xs text-muted-foreground hover:text-foreground ml-auto">Cancel</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <>
                       Not yet uploaded — Legal Executive to attach.
@@ -747,6 +905,54 @@ const CrmAgreement: React.FC = () => {
       toast.error(translateError(e.message));
     } finally {
       setRegSaving(false);
+    }
+  };
+
+  const [proxyApproveDialog, setProxyApproveDialog] = useState(false);
+  const [proxyDateDialog, setProxyDateDialog] = useState(false);
+  const [proxySaving, setProxySaving] = useState(false);
+
+  const handleProxyCustomerApprove = async (method: ProxyMethod, remarks: string) => {
+    if (!selectedId) return;
+    setProxySaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${selectedId}/proxy-customer-approve`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Customer approval recorded on their behalf");
+      setProxyApproveDialog(false);
+      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setProxySaving(false);
+    }
+  };
+
+  const handleProxyDateAccept = async (method: ProxyMethod, remarks: string) => {
+    if (!selectedId) return;
+    setProxySaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${selectedId}/proxy-date-accept`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Customer date acceptance recorded on their behalf");
+      setProxyDateDialog(false);
+      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setProxySaving(false);
     }
   };
 
@@ -1462,6 +1668,19 @@ const CrmAgreement: React.FC = () => {
                           {a?.RecheckCount > 0 && !custApproved && (
                             <p className="text-xs text-red-600">Recheck count: {a.RecheckCount} · Last remark: {a.LastRecheckRemarks || "—"}</p>
                           )}
+                          {sent && !custApproved && !custRecheck && !cancelled && (
+                            <div className="pt-1 border-t border-border/60 mt-1">
+                              <p className="text-[11px] text-muted-foreground mb-1.5 flex items-center gap-1">
+                                <UserCircle2 size={11} /> Customer not on portal?
+                              </p>
+                              <button
+                                onClick={() => setProxyApproveDialog(true)}
+                                className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 flex items-center gap-1.5"
+                              >
+                                <UserCircle2 size={12} /> Record Approval on Their Behalf
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -1495,7 +1714,18 @@ const CrmAgreement: React.FC = () => {
                               </p>
                             );
                             if (a?.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW) return (
-                              <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock size={11} /> Awaiting customer's response</p>
+                              <div className="space-y-2">
+                                <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock size={11} /> Awaiting customer's response on proposed date {String(a.ProposedDate).slice(0,10)}</p>
+                                <div className="border-t border-border/60 pt-1.5">
+                                  <p className="text-[11px] text-muted-foreground mb-1.5 flex items-center gap-1"><UserCircle2 size={11} /> Customer not on portal?</p>
+                                  <button
+                                    onClick={() => setProxyDateDialog(true)}
+                                    className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 flex items-center gap-1.5"
+                                  >
+                                    <UserCircle2 size={12} /> Accept Date on Their Behalf
+                                  </button>
+                                </div>
+                              </div>
                             );
                             if (a?.ProposedDateStatus === "PendingCompanyReview") return (
                               <div className="flex items-center gap-2 flex-wrap pt-0.5">
@@ -1767,6 +1997,30 @@ const CrmAgreement: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Proxy: Record customer approval on their behalf (off-portal) */}
+      {proxyApproveDialog && (
+        <ProxyActionDialog
+          title="Record Customer Approval"
+          description="You are recording that the customer has reviewed and approved the agreement without logging into their portal."
+          confirmLabel="Record Approval"
+          saving={proxySaving}
+          onClose={() => setProxyApproveDialog(false)}
+          onConfirm={handleProxyCustomerApprove}
+        />
+      )}
+
+      {/* Proxy: Accept proposed date on customer's behalf (off-portal) */}
+      {proxyDateDialog && (
+        <ProxyActionDialog
+          title="Accept Date on Customer's Behalf"
+          description="You are recording that the customer has agreed to the proposed signing date without using their portal."
+          confirmLabel="Confirm Date Acceptance"
+          saving={proxySaving}
+          onClose={() => setProxyDateDialog(false)}
+          onConfirm={handleProxyDateAccept}
+        />
+      )}
 
       {/* Propose/Revise Agreement Date — one live proposed date, turn-based
           between company and customer. Submitting here always moves the
