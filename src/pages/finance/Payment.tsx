@@ -97,6 +97,7 @@ import {
   fetchProjectOptions,
   fetchSupplierOptions,
   fetchFinYearOptions,
+  fetchChequeLots,
   PARTY_TYPE_LABELS,
 } from "./payment/api";
 import { blankForm, dbToRecord } from "./payment/formHelpers";
@@ -115,7 +116,7 @@ import { ChequePanel } from "./payment/components/ChequePanel";
 import { DigitalRefPanel } from "./payment/components/DigitalRefPanel";
 import { CardPanel } from "./payment/components/CardPanel";
 import { ExpenseHeadAllocationEditor } from "@/pages/material/ExpenseBooking/ExpenseHeadAllocationEditor";
-import { getPayableEmis, payLoan, type PayableEmi } from "@/api/loanSanctionApi";
+import { getPayableEmis, payLoan, getLoanSanction, type PayableEmi } from "@/api/loanSanctionApi";
 import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
 import { previewOAAdjustment } from "@/api/onAccountAdjustment";
 
@@ -1042,7 +1043,7 @@ const Payment: React.FC = () => {
     setForm((prev) => ({ ...prev, amount: total }));
   }, []);
 
-  const handleLoanEmiSelect = (emi: PayableEmi) => {
+  const handleLoanEmiSelect = async (emi: PayableEmi) => {
     setSelectedLoanEmi(emi);
     setSelectedContract(null);
     setLoanPayMode("emis");
@@ -1099,6 +1100,52 @@ const Payment: React.FC = () => {
     // selection — are handled in a dedicated modal, not the regular
     // payment form.
     setLoanPaymentDetailsOpen(true);
+
+    // Auto-fill the bank/cheque details already recorded on the loan's own
+    // sanction entry — a loan repayment's payment mode was fixed when the
+    // loan was sanctioned (same PaymentMode/bank/cheque lot the borrower
+    // committed to), so making the user re-pick from the Payment page's
+    // generic "available cheques in this lot" dropdown was wrong on two
+    // counts: it's not actually a fresh choice, and the sanction's own
+    // cheque number is usually already marked used (consumed at sanction
+    // time) so it silently didn't even appear in that dropdown's list.
+    try {
+      const sanction = await getLoanSanction(emi.LoanId);
+      const bankAccountId = isCustomerLoan
+        ? sanction.LenderBankAccountId
+        : sanction.BorrowerBankAccountId;
+      const bank = bankAccountId ? banks.find((b) => b.id === bankAccountId) : undefined;
+      const isChequeMode = sanction.PaymentMode === "Cheque" || sanction.PaymentMode === "Post-Dated Cheque";
+
+      let chequeAccountNumber = "";
+      let chequeIfsc = "";
+      if (isChequeMode && sanction.ChequeLotId) {
+        const lots = await fetchChequeLots(bankAccountId ?? undefined);
+        const lot = lots.find((l) => l.CId === sanction.ChequeLotId);
+        chequeAccountNumber = lot?.AccountNumber || "";
+        chequeIfsc = lot?.IFSCCode || "";
+      }
+
+      setForm((prev) => ({
+        ...prev,
+        mode: sanction.PaymentMode || prev.mode,
+        bankId: bank?.id ?? prev.bankId,
+        bankName: bank?.label?.split(" — ")[0] ?? prev.bankName,
+        ...(isChequeMode
+          ? {
+              chequeLotId: sanction.ChequeLotId ?? null,
+              chequeLotNumber: sanction.ChequeLotNumber || "",
+              chequeNo: sanction.ChequeNo || "",
+              chequeDate: sanction.ChequeDate ? sanction.ChequeDate.slice(0, 10) : prev.chequeDate,
+              chequeAccountNumber,
+              chequeIfsc,
+            }
+          : {}),
+      }));
+    } catch {
+      // Auto-fill is a convenience — if the sanction lookup fails, the
+      // user can still fill bank/cheque details in manually as before.
+    }
   };
   const toggleLoanEmiSelected = (emiId: number) => {
     setSelectedLoanEmiIds((prev) => {

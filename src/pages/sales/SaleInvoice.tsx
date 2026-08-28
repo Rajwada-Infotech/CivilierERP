@@ -701,9 +701,9 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
                     <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                       {fmtAmt(inv.AmountReceived || 0)}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${cfg.cls}`}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap ${cfg.cls}`}
                       >
                         {cfg.icon} {cfg.label}
                       </span>
@@ -835,7 +835,7 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
                       STATUS_CONFIG["Pending Payment"];
                     return (
                       <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${cfg.cls}`}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap ${cfg.cls}`}
                       >
                         {cfg.icon} {cfg.label}
                       </span>
