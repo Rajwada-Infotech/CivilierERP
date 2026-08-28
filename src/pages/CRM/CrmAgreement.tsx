@@ -456,7 +456,7 @@ const CrmAgreement: React.FC = () => {
   // with agreementStepStates) so the stepper's steps can each carry a real
   // tab and stay clickable, same as Booking's own checklist row.
   const [agrTab, setAgrTab] = useState<AgrTab>("Overview");
-  useEffect(() => { setAgrTab("Overview"); }, [selectedId]);
+  useEffect(() => { setAgrTab("Overview"); setEditingLegalExec(false); }, [selectedId]);
 
   const { data: agreements = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-agreements"], queryFn: fetchAgreements, staleTime: 30_000 });
   const { data: detail } = useQuery({
@@ -782,6 +782,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const [assigningLegal, setAssigningLegal] = useState(false);
+  const [editingLegalExec, setEditingLegalExec] = useState(false);
   // Deliberately its own action, not folded into Edit Details — assigning
   // "who is handling this" isn't a legal-content correction, so it
   // shouldn't require unlocking Edit, filling a revision reason, or
@@ -798,6 +799,7 @@ const CrmAgreement: React.FC = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success(legalExecutiveId ? "Legal executive assigned" : "Legal executive unassigned");
+      setEditingLegalExec(false);
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreements"] });
     } catch (e: any) {
@@ -1289,18 +1291,41 @@ const CrmAgreement: React.FC = () => {
                       </div>
                       <div className="px-4 py-3 space-y-2">
                         <p className="text-xs text-muted-foreground">The person responsible for preparing this agreement's paperwork. Required before execution (server-enforced).</p>
-                        {["Registered", "Cancelled"].includes(a?.Status) || cancelled ? (
+                        {/* Locked display when assigned and not actively changing */}
+                        {a?.LegalExecutiveId && !editingLegalExec && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled ? (
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-1 bg-muted/40 border border-border rounded-lg px-3 py-1.5">
+                              <UserCircle2 size={14} className="text-primary shrink-0" />
+                              <span className="text-sm font-medium">{a.LegalExecutiveName}</span>
+                              <Lock size={11} className="text-muted-foreground ml-auto shrink-0" />
+                            </div>
+                            <button
+                              onClick={() => setEditingLegalExec(true)}
+                              className="text-xs px-2.5 py-1.5 border border-border rounded-lg text-muted-foreground hover:bg-muted shrink-0">
+                              Change
+                            </button>
+                          </div>
+                        ) : ["Registered", "Cancelled"].includes(a?.Status) || cancelled ? (
                           <div className="font-medium text-sm">{a?.LegalExecutiveName || <span className="text-amber-600">Unassigned</span>}</div>
                         ) : (
-                          <select
-                            value={a?.LegalExecutiveId ? String(a.LegalExecutiveId) : ""}
-                            disabled={assigningLegal}
-                            onChange={(e) => handleAssignLegal(e.target.value)}
-                            className={`text-sm border rounded-lg px-2 py-1.5 bg-background disabled:opacity-40 ${
-                              a?.LegalExecutiveId ? "border-border" : "border-amber-300 text-amber-600"}`}>
-                            <option value="">— Unassigned —</option>
-                            {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                          </select>
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={a?.LegalExecutiveId ? String(a.LegalExecutiveId) : ""}
+                              disabled={assigningLegal}
+                              onChange={(e) => handleAssignLegal(e.target.value)}
+                              className={`flex-1 text-sm border rounded-lg px-2 py-1.5 bg-background disabled:opacity-40 ${
+                                a?.LegalExecutiveId ? "border-border" : "border-amber-300 text-amber-600"}`}>
+                              <option value="">— Unassigned —</option>
+                              {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                            </select>
+                            {editingLegalExec && (
+                              <button
+                                onClick={() => setEditingLegalExec(false)}
+                                className="text-xs px-2.5 py-1.5 border border-border rounded-lg text-muted-foreground hover:bg-muted shrink-0">
+                                Cancel
+                              </button>
+                            )}
+                          </div>
                         )}
                         {!a?.LegalExecutiveId && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled && (
                           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
