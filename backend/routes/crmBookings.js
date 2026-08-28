@@ -686,10 +686,12 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
     // while before staff actually hit Confirm & Book. submitForApproval
     // above already hard-requires the checklist complete, so this is
     // strictly the later of the two gates.
+    let mrWarning = null;
     try {
       await createMoneyReceiptAfterDataReview(pool, id, actor);
     } catch (mrErr) {
       console.error("[crm-bookings] auto money receipt creation on submit-for-approval failed:", mrErr.message);
+      mrWarning = mrErr.message;
     }
 
     const booking = await pool.request().input("id", sql.Int, id).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @id");
@@ -715,10 +717,28 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
         id, "crm_booking");
     }
 
-    res.json({ success: true, ...stageResult });
+    res.json({ success: true, ...stageResult, mrWarning });
   } catch (e) {
     console.error("[crm-bookings] ready-for-approval error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/trigger-money-receipt — recovery action for bookings where the
+// auto-created Money Receipt was silently dropped (PDF error, missing amount,
+// etc.) on Confirm & Book, and the booking has since moved past Review.
+// Only usable when no non-Bounced MR exists (skipIfExists handles duplicates).
+router.post("/:id/trigger-money-receipt", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const activeErr = await requireActiveBooking(pool, id);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+    const result = await createMoneyReceiptAfterDataReview(pool, id, actorId(req));
+    res.status(result.existing ? 200 : 201).json({ success: true, ...result });
+  } catch (e) {
+    console.error("[crm-bookings] trigger-money-receipt error:", e.message);
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
@@ -1466,22 +1486,21 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       milestoneId = parseInt(b.MilestoneId);
       if (!milestoneId) return res.status(400).json({ error: "MilestoneId is required for a Milestone/Booking invoice" });
       const m = await pool.request().input("mid", sql.Int, milestoneId).input("bid", sql.Int, id).query(`
-        SELECT Id, MilestoneNo, MilestoneName, AmountPaid, Status, PaidDate, DemandStatus FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
+        SELECT Id, MilestoneNo, MilestoneName, AmountDue, AmountPaid, Status, PaidDate, DemandStatus, DemandRaisedOn FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
       `);
       const mRow = m.recordset[0];
       if (!mRow) return res.status(404).json({ error: "Milestone not found on this booking" });
-      if (mRow.Status !== CrmStatus.PAID) return res.status(400).json({ error: `"${mRow.MilestoneName}" is not fully paid yet — an invoice can only be generated once it is` });
-      // No auto-generation anywhere now — every invoice is manual, gated on
-      // the milestone's Demand actually having been raised first (not just
-      // "Pending"), per "proper gate, after completion of the steps".
+      // Invoice is a billing document — generated after Demand is raised, BEFORE
+      // On Account Adjustment settles the milestone. Flow: Demand → Invoice → On Account
+      // Adjustment → Milestone Settlement. Do NOT gate on Status = Paid.
       if (mRow.DemandStatus === CrmStatus.PENDING) {
         return res.status(400).json({ error: `A demand must be raised for "${mRow.MilestoneName}" (from the Demands page) before its invoice can be generated` });
       }
       const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid AND Status <> 'Void'");
       if (already.recordset.length) return res.status(400).json({ error: `"${mRow.MilestoneName}" already has an invoice` });
-      amount = Number(mRow.AmountPaid);
-      invoiceDate = mRow.PaidDate;
-      description = b.Description || `${mRow.MilestoneName} — payment received`;
+      amount = Number(mRow.AmountDue);
+      invoiceDate = mRow.DemandRaisedOn || null;
+      description = b.Description || `${mRow.MilestoneName} — invoice`;
     } else {
       amount = parseFloat(b.Amount);
       if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });

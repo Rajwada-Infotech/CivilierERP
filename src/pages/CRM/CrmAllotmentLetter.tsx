@@ -391,7 +391,7 @@ const CrmAllotmentLetter: React.FC = () => {
   return (
     <CrmShell
       title="Allotment Letter"
-      subtitle="Issued after 10% payment is received. Acknowledgement triggers the 30-day RERA clock for the Agreement for Sale."
+      subtitle="Issued once the Booking Amount milestone is paid. Acknowledgement triggers the 30-day RERA clock for the Agreement for Sale."
       action={
         <div className="flex items-center gap-3">
           {dataUpdatedAt > 0 && (
@@ -446,7 +446,7 @@ const CrmAllotmentLetter: React.FC = () => {
             </div>
             {eligibleBookings.length === 0 && (
               <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 p-2.5 rounded-lg">
-                No bookings are eligible yet. A booking must be Approved + have at least 10% of the total consideration received.
+                No bookings are eligible yet. A booking must be Approved and the Booking Amount milestone (Milestone 1) must be fully paid.
               </p>
             )}
             <div className="bg-muted/40 rounded-lg px-3 py-2.5 space-y-1 text-[11px] text-muted-foreground">

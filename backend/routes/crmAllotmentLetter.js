@@ -55,10 +55,7 @@ router.get("/eligible-bookings", requirePageRight("crm-allotment-letter", "creat
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT b.Id, b.BookingNo, b.GrandTotal, a.ApplicantName,
-             (SELECT ISNULL(SUM(AmountPaid), 0)
-              FROM dbo.CrmPaymentMilestone
-              WHERE BookingId = b.Id) AS TotalPaid
+      SELECT b.Id, b.BookingNo, a.ApplicantName
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE b.Status = 'Approved'
@@ -66,13 +63,13 @@ router.get("/eligible-bookings", requirePageRight("crm-allotment-letter", "creat
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmAllotmentLetter al WHERE al.BookingId = b.Id
         )
+        AND EXISTS (
+          SELECT 1 FROM dbo.CrmPaymentMilestone
+          WHERE BookingId = b.Id AND MilestoneNo = 1 AND Status = 'Paid'
+        )
       ORDER BY b.BookingNo
     `);
-    // Enforce >= 10% in JS — keeps the SQL simple and avoids division-by-zero.
-    const eligible = result.recordset.filter(
-      (r) => r.GrandTotal > 0 && r.TotalPaid >= r.GrandTotal * 0.10
-    );
-    res.json(eligible);
+    res.json(result.recordset);
   } catch (e) {
     console.error("[crm-allotment-letter] GET /eligible-bookings error:", e.message);
     res.status(500).json({ error: e.message });
@@ -96,7 +93,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-allotment-letter", "view
 });
 
 // POST /generate — auto-generate an Allotment Letter for an eligible booking.
-// Gate: booking must be Approved + Active + >= 10% payment received + no letter yet.
+// Gate: booking must be Approved + Active + Booking Amount milestone (MilestoneNo=1) Paid + no letter yet.
 // The letter is immediately created in Issued status — no Draft step.
 router.post("/generate", requirePageRight("crm-allotment-letter", "create"), async (req, res) => {
   try {
@@ -108,20 +105,15 @@ router.post("/generate", requirePageRight("crm-allotment-letter", "create"), asy
     const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    // Validate 10% payment gate
+    // Gate: Booking Amount milestone (MilestoneNo=1) must be Paid
     const chk = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT b.GrandTotal,
-             (SELECT ISNULL(SUM(AmountPaid), 0)
-              FROM dbo.CrmPaymentMilestone
-              WHERE BookingId = b.Id) AS TotalPaid
-      FROM dbo.CrmBooking b
-      WHERE b.Id = @bid
+      SELECT COUNT(*) AS PaidCount
+      FROM dbo.CrmPaymentMilestone
+      WHERE BookingId = @bid AND MilestoneNo = 1 AND Status = 'Paid'
     `);
-    if (!chk.recordset.length) return res.status(404).json({ error: "Booking not found" });
-    const { GrandTotal, TotalPaid } = chk.recordset[0];
-    if (GrandTotal <= 0 || TotalPaid < GrandTotal * 0.10) {
+    if (!chk.recordset[0]?.PaidCount) {
       return res.status(400).json({
-        error: "Allotment Letter can only be generated once at least 10% of the total consideration has been received."
+        error: "Allotment Letter can only be generated once the Booking Amount milestone is fully paid."
       });
     }
 

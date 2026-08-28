@@ -363,9 +363,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryKey: ["crm-booking-invoices", bookingId],
     queryFn: () => fetchInvoices(bookingId),
     // Also needed on the Payment Plan tab now — the milestone list there
-    // shows an "Invoice Generation Pending" badge for any paid milestone
-    // with no matching invoice, which requires this data to actually be
-    // loaded rather than sitting on its stale/empty default.
+    // shows an "Invoice Pending" badge for any demanded milestone with no
+    // matching invoice, which requires this data to be loaded.
     enabled: tab === "Payment & Invoice" || tab === "Payment Plan",
   });
   const { data: moneyReceipts = [] } = useQuery({
@@ -966,8 +965,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Failed to mark ready for approval");
       toast.success(`Data review complete — sent to ${resData.label || "Marketing Head Approval"}`);
+      if (resData.mrWarning) {
+        toast.warning(`Money Receipt could not be auto-created — use the payment form to submit it manually. (${resData.mrWarning})`, { duration: 8000 });
+      }
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", bookingId] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -1053,27 +1056,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const bookingMilestone = firstMilestone;
   const bookingMilestoneInvoiced = !!bookingMilestone
     && (invoices as any[]).some((inv: any) => inv.MilestoneId === bookingMilestone.Id && inv.Status !== "Void");
-  const bookingInvoiceReady = !!bookingMilestone && bookingMilestone.Status === CrmStatus.PAID && bookingMilestone.DemandStatus !== CrmStatus.PENDING
+  // Invoice is generated after demand is raised, BEFORE On Account Adjustment
+  // settles the milestone. Flow: Demand → Invoice → On Account Adjustment → Milestone Paid.
+  const bookingInvoiceReady = !!bookingMilestone && bookingMilestone.DemandStatus === "Demanded"
     && !bookingMilestoneInvoiced;
   const canGenerateAnything = bookingInvoiceReady;
 
-  // The real, specific reason the Booking Amount invoice isn't generatable
-  // yet — not a single hardcoded guess. Previously this said "pending a
-  // Demand being raised" unconditionally, which is simply wrong once the
-  // demand actually has been raised and the real blocker is an unpaid
-  // balance instead; and it was gated on the WHOLE booking having zero
-  // invoices, so it silently disappeared the moment any unrelated invoice
-  // (Maintenance, Other, a later milestone) existed — exactly the situation
-  // that let a ₹5,000 shortfall on the Booking Amount go unexplained next
-  // to an unrelated ₹10,000 Maintenance invoice.
   const bookingInvoiceGapMessage = (() => {
     if (!bookingMilestone || bookingMilestoneInvoiced || bookingInvoiceReady) return null;
-    if (bookingMilestone.Status !== CrmStatus.PAID && bookingMilestone.Status !== "Waived") {
-      const due = Number(bookingMilestone.AmountDue || 0) - Number(bookingMilestone.AmountPaid || 0);
-      return `Booking Amount is short by ${fmt(due)} (${fmt(bookingMilestone.AmountPaid)} of ${fmt(bookingMilestone.AmountDue)} paid) — invoice generation unlocks once it's fully paid`;
-    }
     if (bookingMilestone.DemandStatus === CrmStatus.PENDING) {
-      return "Booking Amount is fully paid — raise a Demand (Demands page) to unlock invoice generation";
+      return "Raise a Demand (Demands page) to unlock invoice generation for the Booking Amount";
     }
     return null;
   })();
@@ -1631,10 +1623,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 every later milestone is generated from the
                                 dedicated CRM Invoices page instead. Read-only
                                 here, just a pointer. */}
-                            {m.Status === CrmStatus.PAID && Number(m.MilestoneNo) !== 1
+                            {m.DemandStatus === "Demanded" && Number(m.MilestoneNo) !== 1
                               && !(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id && inv.Status !== "Void") && (
                               <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">
-                                Invoice Generation Pending
+                                Invoice Pending
                               </span>
                             )}
                           </td>
@@ -2660,11 +2652,30 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
 
                   {(moneyReceipts as any[]).length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      {currentStage === "Review"
-                        ? "Auto-generated when this booking is submitted for approval (Verify & Send for Approval)."
-                        : "No money receipt yet."}
-                    </p>
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        {currentStage === "Review"
+                          ? "Auto-generated when this booking is submitted for approval (Verify & Send for Approval)."
+                          : "No money receipt yet — it is auto-created on submission. If it's missing, use the payment form above or click Retry."}
+                      </p>
+                      {currentStage !== "Review" && canEdit && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const r = await fetchWithAuth(`${API}/${bookingId}/trigger-money-receipt`, { method: "POST" });
+                              const d = await r.json().catch(() => ({}));
+                              if (!r.ok) throw new Error(d.error || "Failed");
+                              if (d.existing) toast.success("Money receipt already exists — refreshed.");
+                              else toast.success(`Money Receipt ${d.ReceiptNo || ""} created.`);
+                              qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", bookingId] });
+                            } catch (e: any) { toast.error(e.message); }
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted font-medium"
+                        >
+                          <RefreshCw size={11} /> Retry Auto-Create
+                        </button>
+                      )}
+                    </div>
                   ) : (
                     <div className="space-y-2">
                       {(moneyReceipts as any[]).map((mr: any) => {

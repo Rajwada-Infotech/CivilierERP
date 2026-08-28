@@ -96,14 +96,10 @@ function getMilestoneInsight(m: any, existingInvoices: any[]): MilestoneInsight 
   if (existingInv) {
     return { tone: "invoiced", message: `Already invoiced — ${existingInv.InvoiceNo}`, icon: FileText as any };
   }
-  if (m.Status !== CrmStatus.PAID && m.Status !== "Waived") {
-    const due = Number(m.AmountDue || 0) - Number(m.AmountPaid || 0);
-    return Number(m.AmountPaid) > 0
-      ? { tone: "partial", message: `${fmtMoney(due)} more needed to complete this milestone`, icon: Clock }
-      : { tone: "unpaid", message: "No payment received yet", icon: Clock };
-  }
+  // Invoice is generated from the demand (billing doc for AmountDue), BEFORE
+  // On Account Adjustment settles the milestone. Only gate: demand must exist.
   if (m.DemandStatus === CrmStatus.PENDING) {
-    return { tone: "demand", message: "Fully paid — raise a demand (Demands page) to unlock invoicing", icon: AlertCircle };
+    return { tone: "demand", message: "Raise a demand (Demands page) to unlock invoicing", icon: AlertCircle };
   }
   return { tone: "ready", message: "Ready to invoice", icon: CheckCircle2 };
 }
