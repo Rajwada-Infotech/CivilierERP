@@ -41,7 +41,7 @@ router.get("/", cache("sales-dashboard", 60), async (req, res) => {
           COUNT(CASE WHEN Status = 'Approved' THEN 1 END)                      AS ApprovedCount,
           COUNT(CASE WHEN Status = 'Rejected' THEN 1 END)                      AS RejectedCount
         FROM dbo.SaleOrders
-        WHERE CompanyId = @CompanyId
+        WHERE FromCompanyID = @CompanyId
       `),
 
       // ── Sale Invoices ────────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ router.get("/", cache("sales-dashboard", 60), async (req, res) => {
           so.CreatedAt
         FROM dbo.SaleOrders so
         LEFT JOIN dbo.enterprise tc ON tc.id = so.ToCompanyID
-        WHERE so.CompanyId = @CompanyId
+        WHERE so.FromCompanyID = @CompanyId
         ORDER BY so.CreatedAt DESC
       `),
 

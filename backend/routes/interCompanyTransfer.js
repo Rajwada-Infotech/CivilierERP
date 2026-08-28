@@ -455,6 +455,7 @@ async function executeTransferChain(pool, ctx, createdBy, opts = {}) {
 
     const si = await createSaleInvoiceInternal(pool, {
       SaleOrderID: so.SaleOrderID,
+      SaleOrderSource: "CustomerSaleOrders",
       InvoiceDate: transferDate,
       Amount: totalAmount,
       Remarks: `Auto-generated for inter-company transfer ${so.SaleOrderNo}`,
