@@ -1,15 +1,18 @@
 import React, { useState, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Plus, ArrowLeft, Search, Building2, Package, Calendar, FileText, Hash,
   ArrowRight, Check, X, Boxes, User, Circle, CheckCircle2, ChevronsUpDown, Loader2,
+  Eye, Pencil, Trash2, AlertCircle,
 } from "lucide-react";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
@@ -18,8 +21,9 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import {
-  getTransferUsers, getTransferableAssets, getAssetTransfers, createAssetTransfer,
-  type TransferUser, type TransferableAsset, type TransferListItem,
+  getTransferUsers, getTransferableAssets, getAssetTransfers, getAssetTransfer,
+  createAssetTransfer, updateAssetTransfer, deleteAssetTransfer,
+  type TransferUser, type TransferableAsset, type TransferListItem, type TransferDetail,
 } from "@/api/assetTransferApi";
 import { getDepartmentOptions, type DepartmentOption } from "@/api/departmentMasterApi";
 
@@ -272,6 +276,9 @@ export default function AssetTransfer() {
 
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [form, setForm] = useState<FormState>(emptyForm(activeFinYear));
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [viewingId, setViewingId] = useState<number | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
 
   const [filterCompany, setFilterCompany] = useState("");
   const [filterProject, setFilterProject] = useState("");
@@ -318,6 +325,37 @@ export default function AssetTransfer() {
     }),
     enabled: viewMode === "form" && !!form.projectId,
   });
+
+  // Detail lookups for the Edit form (pre-fill) and the View dialog.
+  const { data: editDetail } = useQuery({
+    queryKey: ["asset-transfer", editingId],
+    queryFn:  () => getAssetTransfer(editingId!),
+    enabled:  viewMode === "form" && editingId != null,
+  });
+  const { data: viewDetail, isLoading: loadingView } = useQuery({
+    queryKey: ["asset-transfer", viewingId],
+    queryFn:  () => getAssetTransfer(viewingId!),
+    enabled:  viewingId != null,
+  });
+
+  // Populate the form once the edited transfer's detail loads.
+  React.useEffect(() => {
+    if (viewMode === "form" && editingId && editDetail) {
+      const d = editDetail as TransferDetail;
+      setForm({
+        docDate:      d.DocDate?.slice(0, 10) || "",
+        transferDate: d.TransferDate?.slice(0, 10) || "",
+        companyId:    String(d.CompanyId || ""),
+        projectId:    String(d.ProjectId || ""),
+        finYear:      d.FinYear || "",
+        fromUserId:   String(d.FromUserId || ""),
+        assetId:      String(d.AssetId || ""),
+        toUserId:     String(d.ToUserId || ""),
+        departmentId: String(d.DepartmentId || ""),
+        remarks:      d.Remarks || "",
+      });
+    }
+  }, [viewMode, editingId, editDetail]);
 
   const projects = useMemo(() => {
     if (!form.companyId) return [];
@@ -383,8 +421,37 @@ export default function AssetTransfer() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const resetForm = () => setForm(emptyForm(activeFinYear));
+  const updateMut = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Parameters<typeof updateAssetTransfer>[1] }) =>
+      updateAssetTransfer(id, data),
+    onSuccess: () => {
+      toast.success("Transfer updated");
+      qc.invalidateQueries({ queryKey: ["asset-transfers"] });
+      qc.invalidateQueries({ queryKey: ["asset-transfer-transferable-assets"] });
+      qc.invalidateQueries({ queryKey: ["asset-transfer", editingId] });
+      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+      resetForm();
+      setViewMode("list");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: deleteAssetTransfer,
+    onSuccess: () => {
+      toast.success("Transfer deleted");
+      qc.invalidateQueries({ queryKey: ["asset-transfers"] });
+      qc.invalidateQueries({ queryKey: ["asset-transfer-transferable-assets"] });
+      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+      setDeleteId(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const resetForm = () => { setForm(emptyForm(activeFinYear)); setEditingId(null); };
   const goToCreate = () => { resetForm(); setViewMode("form"); };
+  const goToEdit = (t: TransferListItem) => { setEditingId(t.Id); setViewMode("form"); };
+  const goToView = (t: TransferListItem) => setViewingId(t.Id);
 
   const handleSave = () => {
     if (!form.companyId)    return toast.error("Company is required");
@@ -400,7 +467,7 @@ export default function AssetTransfer() {
     if (!form.remarks.trim()) return toast.error("Remarks are required");
     if (form.fromUserId === form.toUserId) return toast.error("From User and To User must be different");
 
-    createMut.mutate({
+    const payload = {
       docDate:      form.docDate,
       transferDate: form.transferDate,
       companyId:    Number(form.companyId),
@@ -411,10 +478,13 @@ export default function AssetTransfer() {
       toUserId:     Number(form.toUserId),
       departmentId: Number(form.departmentId),
       remarks:      form.remarks.trim(),
-    });
+    };
+
+    if (editingId) updateMut.mutate({ id: editingId, data: payload });
+    else           createMut.mutate(payload);
   };
 
-  const saving = createMut.isPending;
+  const saving = createMut.isPending || updateMut.isPending;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // FORM VIEW
@@ -422,7 +492,7 @@ export default function AssetTransfer() {
   if (viewMode === "form") {
     return (
       <GlassShell
-        title="New User-Wise Asset Transfer"
+        title={editingId ? "Edit User-Wise Asset Transfer" : "New User-Wise Asset Transfer"}
         subtitle="Move a fixed asset's assignment from one user to another"
         icon={ArrowRight}
         accentColor="#eab308"
@@ -434,7 +504,7 @@ export default function AssetTransfer() {
             </button>
             <button onClick={handleSave} disabled={saving}
               className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
-              <Check size={13} /> {saving ? "Saving…" : "Save Transfer"}
+              <Check size={13} /> {saving ? "Saving…" : editingId ? "Update Transfer" : "Save Transfer"}
             </button>
           </div>
         }
@@ -475,7 +545,7 @@ export default function AssetTransfer() {
               </div>
               <div>
                 <label className={labelCls}><Hash size={11} /> Document Number</label>
-                <input type="text" value="Auto-generated on save" readOnly
+                <input type="text" value={editingId ? (editDetail as TransferDetail | undefined)?.DocNo || "" : "Auto-generated on save"} readOnly
                   className={`${inputCls} bg-muted/30 text-muted-foreground`} />
               </div>
               <div>
@@ -517,10 +587,17 @@ export default function AssetTransfer() {
               </div>
 
               <div>
-                <label className={labelCls}><User size={11} /> From User</label>
-                <div className={`${inputCls} h-auto min-h-9 py-1.5 flex items-center bg-muted/30`}>
-                  <UserChip user={fromUser} empty={form.assetId ? "No current holder" : "Select an asset first"} />
-                </div>
+                <label className={labelCls}><User size={11} /> From User {editingId && "*"}</label>
+                {editingId ? (
+                  <select value={form.fromUserId} onChange={(e) => setField("fromUserId", e.target.value)} className={inputCls}>
+                    <option value="">Select user…</option>
+                    {ensureArray<TransferUser>(users).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                ) : (
+                  <div className={`${inputCls} h-auto min-h-9 py-1.5 flex items-center bg-muted/30`}>
+                    <UserChip user={fromUser} empty={form.assetId ? "No current holder" : "Select an asset first"} />
+                  </div>
+                )}
               </div>
               <div>
                 <label className={labelCls}><User size={11} /> To User *</label>
@@ -683,15 +760,17 @@ export default function AssetTransfer() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[900px]">
+              <table className="w-full text-sm min-w-[1140px]">
                 <thead>
                   <tr className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
                     <th className="px-4 py-3 text-left">Doc No</th>
                     <th className="px-4 py-3 text-left">Transfer Date</th>
                     <th className="px-4 py-3 text-left">Asset</th>
+                    <th className="px-4 py-3 text-left">FA Item Code</th>
                     <th className="px-4 py-3 text-left">From → To</th>
                     <th className="px-4 py-3 text-left">Company / Project</th>
                     <th className="px-4 py-3 text-left">Remarks</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -703,6 +782,7 @@ export default function AssetTransfer() {
                         <p className="font-medium truncate">{t.AssetName || "—"}</p>
                         <p className="text-[11px] text-muted-foreground font-mono truncate">{t.AssetCode || "—"}</p>
                       </td>
+                      <td className="px-4 py-3 font-mono text-xs text-yellow-600 dark:text-yellow-400">{t.FAItemCode || "—"}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5 text-xs">
                           {t.FromUserId && <UserAvatar id={t.FromUserId} name={t.FromUserName || "?"} avatarUrl={t.FromUserAvatar} size={18} />}
@@ -716,6 +796,26 @@ export default function AssetTransfer() {
                         {t.CompanyName || "—"}{t.ProjectName ? ` / ${t.ProjectName}` : ""}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate">{t.Remarks || "—"}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => goToView(t)}
+                            className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="View">
+                            <Eye size={13} />
+                          </button>
+                          {rights.canEdit && (
+                            <button onClick={() => goToEdit(t)}
+                              className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="Edit">
+                              <Pencil size={13} />
+                            </button>
+                          )}
+                          {rights.canDelete && (
+                            <button onClick={() => setDeleteId(t.Id)}
+                              className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500" title="Delete">
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -724,6 +824,87 @@ export default function AssetTransfer() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── view dialog ── */}
+      <Dialog open={viewingId != null} onOpenChange={(open) => { if (!open) setViewingId(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-base">Transfer Detail</DialogTitle>
+          </DialogHeader>
+          {loadingView ? (
+            <div className="text-center py-10 text-muted-foreground text-sm">Loading…</div>
+          ) : viewDetail ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-center gap-3 py-2">
+                <UserAvatar id={viewDetail.FromUserId} name={viewDetail.FromUserName || "?"} avatarUrl={viewDetail.FromUserAvatar} size={32} />
+                <div className="text-center">
+                  <p className="text-sm font-semibold">{viewDetail.FromUserName || "—"}</p>
+                  <p className="text-[10px] text-muted-foreground">From</p>
+                </div>
+                <ArrowRight size={18} className="text-yellow-600 dark:text-yellow-400 shrink-0" />
+                <UserAvatar id={viewDetail.ToUserId} name={viewDetail.ToUserName || "?"} avatarUrl={viewDetail.ToUserAvatar} size={32} />
+                <div className="text-center">
+                  <p className="text-sm font-semibold">{viewDetail.ToUserName || "—"}</p>
+                  <p className="text-[10px] text-muted-foreground">To</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+                {[
+                  ["Doc No",           viewDetail.DocNo],
+                  ["Doc Date",         fmtDate(viewDetail.DocDate)],
+                  ["Transfer Date",    fmtDate(viewDetail.TransferDate)],
+                  ["Financial Year",   viewDetail.FinYear],
+                  ["Asset",            viewDetail.AssetName],
+                  ["FA Item Code",     viewDetail.FAItemCode],
+                  ["Company",          viewDetail.CompanyName],
+                  ["Project",          viewDetail.ProjectName],
+                  ["Department",       viewDetail.DepartmentName],
+                  ["Transferred By",   viewDetail.TransferredByName],
+                ].map(([label, val]) => val ? (
+                  <div key={label as string}>
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="font-medium mt-0.5 truncate">{val}</p>
+                  </div>
+                ) : null)}
+              </div>
+              {viewDetail.Remarks && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Remarks</p>
+                  <p className="text-sm font-medium mt-0.5">{viewDetail.Remarks}</p>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── delete confirm ── */}
+      {deleteId && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
+            <div className="flex items-start gap-3 mb-4">
+              <AlertCircle size={20} className="text-destructive mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold text-sm">Are you sure you want to delete this asset transfer?</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  The asset's current holder will be recalculated from its remaining transfer history.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteId(null)}
+                className="shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+                Cancel
+              </button>
+              <button onClick={() => deleteMut.mutate(deleteId!)} disabled={deleteMut.isPending}
+                className="shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive transition-all disabled:opacity-50">
+                {deleteMut.isPending ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </GlassShell>
     </>
   );

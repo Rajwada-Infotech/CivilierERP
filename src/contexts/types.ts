@@ -58,7 +58,8 @@ export type PageAction =
   | "import"
   | "approve"
   | "reject"
-  | "post-approval";
+  | "post-approval"
+  | "reverse";
 
 export interface PagePermission {
   page: PageKey;

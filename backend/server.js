@@ -225,6 +225,8 @@ const ALL_ROUTES = [
   { path: "/api/depreciation-setup", file: "./routes/depreciationSetup" },
   { path: "/api/fixed-assets",       file: "./routes/fixedAssets" },
   { path: "/api/fixed-asset-tagging", file: "./routes/fixedAssetTagging" },
+  { path: "/api/fixed-asset-inventory-import", file: "./routes/fixedAssetInventoryImport" },
+  { path: "/api/fixed-asset-assignment", file: "./routes/fixedAssetAssignment" },
   { path: "/api/asset-transfer", file: "./routes/assetTransfer" },
   { path: "/api/id-template-master", file: "./routes/idTemplateMaster" },
   { path: "/api/work-progress", file: "./routes/workProgress" },
