@@ -6,7 +6,8 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
-import { Plus, AlertTriangle, RotateCcw } from "lucide-react";
+import { Plus, AlertTriangle, RotateCcw, UserCircle2 } from "lucide-react";
+import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
@@ -47,6 +48,9 @@ const CrmPossessionNotice: React.FC = () => {
   const [disputeReason, setDisputeReason] = useState("");
   const [retractDialog, setRetractDialog] = useState<number | null>(null);
   const [retractReason, setRetractReason] = useState("");
+  const [proxyAckTarget, setProxyAckTarget] = useState<number | null>(null);
+  const [proxyDisputeTarget, setProxyDisputeTarget] = useState<number | null>(null);
+  const [proxySaving, setProxySaving] = useState(false);
 
   const { data: notices = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-possession-notice"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
@@ -85,6 +89,48 @@ const CrmPossessionNotice: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
+    }
+  };
+
+  const handleProxyAcknowledge = async (method: ProxyMethod, remarks: string) => {
+    if (!proxyAckTarget) return;
+    setProxySaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${proxyAckTarget}/proxy-acknowledge`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Customer acknowledgement recorded on their behalf");
+      setProxyAckTarget(null);
+      qc.invalidateQueries({ queryKey: ["crm-possession-notices"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setProxySaving(false);
+    }
+  };
+
+  const handleProxyDispute = async (method: ProxyMethod, remarks: string) => {
+    if (!proxyDisputeTarget) return;
+    setProxySaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${proxyDisputeTarget}/proxy-dispute`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Customer dispute recorded on their behalf");
+      setProxyDisputeTarget(null);
+      qc.invalidateQueries({ queryKey: ["crm-possession-notices"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setProxySaving(false);
     }
   };
 
@@ -171,6 +217,13 @@ const CrmPossessionNotice: React.FC = () => {
               <>
                 <button onClick={() => handleMarkAcknowledged(n.Id)} className="text-xs text-primary hover:underline">Acknowledge</button>
                 <button onClick={() => { setDisputeDialog(n.Id); setDisputeReason(""); }} className="text-xs text-red-600 hover:underline">Dispute</button>
+                <span className="text-border">|</span>
+                <button onClick={() => setProxyAckTarget(n.Id)} className="text-xs flex items-center gap-0.5 text-amber-700 hover:underline">
+                  <UserCircle2 size={11} /> Ack (off-portal)
+                </button>
+                <button onClick={() => setProxyDisputeTarget(n.Id)} className="text-xs flex items-center gap-0.5 text-amber-700 hover:underline">
+                  <UserCircle2 size={11} /> Dispute (off-portal)
+                </button>
               </>
             )}
             {n.Status === "Disputed" && (
@@ -315,6 +368,26 @@ const CrmPossessionNotice: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+      {proxyAckTarget !== null && (
+        <ProxyActionDialog
+          title="Record Customer Acknowledgement"
+          description="You are recording that the customer acknowledged receiving the possession notice without logging into their portal."
+          confirmLabel="Record Acknowledgement"
+          saving={proxySaving}
+          onClose={() => setProxyAckTarget(null)}
+          onConfirm={handleProxyAcknowledge}
+        />
+      )}
+      {proxyDisputeTarget !== null && (
+        <ProxyActionDialog
+          title="Record Customer Dispute"
+          description="You are recording that the customer disputed the possession notice without using the portal. Include their reason in the notes."
+          confirmLabel="Record Dispute"
+          saving={proxySaving}
+          onClose={() => setProxyDisputeTarget(null)}
+          onConfirm={handleProxyDispute}
+        />
+      )}
       </CrmShell>
     </>
   );

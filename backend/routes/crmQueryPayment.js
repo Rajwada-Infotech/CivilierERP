@@ -2,6 +2,7 @@ const express = require("express");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
+const multer = require("multer");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -9,6 +10,7 @@ const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const uploadQP = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 } });
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -270,6 +272,65 @@ router.post("/:id/confirm", requirePageRight("crm-query-payment", "edit"), async
     res.status(500).json({ error: e.message });
   }
 });
+
+// ─── Staff proxy: upload proof on behalf of a non-portal customer ────────────
+const PROXY_METHODS_QP = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
+
+// POST /:id/proxy-proof — staff uploads the customer's payment proof (stamp
+// duty / registration fee receipt) on their behalf. Mirrors portal
+// POST /query-payment/proof but accepts multipart instead of base64 JSON,
+// and stamps the audit trail with ProxyMethod.
+router.post("/:id/proxy-proof",
+  requirePageRight("crm-query-payment", "edit"),
+  uploadQP.single("file"),
+  async (req, res) => {
+    try {
+      const pool  = getPool();
+      const id    = parseInt(req.params.id);
+      const actor = actorId(req);
+      const { ProxyMethod, ProxyRemarks } = req.body;
+
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      if (!ProxyMethod || !PROXY_METHODS_QP.includes(ProxyMethod)) {
+        return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_QP.join(", ")}` });
+      }
+      if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks are required" });
+
+      const cur = await pool.request().input("id", sql.Int, id)
+        .query("SELECT Status, QPNo, BookingId FROM dbo.CrmQueryPayment WHERE Id = @id");
+      if (!cur.recordset.length) return res.status(404).json({ error: "Query payment not found" });
+      const qp = cur.recordset[0];
+      if (qp.Status === "Confirmed") return res.status(400).json({ error: "Payment already confirmed" });
+
+      const proxyNote = `[Proof submitted on behalf of customer via ${ProxyMethod}] ${ProxyRemarks.trim()}`;
+
+      await pool.request()
+        .input("id",    sql.Int,           id)
+        .input("dtype", sql.NVarChar(20),  "Proof")
+        .input("fname", sql.NVarChar(255), req.file.originalname)
+        .input("mime",  sql.NVarChar(100), req.file.mimetype)
+        .input("fsize", sql.Int,           req.file.size)
+        .input("fdata", sql.VarBinary(sql.MAX), req.file.buffer)
+        .input("ub",    sql.Int,           actor)
+        .query(`
+          INSERT INTO dbo.CrmQueryPaymentAttachments
+            (QueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy, UploadedAt)
+          VALUES (@id, @dtype, @fname, @mime, @fsize, @fdata, @ub, SYSDATETIME())
+        `);
+
+      await logCommunication(pool, {
+        bookingId: qp.BookingId, direction: "Inbound",
+        subject: `Payment proof uploaded for ${qp.QPNo} (via ${ProxyMethod})`,
+        summary: proxyNote,
+      });
+
+      res.json({ success: true });
+    } catch (e) {
+      console.error("[crm-query-payment] proxy-proof error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
 
 router.get("/attachment/:attachId", requirePageRight("crm-query-payment", "view"), async (req, res) => {
   try {

@@ -14,8 +14,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatINR } from "@/utils/formatCurrency";
 import {
   Plus, Send, CheckCircle2, Paperclip, AlertTriangle, ReceiptIndianRupee,
-  ChevronLeft, ChevronRight, Check, Upload, X, FileText, Image as ImageIcon, RotateCcw,
+  ChevronLeft, ChevronRight, Check, Upload, X, FileText, Image as ImageIcon, RotateCcw, UserCircle2,
 } from "lucide-react";
+import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
@@ -154,6 +155,10 @@ const CrmQueryPayment: React.FC = () => {
   const [sendingInfo, setSendingInfo] = useState(false);
   const [proofFile, setProofFile] = useState<StagedFile | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [proxyProofDialog, setProxyProofDialog] = useState(false);
+  const [proxyProofFile, setProxyProofFile] = useState<File | null>(null);
+  const [proxySaving, setProxySaving] = useState(false);
+  const proxyProofInputRef = useRef<HTMLInputElement>(null);
   const infoInputRef = useRef<HTMLInputElement>(null);
   const proofInputRef = useRef<HTMLInputElement>(null);
 
@@ -288,6 +293,29 @@ const CrmQueryPayment: React.FC = () => {
       toast.error(translateError(e.message));
     } finally {
       setSendingInfo(false);
+    }
+  };
+
+  const handleProxyProof = async (method: ProxyMethod, remarks: string) => {
+    if (!selectedId || !proxyProofFile) return;
+    setProxySaving(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", proxyProofFile);
+      formData.append("ProxyMethod", method);
+      formData.append("ProxyRemarks", remarks);
+      const res = await fetchWithAuth(`${API}/${selectedId}/proxy-proof`, { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Payment proof uploaded on customer's behalf");
+      setProxyProofDialog(false);
+      setProxyProofFile(null);
+      refetchDetail();
+      qc.invalidateQueries({ queryKey: ["crm-query-payment"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setProxySaving(false);
     }
   };
 
@@ -510,9 +538,27 @@ const CrmQueryPayment: React.FC = () => {
                         {!pendingInfoFiles.length && (
                           <p className="text-[11px] text-muted-foreground text-center">Attach at least one file before sending.</p>
                         )}
-                        {detail.Status === "InfoSent" && (
-                          <div className="flex items-center gap-1.5 text-xs text-blue-700">
-                            <CheckCircle2 size={12} /> Sent � waiting on the customer to pay the government.
+                                          {detail.Status === "InfoSent" && (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-1.5 text-xs text-blue-700">
+                              <CheckCircle2 size={12} /> Sent &mdash; waiting on the customer to pay the government.
+                            </div>
+                            <div className="border-t border-border/60 pt-2">
+                              <p className="text-[11px] text-muted-foreground mb-1.5 flex items-center gap-1"><UserCircle2 size={11} /> Customer not on portal?</p>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <input type="file" ref={proxyProofInputRef} className="hidden"
+                                  onChange={(e) => setProxyProofFile(e.target.files?.[0] || null)} />
+                                <button onClick={() => proxyProofInputRef.current?.click()}
+                                  className="text-xs px-2.5 py-1.5 border border-border rounded-md font-medium hover:bg-muted flex items-center gap-1">
+                                  <Upload size={11} /> {proxyProofFile ? proxyProofFile.name : "Select proof file..."}
+                                </button>
+                                <button onClick={() => proxyProofFile && setProxyProofDialog(true)}
+                                  disabled={!proxyProofFile}
+                                  className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 disabled:opacity-40 flex items-center gap-1.5">
+                                  <UserCircle2 size={12} /> Upload on Their Behalf
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -621,6 +667,16 @@ const CrmQueryPayment: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {proxyProofDialog && (
+        <ProxyActionDialog
+          title="Upload Payment Proof on Customer's Behalf"
+          description="You are uploading the government payment receipt the customer provided without using the portal."
+          confirmLabel="Submit Proof"
+          saving={proxySaving}
+          onClose={() => setProxyProofDialog(false)}
+          onConfirm={handleProxyProof}
+        />
+      )}
     </CrmShell>
   );
 };

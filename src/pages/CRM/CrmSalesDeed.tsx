@@ -12,8 +12,9 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { formatINR } from "@/utils/formatCurrency";
 import {
-  Plus, CheckCircle2, AlertTriangle, XCircle, ExternalLink, Lock, Pencil, ScrollText, RotateCcw,
+  Plus, CheckCircle2, AlertTriangle, XCircle, ExternalLink, Lock, Pencil, ScrollText, RotateCcw, UserCircle2,
 } from "lucide-react";
+import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
@@ -110,6 +111,9 @@ const CrmSalesDeed: React.FC = () => {
   const [progressForm, setProgressForm] = useState({ ...EMPTY_PROGRESS_FORM });
   const [savingProgress, setSavingProgress] = useState(false);
   const [sendingToCustomer, setSendingToCustomer] = useState(false);
+  const [proxyApproveDialog, setProxyApproveDialog] = useState(false);
+  const [proxyRecheckDialog, setProxyRecheckDialog] = useState(false);
+  const [proxySaving, setProxySaving] = useState(false);
 
   const { data: deeds = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-sales-deed"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
@@ -274,6 +278,48 @@ const CrmSalesDeed: React.FC = () => {
   // missed a deed whose ExecutedBy and RegistrationNo were set together in
   // one request � a real bug that left a deed fully Registered with the
   // customer never having been asked to approve it).
+  const handleProxyApprove = async (method: ProxyMethod, remarks: string) => {
+    if (!detailId) return;
+    setProxySaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${detailId}/proxy-customer-approve`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Customer approval recorded on their behalf");
+      setProxyApproveDialog(false);
+      qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setProxySaving(false);
+    }
+  };
+
+  const handleProxyRecheck = async (method: ProxyMethod, remarks: string) => {
+    if (!detailId) return;
+    setProxySaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${detailId}/proxy-customer-recheck`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Customer recheck request recorded on their behalf");
+      setProxyRecheckDialog(false);
+      qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setProxySaving(false);
+    }
+  };
+
   const handleSendToCustomer = async () => {
     if (!detailId) return;
     setSendingToCustomer(true);
@@ -630,12 +676,30 @@ const CrmSalesDeed: React.FC = () => {
                 <div>
                   <SectionLabel>Approvals</SectionLabel>
                   <DetailRow label="Customer Approval" value={<StatusBadge status={detail.CustomerApprovalStatus || "NotSent"} cfg={APPROVAL_CFG} />} />
+                  {detail.CustomerRecheckRemarks && (
+                    <p className="text-xs text-red-600 px-1 pb-1">Recheck: {detail.CustomerRecheckRemarks}</p>
+                  )}
                   {!detail.SentToCustomerAt && detail.Status !== CrmStatus.REGISTERED && (
                     <div className="flex justify-end pb-2">
                       <button onClick={handleSendToCustomer} disabled={sendingToCustomer}
                         className="px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted disabled:opacity-40 transition-colors">
                         {sendingToCustomer ? "Sending..." : "Send to Customer for Approval"}
                       </button>
+                    </div>
+                  )}
+                  {detail.SentToCustomerAt && detail.CustomerApprovalStatus !== CrmStatus.APPROVED && detail.Status !== CrmStatus.REGISTERED && (
+                    <div className="flex flex-col gap-1.5 pb-2">
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-1"><UserCircle2 size={11} /> Customer not on portal?</p>
+                      <div className="flex gap-2 flex-wrap">
+                        <button onClick={() => setProxyApproveDialog(true)}
+                          className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 flex items-center gap-1.5">
+                          <UserCircle2 size={11} /> Record Approval on Their Behalf
+                        </button>
+                        <button onClick={() => setProxyRecheckDialog(true)}
+                          className="text-xs px-3 py-1.5 bg-red-50 border border-red-200 text-red-800 rounded-lg font-semibold hover:bg-red-100 flex items-center gap-1.5">
+                          <UserCircle2 size={11} /> Record Recheck Request on Their Behalf
+                        </button>
+                      </div>
                     </div>
                   )}
                   {detail.DirectorApprovalStatus && detail.DirectorApprovalStatus !== "NotRequired" && (
@@ -668,6 +732,26 @@ const CrmSalesDeed: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
+      {proxyApproveDialog && (
+        <ProxyActionDialog
+          title="Record Customer Approval — Sales Deed"
+          description="You are recording that the customer has reviewed and approved the sales deed without using the portal."
+          confirmLabel="Record Approval"
+          saving={proxySaving}
+          onClose={() => setProxyApproveDialog(false)}
+          onConfirm={handleProxyApprove}
+        />
+      )}
+      {proxyRecheckDialog && (
+        <ProxyActionDialog
+          title="Record Customer Recheck Request — Sales Deed"
+          description="You are recording that the customer flagged an issue or requested changes to the sales deed without using the portal."
+          confirmLabel="Record Recheck Request"
+          saving={proxySaving}
+          onClose={() => setProxyRecheckDialog(false)}
+          onConfirm={handleProxyRecheck}
+        />
+      )}
     </CrmShell>
   );
 };

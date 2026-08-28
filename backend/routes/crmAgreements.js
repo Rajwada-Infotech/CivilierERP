@@ -1738,6 +1738,131 @@ router.put("/:id/proxy-date-accept", requirePageRight("crm-agreements", "edit"),
   }
 });
 
+// PUT /:id/proxy-customer-recheck — CRM staff records that the customer
+// requested a recheck (flagged an issue) without using the portal.
+// Mirrors portal POST /agreement/respond with decision="Recheck".
+router.put("/:id/proxy-customer-recheck", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) {
+      return res.status(400).json({ error: "ProxyRemarks (what the customer's concern is) are required for a recheck" });
+    }
+
+    const agRes = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, SentToCustomerAt, CustomerApprovalStatus, BookingId, AgreementNo, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!agRes.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const a = agRes.recordset[0];
+    if (!a.SentToCustomerAt) return res.status(400).json({ error: "Agreement has not been sent to the customer yet" });
+    if (a.CustomerApprovalStatus === CrmStatus.APPROVED) return res.status(400).json({ error: "Agreement has already been approved — cannot record a recheck" });
+
+    const actorRow = await pool.request().input("uid", sql.Int, actor).query("SELECT TOP 1 name FROM dbo.Users WHERE id = @uid");
+    const actorName = actorRow.recordset[0]?.name || "Staff";
+    const remarksTrimmed = ProxyRemarks.trim();
+
+    await pool.request().input("id", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), remarksTrimmed).query(`
+      UPDATE dbo.CrmAgreement SET
+        CustomerApprovalStatus = 'RecheckRequested',
+        RecheckCount = RecheckCount + 1,
+        CustomerApprovedAt = NULL,
+        LastRecheckRemarks = @rem
+      WHERE Id = @id
+    `);
+
+    await pool.request()
+      .input("agid",  sql.Int, id)
+      .input("ver",   sql.Int, a.VersionNo)
+      .input("adt",   sql.Date, a.AgreementDate)
+      .input("lname", sql.NVarChar(300), a.LegalName)
+      .input("laddr", sql.NVarChar(sql.MAX), a.LegalAddress)
+      .input("pan",   sql.NVarChar(20), a.PanNo)
+      .input("aadh",  sql.NVarChar(20), a.AadhaarNo)
+      .input("note",  sql.NVarChar(sql.MAX), a.Notes)
+      .input("reason",sql.NVarChar(500), `Customer recheck requested via ${ProxyMethod}: ${remarksTrimmed}`)
+      .query(`
+        INSERT INTO dbo.CrmAgreementRevision
+          (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
+        VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, NULL, SYSDATETIME())
+      `);
+
+    await pool.request()
+      .input("agid",  sql.Int, id)
+      .input("actor", sql.Int, actor)
+      .input("aname", sql.NVarChar(200), actorName)
+      .input("method",sql.NVarChar(30), ProxyMethod)
+      .input("rem",   sql.NVarChar(sql.MAX), remarksTrimmed)
+      .query(`
+        INSERT INTO dbo.CrmAgreementApprovalLog
+          (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+        VALUES (@agid, 'CustomerRecheck', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+      `);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] proxy-customer-recheck error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/proxy-propose-date — CRM staff records a date the customer proposed
+// (via phone, in-person, WhatsApp, etc.) without using the portal.
+// Mirrors portal POST /agreement/propose-date.
+// Gate: CustomerApprovalStatus must be 'Approved' and it must be the customer's
+// turn to propose (ProposedDateStatus is null/matched, i.e. not PendingCustomerReview).
+router.put("/:id/proxy-propose-date", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks, ProposedDate } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks are required" });
+    if (!ProposedDate) return res.status(400).json({ error: "ProposedDate is required (YYYY-MM-DD)" });
+
+    const agRes = await pool.request().input("id", sql.Int, id)
+      .query("SELECT CustomerApprovalStatus, ProposedDateStatus, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!agRes.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const a = agRes.recordset[0];
+    if (a.CustomerApprovalStatus !== CrmStatus.APPROVED) {
+      return res.status(400).json({ error: "Customer must have approved the agreement content before proposing a date" });
+    }
+    if (a.ProposedDateStatus === "PendingCompanyReview") {
+      return res.status(400).json({ error: "A customer-proposed date is already pending company review" });
+    }
+
+    await proposeAgreementDate(pool, id, "Customer", ProposedDate, null);
+
+    const actorRow = await pool.request().input("uid", sql.Int, actor).query("SELECT TOP 1 name FROM dbo.Users WHERE id = @uid");
+    const actorName = actorRow.recordset[0]?.name || "Staff";
+
+    await pool.request()
+      .input("agid",  sql.Int, id)
+      .input("actor", sql.Int, actor)
+      .input("aname", sql.NVarChar(200), actorName)
+      .input("method",sql.NVarChar(30), ProxyMethod)
+      .input("rem",   sql.NVarChar(sql.MAX), `Customer proposed date ${ProposedDate} via ${ProxyMethod}: ${ProxyRemarks.trim()}`)
+      .query(`
+        INSERT INTO dbo.CrmAgreementApprovalLog
+          (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+        VALUES (@agid, 'CustomerProposeDate', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+      `);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] proxy-propose-date error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /:id/documents/:docId/proxy-attach — upload a document on behalf of a
 // customer who handed it in physically, emailed it, or sent it via WhatsApp.
 // The file is stored identically to a customer-uploaded file, but the audit

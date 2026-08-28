@@ -240,4 +240,81 @@ router.put("/:id/retract-dispute", requirePageRight("crm-possession-notice", "ed
   }
 });
 
+// ─── Staff proxy actions for non-portal customers ───────────────────────────
+const PROXY_METHODS_PN = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
+
+// PUT /:id/proxy-acknowledge — record that the customer acknowledged the
+// possession notice without using the portal.
+router.put("/:id/proxy-acknowledge", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS_PN.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_PN.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks are required" });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, NoticeNo FROM dbo.CrmPossessionNotice WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
+    if (cur.recordset[0].Status !== "Sent") {
+      return res.status(400).json({ error: `Can only record acknowledgement for a Sent notice (current: '${cur.recordset[0].Status}')` });
+    }
+
+    await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).query(`
+      UPDATE dbo.CrmPossessionNotice SET
+        Status = 'Acknowledged', AcknowledgedAt = SYSDATETIME(),
+        Notes = ISNULL(Notes + CHAR(10), '') + '[Acknowledged via ${ProxyMethod} — recorded by staff]',
+        UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+
+    res.json({ success: true, status: "Acknowledged" });
+  } catch (e) {
+    console.error("[crm-possession-notice] proxy-acknowledge error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/proxy-dispute — record that the customer disputed the possession
+// notice without using the portal.
+router.put("/:id/proxy-dispute", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS_PN.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_PN.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks (customer's dispute reason) are required" });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, NoticeNo FROM dbo.CrmPossessionNotice WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
+    if (cur.recordset[0].Status !== "Sent") {
+      return res.status(400).json({ error: `Can only record a dispute for a Sent notice (current: '${cur.recordset[0].Status}')` });
+    }
+
+    await pool.request()
+      .input("id",     sql.Int, id)
+      .input("reason", sql.NVarChar(sql.MAX), `[via ${ProxyMethod}] ${ProxyRemarks.trim()}`)
+      .input("ub",     sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmPossessionNotice SET
+          Status = 'Disputed', DisputedAt = SYSDATETIME(),
+          DisputeReason = @reason,
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    res.json({ success: true, status: "Disputed" });
+  } catch (e) {
+    console.error("[crm-possession-notice] proxy-dispute error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

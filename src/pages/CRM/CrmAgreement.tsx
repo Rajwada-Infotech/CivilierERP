@@ -14,6 +14,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { promptNextStep } from "@/lib/workflowNav";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
+import { ProxyActionDialog, PROXY_METHODS, type ProxyMethod, PROXY_METHOD_LABELS } from "@/components/crm/ProxyActionDialog";
 
 const API = "/api/crm/agreements";
 // NOTE: mount path assumed as "/api/users" to match users.js's PRIVILEGED_ROLES
@@ -171,92 +172,6 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
     const d: any[] = await r.json();
     return d.map((u) => ({ value: String(u.id), label: u.name }));
   } catch { return []; }
-}
-const PROXY_METHODS = ["Phone", "InPerson", "Email", "WhatsApp", "Other"] as const;
-type ProxyMethod = typeof PROXY_METHODS[number];
-const PROXY_METHOD_LABELS: Record<ProxyMethod, string> = {
-  Phone:    "Phone call",
-  InPerson: "In-person visit",
-  Email:    "Email / document",
-  WhatsApp: "WhatsApp / SMS",
-  Other:    "Other",
-};
-
-// Reusable modal for any staff-proxy action on behalf of a non-portal customer.
-// Captures HOW the customer communicated (ProxyMethod) and a short description
-// (ProxyRemarks) — both permanently stamped in the audit trail.
-function ProxyActionDialog({
-  title, description, confirmLabel, onConfirm, onClose, saving,
-}: {
-  title: string; description: string; confirmLabel: string;
-  onConfirm: (method: ProxyMethod, remarks: string) => void;
-  onClose: () => void; saving: boolean;
-}) {
-  const [method, setMethod] = React.useState<ProxyMethod>("Phone");
-  const [remarks, setRemarks] = React.useState("");
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="font-heading flex items-center gap-2">
-            <UserCircle2 size={16} className="text-primary" /> {title}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
-          <strong>Proxy action</strong> — {description} This will be permanently stamped as a staff-proxy record in the audit trail.
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs font-medium text-foreground block mb-1.5">
-              How did the customer communicate? <span className="text-red-500">*</span>
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {PROXY_METHODS.map((m) => (
-                <button key={m} type="button" onClick={() => setMethod(m)}
-                  className={`text-xs px-3 py-2 rounded-lg border font-medium transition-colors text-left ${
-                    method === m
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border hover:bg-muted"
-                  }`}>
-                  {PROXY_METHOD_LABELS[m]}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-foreground block mb-1">
-              Notes for the record <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-              rows={3}
-              placeholder={
-                method === "Phone"    ? "e.g. Customer called on 28 Aug, confirmed approval verbally" :
-                method === "InPerson" ? "e.g. Customer visited office, signed physical confirmation" :
-                method === "Email"    ? "e.g. Email received from customer@example.com at 10:30 AM" :
-                method === "WhatsApp" ? "e.g. WhatsApp message confirming approval, screenshot saved" :
-                "e.g. Describe how the customer confirmed"
-              }
-              className="w-full text-sm border border-border rounded-lg px-2 py-1.5 bg-background resize-none"
-            />
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            The customer's portal access remains active. They can still log in and view the status.
-          </p>
-        </div>
-        <div className="flex justify-end gap-2 pt-3 border-t border-border">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-          <button
-            onClick={() => remarks.trim() && onConfirm(method, remarks.trim())}
-            disabled={saving || !remarks.trim()}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40">
-            {saving ? "Saving..." : confirmLabel}
-          </button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 const EMPTY_DOC_FORM = {
@@ -909,7 +824,10 @@ const CrmAgreement: React.FC = () => {
   };
 
   const [proxyApproveDialog, setProxyApproveDialog] = useState(false);
+  const [proxyRecheckDialog, setProxyRecheckDialog] = useState(false);
   const [proxyDateDialog, setProxyDateDialog] = useState(false);
+  const [proxyProposeDateDialog, setProxyProposeDateDialog] = useState(false);
+  const [proxyProposedDate, setProxyProposedDate] = useState("");
   const [proxySaving, setProxySaving] = useState(false);
 
   const handleProxyCustomerApprove = async (method: ProxyMethod, remarks: string) => {
@@ -947,6 +865,51 @@ const CrmAgreement: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
       toast.success("Customer date acceptance recorded on their behalf");
       setProxyDateDialog(false);
+      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setProxySaving(false);
+    }
+  };
+
+  const handleProxyCustomerRecheck = async (method: ProxyMethod, remarks: string) => {
+    if (!selectedId) return;
+    setProxySaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${selectedId}/proxy-customer-recheck`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Customer recheck request recorded on their behalf");
+      setProxyRecheckDialog(false);
+      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setProxySaving(false);
+    }
+  };
+
+  const handleProxyProposeDate = async (method: ProxyMethod, remarks: string) => {
+    if (!selectedId || !proxyProposedDate) return;
+    setProxySaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${selectedId}/proxy-propose-date`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks, ProposedDate: proxyProposedDate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Customer's proposed date recorded on their behalf");
+      setProxyProposeDateDialog(false);
+      setProxyProposedDate("");
       qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
     } catch (e: any) {
@@ -1673,12 +1636,20 @@ const CrmAgreement: React.FC = () => {
                               <p className="text-[11px] text-muted-foreground mb-1.5 flex items-center gap-1">
                                 <UserCircle2 size={11} /> Customer not on portal?
                               </p>
-                              <button
-                                onClick={() => setProxyApproveDialog(true)}
-                                className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 flex items-center gap-1.5"
-                              >
-                                <UserCircle2 size={12} /> Record Approval on Their Behalf
-                              </button>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  onClick={() => setProxyApproveDialog(true)}
+                                  className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 flex items-center gap-1.5"
+                                >
+                                  <UserCircle2 size={12} /> Record Approval on Their Behalf
+                                </button>
+                                <button
+                                  onClick={() => setProxyRecheckDialog(true)}
+                                  className="text-xs px-3 py-1.5 bg-red-50 border border-red-200 text-red-800 rounded-lg font-semibold hover:bg-red-100 flex items-center gap-1.5"
+                                >
+                                  <UserCircle2 size={12} /> Record Recheck Request on Their Behalf
+                                </button>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -1740,10 +1711,24 @@ const CrmAgreement: React.FC = () => {
                               </div>
                             );
                             return (
-                              <button onClick={() => { setSendDate(""); setProposeDateDialog(true); }}
-                                className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 mt-0.5">
-                                Propose Agreement Date
-                              </button>
+                              <div className="space-y-2">
+                                <button onClick={() => { setSendDate(""); setProposeDateDialog(true); }}
+                                  className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90">
+                                  Propose Agreement Date
+                                </button>
+                                <div className="border-t border-border/60 pt-1.5">
+                                  <p className="text-[11px] text-muted-foreground mb-1.5 flex items-center gap-1"><UserCircle2 size={11} /> Customer communicated a date off-portal?</p>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <input type="date" value={proxyProposedDate} onChange={(e) => setProxyProposedDate(e.target.value)}
+                                      className="text-xs border border-border rounded-md px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                                    <button onClick={() => proxyProposedDate && setProxyProposeDateDialog(true)}
+                                      disabled={!proxyProposedDate}
+                                      className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 disabled:opacity-40 flex items-center gap-1.5">
+                                      <UserCircle2 size={12} /> Record Customer's Proposed Date
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
                             );
                           })()}
                           {dateHistory.length > 0 && (
@@ -2007,6 +1992,30 @@ const CrmAgreement: React.FC = () => {
           saving={proxySaving}
           onClose={() => setProxyApproveDialog(false)}
           onConfirm={handleProxyCustomerApprove}
+        />
+      )}
+
+      {/* Proxy: Record customer recheck request on their behalf (off-portal) */}
+      {proxyRecheckDialog && (
+        <ProxyActionDialog
+          title="Record Customer Recheck Request"
+          description="You are recording that the customer has flagged an issue or requested changes to the agreement without using the portal."
+          confirmLabel="Record Recheck Request"
+          saving={proxySaving}
+          onClose={() => setProxyRecheckDialog(false)}
+          onConfirm={handleProxyCustomerRecheck}
+        />
+      )}
+
+      {/* Proxy: Record date proposed by customer off-portal */}
+      {proxyProposeDateDialog && (
+        <ProxyActionDialog
+          title="Record Customer's Proposed Date"
+          description={`You are recording that the customer proposed ${proxyProposedDate} as the agreement signing date without using the portal.`}
+          confirmLabel="Record Proposed Date"
+          saving={proxySaving}
+          onClose={() => setProxyProposeDateDialog(false)}
+          onConfirm={handleProxyProposeDate}
         />
       )}
 

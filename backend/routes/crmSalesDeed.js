@@ -467,4 +467,96 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
   }
 });
 
+// ─── Staff proxy actions for non-portal customers ───────────────────────────
+// When a customer doesn't use the portal, CRM staff can record their decision
+// on their behalf. Every proxy action stamps ProxyMethod in the audit trail.
+
+const PROXY_METHODS_SD = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
+
+// PUT /:id/proxy-customer-approve — record that the customer approved the
+// sales deed without logging into the portal. Mirrors portal /sales-deed/respond
+// with decision="Approve".
+router.put("/:id/proxy-customer-approve", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS_SD.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_SD.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks are required" });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT CustomerApprovalStatus, SentToCustomerAt, DeedNo, BookingId FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Sales deed not found" });
+    const row = cur.recordset[0];
+    if (!row.SentToCustomerAt) return res.status(400).json({ error: "Sales deed has not been sent to the customer yet" });
+    if (row.CustomerApprovalStatus === CrmStatus.APPROVED) return res.status(400).json({ error: "Sales deed already approved" });
+
+    await pool.request().input("id", sql.Int, id).query(`
+      UPDATE dbo.CrmSalesDeed SET
+        CustomerApprovalStatus = '${CrmStatus.APPROVED}',
+        CustomerApprovedAt = SYSDATETIME(),
+        CustomerRecheckRemarks = NULL,
+        DirectorApprovalStatus = '${CrmStatus.PENDING}'
+      WHERE Id = @id
+    `);
+
+    await logCommunication(pool, {
+      bookingId: row.BookingId, direction: "Inbound",
+      subject: `Customer approved sales deed ${row.DeedNo} (via ${ProxyMethod})`,
+      summary: `Staff recorded customer approval on their behalf via ${ProxyMethod}. ${ProxyRemarks.trim()}`,
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-sales-deed] proxy-customer-approve error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/proxy-customer-recheck — record that the customer flagged an issue
+// on the sales deed without logging into the portal.
+router.put("/:id/proxy-customer-recheck", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS_SD.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_SD.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks (customer's concern) are required for a recheck" });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT CustomerApprovalStatus, SentToCustomerAt, DeedNo, BookingId FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Sales deed not found" });
+    const row = cur.recordset[0];
+    if (!row.SentToCustomerAt) return res.status(400).json({ error: "Sales deed has not been sent to the customer yet" });
+    if (row.CustomerApprovalStatus === CrmStatus.APPROVED) return res.status(400).json({ error: "Sales deed already approved — cannot record a recheck" });
+
+    await pool.request().input("id", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), ProxyRemarks.trim()).query(`
+      UPDATE dbo.CrmSalesDeed SET
+        CustomerApprovalStatus = 'RecheckRequested',
+        CustomerApprovedAt = NULL,
+        CustomerRecheckRemarks = @rem
+      WHERE Id = @id
+    `);
+
+    await logCommunication(pool, {
+      bookingId: row.BookingId, direction: "Inbound",
+      subject: `Customer requested recheck on sales deed ${row.DeedNo} (via ${ProxyMethod})`,
+      summary: `Staff recorded customer recheck request via ${ProxyMethod}. Concern: ${ProxyRemarks.trim()}`,
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-sales-deed] proxy-customer-recheck error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
