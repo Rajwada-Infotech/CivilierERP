@@ -12,6 +12,7 @@ const { proposeAgreementDate, acceptAgreementDate, syncLegalMilestoneStep } = re
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { getInvoicePdfBuffer } = require("../services/invoicePdf");
 const { getMoneyReceiptPdfBuffer } = require("../services/moneyReceiptPdf");
+const { getAllotmentLetterPdfBufferByBookingId } = require("../services/allotmentLetterPdf");
 const { getAgreementBookingLockReason, agreementExecutedLockReason } = require("./crmAgreements");
 
 // Categories a customer is allowed to raise themselves — same vocabulary as
@@ -1284,6 +1285,59 @@ router.get("/activity", async (req, res) => {
   } catch (e) {
     console.error("[crm-portal] GET /activity error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// ─── Allotment Letter (Customer Portal) ───────────────────────────────────────
+// Both endpoints require ?applicationId= for ownership verification.
+
+// GET /allotment-letter — returns the allotment letter record for the customer's
+// booking (status, dates, whether a PDF is available).
+router.get("/allotment-letter", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (!appId) return;
+
+    const bRow = await pool.request().input("aid", sql.Int, appId)
+      .query("SELECT TOP 1 Id AS BookingId FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1");
+    if (!bRow.recordset.length) return res.json(null);
+    const bookingId = bRow.recordset[0].BookingId;
+
+    const r = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT al.Id, al.AlNo, al.Status, al.DraftedOn, al.IssuedOn, al.Remarks,
+             al.FileName, al.FileSize
+      FROM dbo.CrmAllotmentLetter al
+      WHERE al.BookingId = @bid
+    `);
+    res.json(r.recordset[0] || null);
+  } catch (e) {
+    console.error("[crm-portal] GET /allotment-letter error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /allotment-letter/pdf — generates and streams the allotment letter PDF.
+// ?download=1 forces Content-Disposition: attachment.
+router.get("/allotment-letter/pdf", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (!appId) return;
+
+    const bRow = await pool.request().input("aid", sql.Int, appId)
+      .query("SELECT TOP 1 Id AS BookingId FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1");
+    if (!bRow.recordset.length) return res.status(404).json({ error: "No booking found for this application" });
+    const bookingId = bRow.recordset[0].BookingId;
+
+    const buf = await getAllotmentLetterPdfBufferByBookingId(pool, bookingId);
+    const disposition = req.query.download === "1" ? "attachment" : "inline";
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `${disposition}; filename="allotment-letter.pdf"`);
+    res.send(buf);
+  } catch (e) {
+    console.error("[crm-portal] GET /allotment-letter/pdf error:", e.message);
+    res.status(e.message.includes("not found") ? 404 : 500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 

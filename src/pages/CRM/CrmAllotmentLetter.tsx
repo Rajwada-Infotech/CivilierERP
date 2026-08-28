@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
-  Plus, RotateCcw, FileText, CheckCircle2, Send, X, Upload, ExternalLink,
+  Plus, RotateCcw, FileText, CheckCircle2, Send, X, Upload, ExternalLink, Eye, Download,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -61,6 +61,51 @@ async function fetchBookings(): Promise<any[]> {
   return r.json();
 }
 
+function PdfPreviewModal({ alId, onClose }: { alId: number; onClose: () => void }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [fetchErr, setFetchErr] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    let objectUrl: string | null = null;
+    setLoading(true);
+    setFetchErr(null);
+    fetchWithAuth(`${API}/${alId}/pdf`)
+      .then((r) => r.blob())
+      .then((blob) => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); })
+      .catch((e: any) => setFetchErr(e.message || "Failed to load PDF"))
+      .finally(() => setLoading(false));
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [alId]);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60" onClick={onClose}>
+      <div className="relative w-full max-w-4xl h-[90vh] rounded-2xl overflow-hidden shadow-2xl bg-white flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <FileText size={14} className="text-amber-400" />
+            <span className="text-sm font-semibold text-white">Allotment Letter Preview</span>
+          </div>
+          <div className="flex items-center gap-3">
+            {blobUrl && (
+              <a href={blobUrl} download={`allotment-letter-${alId}.pdf`}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-400 text-slate-900 hover:bg-amber-300">
+                <Download size={12} /> Download
+              </a>
+            )}
+            <button onClick={onClose} className="text-white/60 hover:text-white px-1">✕</button>
+          </div>
+        </div>
+        <div className="flex-1 flex items-center justify-center overflow-hidden">
+          {loading && <span className="text-sm text-muted-foreground">Loading PDF…</span>}
+          {fetchErr && <span className="text-sm text-red-600">{fetchErr}</span>}
+          {blobUrl && <iframe src={blobUrl} title="Allotment Letter" className="w-full h-full border-0" />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const CrmAllotmentLetter: React.FC = () => {
   const qc = useQueryClient();
   const [sp] = useSearchParams();
@@ -77,6 +122,7 @@ const CrmAllotmentLetter: React.FC = () => {
   const [stagedFile, setStagedFile] = useState<StagedFile | null>(null);
   const [issuing, setIssuing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewId, setPreviewId] = useState<number | null>(null);
 
   const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-allotment-letter"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
@@ -176,18 +222,18 @@ const CrmAllotmentLetter: React.FC = () => {
       cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.DraftedOn ? String(i.row.original.DraftedOn).slice(0, 10) : "—"}</span> },
     { accessorKey: "IssuedOn", header: "Issued", size: 100,
       cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.IssuedOn ? String(i.row.original.IssuedOn).slice(0, 10) : "—"}</span> },
-    { id: "file", header: "Letter", size: 70, enableSorting: false,
+    { id: "file", header: "PDF", size: 90, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
-        if (r.FileName) {
-          return (
-            <a href={`${API}/${r.Id}/download`} target="_blank" rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs text-primary hover:underline">
-              <FileText size={11} /> View
-            </a>
-          );
-        }
-        return <span className="text-xs text-muted-foreground">—</span>;
+        return (
+          <button
+            onClick={() => setPreviewId(r.Id)}
+            className="flex items-center gap-1 text-xs text-primary hover:underline"
+            title="Preview & Download PDF"
+          >
+            <Eye size={11} /> View PDF
+          </button>
+        );
       } },
     { id: "actions", header: "", size: 80, enableSorting: false,
       cell: (i) => (
@@ -304,10 +350,16 @@ const CrmAllotmentLetter: React.FC = () => {
                         {selectedRow.IssuedOn && <div className="text-xs mt-0.5">{String(selectedRow.IssuedOn).slice(0, 10)}</div>}
                       </div>
                     </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setPreviewId(selectedRow.Id)}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors">
+                        <Eye size={13} /> Preview &amp; Download PDF
+                      </button>
+                    </div>
                     {selectedRow.FileName && (
                       <a href={`${API}/${selectedRow.Id}/download`} target="_blank" rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-sm text-primary hover:underline font-medium">
-                        <ExternalLink size={13} /> {selectedRow.FileName}
+                        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary hover:underline">
+                        <ExternalLink size={11} /> {selectedRow.FileName} (original upload)
                       </a>
                     )}
                     {selectedRow.Remarks && (
@@ -316,7 +368,11 @@ const CrmAllotmentLetter: React.FC = () => {
                   </div>
                 ) : canEdit ? (
                   <div className="space-y-3">
-                    <p className="text-xs text-muted-foreground">Attach the signed letter PDF and mark it as issued to the customer.</p>
+                    <button onClick={() => setPreviewId(selectedRow.Id)}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium border border-dashed border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground">
+                      <Eye size={12} /> Preview Generated PDF
+                    </button>
+                    <p className="text-xs text-muted-foreground">Optionally attach a signed letter PDF and mark it as issued to the customer.</p>
                     <div>
                       <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading block mb-1">Issue Date</label>
                       <Input type="date" className="h-9 text-sm" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} />
@@ -363,6 +419,9 @@ const CrmAllotmentLetter: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
+      {previewId != null && (
+        <PdfPreviewModal alId={previewId} onClose={() => setPreviewId(null)} />
+      )}
     </CrmShell>
   );
 };

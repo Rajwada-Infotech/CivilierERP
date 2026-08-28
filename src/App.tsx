@@ -431,6 +431,7 @@ const PortalBooking        = lazy(() => import("./pages/CrmCustomerPortal/Portal
 const PortalAgreement      = lazy(() => import("./pages/CrmCustomerPortal/PortalAgreement"));
 const PortalPayments       = lazy(() => import("./pages/CrmCustomerPortal/PortalPayments"));
 const PortalConstruction   = lazy(() => import("./pages/CrmCustomerPortal/PortalConstruction"));
+const PortalDocuments      = lazy(() => import("./pages/CrmCustomerPortal/PortalDocuments"));
 const PortalTickets        = lazy(() => import("./pages/CrmCustomerPortal/PortalTickets"));
 const PortalActivity       = lazy(() => import("./pages/CrmCustomerPortal/PortalActivity"));
 const PortalProfile        = lazy(() => import("./pages/CrmCustomerPortal/PortalProfile"));
@@ -623,6 +624,7 @@ function AppRoutes() {
         <Route path="booking" element={<PortalBooking />} />
         <Route path="agreement" element={<PortalAgreement />} />
         <Route path="payments" element={<PortalPayments />} />
+        <Route path="documents" element={<PortalDocuments />} />
         <Route path="construction" element={<PortalConstruction />} />
         <Route path="tickets" element={<PortalTickets />} />
         <Route path="activity" element={<PortalActivity />} />

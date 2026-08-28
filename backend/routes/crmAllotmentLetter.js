@@ -7,6 +7,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { getAllotmentLetterPdfBuffer } = require("../services/allotmentLetterPdf");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -177,6 +178,23 @@ router.put("/:id/issue", requirePageRight("crm-allotment-letter", "edit"), async
   } catch (e) {
     console.error("[crm-allotment-letter] PUT /:id/issue error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /:id/pdf — generate allotment letter PDF on-the-fly from booking data.
+// ?download=1 forces Content-Disposition: attachment (download prompt).
+router.get("/:id/pdf", requirePageRight("crm-allotment-letter", "view"), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const pool = getPool();
+    const buf = await getAllotmentLetterPdfBuffer(pool, id);
+    const disposition = req.query.download === "1" ? "attachment" : "inline";
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `${disposition}; filename="allotment-letter-${id}.pdf"`);
+    res.send(buf);
+  } catch (e) {
+    console.error("[crm-allotment-letter] GET /:id/pdf error:", e.message);
+    res.status(e.message.includes("not found") ? 404 : 500).json({ error: e.message });
   }
 });
 
