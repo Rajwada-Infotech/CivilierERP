@@ -264,6 +264,14 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
     }
   };
 
+  // Opening this dialog shouldn't inherit an error toast left over from
+  // whatever the user did right before (e.g. a failed date proposal) —
+  // that stale toast otherwise sits on screen looking like it's about
+  // this document, when it isn't.
+  useEffect(() => {
+    toast.dismiss();
+  }, []);
+
   useEffect(() => {
     if (!doc.FilePath) return;
     let objectUrl: string | null = null;
@@ -326,58 +334,13 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
                 <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">
                   <Clock size={22} />
                   {doc.UploadedByType === "Customer" ? (
-                    <div className="flex flex-col items-center gap-3 text-center w-full px-4">
-                      <p className="text-sm text-muted-foreground">Awaiting upload from customer — nothing to preview yet.</p>
-                      {!proxyUploadOpen ? (
-                        <button
-                          onClick={() => setProxyUploadOpen(true)}
-                          className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 flex items-center gap-1.5"
-                        >
-                          <UserCircle2 size={12} /> Submit on Customer's Behalf
-                        </button>
-                      ) : (
-                        <div className="w-full text-left space-y-3 border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 rounded-lg p-3">
-                          <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-400">Proxy document submission</p>
-                          <div>
-                            <p className="text-[11px] text-muted-foreground mb-1.5">How did the customer provide this document?</p>
-                            <div className="grid grid-cols-3 gap-1.5">
-                              {PROXY_METHODS.map((m) => (
-                                <button key={m} onClick={() => setProxyUploadMethod(m)}
-                                  className={`text-[11px] px-2 py-1.5 rounded-md border font-medium ${proxyUploadMethod === m ? "bg-amber-600 text-white border-amber-600" : "border-border text-muted-foreground hover:bg-muted"}`}>
-                                  {PROXY_METHOD_LABELS[m]}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                          <textarea
-                            value={proxyUploadRemarks} onChange={(e) => setProxyUploadRemarks(e.target.value)}
-                            placeholder="Brief description of how/when the document was received…"
-                            rows={2}
-                            className="w-full text-xs border border-border rounded-md px-2.5 py-2 bg-background resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-                          />
-                          <div className="flex items-center gap-2">
-                            <input type="file" ref={proxyAttachRef} className="hidden"
-                              onChange={(e) => setProxyUploadFile(e.target.files?.[0] || null)} />
-                            <button onClick={() => proxyAttachRef.current?.click()}
-                              className="text-xs px-2.5 py-1.5 border border-border rounded-md font-medium hover:bg-muted flex items-center gap-1">
-                              <Upload size={11} /> {proxyUploadFile ? proxyUploadFile.name : "Choose file…"}
-                            </button>
-                            <button onClick={handleProxyAttach}
-                              disabled={proxyUploading || !proxyUploadFile || !proxyUploadRemarks.trim()}
-                              className="text-xs px-3 py-1.5 bg-amber-600 text-white rounded-md font-semibold hover:bg-amber-700 disabled:opacity-40">
-                              {proxyUploading ? "Uploading…" : "Submit"}
-                            </button>
-                            <button onClick={() => setProxyUploadOpen(false)} className="text-xs text-muted-foreground hover:text-foreground ml-auto">Cancel</button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    <p className="text-sm text-muted-foreground px-4 text-center">Awaiting upload from customer — nothing to preview yet.</p>
                   ) : (
                     <>
                       Not yet uploaded — Legal Executive to attach.
                       <input type="file" ref={attachInputRef} className="hidden"
                         onChange={(e) => attachFile(e.target.files)} />
-                      <button onClick={() => attachInputRef.current?.click()} disabled={attaching}
+                      <button type="button" onClick={() => attachInputRef.current?.click()} disabled={attaching}
                         className="mt-1 flex items-center gap-1.5 px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
                         <Upload size={12} /> {attaching ? "Uploading..." : "Upload File"}
                       </button>
@@ -398,6 +361,66 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
                 <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">{mimeIcon(doc.MimeType)} Preview not available.</div>
               )}
             </div>
+
+            {doc.UploadedByType === "Customer" && !doc.FilePath && !doc.DocumentUrl && (
+              <div className="rounded-lg border border-border overflow-hidden">
+                {!proxyUploadOpen ? (
+                  <button type="button" onClick={() => setProxyUploadOpen(true)}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors text-left">
+                    <UserCircle2 size={13} className="shrink-0" />
+                    Customer provided this document off-portal? Submit on their behalf
+                  </button>
+                ) : (
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                        <UserCircle2 size={13} /> Submit on Customer's Behalf
+                      </div>
+                      <button type="button" onClick={() => setProxyUploadOpen(false)}
+                        className="text-muted-foreground hover:text-foreground p-0.5 rounded">
+                        <X size={14} />
+                      </button>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground mb-1.5">How did the customer provide this document?</p>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {PROXY_METHODS.map((m) => (
+                          <button type="button" key={m} onClick={() => setProxyUploadMethod(m)}
+                            className={`text-[11px] px-2 py-1.5 rounded-md border font-medium transition-colors ${
+                              proxyUploadMethod === m
+                                ? "bg-primary text-primary-foreground border-primary"
+                                : "border-border text-muted-foreground hover:bg-muted"
+                            }`}>
+                            {PROXY_METHOD_LABELS[m]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <textarea
+                      value={proxyUploadRemarks} onChange={(e) => setProxyUploadRemarks(e.target.value)}
+                      placeholder="Brief note on how/when the document was received…"
+                      rows={2}
+                      className="w-full text-xs border border-border rounded-md px-2.5 py-2 bg-background resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <div className="flex items-center gap-2">
+                      <input type="file" ref={proxyAttachRef} className="hidden"
+                        onChange={(e) => setProxyUploadFile(e.target.files?.[0] || null)} />
+                      <button type="button" onClick={() => proxyAttachRef.current?.click()}
+                        className="flex-1 min-w-0 text-xs px-2.5 py-1.5 border border-dashed border-border rounded-md font-medium hover:bg-muted flex items-center gap-1.5 text-muted-foreground transition-colors">
+                        <Upload size={11} className="shrink-0" />
+                        <span className="truncate">{proxyUploadFile ? proxyUploadFile.name : "Choose File…"}</span>
+                      </button>
+                      <button type="button" onClick={handleProxyAttach}
+                        disabled={proxyUploading || !proxyUploadFile || !proxyUploadRemarks.trim()}
+                        className="shrink-0 text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-md font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                        {proxyUploading ? "Uploading…" : "Submit"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {!!doc.FilePath && (
               <div className="flex justify-between items-center text-xs text-muted-foreground">
                 <span>{doc.FileName} {doc.FileSize ? `· ${fmtBytes(doc.FileSize)}` : ""}{doc.IssuedBy ? ` · by ${doc.IssuedBy}` : ""}</span>

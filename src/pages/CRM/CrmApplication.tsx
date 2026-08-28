@@ -1366,10 +1366,7 @@ const CrmApplication: React.FC = () => {
     // message instead of a round-trip 400 that translateError's generic
     // "required" fallback used to flatten into an unhelpful "fill in all
     // required fields" toast pointing at nothing.
-    if (form.TokenValue && bankOptions.length > 0 && !form.DepositBankId) {
-      toast.error("Select which company bank this token payment landed in (Deposited To)");
-      return;
-    }
+
     setSaving(true);
     try {
       await saveApplicationFields({
@@ -2475,26 +2472,7 @@ const CrmApplication: React.FC = () => {
                       {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
                     </select>
                   </div>
-                  {/* Which real company bank this token payment landed in —
-                      required by the backend (crmApplications.js PUT /:id)
-                      the moment a project has any tagged bank, but this
-                      picker never actually rendered here before, so staff
-                      had no way to satisfy that check and Submit would fail
-                      with no visible field to fix. Same "Deposited To"
-                      pattern as CrmBooking.tsx. */}
-                  {bankOptions.length > 0 && (
-                    <div>
-                      <label className={labelCls}>Deposited To *</label>
-                      <select value={form.DepositBankId} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
-                        onChange={(e) => setForm((f) => ({ ...f, DepositBankId: e.target.value }))}
-                        className={inputCls}>
-                        <option value="">— Select bank —</option>
-                        {(bankOptions as any[]).map((b: any) => (
-                          <option key={b.BId} value={String(b.BId)}>{b.BName}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+
                   {/* Instrument reference — appears only once a non-Cash mode
                       is picked, since that's the only time there's actually
                       anything to reference. Cheque gets its own number/date
@@ -3279,25 +3257,35 @@ const ParkingSelectionStep: React.FC<{
   useEffect(() => {
     setSelectedSlotId("");
     const rate = (availableRates as any[]).find((r: any) => r.ParkingType === selectedType);
-    setRateOverride(rate ? String(rate.Charge) : "");
-    setRateEditing(false);
+    setRateOverride(rate && rate.Charge != null ? String(rate.Charge) : "");
+    // Unrated types have no master price — jump straight to the editable input.
+    setRateEditing(!rate || !!rate.NeedsRate);
   }, [selectedType]);
 
   const handleAdd = async () => {
     if (!currentType) return;
     if (!currentType.HasSlots) { toast.error("No slots available for this parking type"); return; }
     if (!selectedSlotId) { toast.error("Select a slot"); return; }
+    if (currentType.NeedsRate && (!rateOverride || Number(rateOverride) <= 0)) {
+      toast.error("Enter a price for this parking type"); return;
+    }
     setAdding(true);
     try {
       const body: any = {
-        ApplicationId: applicationId, ParkingMasterId: currentType.ParkingMasterId,
+        ApplicationId: applicationId,
         ParkingSlotId: parseInt(selectedSlotId), Quantity: 1,
-        // Only send a RateOverride when the user explicitly unlocked and changed the rate.
-        // Pre-filling the field with the master rate should not be treated as an override.
-        ...(rateEditing && rateOverride && Number(rateOverride) !== Number(currentType.Charge)
-          ? { RateOverride: rateOverride }
-          : {}),
       };
+      if (currentType.NeedsRate) {
+        // No ParkingMaster row — send type and mandatory price directly.
+        body.ParkingType = currentType.ParkingType;
+        body.RateOverride = rateOverride;
+      } else {
+        body.ParkingMasterId = currentType.ParkingMasterId;
+        // Only send RateOverride when the user explicitly changed it from the master rate.
+        if (rateEditing && rateOverride && Number(rateOverride) !== Number(currentType.Charge)) {
+          body.RateOverride = rateOverride;
+        }
+      }
       const res = await fetchWithAuth(`${PARKING_API}/standalone`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
@@ -3388,11 +3376,7 @@ const ParkingSelectionStep: React.FC<{
       {!canEdit ? null : !projectId ? (
         <p className="text-xs text-muted-foreground">Select a project in Step 1 to choose parking.</p>
       ) : (availableRates as any[]).length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {unratedTypesWithInventory.length > 0
-            ? `${unratedTypesWithInventory.join(", ")} parking slots exist for this project, but no rate is configured — add one in Parking Rate Master.`
-            : "No parking rates configured for this project."}
-        </p>
+        <p className="text-xs text-muted-foreground">No parking configured for this project.</p>
       ) : (
         <div className="rounded-lg border border-border p-3 space-y-3">
           <div>
@@ -3418,7 +3402,7 @@ const ParkingSelectionStep: React.FC<{
                 const disabled = r.NoInventory || noneInBlock;
                 return (
                   <option key={r.ParkingType} value={r.ParkingType} disabled={disabled}>
-                    {r.ParkingType} — ₹{Number(r.Charge).toLocaleString("en-IN")} each
+                    {r.ParkingType} — {r.NeedsRate ? "price required" : `₹${Number(r.Charge).toLocaleString("en-IN")} each`}
                     {r.HasSlots ? ` (${r.AvailableSlots.length} available)` : ""}
                     {r.NoInventory ? " — Not available (no slots set up yet)" : ""}
                     {soldOutEverywhere ? " — Sold out" : ""}
@@ -3450,39 +3434,44 @@ const ParkingSelectionStep: React.FC<{
             </p>
           )}
 
-          {/* Rate — locked by default, shows the master rate clearly.
-              Click the pencil to unlock if a negotiated price applies. */}
+          {/* Rate — for types with a master rate: locked by default, edit to override.
+              For unrated types (NeedsRate): always editable, price is mandatory. */}
           {currentType && currentType.HasSlots && (
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-xs text-muted-foreground">Rate (₹ per unit)</label>
-                {!rateEditing ? (
-                  <button
-                    type="button"
-                    onClick={() => setRateEditing(true)}
-                    className="text-[11px] text-muted-foreground hover:text-primary flex items-center gap-0.5 transition-colors"
-                    title="Override rate for this customer"
-                  >
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                    Edit
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => { setRateOverride(currentType ? String(currentType.Charge) : ""); setRateEditing(false); }}
-                    className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                    title="Reset to master rate"
-                  >
-                    ↺ Reset
-                  </button>
+                <label className="text-xs text-muted-foreground">
+                  Rate (₹ per unit){currentType.NeedsRate && <span className="text-red-500 ml-0.5">*</span>}
+                </label>
+                {!currentType.NeedsRate && (
+                  !rateEditing ? (
+                    <button
+                      type="button"
+                      onClick={() => setRateEditing(true)}
+                      className="text-[11px] text-muted-foreground hover:text-primary flex items-center gap-0.5 transition-colors"
+                      title="Override rate for this customer"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                      Edit
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { setRateOverride(currentType ? String(currentType.Charge) : ""); setRateEditing(false); }}
+                      className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                      title="Reset to master rate"
+                    >
+                      ↺ Reset
+                    </button>
+                  )
                 )}
               </div>
-              {rateEditing ? (
+              {currentType.NeedsRate || rateEditing ? (
                 <input
                   type="number" min={0}
                   value={rateOverride}
                   onChange={(e) => setRateOverride(e.target.value)}
-                  autoFocus
+                  autoFocus={currentType.NeedsRate}
+                  placeholder={currentType.NeedsRate ? "Enter price…" : ""}
                   className="w-full text-sm border border-primary rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
               ) : (
@@ -3496,12 +3485,17 @@ const ParkingSelectionStep: React.FC<{
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/50"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                 </div>
               )}
-              {rateEditing && rateOverride && Number(rateOverride) !== Number(currentType.Charge) && (
+              {currentType.NeedsRate && (
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  No rate is configured in Parking Rate Master — enter the agreed price manually.
+                </p>
+              )}
+              {!currentType.NeedsRate && rateEditing && rateOverride && Number(rateOverride) !== Number(currentType.Charge) && (
                 <p className="text-[11px] text-amber-600 mt-1">
                   Master rate is ₹{Number(currentType.Charge).toLocaleString("en-IN")} — you're overriding to ₹{Number(rateOverride).toLocaleString("en-IN")}.
                 </p>
               )}
-              {!rateEditing && (
+              {!currentType.NeedsRate && !rateEditing && (
                 <p className="text-[11px] text-muted-foreground mt-1">
                   Master rate. Click <span className="font-medium">Edit</span> to set a negotiated price.
                 </p>

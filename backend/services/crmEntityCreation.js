@@ -829,7 +829,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   const parkingHolds = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId)).query(`
     SELECT h.Id, h.EntityId AS ParkingSlotId, h.RateOverride
     FROM dbo.CrmInventoryHold h
-    WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+    WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = 'Active'
   `);
   for (const hold of parkingHolds.recordset) {
     try {
@@ -844,11 +844,19 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
           WHERE ProjectId = @pid AND ParkingType = @pt AND IsActive = 1 AND (BlockId = @bid2 OR BlockId IS NULL)
           ORDER BY CASE WHEN BlockId = @bid2 THEN 0 ELSE 1 END
         `);
-      if (!rate.recordset.length) continue;
-      await applyAddParking(pool, bookingId, {
-        ParkingMasterId: rate.recordset[0].Id, ParkingSlotId: hold.ParkingSlotId, Quantity: 1,
-        RateOverride: hold.RateOverride,
-      }, actorUserId);
+      if (rate.recordset.length) {
+        await applyAddParking(pool, bookingId, {
+          ParkingMasterId: rate.recordset[0].Id, ParkingSlotId: hold.ParkingSlotId, Quantity: 1,
+          RateOverride: hold.RateOverride,
+        }, actorUserId);
+      } else if (hold.RateOverride != null) {
+        // Unrated type — no ParkingMaster row; use the price staff entered in the wizard.
+        await applyAddParking(pool, bookingId, {
+          ParkingType, ParkingSlotId: hold.ParkingSlotId, Quantity: 1,
+          Charge: hold.RateOverride, GstRate: 0,
+        }, actorUserId);
+      }
+      // No rate AND no override: hold can't be converted — log and skip.
     } catch (parkErr) {
       console.error("[crm-entity-creation] parking hold conversion failed:", parkErr.message);
     }

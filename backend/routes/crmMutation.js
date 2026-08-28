@@ -7,6 +7,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { logCrmAudit } = require("../services/crmAudit");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -92,7 +93,8 @@ router.post("/", requirePageRight("crm-mutation", "create"), async (req, res) =>
   }
 });
 
-// PUT /:id — update all editable fields including Status and approval details.
+// PUT /:id — update editable metadata fields only. Status is never accepted here;
+// use PUT /:id/approve for the Approved transition.
 router.put("/:id", requirePageRight("crm-mutation", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -102,15 +104,13 @@ router.put("/:id", requirePageRight("crm-mutation", "edit"), async (req, res) =>
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmMutation WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Mutation record not found" });
 
-    if (b.Status && !["Applied", "Approved"].includes(b.Status))
-      return res.status(400).json({ error: "Status must be Applied or Approved" });
+    if (b.Status) return res.status(400).json({ error: "Use PUT /:id/approve to advance the status" });
 
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     await pool.request()
       .input("id",   sql.Int, id)
-      .input("st",   sql.NVarChar(20),  b.Status          || null)
       .input("ano",  sql.NVarChar(100), b.ApplicationNo   || null)
       .input("ad",   sql.Date,          b.ApplicationDate || null)
       .input("apno", sql.NVarChar(100), b.ApprovedNo      || null)
@@ -120,7 +120,6 @@ router.put("/:id", requirePageRight("crm-mutation", "edit"), async (req, res) =>
       .input("ub",   sql.Int,           actorId(req))
       .query(`
         UPDATE dbo.CrmMutation SET
-          Status          = ISNULL(@st,   Status),
           ApplicationNo   = ISNULL(@ano,  ApplicationNo),
           ApplicationDate = ISNULL(@ad,   ApplicationDate),
           ApprovedNo      = ISNULL(@apno, ApprovedNo),
@@ -134,6 +133,49 @@ router.put("/:id", requirePageRight("crm-mutation", "edit"), async (req, res) =>
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-mutation] PUT error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/approve — advance from Applied → Approved. One-way; cannot be reversed.
+router.put("/:id/approve", requirePageRight("crm-mutation", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const b = req.body;
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId, Status, MutationNo FROM dbo.CrmMutation WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Mutation record not found" });
+    if (cur.recordset[0].Status === "Approved") return res.status(400).json({ error: "Already approved" });
+
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    await pool.request()
+      .input("id",   sql.Int, id)
+      .input("apno", sql.NVarChar(100), b.ApprovedNo   || null)
+      .input("apd",  sql.Date,          b.ApprovedDate || null)
+      .input("rem",  sql.NVarChar(sql.MAX), b.Remarks  || null)
+      .input("ub",   sql.Int,           actorId(req))
+      .query(`
+        UPDATE dbo.CrmMutation SET
+          Status       = 'Approved',
+          ApprovedNo   = ISNULL(@apno, ApprovedNo),
+          ApprovedDate = ISNULL(@apd,  CONVERT(DATE, SYSDATETIME())),
+          Remarks      = ISNULL(@rem,  Remarks),
+          UpdatedBy    = @ub,
+          UpdatedAt    = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    await logCrmAudit(pool, "Mutation", id, actorId(req), [
+      { field: "Status", oldVal: "Applied", newVal: "Approved" },
+    ]);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-mutation] PUT /:id/approve error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

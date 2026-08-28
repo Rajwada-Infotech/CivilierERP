@@ -128,20 +128,38 @@ const CrmMutation: React.FC = () => {
     if (!editId) return;
     setUpdating(true);
     try {
-      const res = await fetchWithAuth(`${API}/${editId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          Status: editForm.Status || undefined,
-          ApplicationNo: editForm.ApplicationNo || undefined,
-          ApplicationDate: editForm.ApplicationDate || undefined,
-          ApprovedNo: editForm.ApprovedNo || undefined,
-          ApprovedDate: editForm.ApprovedDate || undefined,
-          Authority: editForm.Authority || undefined,
-          Remarks: editForm.Remarks || undefined,
-        }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error);
+      const currentRow = (rows as any[]).find((r: any) => r.Id === editId);
+      const isApproving = editForm.Status === "Approved" && currentRow?.Status !== "Approved";
+
+      if (isApproving) {
+        // Advance Applied → Approved via the dedicated one-way endpoint
+        const res = await fetchWithAuth(`${API}/${editId}/approve`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ApprovedNo: editForm.ApprovedNo || undefined,
+            ApprovedDate: editForm.ApprovedDate || undefined,
+            Remarks: editForm.Remarks || undefined,
+          }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error);
+      } else {
+        // Generic metadata update — Status not accepted
+        const res = await fetchWithAuth(`${API}/${editId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ApplicationNo: editForm.ApplicationNo || undefined,
+            ApplicationDate: editForm.ApplicationDate || undefined,
+            ApprovedNo: editForm.ApprovedNo || undefined,
+            ApprovedDate: editForm.ApprovedDate || undefined,
+            Authority: editForm.Authority || undefined,
+            Remarks: editForm.Remarks || undefined,
+          }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error);
+      }
+
       toast.success("Updated");
       setEditId(null);
       qc.invalidateQueries({ queryKey: ["crm-mutation"] });

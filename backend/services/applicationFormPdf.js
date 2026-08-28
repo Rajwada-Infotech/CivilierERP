@@ -114,10 +114,11 @@ async function fetchApplicationFormData(pool, applicationId) {
   if (d.BookingId) {
     const [parkRes, extraRes] = await Promise.all([
       pool.request().input("bid", sql.Int, d.BookingId).query(`
-        SELECT p.ParkingType AS Type, pa.ParkingSlotNo, pa.Quantity,
+        SELECT COALESCE(p.ParkingType, s.ParkingType) AS Type, pa.ParkingSlotNo, pa.Quantity,
                pa.RateSnapshot, pa.GstRateSnapshot, pa.GstAmount, pa.TotalAmount
         FROM dbo.CrmParkingAllotment pa
-        JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
+        LEFT JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
+        LEFT JOIN dbo.ParkingSlot s ON s.Id = pa.ParkingSlotId
         WHERE pa.BookingId = @bid AND pa.IsActive = 1
       `),
       pool.request().input("bid", sql.Int, d.BookingId).query(`
@@ -130,10 +131,11 @@ async function fetchApplicationFormData(pool, applicationId) {
   } else {
     const [parkRes, holdRes, extraRes] = await Promise.all([
       pool.request().input("aid", sql.Int, applicationId).query(`
-        SELECT p.ParkingType AS Type, pa.ParkingSlotNo, pa.Quantity,
+        SELECT COALESCE(p.ParkingType, s.ParkingType) AS Type, pa.ParkingSlotNo, pa.Quantity,
                pa.RateSnapshot, pa.GstRateSnapshot, pa.GstAmount, pa.TotalAmount
         FROM dbo.CrmParkingAllotment pa
-        JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
+        LEFT JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
+        LEFT JOIN dbo.ParkingSlot s ON s.Id = pa.ParkingSlotId
         WHERE pa.ApplicationId = @aid AND pa.IsActive = 1
       `),
       pool.request().input("aid", sql.Int, applicationId).query(`

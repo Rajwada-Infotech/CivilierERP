@@ -84,6 +84,13 @@ router.put("/:id", requirePageRight("crm-possession-notice", "edit"), async (req
     const pool = getPool();
     const b = req.body;
     const id = parseInt(req.params.id);
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId FROM dbo.CrmPossessionNotice WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
     await pool.request()
       .input("id", sql.Int, id)
       .input("odt", sql.Date, b.OfferedDate || null)

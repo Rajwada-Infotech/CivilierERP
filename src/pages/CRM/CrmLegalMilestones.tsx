@@ -71,6 +71,24 @@ function buildJourneySections(t: any, agrDone: boolean): JourneySection[] {
 
   return [
     {
+      title: "Allotment Letter",
+      description:
+        "Issued to the buyer after at least 10% of the total consideration has been received. The buyer signs and returns it; this acknowledgement starts the 30-day Agreement for Sale clock under RERA.",
+      stages: [
+        {
+          key: "allotmentLetter",
+          label: "Allotment Letter",
+          sublabel: "Issued after 10% payment; buyer acknowledges receipt",
+          path: "/crm/allotment-letter",
+          no: t.AlNo || null,
+          status: t.AllotmentLetterStatus || null,
+          isDone: t.AllotmentLetterStatus === "Acknowledged",
+          isLocked: false,
+          unlockedHint: "",
+        },
+      ],
+    },
+    {
       title: "Sub-Registrar Visit 1 — Registering the Agreement for Sale",
       description:
         "Before the property deal is legally recognised, the Agreement for Sale must be registered at the Sub-Registrar's Office. First the buyer confirms the stamp duty & registration fees, then both parties attend in person to register the document.",
@@ -183,6 +201,24 @@ function buildJourneySections(t: any, agrDone: boolean): JourneySection[] {
           isDone: t.OrgNocStatus === "Issued",
           isLocked: false,
           unlockedHint: "",
+        },
+      ],
+    },
+    {
+      title: "Possession & Key Handover",
+      description:
+        "Once all registrations and formalities are complete, the developer issues a Possession Notice to the buyer with the offered possession date. The buyer acknowledges receipt to confirm key handover.",
+      stages: [
+        {
+          key: "possessionNotice",
+          label: "Possession Notice",
+          sublabel: "Developer issues notice; buyer acknowledges or disputes",
+          path: "/crm/possession-notice",
+          no: null,
+          status: t.PossessionNoticeStatus || null,
+          isDone: t.PossessionNoticeStatus === "Acknowledged",
+          isLocked: t.RegistryStatus !== "Completed",
+          unlockedHint: "Requires Sale Deed Registration Visit to be Completed first",
         },
       ],
     },

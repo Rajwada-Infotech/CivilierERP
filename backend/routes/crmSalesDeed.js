@@ -195,8 +195,8 @@ router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), 
     `);
     const activeErr = await requireActiveBooking(pool, bookingRow.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
-    if (deed.recordset[0].AgreementStatus !== CrmStatus.EXECUTED) {
-      return res.status(400).json({ error: "Agreement must be executed before sending the sales deed to the customer" });
+    if (!["Executed", "Registered"].includes(deed.recordset[0].AgreementStatus)) {
+      return res.status(400).json({ error: "Agreement must be at least Executed before sending the sales deed to the customer" });
     }
     if (deed.recordset[0].Status === CrmStatus.REGISTERED) {
       return res.status(400).json({ error: "Registered sales deed cannot be resent for customer approval" });

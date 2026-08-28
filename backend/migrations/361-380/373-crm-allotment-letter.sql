@@ -18,12 +18,12 @@ BEGIN
     Id        INT           IDENTITY(1,1) PRIMARY KEY,
     AlNo      NVARCHAR(30)  NOT NULL,
     BookingId INT           NOT NULL REFERENCES dbo.CrmBooking(Id),
-    -- 'Draft' -> 'Issued'
-    Status    NVARCHAR(20)  NOT NULL DEFAULT 'Draft',
-    DraftedOn DATE          NULL,
-    IssuedOn  DATE          NULL,
+    -- 'Issued' -> 'Acknowledged'
+    Status    NVARCHAR(20)  NOT NULL DEFAULT 'Issued',
+    IssuedOn  DATE          NOT NULL DEFAULT CONVERT(DATE, SYSDATETIME()),
+    AcknowledgedOn DATE     NULL,
     Remarks   NVARCHAR(MAX) NULL,
-    -- Optional: the actual letter PDF stored inline
+    -- Optional: the actual signed letter PDF stored inline
     FileName  NVARCHAR(255) NULL,
     MimeType  NVARCHAR(100) NULL,
     FileSize  INT           NULL,

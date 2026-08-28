@@ -1911,8 +1911,10 @@ router.post("/:id/documents/:docId/proxy-attach",
           WHERE Id = @id
         `);
 
-      await logCrmAudit(pool, "CrmAgreementDocument", docId, "Status", "Requested", "Uploaded",
-        actor, `StaffProxy:${ProxyMethod}${ProxyRemarks ? " — " + ProxyRemarks.trim() : ""}`);
+      await logCrmAudit(pool, "CrmAgreementDocument", docId, actor, [
+        { field: "Status", oldVal: "Requested", newVal: "Uploaded" },
+        { field: "ProxyMethod", oldVal: null, newVal: `${ProxyMethod}${ProxyRemarks ? " — " + ProxyRemarks.trim() : ""}` },
+      ]);
 
       res.json({ success: true });
     } catch (e) {

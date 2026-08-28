@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -11,23 +11,45 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
-  Plus, RotateCcw, FileText, CheckCircle2, Send, X, Upload, ExternalLink, Eye, Download,
+  Plus, RotateCcw, FileText, CheckCircle2, X, Upload, ExternalLink,
+  Eye, Download, Clock, AlertTriangle, ArrowRight, Circle, Dot,
 } from "lucide-react";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/allotment-letter";
-const BKG_API = "/api/crm/bookings";
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function reraDeadline(acknowledgedOn: string | null): Date | null {
+  if (!acknowledgedOn) return null;
+  const d = new Date(acknowledgedOn);
+  d.setDate(d.getDate() + 30);
+  return d;
+}
+
+function daysFrom(date: Date): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((date.getTime() - today.getTime()) / 86_400_000);
+}
+
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return String(iso).slice(0, 10);
+}
+
+// ─── Status badge ─────────────────────────────────────────────────────────────
 
 const STATUS_CFG: Record<string, { text: string; bar: string }> = {
-  Draft:  { text: "text-amber-700",   bar: "bg-amber-500"   },
-  Issued: { text: "text-emerald-700", bar: "bg-emerald-500" },
+  Issued:       { text: "text-amber-700",   bar: "bg-amber-500"   },
+  Acknowledged: { text: "text-emerald-700", bar: "bg-emerald-500" },
 };
 
 function StatusBadge({ status }: { status: string }) {
-  const c = STATUS_CFG[status] ?? STATUS_CFG.Draft;
+  const c = STATUS_CFG[status] ?? { text: "text-slate-700", bar: "bg-slate-500" };
   return (
     <span className={cn("inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 rounded-sm border border-border bg-card font-mono text-[10px] font-semibold uppercase tracking-wider", c.text)}>
       <span className={cn("w-[3px] h-3 rounded-[1px]", c.bar)} />
@@ -36,7 +58,9 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-interface StagedFile { name: string; size: number; type: string; base64: string; dataUri: string; }
+// ─── File staging ─────────────────────────────────────────────────────────────
+
+interface StagedFile { name: string; size: number; type: string; base64: string; }
 
 function fileToStaged(file: File): Promise<StagedFile> {
   return new Promise((resolve, reject) => {
@@ -44,126 +68,204 @@ function fileToStaged(file: File): Promise<StagedFile> {
     reader.onerror = () => reject(reader.error);
     reader.onload = () => {
       const dataUri = reader.result as string;
-      resolve({ name: file.name, size: file.size, type: file.type, base64: dataUri.slice(dataUri.indexOf(",") + 1), dataUri });
+      resolve({ name: file.name, size: file.size, type: file.type, base64: dataUri.slice(dataUri.indexOf(",") + 1) });
     };
     reader.readAsDataURL(file);
   });
 }
+
+// ─── API ─────────────────────────────────────────────────────────────────────
 
 async function fetchAll(): Promise<any[]> {
   const r = await fetchWithAuth(API);
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load Allotment Letters");
   return r.json();
 }
-async function fetchBookings(): Promise<any[]> {
-  const r = await fetchWithAuth(BKG_API);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load bookings");
+async function fetchEligible(): Promise<any[]> {
+  const r = await fetchWithAuth(API + "/eligible-bookings");
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load eligible bookings");
   return r.json();
 }
 
-function PdfPreviewModal({ alId, onClose }: { alId: number; onClose: () => void }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [fetchErr, setFetchErr] = useState<string | null>(null);
+// ─── RERA clock strip ─────────────────────────────────────────────────────────
 
-  React.useEffect(() => {
-    let objectUrl: string | null = null;
-    setLoading(true);
-    setFetchErr(null);
-    fetchWithAuth(`${API}/${alId}/pdf`)
-      .then((r) => r.blob())
-      .then((blob) => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); })
-      .catch((e: any) => setFetchErr(e.message || "Failed to load PDF"))
-      .finally(() => setLoading(false));
-    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [alId]);
+function ReraClockStrip({ acknowledgedOn }: { acknowledgedOn: string | null }) {
+  const deadline = reraDeadline(acknowledgedOn);
+  if (!deadline) return null;
+  const days = daysFrom(deadline);
+  const urgent = days <= 5;
+  const overdue = days < 0;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60" onClick={onClose}>
-      <div className="relative w-full max-w-4xl h-[90vh] rounded-2xl overflow-hidden shadow-2xl bg-white flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <FileText size={14} className="text-amber-400" />
-            <span className="text-sm font-semibold text-white">Allotment Letter Preview</span>
-          </div>
-          <div className="flex items-center gap-3">
-            {blobUrl && (
-              <a href={blobUrl} download={`allotment-letter-${alId}.pdf`}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-400 text-slate-900 hover:bg-amber-300">
-                <Download size={12} /> Download
-              </a>
-            )}
-            <button onClick={onClose} className="text-white/60 hover:text-white px-1">✕</button>
-          </div>
+    <div className={cn(
+      "rounded-lg border px-3 py-2.5 flex items-start gap-2.5",
+      overdue
+        ? "bg-rose-50 border-rose-200 text-rose-800"
+        : urgent
+          ? "bg-amber-50 border-amber-200 text-amber-800"
+          : "bg-sky-50 border-sky-200 text-sky-800"
+    )}>
+      <Clock size={14} className="mt-0.5 shrink-0" />
+      <div className="min-w-0">
+        <div className="text-xs font-semibold">
+          {overdue
+            ? `RERA 30-day clock expired ${Math.abs(days)} day${Math.abs(days) !== 1 ? "s" : ""} ago`
+            : days === 0
+              ? "RERA Agreement deadline is today"
+              : `RERA Agreement deadline in ${days} day${days !== 1 ? "s" : ""}`}
         </div>
-        <div className="flex-1 flex items-center justify-center overflow-hidden">
-          {loading && <span className="text-sm text-muted-foreground">Loading PDF…</span>}
-          {fetchErr && <span className="text-sm text-red-600">{fetchErr}</span>}
-          {blobUrl && <iframe src={blobUrl} title="Allotment Letter" className="w-full h-full border-0" />}
+        <div className="text-[11px] mt-0.5 opacity-80">
+          Acknowledged {fmtDate(acknowledgedOn)} → Agreement for Sale due by{" "}
+          {deadline.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
         </div>
       </div>
     </div>
   );
 }
 
+// ─── Workflow steps ───────────────────────────────────────────────────────────
+
+function WorkflowSteps({ status, issuedOn, acknowledgedOn }: {
+  status: string; issuedOn: string | null; acknowledgedOn: string | null;
+}) {
+  const steps = [
+    { label: "Generated", hint: "Letter created & issued", done: true, date: fmtDate(issuedOn) },
+    { label: "Shared with Customer", hint: "Print or email the PDF", done: status === "Acknowledged", date: null },
+    { label: "Acknowledged", hint: "Customer returns signed copy", done: status === "Acknowledged", date: fmtDate(acknowledgedOn) },
+  ];
+
+  return (
+    <div className="space-y-0">
+      {steps.map((s, i) => {
+        const isActive = !s.done && (i === 0 || steps[i - 1].done);
+        return (
+          <div key={s.label} className="relative flex gap-3">
+            {i < steps.length - 1 && (
+              <div className={cn("absolute left-[9px] top-5 bottom-0 w-px", s.done ? "bg-emerald-300" : "bg-border")} />
+            )}
+            <div className="shrink-0 mt-0.5 z-10">
+              {s.done
+                ? <CheckCircle2 size={19} className="text-emerald-600 bg-card" />
+                : isActive
+                  ? <div className="w-[19px] h-[19px] rounded-full border-2 border-primary bg-card flex items-center justify-center"><Dot size={10} className="text-primary" /></div>
+                  : <Circle size={19} className="text-border bg-card" />
+              }
+            </div>
+            <div className="pb-4 min-w-0">
+              <div className={cn("text-sm font-medium leading-tight", s.done ? "text-foreground" : isActive ? "text-primary" : "text-muted-foreground")}>
+                {s.label}
+              </div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">{s.hint}</div>
+              {s.done && s.date && s.date !== "—" && (
+                <div className="text-[11px] text-emerald-700 mt-0.5">{s.date}</div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 const CrmAllotmentLetter: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [sp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
   const { canCreate, canEdit } = usePageRights("crm-allotment-letter");
 
+  // Create
   const [createOpen, setCreateOpen] = useState(false);
-  const [newForm, setNewForm] = useState({ BookingId: "", DraftedOn: "", Remarks: "" });
+  const [newBookingId, setNewBookingId] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Detail / Acknowledge
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [issueRemarks, setIssueRemarks] = useState("");
+  const [ackDate, setAckDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [ackRemarks, setAckRemarks] = useState("");
   const [stagedFile, setStagedFile] = useState<StagedFile | null>(null);
   const [issuing, setIssuing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [previewId, setPreviewId] = useState<number | null>(null);
 
-  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-allotment-letter"], queryFn: fetchAll, staleTime: 30_000 });
-  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  // PDF preview
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
-  const trackedBookingIds = new Set((rows as any[]).map((r: any) => r.BookingId));
-  const startableBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
+  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-allotment-letter"], queryFn: fetchAll, staleTime: 30_000,
+  });
+  const { data: eligibleBookings = [] } = useQuery({
+    queryKey: ["crm-allotment-letter-eligible"], queryFn: fetchEligible, staleTime: 30_000,
+  });
 
   const selectedRow = selectedId != null ? (rows as any[]).find((r: any) => r.Id === selectedId) : null;
 
-  // Deep-link support
+  // Deep-link
   React.useEffect(() => {
     if (!deepLinkBookingId || !rows.length) return;
     const existing = (rows as any[]).find((r: any) => String(r.BookingId) === deepLinkBookingId);
-    if (existing) { setSelectedId(existing.Id); return; }
-    if (startableBookings.some((b: any) => String(b.Id) === deepLinkBookingId)) {
-      setNewForm((f) => ({ ...f, BookingId: deepLinkBookingId }));
+    if (existing) { openDetail(existing.Id); return; }
+    if (eligibleBookings.some((b: any) => String(b.Id) === deepLinkBookingId)) {
+      setNewBookingId(deepLinkBookingId);
       setCreateOpen(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkBookingId, rows.length]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkBookingId, rows.length, eligibleBookings]);
+
+  // PDF fetch when detail opens
+  React.useEffect(() => {
+    if (!selectedId) { setBlobUrl(null); return; }
+    let objectUrl: string | null = null;
+    setPdfLoading(true);
+    setPdfError(null);
+    fetchWithAuth(`${API}/${selectedId}/pdf`)
+      .then((r) => r.blob())
+      .then((blob) => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); })
+      .catch((e: any) => setPdfError(e.message || "Failed to load PDF"))
+      .finally(() => setPdfLoading(false));
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [selectedId]);
+
+  function openDetail(id: number) {
+    setSelectedId(id);
+    setAckDate(new Date().toISOString().slice(0, 10));
+    setAckRemarks("");
+    setStagedFile(null);
+  }
+
+  const stageFile = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error("File must be under 5 MB"); if (fileInputRef.current) fileInputRef.current.value = ""; return; }
+    try { setStagedFile(await fileToStaged(file)); } catch { toast.error("Failed to read file"); }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   const handleCreate = async () => {
-    if (!newForm.BookingId) { toast.error("Booking is required"); return; }
+    if (!newBookingId) { toast.error("Select a booking"); return; }
     setSaving(true);
     try {
-      const res = await fetchWithAuth(API, {
+      const res = await fetchWithAuth(`${API}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          BookingId: parseInt(newForm.BookingId),
-          DraftedOn: newForm.DraftedOn || undefined,
-          Remarks: newForm.Remarks || undefined,
-        }),
+        body: JSON.stringify({ BookingId: parseInt(newBookingId) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(`${data.AlNo} created`);
+      toast.success(`${data.AlNo} generated — share the PDF with the customer`);
       setCreateOpen(false);
-      setNewForm({ BookingId: "", DraftedOn: "", Remarks: "" });
+      setNewBookingId("");
       qc.invalidateQueries({ queryKey: ["crm-allotment-letter"] });
+      qc.invalidateQueries({ queryKey: ["crm-allotment-letter-eligible"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      // Auto-open the new letter
+      setTimeout(() => {
+        const latest = (qc.getQueryData(["crm-allotment-letter"]) as any[])?.find((r: any) => r.Id === data.id);
+        if (data.id) openDetail(data.id);
+      }, 500);
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -171,32 +273,27 @@ const CrmAllotmentLetter: React.FC = () => {
     }
   };
 
-  const stageFile = async (files: FileList | null) => {
-    const file = files?.[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { toast.error("File must be under 5MB"); if (fileInputRef.current) fileInputRef.current.value = ""; return; }
-    try { setStagedFile(await fileToStaged(file)); } catch { toast.error("Failed to read file"); }
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const handleIssue = async () => {
+  const handleAcknowledge = async () => {
     if (!selectedId) return;
+    if (!ackDate) { toast.error("Acknowledgement date is required"); return; }
     setIssuing(true);
     try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/issue`, {
+      const body: any = {
+        AcknowledgedOn: ackDate,
+        Remarks: ackRemarks || undefined,
+      };
+      if (stagedFile) {
+        body.file = { fileName: stagedFile.name, mimeType: stagedFile.type, base64: stagedFile.base64 };
+      }
+      const res = await fetchWithAuth(`${API}/${selectedId}/acknowledge`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          IssuedOn: issueDate || undefined,
-          Remarks: issueRemarks || undefined,
-          file: stagedFile ? { fileName: stagedFile.name, mimeType: stagedFile.type, base64: stagedFile.base64 } : undefined,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("Allotment Letter issued");
-      setSelectedId(null);
+      toast.success("Allotment Letter acknowledged — RERA 30-day Agreement clock has started");
       setStagedFile(null);
-      setIssueRemarks("");
+      setAckRemarks("");
       qc.invalidateQueries({ queryKey: ["crm-allotment-letter"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
     } catch (e: any) {
@@ -206,46 +303,95 @@ const CrmAllotmentLetter: React.FC = () => {
     }
   };
 
+  const retryPdf = () => {
+    if (!selectedRow) return;
+    setPdfError(null);
+    setPdfLoading(true);
+    let objectUrl: string | null = null;
+    fetchWithAuth(`${API}/${selectedRow.Id}/pdf`)
+      .then((r) => r.blob())
+      .then((blob) => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); })
+      .catch((e: any) => setPdfError(e.message || "Failed to load PDF"))
+      .finally(() => setPdfLoading(false));
+  };
+
+  // Days since issued (for overdue warning on list)
+  function daysSinceIssued(row: any): number | null {
+    if (!row.IssuedOn || row.Status === "Acknowledged") return null;
+    return -daysFrom(new Date(row.IssuedOn));
+  }
+
   const columns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "AlNo", header: "AL No", size: 110,
-      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
-    { accessorKey: "ApplicantName", header: "Customer", size: 180,
+    {
+      accessorKey: "AlNo", header: "AL No", size: 100,
+      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span>,
+    },
+    {
+      accessorKey: "ApplicantName", header: "Customer", size: 200,
       cell: (i) => (
         <div>
-          <div className="font-medium">{i.row.original.ApplicantName}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
+          <div className="font-medium text-sm">{i.row.original.ApplicantName}</div>
+          <div className="text-[11px] text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
         </div>
-      ) },
-    { accessorKey: "Status", header: "Status", size: 90,
-      cell: (i) => <StatusBadge status={i.row.original.Status} /> },
-    { accessorKey: "DraftedOn", header: "Drafted", size: 100,
-      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.DraftedOn ? String(i.row.original.DraftedOn).slice(0, 10) : "—"}</span> },
-    { accessorKey: "IssuedOn", header: "Issued", size: 100,
-      cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.IssuedOn ? String(i.row.original.IssuedOn).slice(0, 10) : "—"}</span> },
-    { id: "file", header: "PDF", size: 90, enableSorting: false,
+      ),
+    },
+    {
+      accessorKey: "Status", header: "Status", size: 110,
       cell: (i) => {
-        const r = i.row.original;
+        const row = i.row.original;
+        const dsI = daysSinceIssued(row);
         return (
-          <button
-            onClick={() => setPreviewId(r.Id)}
-            className="flex items-center gap-1 text-xs text-primary hover:underline"
-            title="Preview & Download PDF"
-          >
-            <Eye size={11} /> View PDF
-          </button>
+          <div className="flex flex-col gap-1">
+            <StatusBadge status={row.Status} />
+            {dsI !== null && dsI > 7 && (
+              <span className="text-[10px] text-amber-600 flex items-center gap-0.5">
+                <AlertTriangle size={10} /> {dsI}d pending
+              </span>
+            )}
+          </div>
         );
-      } },
-    { id: "actions", header: "", size: 80, enableSorting: false,
+      },
+    },
+    {
+      accessorKey: "IssuedOn", header: "Issued", size: 90,
+      cell: (i) => <span className="text-xs text-muted-foreground">{fmtDate(i.row.original.IssuedOn)}</span>,
+    },
+    {
+      accessorKey: "AcknowledgedOn", header: "Ack. Date", size: 90,
+      cell: (i) => {
+        const row = i.row.original;
+        if (!row.AcknowledgedOn) return <span className="text-xs text-muted-foreground">—</span>;
+        const deadline = reraDeadline(row.AcknowledgedOn);
+        const days = deadline ? daysFrom(deadline) : null;
+        return (
+          <div>
+            <div className="text-xs text-muted-foreground">{fmtDate(row.AcknowledgedOn)}</div>
+            {days !== null && (
+              <div className={cn("text-[10px]", days < 0 ? "text-rose-600" : days <= 5 ? "text-amber-600" : "text-sky-600")}>
+                {days < 0 ? `Deadline passed ${Math.abs(days)}d ago` : days === 0 ? "Deadline today" : `${days}d to agr.`}
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: "actions", header: "", size: 80, enableSorting: false,
       cell: (i) => (
-        <button onClick={() => { setSelectedId(i.row.original.Id); setIssueDate(new Date().toISOString().slice(0, 10)); setIssueRemarks(""); setStagedFile(null); }}
-          className="text-xs text-primary hover:underline">Open</button>
-      ) },
+        <button
+          onClick={() => openDetail(i.row.original.Id)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-secondary text-secondary-foreground rounded hover:bg-secondary/80 transition-colors w-full justify-center"
+        >
+          Open
+        </button>
+      ),
+    },
   ];
 
   return (
     <CrmShell
       title="Allotment Letter"
-      subtitle="RERA-mandated letter issued to the buyer after booking, confirming the allotted unit, booking amount, and payment schedule"
+      subtitle="Issued after 10% payment is received. Acknowledgement triggers the 30-day RERA clock for the Agreement for Sale."
       action={
         <div className="flex items-center gap-3">
           {dataUpdatedAt > 0 && (
@@ -256,9 +402,11 @@ const CrmAllotmentLetter: React.FC = () => {
             </button>
           )}
           {canCreate && (
-            <button onClick={() => setCreateOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-              <Plus size={14} /> New Allotment Letter
+            <button
+              onClick={() => { qc.invalidateQueries({ queryKey: ["crm-allotment-letter-eligible"] }); setCreateOpen(true); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90"
+            >
+              <Plus size={14} /> Generate Letter
             </button>
           )}
         </div>
@@ -274,154 +422,264 @@ const CrmAllotmentLetter: React.FC = () => {
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
 
-      {/* Create dialog */}
-      <Dialog open={createOpen} onOpenChange={(o) => { if (!o) { setCreateOpen(false); setNewForm({ BookingId: "", DraftedOn: "", Remarks: "" }); } }}>
+      {/* ── Generate dialog ─────────────────────────────────────────────── */}
+      <Dialog open={createOpen} onOpenChange={(o) => { if (!o) { setCreateOpen(false); setNewBookingId(""); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle className="font-heading">New Allotment Letter</DialogTitle>
+            <DialogTitle className="font-heading">Generate Allotment Letter</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select value={newForm.BookingId} onChange={(e) => setNewForm((f) => ({ ...f, BookingId: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select booking</option>
-                {startableBookings.map((b: any) => (
-                  <option key={b.Id} value={String(b.Id)}>{b.BookingNo} · {b.ApplicantName}</option>
+              <label className="text-xs text-muted-foreground block mb-1">Eligible Booking *</label>
+              <select
+                value={newBookingId}
+                onChange={(e) => setNewBookingId(e.target.value)}
+                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+              >
+                <option value="">Select booking…</option>
+                {(eligibleBookings as any[]).map((b: any) => (
+                  <option key={b.Id} value={String(b.Id)}>
+                    {b.BookingNo} · {b.ApplicantName}
+                  </option>
                 ))}
               </select>
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Draft Date</label>
-              <Input type="date" className="h-9 text-sm" value={newForm.DraftedOn} onChange={(e) => setNewForm((f) => ({ ...f, DraftedOn: e.target.value }))} />
+            {eligibleBookings.length === 0 && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 p-2.5 rounded-lg">
+                No bookings are eligible yet. A booking must be Approved + have at least 10% of the total consideration received.
+              </p>
+            )}
+            <div className="bg-muted/40 rounded-lg px-3 py-2.5 space-y-1 text-[11px] text-muted-foreground">
+              <div className="flex items-center gap-1.5 font-medium text-foreground text-xs"><Clock size={12} /> What happens next</div>
+              <div>1. Letter is instantly generated and marked <strong>Issued</strong>.</div>
+              <div>2. Download the PDF and share it with the customer.</div>
+              <div>3. When the customer returns the signed copy, record <strong>Acknowledgement</strong> — this starts the 30-day RERA clock.</div>
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Remarks</label>
-              <Textarea rows={2} className="resize-none text-sm" value={newForm.Remarks} onChange={(e) => setNewForm((f) => ({ ...f, Remarks: e.target.value }))} />
-            </div>
-            <p className="text-[11px] text-muted-foreground">The letter starts in Draft. Attach and issue the PDF from the record after drafting.</p>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setCreateOpen(false); setNewForm({ BookingId: "", DraftedOn: "", Remarks: "" }); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleCreate} disabled={saving || !newForm.BookingId}
+            <button onClick={() => { setCreateOpen(false); setNewBookingId(""); }}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+              Cancel
+            </button>
+            <button onClick={handleCreate} disabled={saving || !newBookingId}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Creating..." : "Create Draft"}
+              {saving ? "Generating…" : "Generate"}
             </button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Detail / Issue dialog */}
+      {/* ── Detail split-panel dialog ────────────────────────────────────── */}
       <Dialog open={!!selectedId} onOpenChange={(o) => !o && setSelectedId(null)}>
-        <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+        <DialogContent className="max-w-5xl h-[88vh] p-0 gap-0 overflow-hidden flex flex-col md:flex-row">
           {selectedRow && (
             <>
-              <DialogHeader className="px-6 py-4 border-b border-border">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <FileText size={15} className="text-primary" />
-                  </div>
-                  <div className="min-w-0">
-                    <DialogTitle className="text-sm font-semibold font-heading font-mono">{selectedRow.AlNo}</DialogTitle>
-                    <DialogDescription className="text-[11px] mt-0.5">Allotment Letter</DialogDescription>
-                  </div>
-                  <div className="ml-auto">
+              {/* LEFT PANEL — workflow + actions */}
+              <div className="w-full md:w-[380px] flex flex-col border-r border-border bg-card shrink-0 h-full overflow-y-auto">
+                {/* Header */}
+                <div className="px-5 py-4 border-b border-border sticky top-0 bg-card z-10">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded bg-primary/10 flex items-center justify-center">
+                        <FileText size={14} className="text-primary" />
+                      </div>
+                      <DialogTitle className="text-sm font-semibold font-mono">{selectedRow.AlNo}</DialogTitle>
+                    </div>
                     <StatusBadge status={selectedRow.Status} />
                   </div>
                 </div>
-              </DialogHeader>
 
-              <div className="px-6 py-4 space-y-4">
-                <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
-                  <p className="text-sm font-semibold text-foreground">{selectedRow.ApplicantName}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{selectedRow.BookingNo} · {selectedRow.UnitNo} · {selectedRow.Mobile}</p>
-                  {selectedRow.DraftedOn && (
-                    <p className="text-[11px] mt-1 text-muted-foreground">Drafted {String(selectedRow.DraftedOn).slice(0, 10)}</p>
+                <div className="p-5 space-y-5 flex-1">
+                  {/* Customer & booking */}
+                  <div className="bg-muted/30 rounded-lg p-3 border border-border space-y-0.5">
+                    <div className="font-semibold text-sm">{selectedRow.ApplicantName}</div>
+                    <div className="text-xs text-muted-foreground">{selectedRow.BookingNo} · {selectedRow.UnitNo}</div>
+                    {selectedRow.Mobile && <div className="text-xs text-muted-foreground">{selectedRow.Mobile}</div>}
+                    {selectedRow.IssuedOn && (
+                      <div className="text-[11px] text-muted-foreground pt-1 border-t border-border/60 mt-1.5">
+                        Issued on {fmtDate(selectedRow.IssuedOn)}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Workflow steps */}
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Workflow</div>
+                    <WorkflowSteps
+                      status={selectedRow.Status}
+                      issuedOn={selectedRow.IssuedOn}
+                      acknowledgedOn={selectedRow.AcknowledgedOn}
+                    />
+                  </div>
+
+                  {/* RERA clock */}
+                  {selectedRow.Status === "Acknowledged" && (
+                    <ReraClockStrip acknowledgedOn={selectedRow.AcknowledgedOn} />
                   )}
-                </div>
 
-                {selectedRow.Status === "Issued" ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-1.5 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
-                      <CheckCircle2 size={15} />
-                      <div>
-                        <div className="font-medium">Issued to customer</div>
-                        {selectedRow.IssuedOn && <div className="text-xs mt-0.5">{String(selectedRow.IssuedOn).slice(0, 10)}</div>}
+                  {/* Acknowledged state */}
+                  {selectedRow.Status === "Acknowledged" ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5">
+                        <CheckCircle2 size={15} className="shrink-0" />
+                        <div>
+                          <div className="font-medium">Customer acknowledged receipt</div>
+                          {selectedRow.AcknowledgedOn && (
+                            <div className="text-xs mt-0.5 text-emerald-600">{fmtDate(selectedRow.AcknowledgedOn)}</div>
+                          )}
+                        </div>
+                      </div>
+
+                      {selectedRow.FileName && (
+                        <a
+                          href={`${API}/${selectedRow.Id}/download`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-xs text-primary hover:underline border border-border rounded-lg px-3 py-2 bg-muted/30 transition-colors hover:bg-muted/50"
+                        >
+                          <ExternalLink size={12} />
+                          <span className="truncate">{selectedRow.FileName}</span>
+                          <span className="text-muted-foreground shrink-0 ml-auto">signed copy</span>
+                        </a>
+                      )}
+
+                      {selectedRow.Remarks && (
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Remarks</div>
+                          <p className="text-sm text-foreground bg-muted/30 rounded-lg p-3 border border-border">{selectedRow.Remarks}</p>
+                        </div>
+                      )}
+
+                      {/* Next step CTA */}
+                      <div className="border-t border-border pt-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Next Step</div>
+                        <button
+                          onClick={() => { setSelectedId(null); navigate(`/crm/agreements?bookingId=${selectedRow.BookingId}`); }}
+                          className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary text-sm font-medium transition-colors"
+                        >
+                          <span>Agreement for Sale</span>
+                          <ArrowRight size={14} className="shrink-0" />
+                        </button>
+                        <p className="text-[11px] text-muted-foreground mt-1.5">Must be executed within 30 days of acknowledgement per RERA.</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => setPreviewId(selectedRow.Id)}
-                        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors">
-                        <Eye size={13} /> Preview &amp; Download PDF
+
+                  ) : canEdit ? (
+                    /* Issued state — acknowledge form */
+                    <div className="space-y-4 border-t border-border pt-5">
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Record Acknowledgement</div>
+                        <p className="text-[11px] text-muted-foreground">
+                          When the customer signs and returns this letter, record the date below. Attaching the scanned signed copy is optional — you can upload it later.
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-medium text-foreground block mb-1">Acknowledgement Date *</label>
+                        <Input type="date" className="h-9 text-sm" value={ackDate} onChange={(e) => setAckDate(e.target.value)} />
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-medium text-foreground block mb-1">
+                          Signed Copy <span className="text-muted-foreground font-normal">(optional)</span>
+                        </label>
+                        {stagedFile ? (
+                          <div className="flex items-center gap-2 text-xs bg-muted/30 border border-border rounded-lg px-3 py-2">
+                            <FileText size={13} className="shrink-0 text-muted-foreground" />
+                            <span className="truncate flex-1 font-medium">{stagedFile.name}</span>
+                            <span className="text-muted-foreground shrink-0">{(stagedFile.size / 1024).toFixed(0)} KB</span>
+                            <button
+                              onClick={() => { setStagedFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                              className="text-muted-foreground hover:text-rose-600 shrink-0 p-0.5"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <input type="file" accept=".pdf,.jpg,.jpeg,.png" ref={fileInputRef} className="hidden" onChange={(e) => stageFile(e.target.files)} />
+                            <button
+                              onClick={() => fileInputRef.current?.click()}
+                              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium border border-dashed border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground"
+                            >
+                              <Upload size={13} /> Attach Signed Letter
+                            </button>
+                          </>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-medium text-foreground block mb-1">
+                          Remarks <span className="text-muted-foreground font-normal">(optional)</span>
+                        </label>
+                        <Textarea rows={2} className="resize-none text-sm" value={ackRemarks} onChange={(e) => setAckRemarks(e.target.value)} placeholder="Any notes…" />
+                      </div>
+
+                      <button
+                        onClick={handleAcknowledge}
+                        disabled={issuing || !ackDate}
+                        className="w-full flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40 transition-colors"
+                      >
+                        <CheckCircle2 size={14} />
+                        {issuing ? "Saving…" : "Mark as Acknowledged"}
                       </button>
+
+                      <p className="text-[10px] text-muted-foreground text-center">
+                        This starts the 30-day RERA Agreement for Sale deadline.
+                      </p>
                     </div>
-                    {selectedRow.FileName && (
-                      <a href={`${API}/${selectedRow.Id}/download`} target="_blank" rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary hover:underline">
-                        <ExternalLink size={11} /> {selectedRow.FileName} (original upload)
-                      </a>
-                    )}
-                    {selectedRow.Remarks && (
-                      <p className="text-xs text-muted-foreground">{selectedRow.Remarks}</p>
-                    )}
-                  </div>
-                ) : canEdit ? (
-                  <div className="space-y-3">
-                    <button onClick={() => setPreviewId(selectedRow.Id)}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium border border-dashed border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground">
-                      <Eye size={12} /> Preview Generated PDF
-                    </button>
-                    <p className="text-xs text-muted-foreground">Optionally attach a signed letter PDF and mark it as issued to the customer.</p>
-                    <div>
-                      <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading block mb-1">Issue Date</label>
-                      <Input type="date" className="h-9 text-sm" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} />
+
+                  ) : (
+                    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 flex items-center gap-2">
+                      <Clock size={13} className="shrink-0" />
+                      Issued — waiting for the customer to return the signed copy.
                     </div>
-                    <div>
-                      <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading block mb-1">Attach Letter (optional)</label>
-                      {stagedFile ? (
-                        <div className="flex items-center gap-2 text-xs bg-muted/30 border border-border rounded-lg px-2.5 py-1.5">
-                          <FileText size={12} className="shrink-0 text-muted-foreground" />
-                          <span className="truncate flex-1">{stagedFile.name}</span>
-                          <span className="text-muted-foreground shrink-0">{(stagedFile.size / 1024).toFixed(0)} KB</span>
-                          <button onClick={() => { setStagedFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }} className="text-muted-foreground hover:text-rose-600 shrink-0">
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" ref={fileInputRef} className="hidden" onChange={(e) => stageFile(e.target.files)} />
-                          <button onClick={() => fileInputRef.current?.click()}
-                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium border border-dashed border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground">
-                            <Upload size={12} /> Choose PDF / Image…
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading block mb-1">Remarks</label>
-                      <Textarea rows={2} className="resize-none text-sm" value={issueRemarks} onChange={(e) => setIssueRemarks(e.target.value)} />
-                    </div>
-                    <button onClick={handleIssue} disabled={issuing}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40 transition-colors">
-                      <Send size={13} /> {issuing ? "Issuing..." : "Mark as Issued"}
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">Draft — not yet issued.</p>
-                )}
+                  )}
+                </div>
               </div>
 
-              <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20">
-                <button onClick={() => setSelectedId(null)} className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors">Close</button>
-              </DialogFooter>
+              {/* RIGHT PANEL — PDF preview */}
+              <div className="flex-1 flex flex-col bg-slate-100 dark:bg-slate-900/50 h-full overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-3 bg-white dark:bg-slate-950 border-b border-border shrink-0">
+                  <div className="flex items-center gap-2">
+                    <Eye size={14} className="text-muted-foreground" />
+                    <span className="text-sm font-semibold">Document Preview</span>
+                  </div>
+                  {blobUrl && (
+                    <a
+                      href={blobUrl}
+                      download={`allotment-letter-${selectedRow.AlNo}.pdf`}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                    >
+                      <Download size={12} /> Download PDF
+                    </a>
+                  )}
+                </div>
+                <div className="flex-1 relative flex items-center justify-center p-3">
+                  {pdfLoading && (
+                    <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                      <div className="w-5 h-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                      <span className="text-sm">Generating preview…</span>
+                    </div>
+                  )}
+                  {pdfError && !pdfLoading && (
+                    <div className="flex flex-col items-center gap-2 text-rose-600 bg-rose-50 border border-rose-200 px-4 py-3 rounded-lg">
+                      <span className="text-sm font-medium">{pdfError}</span>
+                      <button onClick={retryPdf} className="text-xs underline hover:text-rose-700">Retry</button>
+                    </div>
+                  )}
+                  {blobUrl && !pdfLoading && (
+                    <iframe
+                      src={blobUrl}
+                      className="w-full h-full rounded-lg border border-border bg-white shadow-sm"
+                      title="Allotment Letter Preview"
+                    />
+                  )}
+                </div>
+              </div>
             </>
           )}
         </DialogContent>
       </Dialog>
-      {previewId != null && (
-        <PdfPreviewModal alId={previewId} onClose={() => setPreviewId(null)} />
-      )}
     </CrmShell>
   );
 };

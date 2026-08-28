@@ -16,7 +16,7 @@ const { transition: approvalTransition } = require("../services/approvalService"
 const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
 const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releaseHold } = require("../services/crmHoldService");
 const { recalculateRemainingMilestones, requireActiveBooking } = require("../services/crmWorkflowGuards");
-const { releaseAllParkingForApplication } = require("../routes/crmParking");
+const { releaseAllParkingForApplication, applyAddParking, rollupBookingTotals } = require("../routes/crmParking");
 const { ensureBrokerForChannelPartner } = require("../services/channelPartnerBrokerBridge");
 const { getApplicationFormPdfBuffer } = require("../services/applicationFormPdf");
 
@@ -415,18 +415,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // already saved from an earlier step). Only gated on TokenValue —
     // matches the wizard, which only shows/requires the picker once a
     // token value is actually entered.
-    const effectiveTokenValue = b.TokenValue !== undefined ? b.TokenValue : undefined;
-    if (effectiveTokenValue !== undefined && effectiveTokenValue !== null && effectiveTokenValue !== "") {
-      const effectiveProjectId = b.ProjectId ? parseInt(b.ProjectId) : existing.recordset[0].ProjectId;
-      const effectiveDepositBankId = b.DepositBankId !== undefined ? b.DepositBankId : existing.recordset[0].DepositBankId;
-      if (effectiveProjectId) {
-        const tagged = await pool.request().input("pid", sql.Int, effectiveProjectId)
-          .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmProjectBank WHERE ProjectId = @pid AND IsActive = 1");
-        if (tagged.recordset[0].Cnt > 0 && !effectiveDepositBankId) {
-          return res.status(400).json({ error: "Deposit bank is required for this project" });
-        }
-      }
-    }
+
 
     const BROKERAGE_PLANS = ["OneTime", "TwoPart", "AgreementOnly"];
     if (b.BrokeragePaymentPlan !== undefined && b.BrokeragePaymentPlan !== null && !BROKERAGE_PLANS.includes(b.BrokeragePaymentPlan)) {
@@ -564,15 +553,11 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
     // the submit outright instead of letting a second salesperson's application
     // sail into the approval queue unprotected.
     //
-    // Parking deliberately gets no separate hold here: unlike a Unit (which
-    // is only a soft PreferredUnitId preference until a real Booking exists),
-    // crmParking.js's POST /standalone already creates a real, permanent
-    // CrmParkingAllotment row the instant a slot is picked during the
-    // Attachments step — that row itself is what makes the slot exclusive to
-    // this application (assertSlotAvailable blocks anyone else from taking
-    // it), so it already shows as "Booked" in the parking matrix, not
-    // "OnHold". Placing an additional hold on top would just fail (the slot
-    // already reads as "taken") and add nothing.
+    // Parking: slots picked in the wizard are held via CrmInventoryHold
+    // (Status='Active'). createCrmBookingRecord converts Active holds to real
+    // CrmParkingAllotment rows after the booking is inserted. If this is a
+    // re-submit (booking already exists), the conversion block below handles
+    // any unconverted holds instead.
     const pool = getPool();
     const actor = actorId(req);
 
@@ -661,6 +646,49 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
         SET BookingId = @bid
         WHERE ApplicationId = @aid AND BookingId IS NULL
       `);
+
+      // Convert any active parking holds to allotments on the existing booking.
+      // Holds added while the wizard was in Draft/Pending (after the first submit
+      // already created the booking) are never converted by createCrmBookingRecord —
+      // that only runs on first-time booking creation. Re-submitting is the only
+      // trigger that can convert them.
+      try {
+        const parkingHolds = await pool.request().input("aid", sql.Int, id).query(`
+          SELECT h.Id, h.EntityId AS ParkingSlotId, h.RateOverride
+          FROM dbo.CrmInventoryHold h
+          WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = 'Active'
+        `);
+        for (const hold of parkingHolds.recordset) {
+          try {
+            const slot = await pool.request().input("sid", sql.Int, hold.ParkingSlotId)
+              .query("SELECT ProjectId, BlockId, ParkingType FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
+            if (!slot.recordset.length) continue;
+            const { ProjectId, BlockId, ParkingType } = slot.recordset[0];
+            const rate = await pool.request()
+              .input("pid", sql.Int, ProjectId).input("bid2", sql.Int, BlockId).input("pt", sql.NVarChar(50), ParkingType)
+              .query(`SELECT TOP 1 Id FROM dbo.ParkingMaster
+                      WHERE ProjectId = @pid AND ParkingType = @pt AND IsActive = 1
+                        AND (BlockId = @bid2 OR BlockId IS NULL)
+                      ORDER BY CASE WHEN BlockId = @bid2 THEN 0 ELSE 1 END`);
+            if (rate.recordset.length) {
+              await applyAddParking(pool, booking.id, {
+                ParkingMasterId: rate.recordset[0].Id, ParkingSlotId: hold.ParkingSlotId,
+                Quantity: 1, RateOverride: hold.RateOverride,
+              }, actor);
+            } else if (hold.RateOverride != null) {
+              await applyAddParking(pool, booking.id, {
+                ParkingType, ParkingSlotId: hold.ParkingSlotId,
+                Quantity: 1, Charge: hold.RateOverride, GstRate: 0,
+              }, actor);
+            }
+          } catch (holdErr) {
+            console.error("[crm-applications] parking hold conversion (re-submit) failed:", holdErr.message);
+          }
+        }
+        await rollupBookingTotals(pool, booking.id);
+      } catch (phErr) {
+        console.error("[crm-applications] parking holds query on re-submit failed:", phErr.message);
+      }
     } else {
       // If no booking exists yet, place a hold and create one.
       try {

@@ -94,13 +94,19 @@ async function resolveParkingRateForSlot(pool, parkingSlotId) {
   return rate.recordset[0] || null;
 }
 
+// ParkingMaster is LEFT JOIN — unrated allotments (NeedsRate flow) store
+// ParkingMasterId = NULL, so an INNER JOIN would silently exclude them.
+// ParkingType falls back to the slot's own type for those rows.
 const ALLOTMENT_SELECT = `
-  SELECT pa.*, p.ParkingType AS CurrentParkingType, p.ProjectId, p.BlockId,
+  SELECT pa.*,
+         COALESCE(p.ParkingType, s.ParkingType) AS CurrentParkingType,
+         COALESCE(p.ProjectId,   s.ProjectId)   AS ProjectId,
+         COALESCE(p.BlockId,     s.BlockId)      AS BlockId,
          s.SlotNo, a.ApplicantName, a.Mobile,
          b.BookingNo, b.Status AS BookingStatus, b.GrandTotal AS BookingGrandTotal,
          ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0) AS BookingTotalPaid
   FROM dbo.CrmParkingAllotment pa
-  JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
+  LEFT JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
   LEFT JOIN dbo.ParkingSlot s ON s.Id = pa.ParkingSlotId
   LEFT JOIN dbo.CrmApplication a ON a.Id = pa.ApplicationId
   LEFT JOIN dbo.CrmBooking b ON b.Id = pa.BookingId
@@ -112,7 +118,7 @@ const ALLOTMENT_SELECT = `
 // crmBookingAmendments.js when an approver signs off on a queued request.
 
 async function applyAddParking(pool, bookingId, b, actorUserId) {
-  if (!b.ParkingMasterId) throw parkingError("ParkingMasterId is required");
+  if (!b.ParkingMasterId && !b.ParkingType) throw parkingError("ParkingMasterId or ParkingType is required");
   const qty = b.Quantity != null ? parseInt(b.Quantity) : 1;
   if (!Number.isFinite(qty) || qty < 1) throw parkingError("Quantity must be at least 1");
 
@@ -123,29 +129,31 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
     .query("SELECT Id, BookingNo, ApplicationId, ProjectId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
   if (!booking.recordset.length) throw parkingError("Booking not found", 404);
 
-  const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
-    .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
-  if (!rate.recordset.length) throw parkingError("Selected parking rate is not active");
-  const { GstRate, ParkingType } = rate.recordset[0];
-  // Staff can override the Parking Rate Master's default figure for a
-  // genuine one-off negotiated price — validated the same way an amount
-  // typed anywhere else in CRM is (finite, positive). Falls back to the
-  // master rate when omitted, exactly as before this existed.
-  let Charge = rate.recordset[0].Charge;
-  if (b.RateOverride != null && b.RateOverride !== "") {
-    const override = parseFloat(b.RateOverride);
-    if (!Number.isFinite(override) || override <= 0) throw parkingError("Rate override must be a positive number");
-    Charge = override;
-  }
+  let ParkingType, GstRate, Charge;
 
-  // Same rule already enforced for standalone parking sales (POST
-  // /standalone below) and hold placement (crmHoldService.js placeHold) —
-  // without it, parking from one Project's rate card could get sold onto a
-  // Booking for a different Project entirely, a nonsensical record that'd
-  // never reconcile against real inventory. This unit-linked path was
-  // missing the check both of its siblings already have.
-  if (rate.recordset[0].ProjectId !== booking.recordset[0].ProjectId) {
-    throw parkingError("This booking is for a different project than the selected parking rate/slot");
+  if (b.ParkingMasterId) {
+    const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
+      .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
+    if (!rate.recordset.length) throw parkingError("Selected parking rate is not active");
+    if (rate.recordset[0].ProjectId !== booking.recordset[0].ProjectId) {
+      throw parkingError("This booking is for a different project than the selected parking rate/slot");
+    }
+    ParkingType = rate.recordset[0].ParkingType;
+    GstRate = rate.recordset[0].GstRate;
+    // Staff can override the Parking Rate Master's default figure for a genuine
+    // one-off negotiated price — falls back to the master rate when omitted.
+    Charge = rate.recordset[0].Charge;
+    if (b.RateOverride != null && b.RateOverride !== "") {
+      const override = parseFloat(b.RateOverride);
+      if (!Number.isFinite(override) || override <= 0) throw parkingError("Rate override must be a positive number");
+      Charge = override;
+    }
+  } else {
+    // Unrated type — no ParkingMaster row; caller supplies ParkingType + Charge directly.
+    if (b.Charge == null || parseFloat(b.Charge) <= 0) throw parkingError("A price is required for unrated parking types");
+    ParkingType = b.ParkingType;
+    Charge = parseFloat(b.Charge);
+    GstRate = b.GstRate != null ? parseFloat(b.GstRate) : 0;
   }
 
   const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
@@ -164,7 +172,7 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   const result = await pool.request()
     .input("bid",  sql.Int, bookingId)
     .input("aid",  sql.Int, booking.recordset[0].ApplicationId)
-    .input("pmid", sql.Int, parseInt(b.ParkingMasterId))
+    .input("pmid", sql.Int, b.ParkingMasterId ? parseInt(b.ParkingMasterId) : null)
     .input("sid",  sql.Int, parkingSlotId)
     .input("slot", sql.NVarChar(50), slotNo)
     .input("qty",  sql.Int, qty)
@@ -497,7 +505,20 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
     const ratedTypes = new Set(rates.recordset.map((r) => r.ParkingType));
     const unratedTypesWithInventory = [...typesWithInventory].filter((t) => !ratedTypes.has(t));
 
-    res.json({ rates: out, unratedTypesWithInventory });
+    // Include unrated types so staff can still select them and enter a price manually.
+    const unratedOut = unratedTypesWithInventory.map((type) => {
+      const blockScoped = slotsByType.get(type) || [];
+      const freeAnyBlock = freeCountByType.get(type) || 0;
+      return {
+        ParkingMasterId: null, ParkingType: type, Charge: null, GstRate: 0,
+        HasSlots: true, NoInventory: false, NeedsRate: true,
+        AvailableSlots: blockScoped,
+        SoldOutProjectWide: blockId != null && freeAnyBlock === 0,
+        FreeCountProjectWide: freeAnyBlock,
+      };
+    });
+
+    res.json({ rates: [...out, ...unratedOut], unratedTypesWithInventory });
   } catch (e) {
     console.error("[crm-parking] GET /available error:", e.message);
     res.status(500).json({ error: e.message });
@@ -573,7 +594,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const pool = getPool();
     const b = req.body;
     if (!b.ApplicationId) return res.status(400).json({ error: "ApplicationId is required — parking must be sold to a real customer/applicant" });
-    if (!b.ParkingMasterId) return res.status(400).json({ error: "ParkingMasterId is required" });
+    if (!b.ParkingMasterId && !b.ParkingType) return res.status(400).json({ error: "ParkingMasterId or ParkingType is required" });
     const qty = b.Quantity != null ? parseInt(b.Quantity) : 1;
     if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity must be at least 1" });
 
@@ -581,22 +602,35 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
       .query("SELECT Id, ProjectId, Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!application.recordset.length) return res.status(404).json({ error: "Application not found" });
 
-    const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
-      .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
-    if (!rate.recordset.length) return res.status(400).json({ error: "Selected parking rate is not active" });
-    const { GstRate, ParkingType } = rate.recordset[0];
-    // Defaults to the Parking Rate Master's own figure — staff can type a
-    // different amount for a genuine one-off negotiated price, same
-    // "defaults but overridable" pattern as Token Amount elsewhere in CRM.
-    let Charge = rate.recordset[0].Charge;
-    if (b.RateOverride != null && b.RateOverride !== "") {
-      const override = parseFloat(b.RateOverride);
-      if (!Number.isFinite(override) || override <= 0) return res.status(400).json({ error: "Rate override must be a positive number" });
-      Charge = override;
-    }
+    let ParkingType, Charge, GstRate;
 
-    if (rate.recordset[0].ProjectId !== application.recordset[0].ProjectId) {
-      return res.status(400).json({ error: "This Application is for a different project than the selected parking rate/slot" });
+    if (b.ParkingMasterId) {
+      const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
+        .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
+      if (!rate.recordset.length) return res.status(400).json({ error: "Selected parking rate is not active" });
+      if (rate.recordset[0].ProjectId !== application.recordset[0].ProjectId) {
+        return res.status(400).json({ error: "This Application is for a different project than the selected parking rate/slot" });
+      }
+      ParkingType = rate.recordset[0].ParkingType;
+      GstRate = rate.recordset[0].GstRate;
+      // Defaults to the Parking Rate Master's own figure — staff can type a
+      // different amount for a genuine one-off negotiated price.
+      Charge = rate.recordset[0].Charge;
+      if (b.RateOverride != null && b.RateOverride !== "") {
+        const override = parseFloat(b.RateOverride);
+        if (!Number.isFinite(override) || override <= 0) return res.status(400).json({ error: "Rate override must be a positive number" });
+        Charge = override;
+      }
+    } else {
+      // Unrated parking type — no ParkingMaster row exists yet; price is mandatory.
+      if (b.RateOverride == null || b.RateOverride === "") {
+        return res.status(400).json({ error: "A price is required for parking types without a configured rate" });
+      }
+      const override = parseFloat(b.RateOverride);
+      if (!Number.isFinite(override) || override <= 0) return res.status(400).json({ error: "Price must be a positive number" });
+      ParkingType = b.ParkingType;
+      Charge = override;
+      GstRate = 0;
     }
 
     const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
@@ -648,7 +682,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
 
     const result = await pool.request()
       .input("aid",  sql.Int, parseInt(b.ApplicationId))
-      .input("pmid", sql.Int, parseInt(b.ParkingMasterId))
+      .input("pmid", sql.Int, b.ParkingMasterId ? parseInt(b.ParkingMasterId) : null)
       .input("sid",  sql.Int, parkingSlotId)
       .input("slot", sql.NVarChar(50), slotNo)
       .input("qty",  sql.Int, qty)

@@ -20,7 +20,7 @@ function decodeLogo(dataUrl) {
 
 const AL_PDF_SELECT = `
   SELECT
-    al.Id, al.AlNo, al.BookingId, al.Status, al.DraftedOn, al.IssuedOn, al.Remarks,
+    al.Id, al.AlNo, al.BookingId, al.Status, al.IssuedOn, al.Remarks,
     b.BookingNo, b.BookingDate, b.BookingAmount, b.TotalValue, b.GrandTotal,
     b.AreaSqFt, b.RatePerSqFt, b.BlockName,
     COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
@@ -54,157 +54,177 @@ async function fetchAllotmentLetterDataByBookingId(pool, bookingId) {
 
 function renderAllotmentLetterPdf(d) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", margin: 50 });
+    // A4: 595.28 × 841.89 pt. Margins: 45 all sides.
+    const MARGIN = 45;
+    const doc = new PDFDocument({ size: "A4", margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN } });
     const chunks = [];
     doc.on("data", (c) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    const PW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-    const left = doc.page.margins.left;
+    const PW = doc.page.width - MARGIN * 2;     // usable content width ≈ 505.28
+    const PH = doc.page.height;                  // 841.89
+    const left = MARGIN;
+
+    // ── Fixed anchor positions (guarantee 1 page) ────────────────────────────
+    // Signature block sits 90pt from the bottom of the content area.
+    const SIG_Y    = PH - MARGIN - 88;
+    const FOOTER_Y = PH - MARGIN - 16;
+
+    // ── Header band (slate-900 background) ──────────────────────────────────
+    const BAND_H = 72;
+    doc.rect(left, MARGIN, PW, BAND_H).fill("#0f172a");
+
     const logoBuf = decodeLogo(d.CompanyLogo);
+    let textX = left + 12;
 
-    // ── Header band ──────────────────────────────────────────────────────────
-    const hTop = doc.y;
-    doc.rect(left, hTop, PW, 80).fill("#0f172a");
-
-    let tx = left + 14;
     if (logoBuf) {
       try {
-        doc.roundedRect(left + 12, hTop + 12, 56, 56, 6).fill("#ffffff");
-        doc.image(logoBuf, left + 14, hTop + 14, { width: 52, height: 52, fit: [52, 52] });
-        tx = left + 78;
+        doc.roundedRect(left + 10, MARGIN + 10, 52, 52, 5).fill("#ffffff");
+        doc.image(logoBuf, left + 12, MARGIN + 12, { width: 48, height: 48, fit: [48, 48] });
+        textX = left + 72;
       } catch (_) {}
     }
-    const txtW = PW - (tx - left);
-    doc.fillColor("#ffffff").fontSize(14).font("Helvetica-Bold")
-      .text(d.CompanyName || "Company", tx, hTop + 16, { width: txtW });
-    const compAddr = [d.CompanyAddress, d.CompanyAddress2, d.CompanyCity, d.CompanyState, d.CompanyPincode].filter(Boolean).join(", ");
-    if (compAddr) doc.fontSize(7.5).font("Helvetica").fillColor("#94a3b8").text(compAddr, tx, hTop + 34, { width: txtW });
-    const compContact = [d.CompanyPhone, d.CompanyEmail].filter(Boolean).join("  |  ");
-    if (compContact) doc.fontSize(7.5).fillColor("#94a3b8").text(compContact, tx, hTop + 48, { width: txtW });
 
-    doc.y = hTop + 80 + 20;
+    const nameW = PW - (textX - left) - 8;
+    doc.fillColor("#ffffff").fontSize(13).font("Helvetica-Bold")
+      .text(d.CompanyName || "Company", textX, MARGIN + 14, { width: nameW });
+
+    const compAddr = [d.CompanyAddress, d.CompanyCity, d.CompanyState].filter(Boolean).join(", ");
+    if (compAddr)
+      doc.fontSize(7).font("Helvetica").fillColor("#94a3b8").text(compAddr, textX, MARGIN + 30, { width: nameW });
+    const compContact = [d.CompanyPhone, d.CompanyEmail].filter(Boolean).join("  |  ");
+    if (compContact)
+      doc.fontSize(7).fillColor("#94a3b8").text(compContact, textX, MARGIN + 42, { width: nameW });
+
+    // ── Move cursor below band ───────────────────────────────────────────────
+    doc.y = MARGIN + BAND_H + 14;
     doc.fillColor("#0f172a");
 
-    // ── Title ─────────────────────────────────────────────────────────────────
-    doc.fontSize(13).font("Helvetica-Bold").fillColor("#0f172a").text("ALLOTMENT LETTER", { align: "center" });
-    doc.moveDown(0.25);
-    doc.fontSize(8.5).font("Helvetica").fillColor("#64748b").text("Allotment of Residential / Commercial Unit", { align: "center" });
-    doc.moveDown(1);
+    // ── Title ────────────────────────────────────────────────────────────────
+    doc.fontSize(12).font("Helvetica-Bold").fillColor("#0f172a").text("ALLOTMENT LETTER", { align: "center" });
+    doc.moveDown(0.15);
+    doc.fontSize(7.5).font("Helvetica").fillColor("#64748b").text("Allotment of Residential / Commercial Unit", { align: "center" });
+    doc.moveDown(0.7);
 
-    // ── Ref + Date ────────────────────────────────────────────────────────────
-    const refDate = d.IssuedOn || d.DraftedOn || new Date();
+    // ── Ref + Date ───────────────────────────────────────────────────────────
+    const refDate = d.IssuedOn || new Date();
     const savedY = doc.y;
-    doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#0f172a").text(`Ref. No.: ${d.AlNo}`, left, savedY);
-    doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#0f172a").text(`Date: ${fmtDate(refDate)}`, left, savedY, { align: "right" });
-    doc.y = savedY + 14;
-    doc.moveDown(1);
+    doc.fontSize(8).font("Helvetica-Bold").fillColor("#0f172a").text(`Ref. No.: ${d.AlNo}`, left, savedY);
+    doc.fontSize(8).font("Helvetica-Bold").fillColor("#0f172a").text(`Date: ${fmtDate(refDate)}`, left, savedY, { align: "right" });
+    doc.y = savedY + 13;
+    doc.moveDown(0.7);
 
-    // ── Addressee ─────────────────────────────────────────────────────────────
-    doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#0f172a").text("To,");
+    // ── Addressee ────────────────────────────────────────────────────────────
+    doc.fontSize(8).font("Helvetica-Bold").fillColor("#0f172a").text("To,");
     doc.font("Helvetica").text(d.ApplicantName || "-");
-    if (d.CustomerAddress) doc.text(d.CustomerAddress);
-    const custLocParts = [d.CustomerCity, d.CustomerState].filter(Boolean).join(", ");
-    if (custLocParts) doc.text(custLocParts);
+    // Cap address at 1 line to save space
+    const addrLine = [d.CustomerAddress, d.CustomerCity, d.CustomerState].filter(Boolean).join(", ");
+    if (addrLine) doc.text(addrLine, { lineBreak: false });
+    if (addrLine) doc.moveDown(0.4);
     if (d.Mobile) doc.text(`Mobile: ${d.Mobile}`);
-    if (d.Email) doc.text(`Email: ${d.Email}`);
-    doc.moveDown(1);
+    doc.moveDown(0.7);
 
-    // ── Subject ───────────────────────────────────────────────────────────────
+    // ── Subject ──────────────────────────────────────────────────────────────
     doc.font("Helvetica-Bold").text("Subject: ", { continued: true })
       .font("Helvetica").text(`Allotment of Unit ${d.UnitNo || "-"} in ${d.ProjectFullName || d.ProjectName || "-"}`);
-    doc.moveDown(0.5);
-    doc.moveTo(left, doc.y).lineTo(left + PW, doc.y).strokeColor("#e2e8f0").lineWidth(0.8).stroke();
+    doc.moveDown(0.3);
+    doc.moveTo(left, doc.y).lineTo(left + PW, doc.y).strokeColor("#e2e8f0").lineWidth(0.7).stroke();
+    doc.moveDown(0.6);
+
+    // ── Body paragraph ───────────────────────────────────────────────────────
+    doc.font("Helvetica").fontSize(8).fillColor("#1e293b")
+      .text(
+        `Dear ${d.ApplicantName || "Sir/Madam"}, we are pleased to confirm the allotment of the unit specified below in our project ` +
+        `${d.ProjectFullName || d.ProjectName || "-"}. This allotment is made in your favour as per the terms of the booking agreement. ` +
+        `Kindly acknowledge receipt and retain this letter for your records.`,
+        { align: "justify" }
+      );
     doc.moveDown(0.8);
 
-    // ── Body ──────────────────────────────────────────────────────────────────
-    doc.font("Helvetica").fontSize(8.5).text(`Dear ${d.ApplicantName || "Sir/Madam"},`);
-    doc.moveDown(0.6);
-    doc.text(
-      `We are pleased to confirm the allotment of the unit specified below in our project ${d.ProjectFullName || d.ProjectName || "-"}. ` +
-      `This allotment is made in your favour as per the terms and conditions of the booking agreement executed between the parties. ` +
-      `Kindly acknowledge receipt of this letter and retain it for your records.`,
-      { align: "justify" }
-    );
-    doc.moveDown(1.2);
-
     // ── Allotment details table ───────────────────────────────────────────────
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#0f172a").text("ALLOTMENT DETAILS");
-    doc.moveDown(0.5);
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("ALLOTMENT DETAILS");
+    doc.moveDown(0.35);
 
     const detailRows = [
-      ["Booking No.", d.BookingNo || "-"],
-      ["Application No.", d.ApplicationNo || "-"],
-      ["Project Name", d.ProjectFullName || d.ProjectName || "-"],
-      ["Unit No.", d.UnitNo || "-"],
-      d.BlockName ? ["Block / Wing", d.BlockName] : null,
-      d.AreaSqFt ? ["Built-up Area", `${d.AreaSqFt} sq.ft.`] : null,
-      d.RatePerSqFt ? ["Rate per sq.ft.", money(d.RatePerSqFt)] : null,
-      ["Booking Date", fmtDate(d.BookingDate)],
-      d.IssuedOn ? ["Issue Date", fmtDate(d.IssuedOn)] : null,
-      d.ProjectRera ? ["RERA No.", d.ProjectRera] : null,
+      ["Booking No.",      d.BookingNo      || "-"],
+      ["Application No.",  d.ApplicationNo  || "-"],
+      ["Project Name",     d.ProjectFullName || d.ProjectName || "-"],
+      ["Unit No.",         d.UnitNo         || "-"],
+      d.BlockName       ? ["Block / Wing",     d.BlockName]                         : null,
+      d.AreaSqFt        ? ["Built-up Area",    `${d.AreaSqFt} sq.ft.`]              : null,
+      d.RatePerSqFt     ? ["Rate / sq.ft.",    money(d.RatePerSqFt)]                : null,
+      ["Booking Date",    fmtDate(d.BookingDate)],
+      d.IssuedOn        ? ["Issue Date",       fmtDate(d.IssuedOn)]                  : null,
+      d.ProjectRera     ? ["RERA No.",         d.ProjectRera]                       : null,
     ].filter(Boolean);
 
+    const ROW_H = 16;
     const colW = PW / 2;
     let rowY = doc.y;
     detailRows.forEach(([label, value], i) => {
       const bg = i % 2 === 0 ? "#f8fafc" : "#ffffff";
-      doc.rect(left, rowY, colW, 18).fill(bg);
-      doc.rect(left + colW, rowY, colW, 18).fill(bg);
-      doc.fillColor("#64748b").font("Helvetica").fontSize(8).text(label, left + 6, rowY + 5, { width: colW - 10 });
-      doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(8).text(value, left + colW + 6, rowY + 5, { width: colW - 10 });
-      rowY += 18;
+      doc.rect(left, rowY, colW, ROW_H).fill(bg);
+      doc.rect(left + colW, rowY, colW, ROW_H).fill(bg);
+      doc.fillColor("#64748b").font("Helvetica").fontSize(7.5).text(label, left + 5, rowY + 4.5, { width: colW - 8, lineBreak: false });
+      doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(7.5).text(value, left + colW + 5, rowY + 4.5, { width: colW - 8, lineBreak: false });
+      rowY += ROW_H;
     });
-    doc.y = rowY + 14;
+    doc.y = rowY + 10;
 
     // ── Financial summary ─────────────────────────────────────────────────────
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#0f172a").text("FINANCIAL SUMMARY");
-    doc.moveDown(0.5);
     const finRows = [
-      d.BookingAmount != null ? ["Booking Amount", money(d.BookingAmount)] : null,
-      (d.GrandTotal != null || d.TotalValue != null) ? ["Total Consideration", money(d.GrandTotal || d.TotalValue)] : null,
+      d.BookingAmount != null ? ["Booking Amount",      money(d.BookingAmount)] : null,
+      (d.GrandTotal || d.TotalValue) ? ["Total Consideration", money(d.GrandTotal || d.TotalValue)] : null,
     ].filter(Boolean);
-    rowY = doc.y;
-    finRows.forEach(([label, value], i) => {
-      const bg = i % 2 === 0 ? "#f0fdf4" : "#ffffff";
-      doc.rect(left, rowY, colW, 18).fill(bg);
-      doc.rect(left + colW, rowY, colW, 18).fill(bg);
-      doc.fillColor("#64748b").font("Helvetica").fontSize(8).text(label, left + 6, rowY + 5, { width: colW - 10 });
-      doc.fillColor("#166534").font("Helvetica-Bold").fontSize(8).text(value, left + colW + 6, rowY + 5, { width: colW - 10 });
-      rowY += 18;
-    });
-    doc.y = rowY + 16;
 
-    // ── Terms ─────────────────────────────────────────────────────────────────
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#0f172a").text("TERMS & CONDITIONS");
-    doc.moveDown(0.4);
+    if (finRows.length) {
+      doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("FINANCIAL SUMMARY");
+      doc.moveDown(0.35);
+      rowY = doc.y;
+      finRows.forEach(([label, value], i) => {
+        const bg = i % 2 === 0 ? "#f0fdf4" : "#ffffff";
+        doc.rect(left, rowY, colW, ROW_H).fill(bg);
+        doc.rect(left + colW, rowY, colW, ROW_H).fill(bg);
+        doc.fillColor("#64748b").font("Helvetica").fontSize(7.5).text(label, left + 5, rowY + 4.5, { width: colW - 8, lineBreak: false });
+        doc.fillColor("#166534").font("Helvetica-Bold").fontSize(7.5).text(value, left + colW + 5, rowY + 4.5, { width: colW - 8, lineBreak: false });
+        rowY += ROW_H;
+      });
+      doc.y = rowY + 10;
+    }
+
+    // ── Terms & conditions ────────────────────────────────────────────────────
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("TERMS & CONDITIONS");
+    doc.moveDown(0.3);
     [
-      "This allotment is subject to the terms and conditions of the Agreement to Sell / Sale Agreement signed between the parties.",
-      "The allotment may be cancelled in the event of default in payment or non-compliance with the agreed terms.",
-      "Unit dimensions and area are as per the approved project plan and may be subject to minor variations as permissible under law.",
-      "Possession of the unit shall be given upon completion of all legal formalities, full payment of the consideration, and obtaining the Occupancy Certificate.",
+      "This allotment is subject to the terms of the Agreement to Sell / Sale Agreement executed between the parties.",
+      "The allotment may be cancelled upon default in payment or non-compliance with agreed terms.",
+      "Possession shall be given on completion of all legal formalities, full payment, and obtaining the Occupancy Certificate.",
     ].forEach((t, i) => {
-      doc.font("Helvetica").fontSize(8).fillColor("#374151").text(`${i + 1}. ${t}`, left, doc.y, { width: PW, align: "justify" });
-      doc.moveDown(0.3);
+      doc.font("Helvetica").fontSize(7.5).fillColor("#374151")
+        .text(`${i + 1}. ${t}`, left, doc.y, { width: PW, align: "justify" });
+      doc.moveDown(0.25);
     });
-    doc.moveDown(1.5);
 
-    // ── Signature block ───────────────────────────────────────────────────────
-    const sigY = doc.y;
-    const sigHalf = PW * 0.55;
-    doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#0f172a").text("Acknowledged by:", left, sigY);
-    doc.text(`For ${d.CompanyName || "Company"}`, left + PW - sigHalf, sigY);
-    doc.y = sigY + 40;
-    doc.moveTo(left, doc.y).lineTo(left + sigHalf * 0.75, doc.y).strokeColor("#0f172a").lineWidth(0.5).stroke();
-    doc.moveTo(left + PW - sigHalf, doc.y).lineTo(left + PW, doc.y).stroke();
-    doc.moveDown(0.4);
-    doc.font("Helvetica").fontSize(7.5).fillColor("#64748b").text("Customer Signature & Date", left);
-    doc.text("Authorised Signatory", left + PW - sigHalf, doc.y - doc.currentLineHeight());
+    // ── Signature block — anchored at SIG_Y (never pushed to page 2) ─────────
+    const sigHalf = PW * 0.52;
+    doc.fontSize(8).font("Helvetica-Bold").fillColor("#0f172a")
+      .text("Acknowledged by:", left, SIG_Y);
+    doc.text(`For ${d.CompanyName || "Company"}`, left + PW - sigHalf, SIG_Y);
 
-    // ── Footer ────────────────────────────────────────────────────────────────
-    const footerText = `${d.AlNo}  |  ${d.CompanyName || ""}  |  Generated on ${new Date().toLocaleDateString("en-GB")}`;
-    doc.fontSize(7).fillColor("#94a3b8").text(footerText, left, doc.page.height - 38, { width: PW, align: "center" });
+    const sigLineY = SIG_Y + 36;
+    doc.moveTo(left, sigLineY).lineTo(left + sigHalf * 0.72, sigLineY)
+      .strokeColor("#0f172a").lineWidth(0.5).stroke();
+    doc.moveTo(left + PW - sigHalf, sigLineY).lineTo(left + PW, sigLineY).stroke();
+
+    doc.fontSize(7).font("Helvetica").fillColor("#64748b")
+      .text("Customer Signature & Date", left, sigLineY + 4);
+    doc.text("Authorised Signatory", left + PW - sigHalf, sigLineY + 4);
+
+    // ── Footer — anchored at FOOTER_Y ────────────────────────────────────────
+    const footerText = `${d.AlNo}  ·  ${d.CompanyName || ""}  ·  Generated ${new Date().toLocaleDateString("en-GB")}`;
+    doc.fontSize(6.5).fillColor("#94a3b8")
+      .text(footerText, left, FOOTER_Y, { width: PW, align: "center" });
 
     doc.end();
   });

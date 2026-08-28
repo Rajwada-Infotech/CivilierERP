@@ -283,7 +283,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [editingExtraId, setEditingExtraId] = useState<number | null>(null);
   const [editingParkingId, setEditingParkingId] = useState<number | null>(null);
   const [addingParking, setAddingParking] = useState(false);
-  const [addParkingForm, setAddParkingForm] = useState({ ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "", RateOverride: "" });
+  const [addParkingForm, setAddParkingForm] = useState({ ParkingType: "", ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "", RateOverride: "" });
   const [extraReason, setExtraReason] = useState("");
   const [parkingReason, setParkingReason] = useState("");
   // eslint-disable-next-line @typescript-eslint/no-unused-vars — kept only if discount feature ships later
@@ -574,14 +574,23 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   };
 
   const handleAddParkingFromDetail = async () => {
-    if (!addParkingForm.ParkingMasterId) { toast.error("Select a parking type"); return; }
+    if (!addParkingForm.ParkingType) { toast.error("Select a parking type"); return; }
     if (legalWorkStarted && !addParkingForm.Reason.trim()) { toast.error("A reason is required — legal documents are already under verification"); return; }
+    const selectedRate = (availableParking.rates as any[]).find((r: any) => r.ParkingType === addParkingForm.ParkingType);
+    const isUnrated = selectedRate?.NeedsRate;
+    if (isUnrated && (!addParkingForm.RateOverride || Number(addParkingForm.RateOverride) <= 0)) {
+      toast.error("Enter a price for this parking type"); return;
+    }
     setChargesSaving(true);
     try {
-      const payload: any = {
-        ParkingMasterId: parseInt(addParkingForm.ParkingMasterId),
-        Quantity: parseInt(addParkingForm.Quantity) || 1,
-      };
+      const payload: any = { Quantity: parseInt(addParkingForm.Quantity) || 1 };
+      if (isUnrated) {
+        payload.ParkingType = addParkingForm.ParkingType;
+        payload.Charge = addParkingForm.RateOverride;
+      } else {
+        payload.ParkingMasterId = parseInt(addParkingForm.ParkingMasterId);
+        if (addParkingForm.RateOverride) payload.RateOverride = addParkingForm.RateOverride;
+      }
       if (addParkingForm.ParkingSlotId) payload.ParkingSlotId = parseInt(addParkingForm.ParkingSlotId);
       if (addParkingForm.Reason.trim()) payload.Reason = addParkingForm.Reason.trim();
       if (addParkingForm.RateOverride) payload.RateOverride = addParkingForm.RateOverride;
@@ -594,7 +603,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       if (!res.ok) throw new Error(resData.error);
       toast.success(resData.pending ? "Amendment request submitted — pending approval" : "Parking allotment added");
       setAddingParking(false);
-      setAddParkingForm({ ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "", RateOverride: "" });
+      setAddParkingForm({ ParkingType: "", ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "", RateOverride: "" });
       invalidateCharges();
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -2006,28 +2015,29 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div className="rounded-lg border border-border p-3 space-y-2 bg-muted/20">
                       <div className="text-xs font-medium text-foreground mb-1">Add Parking Allotment</div>
                       {(availableParking.rates as any[])?.length === 0 ? (
-                        <p className="text-xs text-muted-foreground mb-3">
-                          {(availableParking.unratedTypesWithInventory as any[])?.length > 0
-                            ? `${(availableParking.unratedTypesWithInventory as any[]).join(", ")} parking slots exist for this project, but no rate is configured — add one in Parking Rate Master.`
-                            : "No parking rates configured for this project."}
-                        </p>
+                        <p className="text-xs text-muted-foreground mb-3">No parking configured for this project.</p>
                       ) : (
                         <>
-                          <select value={addParkingForm.ParkingMasterId}
+                          <select value={addParkingForm.ParkingType}
                             onChange={(e) => {
-                              const rate = (availableParking.rates as any[]).find((r: any) => String(r.ParkingMasterId) === e.target.value);
-                              setAddParkingForm((f) => ({ ...f, ParkingMasterId: e.target.value, ParkingSlotId: "", ...(rate ? {} : {}) }));
+                              const rate = (availableParking.rates as any[]).find((r: any) => r.ParkingType === e.target.value);
+                              setAddParkingForm((f) => ({
+                                ...f, ParkingType: e.target.value,
+                                ParkingMasterId: rate?.ParkingMasterId != null ? String(rate.ParkingMasterId) : "",
+                                ParkingSlotId: "", RateOverride: "",
+                              }));
                             }}
                             className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background">
                             <option value="">— Select parking type —</option>
                             {(availableParking.rates as any[]).map((r: any) => (
-                              <option key={r.ParkingMasterId} value={String(r.ParkingMasterId)} disabled={r.SoldOutProjectWide}>
-                                {r.ParkingType} — {fmt(r.Charge)} + {r.GstRate}% GST{r.SoldOutProjectWide ? " (sold out)" : r.FreeCountProjectWide > 0 ? ` (${r.FreeCountProjectWide} free)` : ""}
+                              <option key={r.ParkingType} value={r.ParkingType} disabled={r.SoldOutProjectWide}>
+                                {r.ParkingType} — {r.NeedsRate ? "price required" : `${fmt(r.Charge)} + ${r.GstRate}% GST`}
+                                {r.SoldOutProjectWide ? " (sold out)" : r.FreeCountProjectWide > 0 ? ` (${r.FreeCountProjectWide} free)` : ""}
                               </option>
                             ))}
                           </select>
-                          {addParkingForm.ParkingMasterId && (() => {
-                            const rate = (availableParking.rates as any[]).find((r: any) => String(r.ParkingMasterId) === addParkingForm.ParkingMasterId);
+                          {addParkingForm.ParkingType && (() => {
+                            const rate = (availableParking.rates as any[]).find((r: any) => r.ParkingType === addParkingForm.ParkingType);
                             return rate?.AvailableSlots?.length > 0 ? (
                               <select value={addParkingForm.ParkingSlotId}
                                 onChange={(e) => setAddParkingForm((f) => ({ ...f, ParkingSlotId: e.target.value }))}
@@ -2039,20 +2049,25 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               </select>
                             ) : null;
                           })()}
-                          {addParkingForm.ParkingMasterId && (() => {
-                            const rate = (availableParking.rates as any[]).find((r: any) => String(r.ParkingMasterId) === addParkingForm.ParkingMasterId);
-                            const effectiveRate = addParkingForm.RateOverride ? Number(addParkingForm.RateOverride) : (rate ? Number(rate.Charge) : 0);
+                          {addParkingForm.ParkingType && (() => {
+                            const rate = (availableParking.rates as any[]).find((r: any) => r.ParkingType === addParkingForm.ParkingType);
+                            const isUnrated = rate?.NeedsRate;
+                            const effectiveRate = addParkingForm.RateOverride ? Number(addParkingForm.RateOverride) : (rate?.Charge != null ? Number(rate.Charge) : 0);
                             const gst = rate ? Math.round(effectiveRate * Number(rate.GstRate) / 100 * 100) / 100 : 0;
                             return (
                               <>
                                 <div className="grid grid-cols-2 gap-3">
                                   <div>
-                                    <label className="text-xs font-medium text-foreground block mb-1">Rate (₹)</label>
+                                    <label className="text-xs font-medium text-foreground block mb-1">
+                                      Rate (₹){isUnrated && <span className="text-red-500 ml-0.5">*</span>}
+                                    </label>
                                     <input type="number" min={0} value={addParkingForm.RateOverride}
                                       onChange={(e) => setAddParkingForm((f) => ({ ...f, RateOverride: e.target.value }))}
-                                      placeholder={rate ? String(rate.Charge) : undefined}
+                                      placeholder={isUnrated ? "Enter price…" : (rate ? String(rate.Charge) : undefined)}
+                                      autoFocus={isUnrated}
                                       className="w-full text-xs border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-                                    {rate && <p className="text-[10px] text-muted-foreground mt-0.5">Master: {fmt(rate.Charge)}</p>}
+                                    {!isUnrated && rate && <p className="text-[10px] text-muted-foreground mt-0.5">Master: {fmt(rate.Charge)}</p>}
+                                    {isUnrated && <p className="text-[10px] text-muted-foreground mt-0.5">No master rate — enter agreed price.</p>}
                                   </div>
                                   <div>
                                     <label className="text-xs font-medium text-foreground block mb-1">Qty</label>
@@ -2061,16 +2076,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                       className="w-full text-xs border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
                                   </div>
                                 </div>
-                                {effectiveRate > 0 && Number(addParkingForm.Quantity) > 0 && rate && (
+                                {effectiveRate > 0 && Number(addParkingForm.Quantity) > 0 && (
                                   <div className="rounded-md bg-background border border-border px-3 py-2 text-xs space-y-0.5">
                                     <div className="flex justify-between text-muted-foreground">
                                       <span>Base ({addParkingForm.Quantity} × {fmt(effectiveRate)})</span>
                                       <span>{fmt(effectiveRate * Number(addParkingForm.Quantity))}</span>
                                     </div>
-                                    <div className="flex justify-between text-muted-foreground">
-                                      <span>GST ({rate.GstRate}%)</span>
-                                      <span>{fmt(gst * Number(addParkingForm.Quantity))}</span>
-                                    </div>
+                                    {!isUnrated && gst > 0 && (
+                                      <div className="flex justify-between text-muted-foreground">
+                                        <span>GST ({rate?.GstRate}%)</span>
+                                        <span>{fmt(gst * Number(addParkingForm.Quantity))}</span>
+                                      </div>
+                                    )}
                                     <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
                                       <span>Total payable</span>
                                       <span>{fmt((effectiveRate + gst) * Number(addParkingForm.Quantity))}</span>
@@ -2094,7 +2111,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             Save
                           </button>
                         )}
-                        <button onClick={() => { setAddingParking(false); setAddParkingForm({ ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "", RateOverride: "" }); }}
+                        <button onClick={() => { setAddingParking(false); setAddParkingForm({ ParkingType: "", ParkingMasterId: "", ParkingSlotId: "", Quantity: "1", Reason: "", RateOverride: "" }); }}
                           className="px-2.5 py-1 text-xs border border-border rounded text-muted-foreground hover:bg-muted">
                           Cancel
                         </button>

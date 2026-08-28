@@ -43,7 +43,9 @@ const LM_SELECT = `
     -- Post-registration formalities
     mut.Id AS MutationId, mut.MutationNo, mut.Status AS MutationStatus,
     bankNoc.Id AS BankNocId, bankNoc.NocNo AS BankNocNo, bankNoc.Status AS BankNocStatus,
-    orgNoc.Id AS OrgNocId, orgNoc.NocNo AS OrgNocNo, orgNoc.Status AS OrgNocStatus
+    orgNoc.Id AS OrgNocId, orgNoc.NocNo AS OrgNocNo, orgNoc.Status AS OrgNocStatus,
+    -- Possession Notice (key handover)
+    pn.Id AS PossessionNoticeId, pn.Status AS PossessionNoticeStatus
   FROM dbo.CrmLegalMilestone m
   JOIN dbo.CrmBooking b ON b.Id = m.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -55,6 +57,10 @@ const LM_SELECT = `
   LEFT JOIN dbo.CrmQueryPayment qp ON qp.BookingId = m.BookingId
   LEFT JOIN dbo.CrmRegistry reg ON reg.BookingId = m.BookingId
   LEFT JOIN dbo.CrmMutation mut ON mut.BookingId = m.BookingId
+  OUTER APPLY (
+    SELECT TOP 1 Id, Status FROM dbo.CrmPossessionNotice
+    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+  ) pn
   OUTER APPLY (
     SELECT TOP 1 Id, NocNo, Status FROM dbo.CrmNoc
     WHERE BookingId = m.BookingId AND NocType = 'Bank' ORDER BY CreatedAt DESC
