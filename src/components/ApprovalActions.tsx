@@ -232,7 +232,7 @@ export function ApprovalActions({
           {reviewInstead ? (
             <Button
               size="sm"
-              className="gap-1.5 bg-cyan-600 hover:bg-cyan-700 text-white"
+              className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-cyan-600 hover:bg-cyan-700 text-white [&_svg]:size-3.5"
               onClick={reviewInstead.onClick}
             >
               <ClipboardCheck className="w-3.5 h-3.5" />
@@ -241,7 +241,7 @@ export function ApprovalActions({
           ) : (
             <Button
               size="sm"
-              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"
               disabled={loading !== null}
               onClick={() => handleAction("approve")}
             >
@@ -256,7 +256,7 @@ export function ApprovalActions({
 
           <Button
             size="sm"
-            className="gap-1.5 bg-red-600 hover:bg-red-700 text-white border-0"
+            className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-red-600 hover:bg-red-700 text-white border-0 [&_svg]:size-3.5"
             disabled={loading !== null}
             onClick={() => setRejectOpen(true)}
           >

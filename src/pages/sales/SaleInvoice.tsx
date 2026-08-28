@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -280,7 +281,7 @@ function CollectPaymentModal({
     });
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
       <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-md max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
@@ -405,7 +406,8 @@ function CollectPaymentModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -566,16 +568,16 @@ function GenerateInvoiceTab() {
                   <button
                     onClick={handleSubmit}
                     disabled={!selectedOrder || createMut.isPending}
-                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors shadow-sm"
+                    className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors shadow-sm"
                   >
                     {createMut.isPending ? (
                       <>
-                        <RefreshCw size={14} className="animate-spin" />{" "}
+                        <RefreshCw size={13} className="animate-spin" />{" "}
                         Generating…
                       </>
                     ) : (
                       <>
-                        <Send size={14} /> Generate Sale Invoice
+                        <Send size={13} /> Generate Sale Invoice
                       </>
                     )}
                   </button>
@@ -738,7 +740,7 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
       </div>
 
       {/* ── View modal ────────────────────────────────────────────────────── */}
-      {viewingInvoice && (
+      {viewingInvoice && createPortal(
         <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
           <style>{`
             @media print {
@@ -864,7 +866,8 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* ── Collect payment modal ────────────────────────────────────────── */}
@@ -910,24 +913,24 @@ export default function SaleInvoice() {
             {rights.canCreate && (
               <button
                 onClick={() => setActiveTab("generate")}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg transition-colors ${
                   activeTab === "generate"
                     ? "bg-violet-600 text-white shadow-sm"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`}
               >
-                <FileText size={14} /> Generate
+                <FileText size={13} /> Generate
               </button>
             )}
             <button
               onClick={() => setActiveTab("history")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg transition-colors ${
                 activeTab === "history"
                   ? "bg-violet-600 text-white shadow-sm"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
               }`}
             >
-              <ClipboardList size={14} /> History
+              <ClipboardList size={13} /> History
             </button>
           </div>
         }

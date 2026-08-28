@@ -12,6 +12,7 @@ const {
   backPatchRecordId,
 } = require("../utils/docNumberLock");
 const { getActiveFinYearName } = require("./receivedPayment");
+const { recordGLPosting } = require("../services/approvalService");
 
 // Sale Invoices are gated per-route via requirePageRight("sale-invoice", ...)
 
@@ -40,7 +41,13 @@ const SI_SELECT = `
     si.SaleInvoiceNo                  AS DocNo,
     si.InvoiceDate,
     si.SaleOrderID,
-    so.SaleOrderNo                    AS SaleOrderDocNo,
+    -- si.SaleOrderID can point into either dbo.SaleOrders (the "Generate
+    -- Invoice" tab's picker) or dbo.CustomerSaleOrders (the Inter-Company
+    -- Transfer orchestrator creates one of these, then invoices it) — see
+    -- createSaleInvoiceInternal's SaleOrderSource branch. Both tables
+    -- auto-increment independently, so try both joins and take whichever
+    -- actually matches.
+    COALESCE(so.DocNo, cso.SaleOrderNo) AS SaleOrderDocNo,
     si.CustomerID,
     ah.LHeadName                      AS CustomerName,
     si.CustomerID                     AS ToCompanyID,
@@ -77,10 +84,11 @@ const SI_SELECT = `
                                        AND eb.ESourceType = 'GRN'
       JOIN   dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
       WHERE  po.SourceSaleInvoiceId = si.SaleInvoiceID
-        AND  ISNULL(np.PStatus, '') NOT IN ('Rejected','Deleted')
+        AND  ISNULL(np.Status, '') NOT IN ('Rejected','Deleted')
     ), 0) AS DummyBankDebited
   FROM dbo.SaleInvoices si
-  LEFT JOIN dbo.CustomerSaleOrders  so ON so.SaleOrderID  = si.SaleOrderID
+  LEFT JOIN dbo.SaleOrders          so ON so.SaleOrderID  = si.SaleOrderID
+  LEFT JOIN dbo.CustomerSaleOrders  cso ON cso.SaleOrderID = si.SaleOrderID
   LEFT JOIN dbo.AccountHeadMaster   ah ON ah.LHeadId      = si.CustomerID
   LEFT JOIN dbo.enterprise          co ON co.id           = si.CompanyId
   LEFT JOIN dbo.enterprise          pr ON pr.id           = si.ProjectId
@@ -235,7 +243,25 @@ router.get("/:id", requirePageRight("sale-invoice", "view"), async (req, res) =>
 // below now just calls this and maps thrown errors to a response; behavior
 // is unchanged. Thrown errors carry a `.status` for the HTTP code to use.
 async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail) {
-  const { SaleOrderID, InvoiceDate, Amount, DocTypeId, RPFinYear: finYear, Remarks, ContractId } = payload;
+  const {
+    SaleOrderID,
+    InvoiceDate,
+    Amount,
+    DocTypeId,
+    RPFinYear: finYear,
+    Remarks,
+    ContractId,
+    // Two different features both produce a "Sale Order" and both call this
+    // same internal creator: the Sale Invoice page's own "Generate Invoice"
+    // tab (dbo.SaleOrders — the inter-company transfer with its Draft ->
+    // Pending -> Approved workflow) and the Inter-Company Transfer
+    // orchestrator, which creates its own dbo.CustomerSaleOrders row first
+    // and immediately invoices it. Both tables auto-increment their own
+    // SaleOrderID from 1, so an unlabeled id is genuinely ambiguous —
+    // explicit source selection, not a heuristic, is what keeps this from
+    // silently resolving against the wrong table's same-numbered row.
+    SaleOrderSource = "SaleOrders",
+  } = payload;
 
   if (!SaleOrderID) {
     const err = new Error("SaleOrderID is required.");
@@ -243,23 +269,96 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
     throw err;
   }
 
-  // ── Guard: Sale Order must exist ─────────────────────────────────────────
-  const soCheck = await pool
-    .request()
-    .input("SaleOrderID", sql.Int, parseInt(SaleOrderID, 10)).query(`
-      SELECT SaleOrderID, SaleOrderNo, CustomerID, CompanyId, ProjectId,
-             TotalAmount, fy_id, Status
-      FROM   dbo.CustomerSaleOrders
-      WHERE  SaleOrderID = @SaleOrderID AND IsDeleted = 0
-    `);
+  let so;
 
-  if (!soCheck.recordset.length) {
-    const err = new Error("Sale Order not found.");
-    err.status = 404;
-    throw err;
+  if (SaleOrderSource === "CustomerSaleOrders") {
+    // ── Inter-Company Transfer path — dbo.CustomerSaleOrders already
+    // carries its own CustomerID/CompanyId/ProjectId/fy_id, no Approved-
+    // status gate (that workflow has none) and no project-ledger lookup
+    // needed. Unchanged from the original logic.
+    const soCheck = await pool
+      .request()
+      .input("SaleOrderID", sql.Int, parseInt(SaleOrderID, 10)).query(`
+        SELECT SaleOrderID, SaleOrderNo AS DocNo, CustomerID, CompanyId, ProjectId,
+               TotalAmount, fy_id
+        FROM   dbo.CustomerSaleOrders
+        WHERE  SaleOrderID = @SaleOrderID AND IsDeleted = 0
+      `);
+    if (!soCheck.recordset.length) {
+      const err = new Error("Sale Order not found.");
+      err.status = 404;
+      throw err;
+    }
+    so = soCheck.recordset[0];
+  } else {
+    // ── Sale Invoice page's "Generate Invoice" tab — dbo.SaleOrders is the
+    // real, actively-used Sale Order feature (Draft -> Pending -> Approved
+    // workflow, see routes/saleOrders.js), an inter-company stock transfer
+    // where the "To Company"/"To Project" side is who gets invoiced. The
+    // EligibleOrderPicker on the Sale Invoice page has always sourced its
+    // list from dbo.SaleOrders, so this matches what the picker offers.
+    const soCheck = await pool
+      .request()
+      .input("SaleOrderID", sql.Int, parseInt(SaleOrderID, 10)).query(`
+        SELECT SaleOrderID, DocNo, ToCompanyID, ToProjectID,
+               FromCompanyID, FromProjectID, TotalAmount, Status, SaleItems
+        FROM   dbo.SaleOrders
+        WHERE  SaleOrderID = @SaleOrderID
+      `);
+
+    if (!soCheck.recordset.length) {
+      const err = new Error("Sale Order not found.");
+      err.status = 404;
+      throw err;
+    }
+
+    const soRaw = soCheck.recordset[0];
+
+    if (soRaw.Status !== "Approved") {
+      const err = new Error(
+        `Sale Order ${soRaw.DocNo} must be Approved before it can be invoiced (currently "${soRaw.Status}").`,
+      );
+      err.status = 409;
+      throw err;
+    }
+
+    // The "To Project" side is who's actually being billed — every project
+    // already gets an auto-provisioned Customer ledger head the moment
+    // it's created (see routes/projectMaster.js's ensureProjectLedgerHeads,
+    // LHeadCode 'PRJ-<projectId>-CUST'), so this reuses that existing head
+    // rather than inventing a second, parallel way to represent the same
+    // project as a billable party.
+    const custHeadRes = await pool
+      .request()
+      .input("Code", sql.NVarChar(20), `PRJ-${soRaw.ToProjectID}-CUST`)
+      .query("SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = @Code");
+    const customerHeadId = custHeadRes.recordset[0]?.LHeadId ?? null;
+    if (!customerHeadId) {
+      const err = new Error(
+        `No billing ledger found for the destination project on Sale Order ${soRaw.DocNo}. Re-save that project in Project Master to provision one.`,
+      );
+      err.status = 422;
+      throw err;
+    }
+
+    let glItems = [];
+    try {
+      glItems = JSON.parse(soRaw.SaleItems || "[]");
+    } catch {
+      glItems = [];
+    }
+
+    so = {
+      SaleOrderID: soRaw.SaleOrderID,
+      DocNo: soRaw.DocNo,
+      CustomerID: customerHeadId,
+      CompanyId: soRaw.FromCompanyID,
+      ProjectId: soRaw.FromProjectID,
+      TotalAmount: soRaw.TotalAmount,
+      fy_id: null,
+      GLItems: Array.isArray(glItems) ? glItems : [],
+    };
   }
-
-  const so = soCheck.recordset[0];
 
   // ── Guard: no existing active invoice for this SO ────────────────────────
   const dupCheck = await pool
@@ -280,14 +379,23 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
     throw err;
   }
 
-  // Resolve FinYear
-  let fyId = so.fy_id;
+  // Resolve FinYear — dbo.SaleOrders carries no fy_id of its own (unlike
+  // CustomerSaleOrders), so fall back to the currently active FinYear when
+  // the caller doesn't pass one explicitly. CustomerSaleOrders carries its
+  // own fy_id (so.fy_id above), which still wins when present.
+  let fyId = so.fy_id ?? null;
   if (finYear) {
     const fyRow = await pool
       .request()
       .input("FName", sql.NVarChar, finYear)
       .query("SELECT FId FROM dbo.FinYear WHERE FName = @FName");
     fyId = fyRow.recordset[0]?.FId ?? fyId;
+  }
+  if (!fyId) {
+    const activeFy = await pool.request().query(
+      "SELECT TOP 1 FId FROM dbo.FinYear WHERE FStatus = 1 AND FisLocked = 0 ORDER BY FStartDate DESC",
+    );
+    fyId = activeFy.recordset[0]?.FId ?? null;
   }
 
   const invoiceAmount = parseFloat(Amount) || parseFloat(so.TotalAmount) || 0;
@@ -362,6 +470,52 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
 
     await transaction.commit();
     await backPatchRecordId(pool, sql, finalDocNo, "SaleInvoices", newId);
+
+    // ── Revenue GL posting (after commit — postVoucher has its own
+    // transaction, same pattern as Received Payment/GRN posting) ───────────
+    // Dr Customer (the billed project's ledger head) / Cr each item's own
+    // tagged GL Head — grouped so two items sharing a head post one leg,
+    // not two. An untagged item just isn't posted (no default "Sales
+    // Revenue" system ledger exists yet) — logged via recordGLPosting so an
+    // under-posted invoice is findable rather than silently wrong.
+    if (Array.isArray(so.GLItems) && so.GLItems.length > 0) {
+      try {
+        const buckets = new Map();
+        for (const it of so.GLItems) {
+          if (!it.glHeadId) continue;
+          const amt = Number(it.amount) > 0 ? Number(it.amount) : (Number(it.qty) || 0) * (Number(it.rate) || 0);
+          if (amt <= 0) continue;
+          buckets.set(it.glHeadId, (buckets.get(it.glHeadId) || 0) + amt);
+        }
+        const taggedTotal = [...buckets.values()].reduce((s, v) => s + v, 0);
+        if (taggedTotal > 0) {
+          const { postVoucher } = require("../services/generalLedger");
+          const legs = [
+            { lHeadId: so.CustomerID, debit: Math.round(taggedTotal * 100) / 100, narration: `${finalDocNo} — Sale Invoice` },
+            ...[...buckets.entries()].map(([lHeadId, amt]) => ({
+              lHeadId,
+              credit: Math.round(amt * 100) / 100,
+              narration: `${finalDocNo} — Sale Invoice revenue`,
+            })),
+          ];
+          await postVoucher(pool, {
+            voucherNo: finalDocNo,
+            voucherDate: InvoiceDate || new Date(),
+            sourceType: "SaleInvoice",
+            sourceId: newId,
+            companyId: so.CompanyId ?? null,
+            projectId: so.ProjectId ?? null,
+            createdBy: userEmail,
+            legs,
+          });
+          await recordGLPosting("sale-invoice", newId, { posted: true }, userEmail);
+        } else {
+          await recordGLPosting("sale-invoice", newId, { none: true, reason: "No line item on the Sale Order was tagged with a GL Head" }, userEmail);
+        }
+      } catch (glErr) {
+        await recordGLPosting("sale-invoice", newId, { failed: true, reason: glErr.message }, userEmail);
+      }
+    }
 
     // ── Contract Master: auto-allocate (FIFO) any available advance ─────────
     // Runs AFTER commit — the invoice itself must exist first, and this

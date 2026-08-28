@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -26,6 +27,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getInventoryMaster } from "@/api/inventoryMasterApi";
@@ -63,6 +65,12 @@ interface SOItem {
   rate: string;
   availableQty: number;
   remarks: string;
+  // Which revenue GL Head this item's sale posts to once invoiced — see
+  // GLAccountSelect (dbo.AccountHeadMaster WHERE LHeadType='GL'). Persisted
+  // per-item (not per-order) since one Sale Order can mix items that book
+  // to different revenue heads.
+  glHeadId: number | null;
+  glHeadLabel: string | null;
 }
 
 interface AvailableItem {
@@ -80,6 +88,8 @@ const emptyItem = (): SOItem => ({
   rate: "",
   availableQty: 0,
   remarks: "",
+  glHeadId: null,
+  glHeadLabel: null,
 });
 
 type Accent = "blue" | "violet";
@@ -373,12 +383,13 @@ function SOItemRow({
 
   return (
     <div
-      className={`grid grid-cols-12 gap-2 items-start p-3 rounded-xl border transition-colors ${
+      className={`p-3 rounded-xl border transition-colors space-y-2 ${
         overLimit
           ? "border-red-400/40 bg-red-500/5"
           : "border-border bg-muted/20"
       }`}
     >
+    <div className="grid grid-cols-12 gap-2 items-start">
       {/* # */}
       <div className="col-span-1 flex items-center h-9 text-xs font-mono text-muted-foreground">
         {idx + 1}
@@ -529,6 +540,22 @@ function SOItemRow({
         >
           <Trash2 size={13} />
         </button>
+      </div>
+    </div>
+
+      {/* GL Head — which revenue ledger this item posts to once invoiced */}
+      <div className="flex items-center gap-2 pl-8">
+        <span className="text-[10px] uppercase tracking-widest text-muted-foreground shrink-0">
+          GL Head
+        </span>
+        <div className="flex-1 max-w-xs">
+          <GLAccountSelect
+            value={item.glHeadId}
+            onChange={(id, label) => onUpdate(idx, { glHeadId: id, glHeadLabel: label })}
+            placeholder="Default revenue account"
+            className="!py-1.5 !text-xs"
+          />
+        </div>
       </div>
     </div>
   );
@@ -701,7 +728,7 @@ function SaleOrderHistory() {
       {/* ══════════════════════════════════════════════════════════════════ */}
       {/*  VIEW / PRINT MODAL                                                */}
       {/* ══════════════════════════════════════════════════════════════════ */}
-      {viewingOrder && (
+      {viewingOrder && createPortal(
         <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
           <style>{`
             @media print {
@@ -875,7 +902,8 @@ function SaleOrderHistory() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -1076,6 +1104,7 @@ export default function SaleOrder() {
         uom: it.uom,
         rate: parseFloat(it.rate) || 0,
         remarks: it.remarks,
+        glHeadId: it.glHeadId,
       }));
     createMut.mutate({
       FromCompanyID: parseInt(fromCompanyId),
