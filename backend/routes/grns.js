@@ -1799,6 +1799,27 @@ router.get("/:id/posting", async (req, res) => {
         const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100), M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100), M_Id) IN (${ph})`);
         for (const row of mRes.recordset) masterMap[row.M_Id] = { cgstRate: parseFloat(row.M_CGST) || 0, sgstRate: parseFloat(row.M_SGST) || 0 };
       }
+      // Per-item Cost Centre — Cost Centre now lives on the PO's own line
+      // item (migration 365), not the PO header, since one PO/GRN can mix
+      // e.g. a fixed-asset item with a consumption item. Resolve each
+      // received item's cost centre by matching ItemId back to the same
+      // PO's PurchaseOrderItems row.
+      let itemCostCentreMap = {};
+      if (grn.POID && itemIds.length > 0) {
+        const ccReq = pool.request().input("POID", sql.Int, grn.POID);
+        const ph2 = itemIds.map((id, i) => { ccReq.input(`ccid${i}`, sql.NVarChar(100), id); return `@ccid${i}`; }).join(",");
+        const ccRes = await ccReq.query(`
+          SELECT CONVERT(NVARCHAR(100), poi.ItemId) AS ItemId, poi.CostCenterId, cc.Name AS CostCenterName, cc.Code AS CostCenterCode
+          FROM dbo.PurchaseOrderItems poi
+          LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = poi.CostCenterId
+          WHERE poi.PurchaseOrderID = @POID AND CONVERT(NVARCHAR(100), poi.ItemId) IN (${ph2})
+        `);
+        for (const row of ccRes.recordset) {
+          itemCostCentreMap[row.ItemId] = row.CostCenterId
+            ? { id: row.CostCenterId, name: row.CostCenterName, code: row.CostCenterCode }
+            : null;
+        }
+      }
       for (const it of receivedItems) {
         const itemId = String(it.itemId || it.ItemId || "");
         const receivedQty = Number(it.receivedQty || it.ReceivedQty || 0);
@@ -1819,9 +1840,36 @@ router.get("/:id/posting", async (req, res) => {
           rate,
           baseAmount: Math.round(baseAmount * 100) / 100,
           gstAmount,
+          costCentre: itemCostCentreMap[itemId] ?? null,
         });
       }
     }
+
+    // Cost-centre-wise money breakdown — same base+GST totals as above,
+    // regrouped by each item's own cost centre instead of by item, so the
+    // Posting tab can show e.g. "Fixed Asset: ₹X · Consumption: ₹Y" instead
+    // of forcing the reviewer to add up items manually.
+    const costCentreBreakdownMap = new Map();
+    for (const row of itemBreakdown) {
+      const key = row.costCentre?.id ?? "unassigned";
+      const existing = costCentreBreakdownMap.get(key);
+      if (existing) {
+        existing.baseAmount += row.baseAmount;
+        existing.gstAmount += row.gstAmount;
+      } else {
+        costCentreBreakdownMap.set(key, {
+          costCentre: row.costCentre ?? null,
+          baseAmount: row.baseAmount,
+          gstAmount: row.gstAmount,
+        });
+      }
+    }
+    const costCentreBreakdown = [...costCentreBreakdownMap.values()].map((r) => ({
+      ...r,
+      baseAmount: Math.round(r.baseAmount * 100) / 100,
+      gstAmount: Math.round(r.gstAmount * 100) / 100,
+      totalAmount: Math.round((r.baseAmount + r.gstAmount) * 100) / 100,
+    }));
     totalBase = Math.round(totalBase * 100) / 100;
     totalGST = Math.round(totalGST * 100) / 100;
     const totalInclGST = Math.round((totalBase + totalGST) * 100) / 100;
@@ -1850,7 +1898,11 @@ router.get("/:id/posting", async (req, res) => {
       taxAmount: totalGST,
       totalAmount: totalInclGST,
       items: itemBreakdown,
+      // Legacy single flat cost centre (PO header) — kept for any old
+      // caller, but the Posting tab now uses costCentreBreakdown / each
+      // item's own costCentre instead of this.
       costCentre: grn.CostCenterName ? { id: grn.CostCenterId, name: grn.CostCenterName, code: grn.CostCenterCode } : null,
+      costCentreBreakdown,
       accounts: { purchase: purchaseLed, pgrn: pgrnLed, provisional: provisionalLed },
       isPosted: !!existingPost,
       jvNo: existingPost?.VoucherNo ?? null,
@@ -1888,10 +1940,16 @@ router.post("/:id/post-to-gl", async (req, res) => {
     `);
     if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This GRN has already been posted to GL." });
 
-    // Recompute totals
+    // Recompute totals — and each item's own Cost Centre (migration 365:
+    // Cost Centre lives on the PO's line item now, not the PO header, since
+    // one PO/GRN can mix e.g. a fixed-asset item with a consumption item).
+    // Grouping the JV legs by cost centre (instead of one flat Purchase/
+    // PGRN pair for the whole GRN) is what makes the Posting tab's
+    // cost-centre-wise breakdown actually true to what's posted in GL.
     const rawItems = parseGRNItems(grn.GRNItems);
     const receivedItems = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
     let totalBase = 0, totalGST = 0;
+    const costCentreBuckets = new Map(); // key: CostCenterId ?? "unassigned" -> { costCenterId, base, gst }
     if (receivedItems.length > 0) {
       const itemIds = receivedItems.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
       let masterMap = {};
@@ -1901,6 +1959,17 @@ router.post("/:id/post-to-gl", async (req, res) => {
         const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
         for (const row of mRes.recordset) masterMap[row.M_Id]={ cgstRate:parseFloat(row.M_CGST)||0, sgstRate:parseFloat(row.M_SGST)||0 };
       }
+      let itemCostCentreMap = {};
+      if (grn.POID && itemIds.length > 0) {
+        const ccReq = pool.request().input("POID", sql.Int, grn.POID);
+        const ph2 = itemIds.map((id,i)=>{ ccReq.input(`ccid${i}`,sql.NVarChar(100),id); return `@ccid${i}`; }).join(",");
+        const ccRes = await ccReq.query(`
+          SELECT CONVERT(NVARCHAR(100), ItemId) AS ItemId, CostCenterId
+          FROM dbo.PurchaseOrderItems
+          WHERE PurchaseOrderID = @POID AND CONVERT(NVARCHAR(100), ItemId) IN (${ph2})
+        `);
+        for (const row of ccRes.recordset) itemCostCentreMap[row.ItemId] = row.CostCenterId ?? null;
+      }
       for (const it of receivedItems) {
         const itemId = String(it.itemId||it.ItemId||"");
         const receivedQty = Number(it.receivedQty||it.ReceivedQty||0);
@@ -1909,8 +1978,16 @@ router.post("/:id/post-to-gl", async (req, res) => {
         const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
         const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
         const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
+        const gstAmount = baseAmount*(totalGSTRate/100);
         totalBase += baseAmount;
-        totalGST += baseAmount*(totalGSTRate/100);
+        totalGST += gstAmount;
+
+        const costCenterId = itemCostCentreMap[itemId] ?? null;
+        const bucketKey = costCenterId ?? "unassigned";
+        const bucket = costCentreBuckets.get(bucketKey) ?? { costCenterId, base: 0, gst: 0 };
+        bucket.base += baseAmount;
+        bucket.gst += gstAmount;
+        costCentreBuckets.set(bucketKey, bucket);
       }
     }
     totalBase = Math.round(totalBase*100)/100;
@@ -1935,16 +2012,28 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // (once as the base-amount debit, once as the tax-amount credit) rather
     // than crediting PGRN with the GST-inclusive total, so PGRN only ever
     // reflects the base receivable and the ITC leg nets against Purchase.
-    const lines = [
-      { LHeadId: purchaseId,    DebitAmount: totalBase,    CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (base)` },
-      { LHeadId: pgrnId,        DebitAmount: 0,             CreditAmount: totalBase, Narration: `GRN Posting: ${grn.GRNNo} — Provision for Pending GRN` },
-      ...(totalGST > 0
-        ? [
-            { LHeadId: provisionalId, DebitAmount: totalGST, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Provisional ITC` },
-            { LHeadId: purchaseId,    DebitAmount: 0, CreditAmount: totalGST, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (tax offset)` },
-          ]
-        : []),
-    ];
+    //
+    // Repeated once per Cost Centre bucket (instead of once for the whole
+    // GRN) so each leg is tagged with the cost centre that actually earned
+    // it — a GRN mixing a fixed-asset item and a consumption item posts two
+    // separate Purchase/PGRN pairs, not one pair with an arbitrary single
+    // cost centre stamped on the whole thing.
+    const lines = [];
+    for (const { costCenterId, base, gst } of costCentreBuckets.values()) {
+      const roundedBase = Math.round(base * 100) / 100;
+      const roundedGst = Math.round(gst * 100) / 100;
+      if (roundedBase <= 0) continue;
+      lines.push(
+        { LHeadId: purchaseId, DebitAmount: roundedBase, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (base)`, CostCenterId: costCenterId },
+        { LHeadId: pgrnId,     DebitAmount: 0, CreditAmount: roundedBase, Narration: `GRN Posting: ${grn.GRNNo} — Provision for Pending GRN`, CostCenterId: costCenterId },
+      );
+      if (roundedGst > 0) {
+        lines.push(
+          { LHeadId: provisionalId, DebitAmount: roundedGst, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Provisional ITC`, CostCenterId: costCenterId },
+          { LHeadId: purchaseId,    DebitAmount: 0, CreditAmount: roundedGst, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (tax offset)`, CostCenterId: costCenterId },
+        );
+      }
+    }
 
     // Voucher number only — GL posting is independent of the Journal
     // Voucher module. This used to ALSO insert a dbo.JournalVoucher header +
@@ -1982,7 +2071,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
       projectId: grn.ProjectId ?? null,
       costCenterId: grn.CostCenterId ?? null,
       createdBy: userEmail,
-      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
+      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration, costCenterId: l.CostCenterId ?? null })),
     });
 
     await bumpCacheVersion("journal-voucher");

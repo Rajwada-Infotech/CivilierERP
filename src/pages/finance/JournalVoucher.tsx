@@ -27,7 +27,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   Plus, Trash2, Scale, Loader2, RefreshCw,
-  CheckCircle2, Clock, FileText, AlertCircle, Search, X, Check,
+  CheckCircle2, Clock, FileText, AlertCircle, Search, X, Check, BookOpen,
 } from "lucide-react";
 import {
   getJournalVouchers,
@@ -845,7 +845,6 @@ export default function JournalVoucher() {
                     {viewingJV.JVNo || `JV-${viewingJV.JVID}`}
                   </span>
                   <StatusBadge status={viewingJV.Status} />
-                  <GLBadge status={viewingJV.Status} postedToGL={viewingJV.PostedToGL} />
                 </div>
                 <DialogTitle className="text-sm font-semibold mt-1.5">Journal Voucher</DialogTitle>
                 <DialogDescription className="text-[11px] mt-0.5">
@@ -856,49 +855,81 @@ export default function JournalVoucher() {
               </DialogHeader>
 
               <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-4">
+                {/* Header row — same visual language as the GRN/Invoice
+                    Posting tabs (BookOpen label + posted/not-posted pill) */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <BookOpen size={14} className="text-primary" />
+                    <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                      Journal Entry — JV Posting
+                    </span>
+                  </div>
+                  <GLBadge status={viewingJV.Status} postedToGL={viewingJV.PostedToGL} />
+                </div>
+
                 {viewingJV.Narration && (
                   <p className="text-sm text-foreground">{viewingJV.Narration}</p>
                 )}
-                <div className="rounded-lg border border-border overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-muted/50 border-b border-border text-left text-muted-foreground">
-                        <th className="px-3 py-2 font-medium">Ledger</th>
-                        <th className="px-3 py-2 font-medium text-right">Debit</th>
-                        <th className="px-3 py-2 font-medium text-right">Credit</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {viewingJV.lines.map((l) => (
-                        <tr key={l.LineID} className="border-b border-border/50 last:border-0">
-                          <td className="px-3 py-2">
-                            <p className="text-foreground">{l.LHeadName || "—"}</p>
+
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
+                    <span>Ledger</span>
+                    <span className="text-right">Debit (₹)</span>
+                    <span className="text-right">Credit (₹)</span>
+                  </div>
+                  {viewingJV.lines.map((l) => {
+                    const isDebit = Number(l.DebitAmount) > 0;
+                    return (
+                      <div
+                        key={l.LineID}
+                        className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 border-b border-border/50 last:border-0 items-center gap-1 sm:gap-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0 pl-1">
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDebit ? "bg-emerald-500" : "bg-rose-500"}`} />
+                          <div className="min-w-0">
+                            <p className="text-[11px] sm:text-xs text-foreground truncate">{l.LHeadName || "—"}</p>
                             {l.Narration && (
-                              <p className="text-[10px] text-muted-foreground mt-0.5">{l.Narration}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{l.Narration}</p>
                             )}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-foreground">
-                            {l.DebitAmount ? formatINR(l.DebitAmount) : "—"}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-foreground">
-                            {l.CreditAmount ? formatINR(l.CreditAmount) : "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-muted/30 font-semibold">
-                        <td className="px-3 py-2 text-foreground">Total</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-foreground">
-                          {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.DebitAmount) || 0), 0))}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-foreground">
-                          {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.CreditAmount) || 0), 0))}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                          </div>
+                        </div>
+                        <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                          {l.DebitAmount ? formatINR(l.DebitAmount) : ""}
+                        </span>
+                        <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                          {l.CreditAmount ? formatINR(l.CreditAmount) : ""}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
+                    <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                    <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">
+                      {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.DebitAmount) || 0), 0))}
+                    </span>
+                    <span className="text-right text-rose-600 dark:text-rose-400 font-mono">
+                      {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.CreditAmount) || 0), 0))}
+                    </span>
+                  </div>
                 </div>
+
+                {viewingJV.Status === "Approved" && (
+                  viewingJV.PostedToGL ? (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                      <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
+                      <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                        Posted to General Ledger. Entries are visible in the Trial Balance.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3">
+                      <AlertCircle size={13} className="text-destructive flex-shrink-0" />
+                      <p className="text-xs text-destructive">
+                        Not yet posted to General Ledger.
+                      </p>
+                    </div>
+                  )
+                )}
               </div>
 
               <DialogFooter className="shrink-0 px-4 sm:px-5 py-3.5 border-t border-border bg-muted/20">

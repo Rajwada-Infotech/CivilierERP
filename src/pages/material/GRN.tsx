@@ -3655,7 +3655,7 @@ export default function GRN() {
                         Could not load posting data.
                       </div>
                     ) : (() => {
-                      const { baseAmount, taxAmount, costCentre, accounts, items } = grnPostingData;
+                      const { baseAmount, taxAmount, costCentreBreakdown, accounts, items } = grnPostingData;
                       const fmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                       type PostRow = { key: string; label: string; code: string | null; side: "debit" | "credit"; amount: number };
                       const purchaseLabel = accounts?.purchase?.name ?? accounts?.purchase?.label ?? "Purchase A/c";
@@ -3685,7 +3685,7 @@ export default function GRN() {
                           : []),
                       ];
 
-                      type ItemGroup = { key: string; itemName: string | null; qty: number | null; rate: number | null; uom: string | null; rows: PostRow[] };
+                      type ItemGroup = { key: string; itemName: string | null; qty: number | null; rate: number | null; uom: string | null; costCentre: { id: number; name: string; code: string | null } | null; rows: PostRow[] };
                       const itemGroups: ItemGroup[] =
                         Array.isArray(items) && items.length > 0
                           ? items.map((it: any, idx: number) => ({
@@ -3694,9 +3694,10 @@ export default function GRN() {
                               qty: it.qty ?? null,
                               rate: it.rate ?? null,
                               uom: it.uom ?? null,
+                              costCentre: it.costCentre ?? null,
                               rows: buildRows(String(it.itemId ?? idx), Number(it.baseAmount) || 0, Number(it.gstAmount) || 0),
                             }))
-                          : [{ key: "lumped", itemName: null, qty: null, rate: null, uom: null, rows: buildRows("lumped", baseAmount, taxAmount) }];
+                          : [{ key: "lumped", itemName: null, qty: null, rate: null, uom: null, costCentre: null, rows: buildRows("lumped", baseAmount, taxAmount) }];
 
                       const allRows = itemGroups.flatMap((g) => g.rows);
                       const totalDebit = allRows.filter(r => r.side === "debit").reduce((s, r) => s + r.amount, 0);
@@ -3704,7 +3705,30 @@ export default function GRN() {
 
                       const gridCols = "grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr]";
 
+                      // Cost-centre-wise money breakdown — same totals as
+                      // the table above, regrouped by cost centre instead
+                      // of by item, so a reviewer can see e.g. "Fixed
+                      // Asset: ₹X · Consumption: ₹Y" at a glance.
+                      const ccBreakdown: Array<{ costCentre: { id: number; name: string; code: string | null } | null; baseAmount: number; gstAmount: number; totalAmount: number }> =
+                        Array.isArray(costCentreBreakdown) ? costCentreBreakdown : [];
+
                       return (
+                        <div className="space-y-3">
+                        {ccBreakdown.length > 1 && (
+                          <div className="rounded-xl border border-border overflow-hidden">
+                            <div className="px-3 sm:px-4 py-2 bg-muted/40 border-b border-border text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+                              Cost Centre — Money Breakdown
+                            </div>
+                            <div className="divide-y divide-border/50">
+                              {ccBreakdown.map((b, i) => (
+                                <div key={b.costCentre?.id ?? `unassigned-${i}`} className="flex items-center justify-between px-3 sm:px-4 py-2.5 text-xs">
+                                  <span className="text-foreground font-medium">{b.costCentre?.name || "Unassigned"}</span>
+                                  <span className="font-mono text-muted-foreground">₹{fmt(b.totalAmount)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         <div className="rounded-xl border border-border overflow-hidden">
                           <div className={`grid ${gridCols} bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2`}>
                             <span>Account</span>
@@ -3737,7 +3761,7 @@ export default function GRN() {
                                       {row.label}{row.code ? ` (${row.code})` : ""}
                                     </span>
                                   </div>
-                                  <span className="text-[11px] text-muted-foreground text-center truncate">{costCentre?.name || "—"}</span>
+                                  <span className="text-[11px] text-muted-foreground text-center truncate">{group.costCentre?.name || "Unassigned"}</span>
                                   <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
                                     {row.side === "debit" ? fmt(row.amount) : ""}
                                   </span>
@@ -3754,6 +3778,7 @@ export default function GRN() {
                             <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(totalDebit)}</span>
                             <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(totalCredit)}</span>
                           </div>
+                        </div>
                         </div>
                       );
                     })()}

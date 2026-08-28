@@ -706,6 +706,22 @@ export function ExpenseBookingPreviewModal({
                     </div>
                   )}
 
+                  {isGrnLinked && Array.isArray(invPostingData.costCentreBreakdown) && invPostingData.costCentreBreakdown.length > 1 && (
+                    <div className="rounded-xl border border-border overflow-hidden">
+                      <div className="px-3 sm:px-4 py-2 bg-muted/40 border-b border-border text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+                        Cost Centre — Money Breakdown
+                      </div>
+                      <div className="divide-y divide-border/50">
+                        {invPostingData.costCentreBreakdown.map((b: any, i: number) => (
+                          <div key={b.costCentre?.id ?? `unassigned-${i}`} className="flex items-center justify-between px-3 sm:px-4 py-2.5 text-xs">
+                            <span className="text-foreground font-medium">{b.costCentre?.name || "Unassigned"}</span>
+                            <span className="font-mono text-muted-foreground">₹{fmtAmt(b.totalAmount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="rounded-xl border border-border overflow-hidden">
                     <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
                       <span>Account</span>

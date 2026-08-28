@@ -125,6 +125,97 @@ async function computeGrnBaseTax(pool, grnIds) {
   };
 }
 
+// Cost-centre-wise base/GST breakdown for a SINGLE GRN's item lines —
+// mirrors computeSingleGrnBaseTax's per-item math but groups by each item's
+// own Cost Centre (migration 365) instead of summing into one flat total.
+// Used both by the multi-GRN summary breakdown below and by post-to-gl to
+// split each GRN's PGRN-reversal/GST-Credit legs per cost centre.
+async function computeSingleGrnCostCentreBuckets(pool, grnId) {
+  const grnRes = await pool.request().input("GRNID", sql.Int, grnId)
+    .query(`SELECT GRNItems, POID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID`);
+  const row = grnRes.recordset[0];
+  if (!row) return [];
+  const rawItems = JSON.parse(row.GRNItems || "[]");
+  const received = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
+  if (!received.length) return [];
+
+  const itemIds = received.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
+  let masterMap = {}, ccMap = {};
+  if (itemIds.length) {
+    const mReq = pool.request();
+    const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
+    const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
+    for (const r of mRes.recordset) masterMap[r.M_Id]={cgstRate:parseFloat(r.M_CGST)||0,sgstRate:parseFloat(r.M_SGST)||0};
+
+    if (row.POID) {
+      const ccReq = pool.request().input("POID", sql.Int, row.POID);
+      const ph2 = itemIds.map((id,i)=>{ ccReq.input(`ccid${i}`,sql.NVarChar(100),id); return `@ccid${i}`; }).join(",");
+      const ccRes = await ccReq.query(`
+        SELECT CONVERT(NVARCHAR(100), poi.ItemId) AS ItemId, poi.CostCenterId, cc.Name AS CostCenterName, cc.Code AS CostCenterCode
+        FROM dbo.PurchaseOrderItems poi
+        LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = poi.CostCenterId
+        WHERE poi.PurchaseOrderID = @POID AND CONVERT(NVARCHAR(100), poi.ItemId) IN (${ph2})
+      `);
+      for (const r of ccRes.recordset) {
+        ccMap[r.ItemId] = r.CostCenterId ? { id: r.CostCenterId, name: r.CostCenterName, code: r.CostCenterCode } : null;
+      }
+    }
+  }
+
+  const buckets = new Map();
+  for (const it of received) {
+    const itemId = String(it.itemId||it.ItemId||"");
+    const qty = Number(it.receivedQty||it.ReceivedQty||0);
+    const rate = Number(it.rate||it.Rate||0);
+    const base = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*Number(it.quantity||it.Quantity||qty||0);
+    const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
+    const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
+    const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
+    const gst = base*(totalGSTRate/100);
+
+    const costCentre = ccMap[itemId] ?? null;
+    const key = costCentre?.id ?? "unassigned";
+    const bucket = buckets.get(key) ?? { costCentre, base: 0, gst: 0 };
+    bucket.base += base;
+    bucket.gst += gst;
+    buckets.set(key, bucket);
+  }
+  return [...buckets.values()].map((b) => ({
+    costCentre: b.costCentre,
+    baseAmount: Math.round(b.base * 100) / 100,
+    gstAmount: Math.round(b.gst * 100) / 100,
+  }));
+}
+
+// Cost-centre-wise base/GST breakdown across every GRN feeding an invoice —
+// mirrors computeSingleGrnBaseTax's per-item math but groups by each item's
+// own Cost Centre (migration 365: lives on the PO's line item, not the PO
+// header, since one PO/GRN can mix e.g. a fixed-asset item with a
+// consumption item) instead of summing into one flat total. Used so a
+// GRN-linked invoice's Posting tab can show the same cost-centre-wise money
+// breakdown as the GRN it was raised from.
+async function computeGrnCostCentreBreakdown(pool, grnIds) {
+  const buckets = new Map(); // key: CostCenterId ?? "unassigned" -> { costCentre, base, gst }
+  for (const grnId of grnIds) {
+    const grnBuckets = await computeSingleGrnCostCentreBuckets(pool, grnId);
+    for (const b of grnBuckets) {
+      const key = b.costCentre?.id ?? "unassigned";
+      const bucket = buckets.get(key) ?? { costCentre: b.costCentre, base: 0, gst: 0 };
+      bucket.base += b.baseAmount;
+      bucket.gst += b.gstAmount;
+      buckets.set(key, bucket);
+    }
+  }
+  return [...buckets.values()]
+    .filter((b) => Math.round(b.base * 100) / 100 > 0)
+    .map((b) => ({
+      costCentre: b.costCentre,
+      baseAmount: Math.round(b.base * 100) / 100,
+      gstAmount: Math.round(b.gst * 100) / 100,
+      totalAmount: Math.round((b.base + b.gst) * 100) / 100,
+    }));
+}
+
 // Resolves every GRN id feeding an invoice — the primary eb.ESourceId, plus
 // every id in eb.ELinkedGrnIds for a multi-GRN combined invoice.
 function resolveGrnIds(eb) {
@@ -3960,10 +4051,12 @@ router.get("/:id/posting", async (req, res) => {
 
     // Determine if GRN-linked
     const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
-    let baseAmount = 0, taxAmount = 0, totalAmount = 0, perGrn = null;
+    let baseAmount = 0, taxAmount = 0, totalAmount = 0, perGrn = null, costCentreBreakdown = [];
 
     if (isGrnLinked) {
-      ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, resolveGrnIds(eb)));
+      const grnIds = resolveGrnIds(eb);
+      ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, grnIds));
+      costCentreBreakdown = await computeGrnCostCentreBreakdown(pool, grnIds);
     } else {
       // Direct (non-GRN) booking: back-derive base/tax from the invoice's
       // own GST rates against the GST-inclusive ENetAmount — MUST exactly
@@ -4028,6 +4121,7 @@ router.get("/:id/posting", async (req, res) => {
       // multi-row for a combined invoice; a single-GRN invoice still gets
       // a 1-row array so the frontend can render one consistent shape.
       grnBreakdown: perGrn,
+      costCentreBreakdown,
       supplierName: eb.SupplierName,
       accounts,
       expenseHeadAllocations,
@@ -4210,19 +4304,41 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const tdsShareOf = (fullAmount) =>
       tdsAmount <= 0 ? 0 : fullAmount >= totalAmount - 0.5 ? tdsAmount : Math.round((fullAmount / totalAmount) * tdsAmount * 100) / 100;
 
+    const grnGroups = perGrn && perGrn.length > 1 ? perGrn : [{ grnId: isGrnLinked ? parseInt(eb.ESourceId, 10) : null, docNo: eb.EDocNo, date: null, baseAmount, taxAmount, totalAmount }];
+    // Cost-centre buckets per GRN group — Cost Centre now lives on the PO's
+    // own line item (migration 365), not the PO header, since one GRN can
+    // mix e.g. a fixed-asset item with a consumption item. Splitting the
+    // PGRN-reversal/GST-Credit legs per bucket (instead of one flat pair
+    // per GRN) is what makes this invoice's Posting tab breakdown true to
+    // what's actually posted in GL — mirrors the same split already done
+    // for the GRN's own post-to-gl route.
+    const grnGroupBuckets = isGrnLinked
+      ? await Promise.all(grnGroups.map((g) => g.grnId ? computeSingleGrnCostCentreBuckets(pool, g.grnId) : []))
+      : [];
+
     const lines = isGrnLinked
       ? [
-          ...(perGrn && perGrn.length > 1 ? perGrn : [{ docNo: eb.EDocNo, date: null, baseAmount, taxAmount, totalAmount }])
-            .flatMap((g) => {
-              const gTdsShare = tdsShareOf(g.totalAmount);
+          ...grnGroups.flatMap((g, gi) => {
+            const gTdsShare = tdsShareOf(g.totalAmount);
+            const suffix = ` — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}`;
+            const buckets = grnGroupBuckets[gi] && grnGroupBuckets[gi].length > 0
+              ? grnGroupBuckets[gi]
+              : [{ costCentre: null, baseAmount: g.baseAmount, gstAmount: g.taxAmount }];
+            // TDS is deducted off the GRN group's total base, proportionally
+            // across its cost-centre buckets by each bucket's own share of
+            // that base — same spirit as tdsShareOf, just one level deeper.
+            return buckets.flatMap((b) => {
+              const bTdsShare = g.baseAmount > 0 ? Math.round((b.baseAmount / g.baseAmount) * gTdsShare * 100) / 100 : 0;
+              const ccSuffix = b.costCentre?.name ? ` [${b.costCentre.name}]` : "";
               return [
-                { LHeadId: pgrnId, DebitAmount: Math.round((g.baseAmount - gTdsShare) * 100) / 100, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — Provision for Pending GRN (reversal) — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
-                ...(g.taxAmount > 0
-                  ? [{ LHeadId: gstCreditId, DebitAmount: g.taxAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` }]
+                { LHeadId: pgrnId, DebitAmount: Math.round((b.baseAmount - bTdsShare) * 100) / 100, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — Provision for Pending GRN (reversal)${ccSuffix}${suffix}`, CostCenterId: b.costCentre?.id ?? null },
+                ...(b.gstAmount > 0
+                  ? [{ LHeadId: gstCreditId, DebitAmount: b.gstAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available${ccSuffix}${suffix}`, CostCenterId: b.costCentre?.id ?? null }]
                   : []),
-                ...creditLegs(g.totalAmount, ` — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}`),
               ];
-            }),
+            });
+          }),
+          ...grnGroups.flatMap((g) => creditLegs(g.totalAmount, ` — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}`)),
           ...tdsNatureLeg,
         ]
       : expenseHeadAllocations.length > 0
@@ -4318,7 +4434,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
       projectId: eb.ProjectId ?? null,
       costCenterId,
       createdBy: userEmail,
-      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
+      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration, costCenterId: l.CostCenterId ?? null })),
     });
 
     res.json({ jvNo: finalDocNo, message: "Posted successfully." });
