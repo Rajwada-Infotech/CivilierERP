@@ -52,6 +52,35 @@ async function requireActiveBooking(pool, bookingId) {
   return null;
 }
 
+// Stricter variant of requireActiveBooking — also asserts Status = 'Approved'.
+// Used for workflow actions that only make sense after admin has fully approved
+// the booking (Welcome Call, Legal Milestone creation, etc.). A booking that is
+// still Pending has not been signed off yet and should not progress into post-
+// booking workflows.
+async function requireApprovedBooking(pool, bookingId) {
+  const row = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Status, IsActive, IsFrozen, FreezeReason, FreezeExpiresAt FROM dbo.CrmBooking WHERE Id = @bid");
+  if (!row.recordset.length) return "Booking not found";
+  const b = row.recordset[0];
+  if (!b.IsActive) return "This booking is no longer active";
+  if (["Cancelled", "Rejected"].includes(b.Status)) {
+    return `This booking has been ${b.Status} — no further workflow actions are allowed on it`;
+  }
+  if (b.Status !== "Approved") {
+    return `Booking must be fully approved before this action (current status: ${b.Status})`;
+  }
+  if (b.IsFrozen) {
+    if (b.FreezeExpiresAt && new Date(b.FreezeExpiresAt) < new Date()) {
+      pool.request().input("bid", sql.Int, bookingId).query(
+        "UPDATE dbo.CrmBooking SET IsFrozen=0, FrozenAt=NULL, FrozenBy=NULL, FreezeReason=NULL, FreezeExpiresAt=NULL, UpdatedAt=SYSDATETIME() WHERE Id=@bid"
+      ).catch(() => {});
+      return null;
+    }
+    return `Booking is currently frozen${b.FreezeReason ? ": " + b.FreezeReason : ""}. Contact an admin to unfreeze before making changes.`;
+  }
+  return null;
+}
+
 // Gate for Unit/Parking/Extra-Charge edits: once the booking's Agreement has
 // at least one uploaded document, the numbers may already be baked into a
 // document someone is reviewing/signing, so a direct edit is no longer safe
@@ -1036,6 +1065,7 @@ module.exports = {
   recomputeLegalMilestoneCurrentStep,
   checkLoanProcessingCleared,
   requireActiveBooking,
+  requireApprovedBooking,
   recalculateRemainingMilestones,
   isLegalWorkStarted,
   isBookingFullySettled,

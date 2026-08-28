@@ -6,7 +6,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { maybeAutoCreateAgreement, requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateAgreement, requireActiveBooking, requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
 
@@ -255,13 +255,15 @@ router.get("/", requirePageRight("crm-welcome-calls", "view"), async (req, res) 
   }
 });
 
-// POST / — log a welcome call
+// POST / — log a welcome call. Requires a fully approved booking (Status =
+// 'Approved') — a Pending booking has not been signed off by admin yet and
+// should not progress into post-booking workflows.
 router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
-    const activeErr = await requireActiveBooking(pool, parseInt(b.BookingId));
+    const activeErr = await requireApprovedBooking(pool, parseInt(b.BookingId));
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     // Idempotency window: reject a duplicate log for the same booking + outcome

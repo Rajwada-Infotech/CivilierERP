@@ -5,7 +5,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { requireActiveBooking, recomputeLegalMilestoneCurrentStep } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, requireApprovedBooking, recomputeLegalMilestoneCurrentStep } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -103,7 +103,7 @@ router.post("/", requirePageRight("crm-legal-milestones", "create"), async (req,
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
 
-    const activeErr = await requireActiveBooking(pool, bookingId);
+    const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const agr = await pool.request().input("bid", sql.Int, bookingId)
