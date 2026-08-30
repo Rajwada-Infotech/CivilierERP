@@ -10,6 +10,7 @@ const compression = require("compression");
 
 const { connectDB, closeDB } = require("./db");
 const { startCrmSlaEngine } = require("./services/crmSlaEngine");
+const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
@@ -228,6 +229,7 @@ const ALL_ROUTES = [
   { path: "/api/fixed-asset-inventory-import", file: "./routes/fixedAssetInventoryImport" },
   { path: "/api/fixed-asset-assignment", file: "./routes/fixedAssetAssignment" },
   { path: "/api/asset-transfer", file: "./routes/assetTransfer" },
+  { path: "/api/fixed-asset-quality-check", file: "./routes/fixedAssetQualityCheck" },
   { path: "/api/id-template-master", file: "./routes/idTemplateMaster" },
   { path: "/api/work-progress", file: "./routes/workProgress" },
   { path: "/api/contractor-allocation", file: "./routes/contractorAllocation" },
@@ -606,6 +608,7 @@ async function startServer() {
       printBanner(PORT);
       logger.info(`[START] Server ready on port ${PORT}`);
       startCrmSlaEngine();
+      startFollowupReminderEngine();
     });
 
     setupGracefulShutdown(server, worker);

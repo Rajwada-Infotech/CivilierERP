@@ -29,6 +29,7 @@ export interface TransferableAsset {
   CompanyId: number | null;
   ProjectId: number | null;
   FinYear: string | null;
+  PictureBase64: string | null;
   CustodianUserId: number | null;
   CustodianName: string | null;
   CustodianAvatar: string | null;
@@ -168,6 +169,19 @@ export const updateAssetTransfer = async (id: number, data: UpdateTransferPayloa
     body: JSON.stringify(data),
   });
   if (!res.ok) await handleError(res, "Failed to update asset transfer");
+  return res.json();
+};
+
+// Sets/replaces/removes the Item Picture on the Fixed Asset Record for this
+// asset — shared with Assignment and every other asset view. Pass null/"" to
+// remove.
+export const setAssetPicture = async (assetId: number, pictureBase64: string | null): Promise<{ ok: true }> => {
+  const res = await fetchWithAuth(`${BASE}/asset-picture/${assetId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pictureBase64 }),
+  });
+  if (!res.ok) await handleError(res, "Failed to save item picture");
   return res.json();
 };
 

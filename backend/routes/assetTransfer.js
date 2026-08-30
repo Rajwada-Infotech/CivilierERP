@@ -65,6 +65,82 @@ async function recomputeCustodianForAsset(tx, assetId) {
   return custodianUserId;
 }
 
+// ── Asset Transfer → Assignment integration ─────────────────────────────────
+// Every successful transfer keeps exactly one live Fixed Asset Assignment row
+// linked back to it (SourceTransferId), for the receiving user. "Current" vs
+// "Old" is still derived from FixedAssetRecord.CustodianUserId elsewhere, so
+// these helpers only maintain the row + its link, never a status flag.
+async function upsertAssignmentForTransfer(tx, pool, opts) {
+  const {
+    transferId, assetId, toUserId, companyId, projectId, finYear,
+    departmentId, transferDate, email,
+  } = opts;
+
+  const existing = await tx.request()
+    .input("TransferId", sql.Int, transferId)
+    .query(`
+      SELECT AssignmentId FROM dbo.FixedAssetAssignment
+      WHERE SourceTransferId = @TransferId AND Status <> 'Deleted'
+    `);
+
+  if (existing.recordset.length) {
+    await tx.request()
+      .input("AssignmentId", sql.Int, existing.recordset[0].AssignmentId)
+      .input("AssetId",      sql.Int, assetId)
+      .input("UserId",       sql.Int, toUserId)
+      .input("CompanyId",    sql.Int, companyId || null)
+      .input("ProjectId",    sql.Int, projectId || null)
+      .input("FinYear",      sql.NVarChar(20), finYear || null)
+      .input("DepartmentId", sql.Int, departmentId || null)
+      .input("DocDate",      sql.Date, transferDate || null)
+      .query(`
+        UPDATE dbo.FixedAssetAssignment SET
+          AssetId = @AssetId, UserId = @UserId,
+          CompanyId = @CompanyId, ProjectId = @ProjectId, FinYear = @FinYear,
+          DepartmentId = @DepartmentId, DocDate = @DocDate
+        WHERE AssignmentId = @AssignmentId
+      `);
+    return null;
+  }
+
+  const docTypeId = await resolveDocTypeId(pool, sql, "FAA");
+  const docNo = await lockNextDocNumber(pool, sql, {
+    docTypeId, finYear: finYear || null, tableName: "FixedAssetAssignment", issuedBy: email,
+  });
+  const ins = await tx.request()
+    .input("DocNo",            sql.NVarChar(100), docNo)
+    .input("DocDate",          sql.Date, transferDate || null)
+    .input("FinYear",          sql.NVarChar(20), finYear || null)
+    .input("CompanyId",        sql.Int, companyId || null)
+    .input("ProjectId",        sql.Int, projectId || null)
+    .input("AssetId",          sql.Int, assetId)
+    .input("UserId",           sql.Int, toUserId)
+    .input("DepartmentId",     sql.Int, departmentId || null)
+    .input("SourceTransferId", sql.Int, transferId)
+    .input("Remarks",          sql.NVarChar(sql.MAX), "Auto-created from User-Wise Asset Transfer")
+    .input("CreatedBy",        sql.NVarChar(200), email)
+    .query(`
+      INSERT INTO dbo.FixedAssetAssignment
+        (DocNo, DocDate, FinYear, CompanyId, ProjectId, AssetId, UserId, DepartmentId,
+         SourceTransferId, UserImage, Remarks, CreatedBy, CreatedAt)
+      OUTPUT INSERTED.AssignmentId
+      VALUES
+        (@DocNo, @DocDate, @FinYear, @CompanyId, @ProjectId, @AssetId, @UserId, @DepartmentId,
+         @SourceTransferId, NULL, @Remarks, @CreatedBy, SYSDATETIME())
+    `);
+  return { assignmentId: ins.recordset[0].AssignmentId, docNo };
+}
+
+async function softDeleteAssignmentForTransfer(tx, transferId) {
+  await tx.request()
+    .input("TransferId", sql.Int, transferId)
+    .query(`
+      UPDATE dbo.FixedAssetAssignment
+      SET Status = 'Deleted'
+      WHERE SourceTransferId = @TransferId AND Status <> 'Deleted'
+    `);
+}
+
 // ── GET /users — active users for the From/To pickers ────────────────────────
 router.get("/users", requirePageRight("asset-transfer", "view"), async (req, res) => {
   try {
@@ -132,7 +208,7 @@ router.get("/transferable-assets", requirePageRight("asset-transfer", "view"), a
 
     const result = await request.query(`
       SELECT fa.AssetId, fa.AssetName, fa.AssetCode, fa.AssetCategory, fa.FAItemCode,
-             fa.CompanyId, fa.ProjectId, fa.FinYear,
+             fa.CompanyId, fa.ProjectId, fa.FinYear, fa.PictureBase64,
              fa.CustodianUserId, fa.Custodian AS CustodianName, cu.avatar_url AS CustodianAvatar
       FROM dbo.FixedAssetRecord fa
       LEFT JOIN dbo.users cu ON cu.id = fa.CustodianUserId
@@ -142,6 +218,53 @@ router.get("/transferable-assets", requirePageRight("asset-transfer", "view"), a
     res.json(result.recordset);
   } catch (err) {
     console.error("[assetTransfer] GET /transferable-assets:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /asset-picture/:assetId — set/replace/remove the Item Picture on the
+// Fixed Asset Record itself (asset-specific, shared with Assignment / Asset
+// Register / Detail). Lets the transfer form fill in a missing photo without
+// needing the fixed-asset-record edit right. ────────────────────────────────
+router.put("/asset-picture/:assetId", requirePageRight("asset-transfer", "create"), async (req, res) => {
+  const email = requireUser(req, res);
+  if (!email) return;
+  const assetId = toInt(req.params.assetId);
+  if (!assetId) return res.status(400).json({ error: "Invalid assetId" });
+
+  const { pictureBase64 } = req.body;
+  const clearing = pictureBase64 == null || pictureBase64 === "";
+  if (!clearing) {
+    if (!/^data:image\/(jpeg|jpg|png|webp);base64,/.test(pictureBase64)) {
+      return res.status(400).json({ error: "Unsupported image — use JPG, JPEG, PNG or WEBP" });
+    }
+    if (pictureBase64.length > 6_000_000) {
+      return res.status(400).json({ error: "Image is too large (max ~4 MB)" });
+    }
+  }
+
+  try {
+    const pool = getPool();
+    const guard = await pool.request().input("AssetId", sql.Int, assetId).query(
+      `SELECT AssetId, FAItemCode FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId AND Status <> 'Deleted' AND AssetCode IS NOT NULL`,
+    );
+    if (!guard.recordset.length) return res.status(404).json({ error: "Fixed Asset Record not found" });
+
+    await pool.request()
+      .input("AssetId",       sql.Int, assetId)
+      .input("PictureBase64", sql.NVarChar(sql.MAX), clearing ? null : pictureBase64)
+      .input("UpdatedBy",     sql.NVarChar(200), email)
+      .query(`
+        UPDATE dbo.FixedAssetRecord
+        SET PictureBase64 = @PictureBase64, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+        WHERE AssetId = @AssetId
+      `);
+
+    await bumpCacheVersion("fixed-assets");
+    await bumpCacheVersion("asset-transfer");
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[assetTransfer] PUT /asset-picture/:assetId:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -340,9 +463,19 @@ router.post("/", requirePageRight("asset-transfer", "create"), async (req, res) 
         `);
       const newId = insert.recordset[0].Id;
 
+      const asn = await upsertAssignmentForTransfer(tx, pool, {
+        transferId: newId, assetId: assetIdVal, toUserId: toUserIdVal,
+        companyId: companyId ? parseInt(companyId, 10) : null,
+        projectId: projectIdVal, finYear: finYear || null,
+        departmentId: departmentIdVal,
+        transferDate: transferDate || docDate || null, email,
+      });
+
       await tx.commit();
       await backPatchRecordId(pool, sql, docNo, "AssetTransferHistory", newId);
+      if (asn) await backPatchRecordId(pool, sql, asn.docNo, "FixedAssetAssignment", asn.assignmentId);
       await bumpCacheVersion("asset-transfer");
+      await bumpCacheVersion("fixed-asset-assignment");
       await bumpCacheVersion("fixed-assets");
       res.json({ id: newId, docNo });
     } catch (e) { await tx.rollback(); throw e; }
@@ -484,8 +617,19 @@ router.put("/:id", requirePageRight("asset-transfer", "edit"), async (req, res) 
         await recomputeCustodianForAsset(tx, assetIdVal);
       }
 
+      // Keep this transfer's linked Assignment row in step with the edit.
+      const asn = await upsertAssignmentForTransfer(tx, pool, {
+        transferId: id, assetId: assetIdVal, toUserId: toUserIdVal,
+        companyId: companyId ? parseInt(companyId, 10) : null,
+        projectId: projectIdVal, finYear: finYear || null,
+        departmentId: departmentIdVal,
+        transferDate: transferDate || docDate || null, email,
+      });
+
       await tx.commit();
+      if (asn) await backPatchRecordId(pool, sql, asn.docNo, "FixedAssetAssignment", asn.assignmentId);
       await bumpCacheVersion("asset-transfer");
+      await bumpCacheVersion("fixed-asset-assignment");
       await bumpCacheVersion("fixed-assets");
       res.json({ ok: true, toUserName });
     } catch (e) { await tx.rollback(); throw e; }
@@ -542,8 +686,14 @@ router.delete("/:id", requirePageRight("asset-transfer", "delete"), async (req, 
         await applyCustodian(tx, row.AssetId, row.FromUserId);
       }
 
+      // Roll back the Assignment this transfer created — the previous
+      // holder's assignment becomes Current again automatically (it's
+      // derived from the custodian we just restored above).
+      await softDeleteAssignmentForTransfer(tx, id);
+
       await tx.commit();
       await bumpCacheVersion("asset-transfer");
+      await bumpCacheVersion("fixed-asset-assignment");
       await bumpCacheVersion("fixed-assets");
       res.json({ ok: true });
     } catch (e) { await tx.rollback(); throw e; }

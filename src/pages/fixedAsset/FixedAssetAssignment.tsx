@@ -1,9 +1,11 @@
 import React, { useState, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Plus, ArrowLeft, Search, Building2, Package, Calendar, FileText, Hash,
   Check, X, Boxes, User, ChevronsUpDown, Loader2, ImagePlus, UserRound,
+  Eye, Pencil, Trash2, AlertTriangle, ArrowLeftRight,
 } from "lucide-react";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -19,8 +21,9 @@ import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getTransferUsers, type TransferUser } from "@/api/assetTransferApi";
 import {
-  getAssignableAssets, getAssignments, createAssignment,
-  type AssignableAsset, type AssignmentListItem,
+  getAssignableAssets, getAssignments, createAssignment, getAssignment,
+  updateAssignment, deleteAssignment,
+  type AssignableAsset, type AssignmentListItem, type AssignmentDetail,
 } from "@/api/fixedAssetAssignmentApi";
 
 function ensureArray<T>(v: unknown): T[] {
@@ -77,6 +80,52 @@ function SummaryCard({ label, value, color = "", icon: Icon }: { label: string; 
       <p className="text-xs text-muted-foreground mb-1">{label}</p>
       <p className={`text-base font-bold tabular-nums ${color}`}>{value}</p>
     </div>
+  );
+}
+
+// Searchable user selector (shadcn Popover + Command).
+function UserCombobox({
+  users, value, onChange, placeholder = "Search user…",
+}: {
+  users: TransferUser[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = users.find((u) => String(u.id) === value);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" role="combobox" aria-expanded={open}
+          className={cn("w-full justify-between font-normal h-9", !selected && "text-muted-foreground")}>
+          <span className="flex items-center gap-2 min-w-0">
+            {selected && <UserAvatar id={selected.id} name={selected.name} avatarUrl={selected.avatar_url} size={18} />}
+            <span className="truncate">{selected ? selected.name : placeholder}</span>
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command>
+          <CommandInput placeholder={placeholder} />
+          <CommandList>
+            <CommandEmpty>No users found.</CommandEmpty>
+            <CommandGroup>
+              {users.map((u) => (
+                <CommandItem key={u.id} value={u.name}
+                  onSelect={() => { onChange(String(u.id)); setOpen(false); }}
+                  className="data-[selected=true]:bg-neutral-900 data-[selected=true]:text-neutral-50">
+                  <Check className={cn("mr-2 h-4 w-4", String(u.id) === value ? "opacity-100" : "opacity-0")} />
+                  <UserAvatar id={u.id} name={u.name} avatarUrl={u.avatar_url} size={18} />
+                  <span className="ml-2 text-sm truncate">{u.name}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -150,6 +199,7 @@ interface FormState {
   finYear: string;
   assetId: string;
   userId: string;
+  responsibleUserId: string;
   remarks: string;
 }
 
@@ -160,6 +210,7 @@ const emptyForm = (finYear = ""): FormState => ({
   finYear,
   assetId:   "",
   userId:    "",
+  responsibleUserId: "",
   remarks:   "",
 });
 
@@ -174,6 +225,15 @@ export default function FixedAssetAssignment() {
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [form, setForm] = useState<FormState>(emptyForm(activeFinYear));
   const [userImage, setUserImage] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [viewingId, setViewingId] = useState<number | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  // Set on edit so the FA Item Code / asset shows read-only (asset can't be
+  // re-pointed on an existing assignment — delete & create a new one instead).
+  const [editAsset, setEditAsset] = useState<{ code: string | null; name: string | null } | null>(null);
+  // Auto-created from a User-Wise Asset Transfer — the user is locked to the
+  // transfer document; only date/remarks/photo stay editable here.
+  const [editIsAuto, setEditIsAuto] = useState(false);
 
   const [search, setSearch] = useState("");
 
@@ -201,8 +261,39 @@ export default function FixedAssetAssignment() {
   const { data: assignableAssets = [], isLoading: loadingAssets } = useQuery({
     queryKey: ["fixed-asset-assignable-assets"],
     queryFn:  getAssignableAssets,
-    enabled:  viewMode === "form",
+    enabled:  viewMode === "form" && !editingId,
   });
+
+  const { data: viewDetail } = useQuery({
+    queryKey: ["fixed-asset-assignment", viewingId],
+    queryFn:  () => getAssignment(viewingId!),
+    enabled:  viewingId != null,
+  });
+
+  const { data: editDetail } = useQuery({
+    queryKey: ["fixed-asset-assignment", editingId],
+    queryFn:  () => getAssignment(editingId!),
+    enabled:  editingId != null && viewMode === "form",
+  });
+
+  React.useEffect(() => {
+    if (editingId && editDetail) {
+      const d = editDetail as AssignmentDetail;
+      setForm({
+        docDate:   d.DocDate?.slice(0, 10) || "",
+        companyId: String(d.CompanyId || ""),
+        projectId: String(d.ProjectId || ""),
+        finYear:   d.FinYear || "",
+        assetId:   String(d.AssetId || ""),
+        userId:    String(d.UserId || ""),
+        responsibleUserId: String(d.ResponsibleUserId || ""),
+        remarks:   d.Remarks || "",
+      });
+      setUserImage(d.UserImage || null);
+      setEditAsset({ code: d.FAItemCode, name: d.AssetName });
+      setEditIsAuto(!!d.SourceTransferId);
+    }
+  }, [editingId, editDetail]);
 
   const projects = useMemo(() => {
     if (!form.companyId) return [];
@@ -266,17 +357,65 @@ export default function FixedAssetAssignment() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const resetForm = () => { setForm(emptyForm(activeFinYear)); setUserImage(null); };
+  const updateMut = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Parameters<typeof updateAssignment>[1] }) => updateAssignment(id, data),
+    onSuccess: () => {
+      toast.success("Assignment updated");
+      qc.invalidateQueries({ queryKey: ["fixed-asset-assignments"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-assignment"] });
+      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+      resetForm();
+      setViewMode("list");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: deleteAssignment,
+    onSuccess: () => {
+      toast.success("Assignment deleted");
+      qc.invalidateQueries({ queryKey: ["fixed-asset-assignments"] });
+      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+      setDeleteId(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const resetForm = () => {
+    setForm(emptyForm(activeFinYear));
+    setUserImage(null);
+    setEditingId(null);
+    setEditAsset(null);
+    setEditIsAuto(false);
+  };
   const goToCreate = () => { resetForm(); setViewMode("form"); };
+  const goToEdit = (a: AssignmentListItem) => { resetForm(); setEditingId(a.AssignmentId); setViewMode("form"); };
 
   const handleSave = () => {
-    if (!form.companyId) return toast.error("Company is required");
-    if (!form.projectId) return toast.error("Project is required");
     if (!form.finYear)   return toast.error("Financial year is required");
     if (!form.docDate)   return toast.error("Assignment date is required");
+    if (!form.userId)    return toast.error("User is required");
+    if (!form.responsibleUserId) return toast.error("Responsible User is required");
+
+    if (editingId) {
+      updateMut.mutate({
+        id: editingId,
+        data: {
+          docDate:   form.docDate,
+          finYear:   form.finYear,
+          userId:    Number(form.userId),
+          responsibleUserId: Number(form.responsibleUserId),
+          userImage: userImage,
+          remarks:   form.remarks || undefined,
+        },
+      });
+      return;
+    }
+
+    if (!form.companyId) return toast.error("Company is required");
+    if (!form.projectId) return toast.error("Project is required");
     if (!form.assetId)   return toast.error("FA Item Code is required");
     if (!selectedAsset)  return toast.error("Selected FA Item Code is no longer available");
-    if (!form.userId)    return toast.error("User is required");
 
     createMut.mutate({
       docDate:   form.docDate,
@@ -285,12 +424,13 @@ export default function FixedAssetAssignment() {
       finYear:   form.finYear,
       assetId:   Number(form.assetId),
       userId:    Number(form.userId),
+      responsibleUserId: Number(form.responsibleUserId),
       userImage: userImage || undefined,
       remarks:   form.remarks || undefined,
     });
   };
 
-  const saving = createMut.isPending;
+  const saving = createMut.isPending || updateMut.isPending;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // FORM VIEW
@@ -298,8 +438,8 @@ export default function FixedAssetAssignment() {
   if (viewMode === "form") {
     return (
       <GlassShell
-        title="New Assignment"
-        subtitle="Assign a Fixed Asset Depreciation Tag to a user"
+        title={editingId ? "Edit Assignment" : "New Assignment"}
+        subtitle={editingId ? "Update this asset assignment" : "Assign a Fixed Asset Depreciation Tag to a user"}
         icon={UserRound}
         accentColor="#eab308"
         action={
@@ -310,7 +450,7 @@ export default function FixedAssetAssignment() {
             </button>
             <button onClick={handleSave} disabled={saving}
               className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
-              <Check size={13} /> {saving ? "Saving…" : "Save Assignment"}
+              <Check size={13} /> {saving ? "Saving…" : editingId ? "Update Assignment" : "Save Assignment"}
             </button>
           </div>
         }
@@ -324,7 +464,7 @@ export default function FixedAssetAssignment() {
                 <label className={labelCls}><Building2 size={11} /> Company *</label>
                 <select value={form.companyId}
                   onChange={(e) => setForm((p) => ({ ...p, companyId: e.target.value, projectId: "", assetId: "" }))}
-                  className={inputCls}>
+                  className={inputCls} disabled={!!editingId}>
                   <option value="">Select company…</option>
                   {ensureArray<{ id: number; label: string }>(companies).map((c) => (
                     <option key={c.id} value={c.id}>{c.label}</option>
@@ -335,7 +475,7 @@ export default function FixedAssetAssignment() {
                 <label className={labelCls}>Project *</label>
                 <select value={form.projectId}
                   onChange={(e) => setForm((p) => ({ ...p, projectId: e.target.value, assetId: "" }))}
-                  className={inputCls} disabled={!form.companyId}>
+                  className={inputCls} disabled={!form.companyId || !!editingId}>
                   <option value="">Select project…</option>
                   {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
@@ -359,21 +499,34 @@ export default function FixedAssetAssignment() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 xl:gap-5">
               <div className="sm:col-span-2">
                 <label className={labelCls}><Hash size={11} /> FA Item Code *</label>
-                <FAItemCodeCombobox
-                  assets={scopedAssets}
-                  value={form.assetId}
-                  loading={loadingAssets}
-                  onSelect={(asset) => setField("assetId", String(asset.AssetId))}
-                />
-                {!loadingAssets && scopedAssets.length === 0 && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1.5">
-                    No Fixed Asset Records found{form.companyId ? " for the selected company/project" : ""}. Create one in Fixed Asset Depreciation Tag first.
-                  </p>
+                {editingId ? (
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/[0.04] px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{editAsset?.name || "—"}</p>
+                      <p className="text-[11px] font-mono text-yellow-600 dark:text-yellow-400 truncate">{editAsset?.code || "—"}</p>
+                    </div>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">Cannot be changed</span>
+                  </div>
+                ) : (
+                  <>
+                    <FAItemCodeCombobox
+                      assets={scopedAssets}
+                      value={form.assetId}
+                      loading={loadingAssets}
+                      onSelect={(asset) => setField("assetId", String(asset.AssetId))}
+                    />
+                    {!loadingAssets && scopedAssets.length === 0 && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1.5">
+                        No Fixed Asset Records found{form.companyId ? " for the selected company/project" : ""}. Create one in Fixed Asset Depreciation Tag first.
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
               <div>
                 <label className={labelCls}><User size={11} /> User *</label>
-                <select value={form.userId} onChange={(e) => setField("userId", e.target.value)} className={inputCls}>
+                <select value={form.userId} onChange={(e) => setField("userId", e.target.value)}
+                  className={`${inputCls} ${editIsAuto ? "bg-muted/30 text-muted-foreground" : ""}`} disabled={editIsAuto}>
                   <option value="">Select user…</option>
                   {ensureArray<TransferUser>(users).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
@@ -383,6 +536,19 @@ export default function FixedAssetAssignment() {
                     <span className="text-sm font-medium truncate">{selectedUser.name}</span>
                   </div>
                 )}
+                {editIsAuto && (
+                  <p className="text-[11px] text-muted-foreground mt-1">Set by the linked Asset Transfer — edit the transfer to change it.</p>
+                )}
+              </div>
+              <div>
+                <label className={labelCls}><UserRound size={11} /> Responsible User *</label>
+                <UserCombobox
+                  users={ensureArray<TransferUser>(users)}
+                  value={form.responsibleUserId}
+                  onChange={(id) => setField("responsibleUserId", id)}
+                  placeholder="Search responsible user…"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">Person responsible for overseeing / monitoring this asset — separate from the assigned User.</p>
               </div>
             </div>
           </div>
@@ -526,7 +692,7 @@ export default function FixedAssetAssignment() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[980px]">
+              <table className="w-full text-sm min-w-[1100px]">
                 <thead>
                   <tr className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
                     <th className="px-4 py-3 text-left">Doc No</th>
@@ -537,12 +703,22 @@ export default function FixedAssetAssignment() {
                     <th className="px-4 py-3 text-left">Company / Project</th>
                     <th className="px-4 py-3 text-left">Status</th>
                     <th className="px-4 py-3 text-left">Remarks</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {filtered.map((a) => (
-                    <tr key={a.AssignmentId} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs">{a.DocNo || "—"}</td>
+                    <tr key={a.AssignmentId}
+                      onClick={() => setViewingId(a.AssignmentId)}
+                      className="hover:bg-muted/30 transition-colors cursor-pointer">
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {a.DocNo || "—"}
+                        {a.SourceTransferId && (
+                          <span className="mt-1 flex items-center gap-1 text-[10px] font-sans font-medium text-sky-600 dark:text-sky-400" title="Auto-created from a User-Wise Asset Transfer">
+                            <ArrowLeftRight size={10} /> {a.SourceTransferDocNo || "Transfer"}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(a.DocDate)}</td>
                       <td className="px-4 py-3">
                         <p className="font-medium truncate">{a.AssetName || "—"}</p>
@@ -565,11 +741,31 @@ export default function FixedAssetAssignment() {
                           </span>
                         ) : (
                           <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground">
-                            Superseded
+                            Previous
                           </span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate">{a.Remarks || "—"}</td>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => setViewingId(a.AssignmentId)} title="View"
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                            <Eye size={14} />
+                          </button>
+                          {rights.canEdit && (
+                            <button onClick={() => goToEdit(a)} title="Edit"
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-yellow-600 dark:hover:text-yellow-400 hover:bg-muted transition-colors">
+                              <Pencil size={14} />
+                            </button>
+                          )}
+                          {rights.canDelete && !a.SourceTransferId && (
+                            <button onClick={() => setDeleteId(a.AssignmentId)} title="Delete"
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-muted transition-colors">
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -578,6 +774,106 @@ export default function FixedAssetAssignment() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── View drawer ── */}
+      {viewingId != null && createPortal(
+        <div className="fixed inset-0 z-50 flex">
+          <div className="flex-1 bg-black/40" onClick={() => setViewingId(null)} />
+          <div className="w-full max-w-sm bg-card border-l border-border flex flex-col shadow-2xl overflow-y-auto">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2.5">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
+                  <UserRound size={15} />
+                </span>
+                <h2 className="text-base font-semibold">Assignment</h2>
+              </div>
+              <button onClick={() => setViewingId(null)} className="p-1.5 rounded hover:bg-muted transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            {!viewDetail ? (
+              <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground text-sm">
+                <Loader2 size={14} className="animate-spin" /> Loading…
+              </div>
+            ) : (
+              <div className="p-5 space-y-4">
+                {(viewDetail as AssignmentDetail).UserImage && (
+                  <img src={(viewDetail as AssignmentDetail).UserImage!} alt="User"
+                    className="w-full h-40 rounded-lg object-cover border border-border" />
+                )}
+                <div className="flex items-center gap-2.5">
+                  <UserAvatar id={viewDetail.UserId} name={viewDetail.UserName || "?"} avatarUrl={viewDetail.UserAvatar} size={32} />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold truncate">{viewDetail.UserName || "—"}</p>
+                    <p className="text-[11px] text-muted-foreground">Assigned To</p>
+                  </div>
+                </div>
+                {viewDetail.ResponsibleUserName && (
+                  <div className="flex items-center gap-2.5">
+                    <UserAvatar id={viewDetail.ResponsibleUserId || 0} name={viewDetail.ResponsibleUserName} avatarUrl={viewDetail.ResponsibleUserAvatar} size={32} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{viewDetail.ResponsibleUserName}</p>
+                      <p className="text-[11px] text-muted-foreground">Responsible User</p>
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-2.5 text-sm border-t border-border pt-3">
+                  {[
+                    ["Doc No", viewDetail.DocNo || "—"],
+                    ["Assignment Date", fmtDate(viewDetail.DocDate)],
+                    ["Financial Year", viewDetail.FinYear || "—"],
+                    ["Asset", viewDetail.AssetName || "—"],
+                    ["FA Item Code", viewDetail.FAItemCode || "—"],
+                    ["Asset Code", viewDetail.AssetCode || "—"],
+                    ["Company", viewDetail.CompanyName || "—"],
+                    ["Project", viewDetail.ProjectName || "—"],
+                    ["Status", viewDetail.IsCurrent ? "Current" : "Previous"],
+                    ["Source", viewDetail.SourceTransferId ? `Asset Transfer ${viewDetail.SourceTransferDocNo || ""}`.trim() : "Manual entry"],
+                    ["Remarks", viewDetail.Remarks || "—"],
+                    ["Created By", viewDetail.CreatedBy || "—"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex items-start justify-between gap-3">
+                      <span className="text-xs text-muted-foreground shrink-0 pt-0.5">{label}</span>
+                      <span className="font-medium text-right break-words">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {/* ── Delete confirm ── */}
+      {deleteId != null && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setDeleteId(null)}>
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="relative bg-card border border-border rounded-2xl shadow-2xl max-w-sm w-full p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2.5">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-red-500/10 text-red-600 dark:text-red-400">
+                <AlertTriangle size={16} />
+              </span>
+              <p className="font-semibold text-sm">Delete this assignment?</p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              The assignment record will be removed from history. The asset's current holder is
+              re-set to its most recent remaining assignment.
+            </p>
+            <div className="flex gap-2 justify-end pt-1">
+              <button onClick={() => setDeleteId(null)}
+                className="h-9 px-4 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
+                Cancel
+              </button>
+              <button onClick={() => deleteMut.mutate(deleteId)} disabled={deleteMut.isPending}
+                className="h-9 px-4 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-colors disabled:opacity-50 inline-flex items-center gap-1.5">
+                <Trash2 size={13} /> {deleteMut.isPending ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </GlassShell>
     </>
   );

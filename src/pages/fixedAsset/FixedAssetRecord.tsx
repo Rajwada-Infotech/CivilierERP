@@ -7,6 +7,7 @@ import {
   Building2, Package, TrendingDown, TrendingUp, IndianRupee, Calendar,
   FileText, Hash, Cpu, Check, X, ChevronsUpDown, Loader2, Warehouse,
   Boxes, Wallet, PackageCheck, Circle, CheckCircle2, PlayCircle, Undo2, ShieldAlert,
+  Image as ImageIcon, Upload, RefreshCw,
 } from "lucide-react";
 import { GlassShell, GlassCard } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -175,6 +176,7 @@ interface FormState {
   buyerName: string;
   saleRemarks: string;
   remarks: string;
+  pictureBase64: string;
 }
 
 const emptyForm = (finYear = ""): FormState => ({
@@ -207,6 +209,7 @@ const emptyForm = (finYear = ""): FormState => ({
   buyerName:          "",
   saleRemarks:        "",
   remarks:            "",
+  pictureBase64:      "",
 });
 
 type ViewMode = "list" | "form" | "detail";
@@ -272,6 +275,72 @@ function CategoryBadge({ category }: { category: string }) {
     <span className={`inline-flex h-8 w-8 items-center justify-center rounded-lg shrink-0 ${color}`}>
       <Icon size={15} />
     </span>
+  );
+}
+
+// ── Item Picture upload ───────────────────────────────────────────────────────
+const PICTURE_ACCEPT = "image/jpeg,image/jpg,image/png,image/webp";
+const PICTURE_MAX_BYTES = 4 * 1024 * 1024; // 4 MB
+
+function ItemPicturePicker({ value, onChange }: { value: string; onChange: (dataUrl: string) => void }) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFile = (file: File | undefined) => {
+    if (!file) return;
+    if (!/\.(jpe?g|png|webp)$/i.test(file.name) && !PICTURE_ACCEPT.includes(file.type)) {
+      toast.error("Unsupported format — use JPG, JPEG, PNG or WEBP");
+      return;
+    }
+    if (file.size > PICTURE_MAX_BYTES) {
+      toast.error("Image too large — max 4 MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => onChange(String(reader.result || ""));
+    reader.onerror = () => toast.error("Could not read the image file");
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="sm:col-span-2 lg:col-span-3 xl:col-span-4">
+      <label className={labelCls}><ImageIcon size={11} /> Item Picture</label>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={PICTURE_ACCEPT}
+        className="hidden"
+        onChange={(e) => { handleFile(e.target.files?.[0]); e.target.value = ""; }}
+      />
+      {value ? (
+        <div className="flex items-center gap-4 rounded-lg border border-border bg-background p-3">
+          <img
+            src={value}
+            alt="Fixed asset"
+            className="h-20 w-20 shrink-0 rounded-lg border border-border object-cover"
+          />
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-muted-foreground">Picture attached to this asset.</p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => inputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors">
+                <RefreshCw size={12} /> Change
+              </button>
+              <button type="button" onClick={() => onChange("")}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors">
+                <Trash2 size={12} /> Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => inputRef.current?.click()}
+          className="flex w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border bg-background py-6 text-muted-foreground hover:border-yellow-500/40 hover:bg-yellow-500/[0.03] transition-colors">
+          <Upload size={16} />
+          <span className="text-xs font-medium">Upload Picture</span>
+          <span className="text-[10px] text-muted-foreground/70">JPG, JPEG, PNG or WEBP · max 4 MB</span>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -594,6 +663,7 @@ export default function FixedAssetRecord() {
         buyerName:           d.BuyerName || "",
         saleRemarks:         d.SaleRemarks || "",
         remarks:             d.Remarks || "",
+        pictureBase64:       d.PictureBase64 || "",
       });
     }
   }, [viewMode, editingId, detailData]);
@@ -671,6 +741,7 @@ export default function FixedAssetRecord() {
       buyerName:           form.buyerName || undefined,
       saleRemarks:         form.saleRemarks || undefined,
       remarks:             form.remarks || undefined,
+      pictureBase64:       form.pictureBase64 || null,
     };
 
     if (editingId) updateMut.mutate({ id: editingId, data: payload });
@@ -750,6 +821,11 @@ export default function FixedAssetRecord() {
                         <Hash size={11} /> {d.AssetCode}
                       </span>
                     )}
+                    {d.FAItemCode && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/15 text-xs font-mono font-medium">
+                        <Boxes size={11} /> {d.FAItemCode}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -781,8 +857,19 @@ export default function FixedAssetRecord() {
           {/* details grid */}
           <div className={sectionCls} style={glassSection}>
             <SectionHeader icon={Package}>Asset Details</SectionHeader>
+            {d.PictureBase64 && (
+              <div className="flex items-start gap-3">
+                <img
+                  src={d.PictureBase64}
+                  alt={d.AssetName}
+                  className="h-32 w-32 rounded-xl border border-border object-cover"
+                />
+                <p className="text-xs text-muted-foreground pt-1">Item Picture</p>
+              </div>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
               {[
+                ["FA Item Code",      d.FAItemCode],
                 ["Brand",             d.Brand],
                 ["Model",             d.Model],
                 ["Serial Number",     d.SerialNumber],
@@ -1031,6 +1118,13 @@ export default function FixedAssetRecord() {
                   {suppliers.map((s) => <option key={s.LHeadId} value={s.LHeadId}>{s.LHeadName}</option>)}
                 </select>
               </div>
+            </SubGroup>
+
+            <SubGroup label="Item Picture">
+              <ItemPicturePicker
+                value={form.pictureBase64}
+                onChange={(v) => setField("pictureBase64", v)}
+              />
             </SubGroup>
 
           </div>
