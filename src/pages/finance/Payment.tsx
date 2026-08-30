@@ -1163,25 +1163,36 @@ const Payment: React.FC = () => {
         }
       }
 
+      // Never fall back to prev.bankId/prev.chequeNo here — this is a fresh
+      // loan-EMI selection, and silently keeping whatever bank happened to
+      // be selected from an earlier, unrelated payment is actively unsafe
+      // (a payment could get recorded against the wrong bank account
+      // without anyone noticing). If the sanction's own bank can't be
+      // resolved, clear the fields instead and tell the user so they pick
+      // it themselves rather than trusting a stale value.
+      if (bankAccountId && !bank) {
+        toast.warning(
+          `Could not find "${isBankLoanType ? "Borrower" : "Lender"} Bank A/C" (id ${bankAccountId}) from this loan's sanction in the bank list — select the bank manually.`,
+        );
+      }
       setForm((prev) => ({
         ...prev,
         mode: sanction.PaymentMode || prev.mode,
-        bankId: bank?.id ?? prev.bankId,
-        bankName: bank?.label?.split(" — ")[0] ?? prev.bankName,
-        ...(isChequeMode
-          ? {
-              chequeLotId: resolvedLotId,
-              chequeLotNumber: resolvedLotNumber,
-              chequeNo: sanction.ChequeNo || "",
-              chequeDate: sanction.ChequeDate ? sanction.ChequeDate.slice(0, 10) : prev.chequeDate,
-              chequeAccountNumber,
-              chequeIfsc,
-            }
-          : {}),
+        bankId: bank?.id ?? null,
+        bankName: bank?.label?.split(" — ")[0] ?? "",
+        chequeLotId: isChequeMode ? resolvedLotId : null,
+        chequeLotNumber: isChequeMode ? resolvedLotNumber : "",
+        chequeNo: isChequeMode ? sanction.ChequeNo || "" : "",
+        chequeDate: isChequeMode && sanction.ChequeDate ? sanction.ChequeDate.slice(0, 10) : prev.chequeDate,
+        chequeAccountNumber: isChequeMode ? chequeAccountNumber : "",
+        chequeIfsc: isChequeMode ? chequeIfsc : "",
       }));
-    } catch {
+    } catch (err: any) {
       // Auto-fill is a convenience — if the sanction lookup fails, the
-      // user can still fill bank/cheque details in manually as before.
+      // user can still fill bank/cheque details in manually as before —
+      // but silently swallowing this made a broken auto-fill look like a
+      // wrong one instead of a failed one. Surface it.
+      toast.warning(`Could not auto-fill bank/cheque details from the loan sanction (${err?.message || "unknown error"}) — fill them in manually.`);
     }
   };
   const toggleLoanEmiSelected = (emiId: number) => {
@@ -4179,14 +4190,14 @@ const Payment: React.FC = () => {
                   <button
                     onClick={handleSave}
                     disabled={saving || !canSave}
-                    className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                    className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-opacity whitespace-nowrap"
                   >
                     {saving ? (
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : editingId ? (
-                      <Check size={14} />
+                      <Check size={12} />
                     ) : (
-                      <Plus size={14} />
+                      <Plus size={12} />
                     )}
                     {saving
                       ? "Saving…"
@@ -5884,93 +5895,95 @@ const Payment: React.FC = () => {
         const willPayOff = loanPayMode === "lumpsum" && loanOutstandingTotal > 0 && Number(loanLumpSumAmount) >= loanOutstandingTotal;
         return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-card border border-border shadow-2xl max-h-[88vh] flex flex-col overflow-hidden">
+          <div className="w-full max-w-sm rounded-2xl bg-card border border-border/60 shadow-2xl max-h-[88vh] flex flex-col overflow-hidden">
             {/* Header */}
-            <div className="px-6 pt-6 pb-5 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border-b border-border">
-              <div className="flex items-start gap-3">
-                <div className="p-2.5 rounded-xl bg-amber-500/15 shrink-0">
-                  <Receipt size={18} className="text-amber-600" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="font-heading font-bold text-foreground text-base">
-                    Loan Payment Details
-                  </h3>
-                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                    <span className="font-mono text-xs font-semibold text-foreground/80">{selectedLoanEmi.LoanNo}</span>
-                    <span className="text-muted-foreground/50">·</span>
-                    <span className="text-xs text-muted-foreground truncate">{selectedLoanEmi.BorrowerName}</span>
-                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400">
-                      {selectedLoanEmi.LoanType}
-                    </span>
-                  </div>
+            <div className="flex items-center gap-3 px-5 pt-5 pb-4">
+              <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
+                <Receipt size={16} className="text-amber-600" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-heading font-semibold text-foreground text-sm">
+                  Loan Payment
+                </h3>
+                <div className="flex items-center gap-1.5 mt-0.5 text-[11px]">
+                  <span className="font-mono text-muted-foreground">{selectedLoanEmi.LoanNo}</span>
+                  <span className="text-muted-foreground/30">·</span>
+                  <span className="text-muted-foreground truncate">{selectedLoanEmi.BorrowerName}</span>
                 </div>
               </div>
+              <span className="text-[10px] font-medium text-muted-foreground/70 shrink-0">
+                {selectedLoanEmi.LoanType}
+              </span>
             </div>
 
+            <div className="h-px bg-border/60 mx-5" />
+
             {/* Body */}
-            <div className="px-6 py-5 space-y-5 overflow-y-auto">
+            <div className="px-5 py-4 space-y-4 overflow-y-auto">
               {/* Payment mode toggle */}
-              <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-muted/50">
+              <div className="flex items-center gap-4 text-xs font-heading font-semibold border-b border-border/60">
                 <button
                   type="button"
                   onClick={() => setLoanPayModeAndSync("emis")}
-                  className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                    loanPayMode === "emis" ? "bg-card shadow-sm text-primary border border-border" : "text-muted-foreground hover:text-foreground"
+                  className={`flex items-center gap-1.5 pb-1.5 border-b-2 transition-colors ${
+                    loanPayMode === "emis"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  <ListChecks size={13} /> Select EMI(s)
+                  <ListChecks size={12} /> Select EMI(s)
                 </button>
                 <button
                   type="button"
                   onClick={() => setLoanPayModeAndSync("lumpsum")}
-                  className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                    loanPayMode === "lumpsum" ? "bg-card shadow-sm text-primary border border-border" : "text-muted-foreground hover:text-foreground"
+                  className={`flex items-center gap-1.5 pb-1.5 border-b-2 transition-colors ${
+                    loanPayMode === "lumpsum"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  <Layers size={13} /> Lump Sum
+                  <Layers size={12} /> Lump Sum
                 </button>
               </div>
 
               {loanPayMode === "emis" ? (
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                    <label className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
                       Installments
                     </label>
-                    <span className="text-[11px] text-muted-foreground">
+                    <span className="text-[10px] text-muted-foreground/70">
                       {selectedLoanEmiIds.length} selected
                     </span>
                   </div>
-                  <div className="rounded-xl border border-border divide-y divide-border max-h-48 overflow-y-auto">
+                  <div className="rounded-lg bg-muted/25 divide-y divide-border/50 max-h-44 overflow-y-auto">
                     {loanSiblingEmis.map((e) => {
                       const checked = selectedLoanEmiIds.includes(e.EMIId);
                       return (
                         <label
                           key={e.EMIId}
                           className={`flex items-center gap-2.5 px-3 py-2.5 text-sm cursor-pointer transition-colors ${
-                            checked ? "bg-primary/5" : "hover:bg-muted/40"
+                            checked ? "bg-primary/[0.05]" : "hover:bg-muted/40"
                           }`}
                         >
                           <input
                             type="checkbox"
                             checked={checked}
                             onChange={() => toggleLoanEmiSelected(e.EMIId)}
-                            className="w-4 h-4 rounded accent-primary cursor-pointer shrink-0"
+                            className="w-3.5 h-3.5 rounded accent-primary cursor-pointer shrink-0"
                           />
                           <span className="flex-1 min-w-0">
                             <span className="flex items-center gap-1.5">
-                              <span className="font-medium">EMI {e.InstallmentNo}</span>
+                              <span className="font-medium text-foreground/90">EMI {e.InstallmentNo}</span>
                               {!!e.IsOverdue && (
-                                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-red-500/15 text-red-600 dark:text-red-400">
-                                  OVERDUE
-                                </span>
+                                <span className="text-[9px] font-semibold text-red-500 tracking-wide">OVERDUE</span>
                               )}
                             </span>
-                            <span className="block text-[11px] text-muted-foreground">
+                            <span className="block text-[11px] text-muted-foreground/80 mt-0.5">
                               Due {new Date(e.DueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                             </span>
                           </span>
-                          <span className="font-mono text-xs font-semibold shrink-0">{formatINR(e.EMIAmount)}</span>
+                          <span className="font-mono text-xs text-foreground/90 shrink-0 tabular-nums">{formatINR(e.EMIAmount)}</span>
                         </label>
                       );
                     })}
@@ -5978,11 +5991,11 @@ const Payment: React.FC = () => {
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                  <label className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
                     Lump Sum Amount
                   </label>
                   <div className="relative">
-                    <IndianRupee size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <IndianRupee size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 pointer-events-none" />
                     <input
                       type="number"
                       min="0"
@@ -5994,11 +6007,11 @@ const Payment: React.FC = () => {
                         applyLoanPaymentAmount("lumpsum", selectedLoanEmiIds, e.target.value, loanSiblingEmis);
                       }}
                       placeholder="Enter amount"
-                      className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="w-full pl-7 pr-3 py-2 rounded-lg bg-muted/40 text-sm outline-none focus:ring-1 focus:ring-primary/40 transition-shadow"
                     />
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    Outstanding on this loan: <span className="font-mono font-medium text-foreground/80">{formatINR(loanOutstandingTotal)}</span>
+                    Outstanding: <span className="font-mono text-foreground/70">{formatINR(loanOutstandingTotal)}</span>
                   </p>
                   {willPayOff && (
                     <p className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
@@ -6010,11 +6023,11 @@ const Payment: React.FC = () => {
 
               {/* Late fee */}
               <div className="space-y-1.5">
-                <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
-                  Late Fee <span className="normal-case text-muted-foreground/70">({selectedLoanEmi.LoanType === "Bank Loan" ? "bank-applied" : "company-set"}, optional)</span>
+                <label className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                  Late Fee <span className="normal-case text-muted-foreground/50">({selectedLoanEmi.LoanType === "Bank Loan" ? "bank-applied" : "company-set"}, optional)</span>
                 </label>
                 <div className="relative">
-                  <IndianRupee size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <IndianRupee size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 pointer-events-none" />
                   <input
                     type="number"
                     min="0"
@@ -6023,7 +6036,7 @@ const Payment: React.FC = () => {
                     value={loanLateFee}
                     onChange={(e) => setLoanLateFee(e.target.value)}
                     placeholder="0"
-                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    className="w-full pl-7 pr-3 py-2 rounded-lg bg-muted/40 text-sm outline-none focus:ring-1 focus:ring-primary/40 transition-shadow"
                   />
                 </div>
                 {!!selectedLoanEmi.IsOverdue && (
@@ -6037,18 +6050,18 @@ const Payment: React.FC = () => {
                   EMI/lump-sum amount, not folded into it, before this gets
                   recorded as a single loan payment (principal+interest,
                   late fee, and grand total tracked separately). */}
-              <div className="rounded-xl border border-primary/20 bg-primary/[0.04] px-4 py-3.5 space-y-2 text-xs tabular-nums">
+              <div className="space-y-1.5 text-xs tabular-nums">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">
                     {loanPayMode === "lumpsum" ? "Lump sum amount" : "Selected EMI(s)"}
                   </span>
-                  <span className="font-mono font-medium text-foreground">{formatINR(base)}</span>
+                  <span className="font-mono text-foreground/80">{formatINR(base)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Late fee</span>
-                  <span className="font-mono font-medium text-foreground">{formatINR(fee)}</span>
+                  <span className="font-mono text-foreground/80">{formatINR(fee)}</span>
                 </div>
-                <div className="flex items-center justify-between pt-2 border-t border-primary/15">
+                <div className="flex items-center justify-between pt-2 border-t border-border/60">
                   <span className="font-heading font-semibold text-foreground text-[13px]">Total to pay</span>
                   <span className="font-mono font-bold text-primary text-base">{formatINR(base + fee)}</span>
                 </div>
@@ -6056,25 +6069,25 @@ const Payment: React.FC = () => {
 
               {/* Notes */}
               <div className="space-y-1.5">
-                <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                <label className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
                   Notes (optional)
                 </label>
                 <div className="relative">
-                  <MessageSquare size={13} className="absolute left-3 top-2.5 text-muted-foreground pointer-events-none" />
+                  <MessageSquare size={12} className="absolute left-3 top-2.5 text-muted-foreground/60 pointer-events-none" />
                   <input
                     type="text"
                     autoComplete="off"
                     value={loanPaymentNotes}
                     onChange={(e) => setLoanPaymentNotes(e.target.value)}
                     placeholder="Reason for late fee, remarks…"
-                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    className="w-full pl-7 pr-3 py-2 rounded-lg bg-muted/40 text-sm outline-none focus:ring-1 focus:ring-primary/40 transition-shadow"
                   />
                 </div>
               </div>
             </div>
 
             {/* Footer */}
-            <div className="flex justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20">
+            <div className="flex justify-end gap-2 px-5 py-3.5 border-t border-border/60">
               <button
                 onClick={() => {
                   clearLoanEmiLink();
@@ -6084,9 +6097,9 @@ const Payment: React.FC = () => {
                   // cancelling leaves a clean form, not a half-filled one.
                   setForm((prev) => ({ ...prev, paymentName: "", amount: null }));
                 }}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                className="px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-1.5"
               >
-                Cancel Loan Payment
+                Cancel
               </button>
               <button
                 onClick={() => {
@@ -6107,9 +6120,9 @@ const Payment: React.FC = () => {
                   }));
                   setLoanPaymentDetailsOpen(false);
                 }}
-                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+                className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity flex items-center gap-1.5"
               >
-                Continue
+                Continue <ArrowRight size={12} />
               </button>
             </div>
           </div>
