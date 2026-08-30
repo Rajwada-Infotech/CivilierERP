@@ -14,6 +14,22 @@
         <link rel="icon" type="image/png" href="/Civilier.png" />
         <link rel="apple-touch-icon" href="/Civilier.png" />
 
+        <!-- Google Fonts — moved out of index.css's @import, which is
+             render-blocking and serializes the fetch (CSS must download and
+             parse before the browser even discovers the font stylesheet URL,
+             which then has to download and parse before it discovers the
+             actual font file URLs — three sequential round-trips). A direct
+             <link> here lets the browser discover and start these fetches
+             immediately, in parallel with everything else. preconnect warms
+             the two Google Fonts origins (the CSS host and the font-file
+             host) before either request is even issued. -->
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            rel="stylesheet"
+            href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Noto+Sans:wght@400;500&family=Sora:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        />
+
         <meta property="og:title" content="CivilierERP" />
         <meta
             property="og:description"
