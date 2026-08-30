@@ -1051,21 +1051,28 @@ const Payment: React.FC = () => {
     setLoanLumpSumAmount("");
     setLoanLateFee("");
     setLoanPaymentNotes("");
-    // Auto-fill Company/Payable To from the loan's own borrower/lender —
-    // this is a loan repayment, not a fresh manual entry, so who pays and
-    // who gets paid is already on file and shouldn't need re-selecting.
+    // Auto-fill Company/Payable To from the loan's own lender/borrower —
+    // this is money moving along an already-agreed loan, not a fresh
+    // manual entry, so who pays and who gets paid is already on file and
+    // shouldn't need re-selecting.
     //
-    // Inter-Company/Bank Loan: the BORROWER is one of our own companies
-    // (the one settling the debt), and the LENDER is who it's paid to — so
-    // Company = borrower, Payee = lender.
+    // Inter-Company / Customer Loan: WE are the lender — the Payment page
+    // records US disbursing to the borrower (A giving the loan to B, per
+    // the user's own framing). Company = lender (us, paying out), Payee =
+    // borrower (receiving), Bank = the lender's own bank the cheque/NEFT/
+    // UPI/cash actually leaves from — same account the sanction cheque
+    // (LoanChequePicker) was drawn against, since that's always scoped to
+    // the lender's bank for every type.
     //
-    // Customer Loan flips this: the borrower is external (a customer, not
-    // one of our companies), and it's the LENDER whose books this repayment
-    // is actually recorded under — so Company = lender, Payee = the
-    // customer (BorrowerName).
-    const isCustomerLoan = emi.LoanType === "Customer Loan";
-    const companySourceName = isCustomerLoan ? emi.LenderCompanyName : emi.BorrowerCompanyName;
-    const payeeSourceName = isCustomerLoan ? emi.BorrowerName : emi.LenderName;
+    // Bank Loan flips this: the LENDER is an external bank, not one of our
+    // companies — a bank disbursing to us is money coming IN (Received
+    // Payment's job, not this page). What belongs on the Payment page for
+    // a Bank Loan is US repaying that bank: Company = borrower (us, paying
+    // out), Payee = lender (the bank), Bank = the borrower's own bank the
+    // repayment leaves from.
+    const isBankLoanType = emi.LoanType === "Bank Loan";
+    const companySourceName = isBankLoanType ? emi.BorrowerCompanyName : emi.LenderCompanyName;
+    const payeeSourceName = isBankLoanType ? emi.LenderName : emi.BorrowerName;
     const matchedCompany = companySourceName
       ? companyOptions.find((c) => c.label === companySourceName)
       : undefined;
@@ -1102,20 +1109,26 @@ const Payment: React.FC = () => {
     setLoanPaymentDetailsOpen(true);
 
     // Auto-fill the bank/cheque details already recorded on the loan's own
-    // sanction entry — a loan repayment's payment mode was fixed when the
-    // loan was sanctioned (same PaymentMode/bank/cheque lot the borrower
-    // committed to), so making the user re-pick from the Payment page's
-    // generic "available cheques in this lot" dropdown was wrong on two
-    // counts: it's not actually a fresh choice, and the sanction's own
-    // cheque number is usually already marked used (consumed at sanction
-    // time) so it silently didn't even appear in that dropdown's list.
+    // sanction entry — same bank/cheque-lot the payer already committed to
+    // at sanction time, so re-picking from the Payment page's generic
+    // "available cheques in this lot" dropdown was wrong: it's not a fresh
+    // choice, and the sanction's own cheque is usually already marked used
+    // (consumed at sanction) so it silently didn't even show in that list.
+    //
+    // Must match the same payer side as Company/Payee above: Inter-Company/
+    // Customer Loan pays from the LENDER's bank (disbursement, us paying
+    // out); Bank Loan pays from the BORROWER's bank (us repaying the
+    // external bank). LoanSanction.tsx's own LoanChequePicker always scopes
+    // cheque lots to `isBankLoan ? lenderBankId : lenderBankAccountId` when
+    // the cheque was originally picked — for a Bank Loan sanction that's
+    // the LENDING bank's own id, which isn't a payer account of ours at
+    // all, so there's no sanction-side cheque lot to reuse there; the user
+    // picks fresh from the borrower's (our) own bank instead.
     try {
       const sanction = await getLoanSanction(emi.LoanId);
-      const bankAccountId = isCustomerLoan
-        ? sanction.LenderBankAccountId
-        : sanction.BorrowerBankAccountId;
+      const bankAccountId = isBankLoanType ? sanction.BorrowerBankAccountId : sanction.LenderBankAccountId;
       const bank = bankAccountId ? banks.find((b) => b.id === bankAccountId) : undefined;
-      const isChequeMode = sanction.PaymentMode === "Cheque" || sanction.PaymentMode === "Post-Dated Cheque";
+      const isChequeMode = !isBankLoanType && (sanction.PaymentMode === "Cheque" || sanction.PaymentMode === "Post-Dated Cheque");
 
       let chequeAccountNumber = "";
       let chequeIfsc = "";
