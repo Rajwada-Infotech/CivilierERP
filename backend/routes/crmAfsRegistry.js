@@ -78,6 +78,18 @@ router.post("/", requirePageRight("crm-afs-registry", "create"), async (req, res
     const agr = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
 
+    // Pre-check: guard against duplicate creation before consuming a doc-number
+    // sequence slot. UNIQUE(BookingId) exists (migration 371) but only fires at
+    // INSERT time — a concurrent double-submit would waste an AREG number and
+    // return an opaque error before our 409 catch could fire.
+    const existingReg = await pool.request().input("bid2", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id, AfsRegNo FROM dbo.CrmAfsRegistry WHERE BookingId = @bid2");
+    if (existingReg.recordset.length) {
+      return res.status(409).json({
+        error: `AFS Registry tracking (${existingReg.recordset[0].AfsRegNo}) has already been started for this booking`,
+      });
+    }
+
     const afsRegNo = await getNextDocNumber(pool, "AREG", "AREG");
     const result = await pool.request()
       .input("no",    sql.NVarChar(30), afsRegNo)

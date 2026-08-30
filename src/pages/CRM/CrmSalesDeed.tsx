@@ -159,6 +159,22 @@ const CrmSalesDeed: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkBookingId, deeds.length, bookings.length]);
 
+  // Auto-fill StampDutyCredit from the AFS registration figures on the agreement
+  // once context loads. crmSalesDeed.js's GET /booking/:id/context already returns
+  // agreement.AfsStampDuty + AfsRegistrationFee — this just wires them to the field
+  // instead of leaving it blank for staff to re-type from memory.
+  // Only fires when the field is still empty (never overwrites a value the staff has
+  // already typed or a deed that was opened from the existing list).
+  useEffect(() => {
+    if (!context?.agreement) return;
+    const afsTotal =
+      (Number(context.agreement.AfsStampDuty ?? 0) + Number(context.agreement.AfsRegistrationFee ?? 0)) || 0;
+    if (afsTotal > 0) {
+      setForm((f) => ({ ...f, StampDutyCredit: f.StampDutyCredit === "" ? String(afsTotal) : f.StampDutyCredit }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context?.agreement?.AfsStampDuty, context?.agreement?.AfsRegistrationFee]);
+
   // Row clicks (openDetail below) only ever set local state — the URL
   // stayed plain /crm/sales-deed, so a refresh lost the open detail dialog
   // and there was nothing to copy/bookmark/share to jump straight back to
@@ -499,7 +515,17 @@ const CrmSalesDeed: React.FC = () => {
               <div className="space-y-1.5">
                 <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">AFS Stamp Duty Credit</label>
                 <Input type="number" className="h-10 font-mono" placeholder="0" value={form.StampDutyCredit} onChange={(e) => setForm((f) => ({ ...f, StampDutyCredit: e.target.value }))} />
-                <p className="text-[10px] text-muted-foreground">Stamp duty already paid at AFS registration — deducted from net payable at Sale Deed registration.</p>
+                {context?.agreement?.AfsStampDuty != null || context?.agreement?.AfsRegistrationFee != null ? (
+                  <p className="text-[10px] text-emerald-600">
+                    ✓ Pre-filled from AFS registration
+                    {context.agreement.AgreementNo ? ` (${context.agreement.AgreementNo})` : ""} —
+                    Stamp Duty {context.agreement.AfsStampDuty != null ? `₹${Number(context.agreement.AfsStampDuty).toLocaleString("en-IN")}` : "—"}{" "}
+                    + Reg. Fee {context.agreement.AfsRegistrationFee != null ? `₹${Number(context.agreement.AfsRegistrationFee).toLocaleString("en-IN")}` : "—"}.
+                    Verify against receipt before saving.
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground">Stamp duty already paid at AFS registration — deducted from net payable at Sale Deed registration.</p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Deed Date</label>

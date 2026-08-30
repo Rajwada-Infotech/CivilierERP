@@ -68,7 +68,12 @@ router.post("/", requirePageRight("crm-communication", "create"), async (req, re
   }
 });
 
-// PUT /:id — edit an existing log entry
+// PUT /:id — edit an existing log entry. System-generated entries (auto-logged
+// workflow events — see crmCommunicationLog.js's logCommunication()) are excluded:
+// they're the audit trail for what actually happened on the record (agreement sent,
+// deed sent, ticket raised, etc.), not a note staff typed, so they're not editable
+// here — same reasoning as why Status is excluded from generic PUTs elsewhere in
+// this module (e.g. crmMutation.js).
 router.put("/:id", requirePageRight("crm-communication", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -76,8 +81,11 @@ router.put("/:id", requirePageRight("crm-communication", "edit"), async (req, re
     const b = req.body;
     if (b.Channel && !CHANNELS.includes(b.Channel)) return res.status(400).json({ error: `Invalid Channel. Must be: ${CHANNELS.join(", ")}` });
 
-    const existing = await pool.request().input("id", sql.Int, id).query("SELECT Id FROM dbo.CrmCommunicationLog WHERE Id = @id");
+    const existing = await pool.request().input("id", sql.Int, id).query("SELECT Id, Channel FROM dbo.CrmCommunicationLog WHERE Id = @id");
     if (!existing.recordset.length) return res.status(404).json({ error: "Log entry not found" });
+    if (existing.recordset[0].Channel === "System") {
+      return res.status(403).json({ error: "System-generated log entries are part of the audit trail and cannot be edited." });
+    }
 
     await pool.request()
       .input("id",   sql.Int, id)
@@ -100,13 +108,19 @@ router.put("/:id", requirePageRight("crm-communication", "edit"), async (req, re
   }
 });
 
-// DELETE /:id
+// DELETE /:id — same System-entry exclusion as PUT above. Table has no IsActive
+// column (this is a hard delete), so a bypass here is unrecoverable — worth the
+// extra SELECT to keep the audit trail intact.
 router.delete("/:id", requirePageRight("crm-communication", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
-    const result = await pool.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmCommunicationLog WHERE Id = @id");
-    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Log entry not found" });
+    const existing = await pool.request().input("id", sql.Int, id).query("SELECT Id, Channel FROM dbo.CrmCommunicationLog WHERE Id = @id");
+    if (!existing.recordset.length) return res.status(404).json({ error: "Log entry not found" });
+    if (existing.recordset[0].Channel === "System") {
+      return res.status(403).json({ error: "System-generated log entries are part of the audit trail and cannot be deleted." });
+    }
+    await pool.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmCommunicationLog WHERE Id = @id");
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-communication] DELETE error:", e.message);

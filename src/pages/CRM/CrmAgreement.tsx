@@ -1296,7 +1296,38 @@ const CrmAgreement: React.FC = () => {
                           Mark Registered
                         </span>
                       ) : (
-                        <button onClick={() => { setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" }); setRegDialog(true); }}
+                        <button onClick={() => {
+                            const ag = detail.agreement;
+                            // Priority 1: ConfirmedAmount from the AFS QP record (what the
+                            // customer actually paid, as attested during AFS QP confirmation).
+                            // Priority 2: individual StampDuty / RegistrationFee from the QP
+                            // record (the estimate that was sent to the customer).
+                            // Priority 3: whatever was previously saved on the Agreement itself
+                            // (non-null only if mark-registered was run before and already had
+                            // a value). Blank as last resort — same as before this fix.
+                            const hasConfirmed = ag?.AfsQpConfirmedAmount != null;
+                            let prefillStamp = "";
+                            let prefillFee   = "";
+                            if (hasConfirmed) {
+                              // ConfirmedAmount is a single total — split proportionally to
+                              // QP's own Stamp/Fee split if both exist, otherwise put it all
+                              // in StampDuty and leave Fee blank for staff to split manually.
+                              if (ag.AfsQpStampDuty != null && ag.AfsQpRegistrationFee != null) {
+                                prefillStamp = String(ag.AfsQpStampDuty);
+                                prefillFee   = String(ag.AfsQpRegistrationFee);
+                              } else {
+                                prefillStamp = String(ag.AfsQpConfirmedAmount);
+                              }
+                            } else if (ag?.AfsQpStampDuty != null || ag?.AfsQpRegistrationFee != null) {
+                              prefillStamp = ag.AfsQpStampDuty   != null ? String(ag.AfsQpStampDuty)        : "";
+                              prefillFee   = ag.AfsQpRegistrationFee != null ? String(ag.AfsQpRegistrationFee) : "";
+                            } else {
+                              prefillStamp = ag?.AfsStampDuty      != null ? String(ag.AfsStampDuty)      : "";
+                              prefillFee   = ag?.AfsRegistrationFee != null ? String(ag.AfsRegistrationFee) : "";
+                            }
+                            setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: prefillStamp, AfsRegistrationFee: prefillFee });
+                            setRegDialog(true);
+                          }}
                           className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
                           Mark Registered
                         </button>
@@ -2138,6 +2169,13 @@ const CrmAgreement: React.FC = () => {
               </div>
             </div>
             <p className="text-[11px] text-muted-foreground">Stamp duty paid at AFS registration is creditable against Sale Deed stamp duty — record it here so the Sale Deed Query Payment can show the correct net amount.</p>
+            {/* Info note: shown when stamp duty/fee were pre-filled from the AFS QP record */}
+            {(regForm.AfsStampDuty !== "" || regForm.AfsRegistrationFee !== "") && (
+              <div className="flex items-start gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 px-2.5 py-1.5 text-[11px] text-emerald-700 dark:text-emerald-400">
+                <span className="shrink-0 mt-px">✓</span>
+                <span>Pre-filled from the AFS Query Payment record — verify against the Sub-Registrar receipt and correct if needed.</span>
+              </div>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setRegDialog(false); setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" }); }}

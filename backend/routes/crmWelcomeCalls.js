@@ -32,6 +32,21 @@ const WC_SELECT = `
 
 const OUTCOMES = ["Welcomed","NotReachable","RequestedCallback","VoiceMail","Busy","SwitchedOff"];
 
+// Ordered outcomes (most-recent first) for the last 20 calls — used to
+// compute a true consecutive streak in JS rather than a COUNT(*) that
+// has no concept of "stop at the first Welcomed" (the previous bug:
+// [NotReachable, NotReachable, Welcomed, NotReachable×3] returned 5
+// instead of 2 because the COUNT didn't stop at the Welcomed call).
+const NON_REACHED = new Set(["NotReachable","Busy","SwitchedOff","VoiceMail"]);
+function computeStreak(orderedOutcomes) {
+  let n = 0;
+  for (const o of orderedOutcomes) {
+    if (NON_REACHED.has(o)) n++;
+    else break; // first Welcomed (or any other outcome) ends the streak
+  }
+  return n;
+}
+
 // GET /queue — the work queue: Approved bookings that still need a welcome
 // call, or have a callback due today/overdue. Never Cancelled/Rejected/
 // Pending bookings — those have no business being called yet.
@@ -47,7 +62,16 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
         a.ApplicantName, a.Mobile,
         last.Id AS LastCallId, last.Outcome AS LastOutcome, last.CallDate AS LastCallDate,
         last.NextCallDate,
-        streak.ConsecutiveNonReached
+        -- Ordered outcomes as JSON so JS can compute the true consecutive
+        -- streak (stop counting at the first Welcomed) rather than a COUNT(*)
+        -- that has no concept of a streak-breaking outcome in the middle.
+        (
+          SELECT TOP 20 Outcome
+          FROM dbo.CrmWelcomeCall
+          WHERE BookingId = b.Id
+          ORDER BY CallDate DESC, CreatedAt DESC
+          FOR JSON PATH
+        ) AS RecentOutcomesJson
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
@@ -57,16 +81,6 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
         WHERE BookingId = b.Id
         ORDER BY CallDate DESC, CreatedAt DESC
       ) last
-      OUTER APPLY (
-        SELECT COUNT(*) AS ConsecutiveNonReached
-        FROM (
-          SELECT TOP 100 Outcome
-          FROM dbo.CrmWelcomeCall
-          WHERE BookingId = b.Id
-          ORDER BY CallDate DESC, CreatedAt DESC
-        ) recent
-        WHERE recent.Outcome IN ('NotReachable','Busy','SwitchedOff','VoiceMail')
-      ) streak
       WHERE b.Status = '${CrmStatus.APPROVED}' AND b.IsActive = 1
         AND (
           last.Id IS NULL
@@ -74,7 +88,18 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
         )
       ORDER BY ISNULL(last.NextCallDate, b.BookingDate)
     `);
-    res.json(result.recordset);
+    // Compute the real consecutive streak in JS for each row and strip the
+    // raw JSON column before sending to the client.
+    const rows = result.recordset.map((r) => {
+      let consecutiveNonReached = 0;
+      try {
+        const outcomes = JSON.parse(r.RecentOutcomesJson || "[]");
+        consecutiveNonReached = computeStreak(outcomes.map((o) => o.Outcome));
+      } catch {}
+      const { RecentOutcomesJson: _, ...rest } = r;
+      return { ...rest, ConsecutiveNonReached: consecutiveNonReached };
+    });
+    res.json(rows);
   } catch (e) {
     console.error("[crm-welcome-calls] GET /queue error:", e.message);
     res.status(500).json({ error: e.message });
@@ -157,7 +182,7 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId);
 
-    const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, streakRes] = await Promise.all([
+    const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, recentCallsRes] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId).query(`
         SELECT b.Id, b.BookingNo,
                COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
@@ -168,6 +193,7 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
                b.RatePerSqFt, b.TotalValue, b.BookingAmount, b.GrandTotal,
                b.ParkingTotal, b.ExtraChargesTotal, b.UnitGstAmount,
                b.PaymentPlanId, pp.PlanName AS PaymentPlanName,
+               b.FinancingType,
                a.ApplicantName, a.Mobile, a.Email
         FROM dbo.CrmBooking b
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -203,15 +229,12 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
         .query("SELECT ReceiptNo, Amount, AppliedAmount, Status FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
       pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT ISNULL(SUM(Amount), 0) AS MRTotal FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status IN ('Pending','Approved')"),
-      pool.request().input("bid", sql.Int, bookingId).query(`
-        SELECT COUNT(*) AS ConsecutiveNonReached
-        FROM (
-          SELECT TOP 100 Outcome
-          FROM dbo.CrmWelcomeCall WHERE BookingId = @bid
-          ORDER BY CallDate DESC, CreatedAt DESC
-        ) recent
-        WHERE recent.Outcome IN ('NotReachable','Busy','SwitchedOff','VoiceMail')
-      `),
+      // Ordered outcomes (most-recent first) so we can compute a true
+      // consecutive streak in JS — a COUNT(*) has no concept of stopping
+      // at a Welcomed call in the middle of the history (old bug: called
+      // it "ConsecutiveNonReached" but it counted ALL non-reached rows).
+      pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT TOP 20 Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CallDate DESC, CreatedAt DESC"),
     ]);
     if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
 
@@ -220,16 +243,23 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
     const totalPaid = milestones.reduce((s, m) => s + (m.AmountPaid || 0), 0);
     const onAccountBalance = oaRes.recordset.reduce((s, r) => s + (Number(r.Amount) - Number(r.AppliedAmount)), 0);
     const mrReceived = Number(mrRes.recordset[0]?.MRTotal || 0);
+    const consecutiveNonReached = computeStreak(recentCallsRes.recordset.map((r) => r.Outcome));
 
+    const booking = bkRes.recordset[0];
     res.json({
-      booking: bkRes.recordset[0],
+      booking,
       customer: custRes.recordset[0] || null,
       outstanding: { totalDue, totalPaid, balance: totalDue - totalPaid },
       invoices: invRes.recordset,
       loan: loanRes.recordset[0] || null,
       onAccount: { payments: oaRes.recordset, availableBalance: onAccountBalance },
       mrReceived,
-      consecutiveNonReached: streakRes.recordset[0]?.ConsecutiveNonReached ?? 0,
+      consecutiveNonReached,
+      // FinancingType is on CrmBooking (captured via the welcome call tab's
+      // "How is this financed?" card, or later via Bank & KYC). Surfaced here
+      // so the Bank Preference tab can show the current selection without an
+      // additional fetch.
+      financingType: booking.FinancingType || null,
     });
   } catch (e) {
     console.error("[crm-welcome-calls] GET /:bookingId/call-context error:", e.message);
@@ -499,6 +529,38 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-welcome-calls] PUT error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Financing Type ─────────────────────────────────────────────────────────
+// PUT /:bookingId/financing-type — records whether the customer is self-funding
+// or taking a home loan. Asked during the welcome call, before Milestone 1
+// payment, so this endpoint deliberately has no payment-gate (contrast with
+// PUT /api/crm/customer-bank-details/booking/:id which gates all writes on
+// Milestone 1 being paid). The Bank & KYC page is the definitive edit path
+// post-payment; this is the first-touch capture path at call time.
+router.put("/:bookingId/financing-type", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId);
+    const { FinancingType } = req.body;
+
+    if (!["SelfFunded", "LoanFinanced"].includes(FinancingType)) {
+      return res.status(400).json({ error: "FinancingType must be SelfFunded or LoanFinanced" });
+    }
+
+    const activeErr = await requireActiveBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    await pool.request()
+      .input("bid", sql.Int, bookingId)
+      .input("ft",  sql.NVarChar(20), FinancingType)
+      .query("UPDATE dbo.CrmBooking SET FinancingType = @ft WHERE Id = @bid");
+
+    res.json({ success: true, FinancingType });
+  } catch (e) {
+    console.error("[crm-welcome-calls] PUT /:bookingId/financing-type error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

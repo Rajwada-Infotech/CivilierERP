@@ -135,6 +135,25 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
         return res.status(400).json({ error: "A Bank NOC requires the Sales Deed to exist for this booking first" });
       }
     }
+
+    // Duplicate guard: a non-Rejected NOC of the same type already means one
+    // is either in progress or already issued — a second row for the same type
+    // would split the status across two rows, breaking Legal Milestones' TOP 1
+    // scoped display and letting a fast double-submit generate two NOC numbers
+    // for the same clearance request. Rejected NOCs are excluded because the
+    // resubmit path uses PUT /:id/submit on the existing row (not a new INSERT).
+    // Migration 379 adds a filtered UNIQUE INDEX as a DB-level backstop for the
+    // same rule.
+    const existingOpen = await pool.request()
+      .input("bid",  sql.Int,          bookingId)
+      .input("type", sql.NVarChar(30), nocType)
+      .query("SELECT TOP 1 NocNo FROM dbo.CrmNoc WHERE BookingId = @bid AND NocType = @type AND Status <> 'Rejected'");
+    if (existingOpen.recordset.length) {
+      return res.status(409).json({
+        error: `A ${nocType} NOC (${existingOpen.recordset[0].NocNo}) already exists for this booking — use the existing NOC or resubmit it if it was rejected`,
+      });
+    }
+
     const nocNo = await getNextDocNumber(pool, "NOC", "NOC");
 
     const result = await pool.request()
@@ -155,6 +174,7 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
         VALUES (@no, @bid, @type, @dt, @reason, @bank, @acc, @lamt, 'Pending', @note, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id, NocNo: nocNo });
+
   } catch (e) {
     console.error("[crm-noc] POST error:", e.message);
     res.status(500).json({ error: e.message });

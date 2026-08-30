@@ -1,4 +1,4 @@
-﻿const express = require("express");
+const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -114,6 +114,18 @@ router.post("/generate", requirePageRight("crm-allotment-letter", "create"), asy
     if (!chk.recordset[0]?.PaidCount) {
       return res.status(400).json({
         error: "Allotment Letter can only be generated once the Booking Amount milestone is fully paid."
+      });
+    }
+
+    // Pre-check: guard against duplicate generation before consuming a doc-number
+    // sequence slot. A UNIQUE constraint exists on (BookingId), but it only fires
+    // at INSERT time — a concurrent double-submit would otherwise waste a number
+    // and return an opaque 500 before our 409 catch could fire.
+    const existing = await pool.request().input("bid2", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id, AlNo FROM dbo.CrmAllotmentLetter WHERE BookingId = @bid2");
+    if (existing.recordset.length) {
+      return res.status(409).json({
+        error: `An Allotment Letter (${existing.recordset[0].AlNo}) has already been generated for this booking`,
       });
     }
 

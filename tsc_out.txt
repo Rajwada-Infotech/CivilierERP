@@ -1,0 +1,2 @@
+﻿src/pages/admin/masters/BlockMaster.tsx(138,15): error TS2322: Type 'unknown' is not assignable to type 'ReactNode'.
+src/pages/admin/masters/BlockMaster.tsx(138,33): error TS2322: Type 'unknown' is not assignable to type 'ReactNode'.

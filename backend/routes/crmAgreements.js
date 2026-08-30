@@ -65,7 +65,16 @@ const AGR_SELECT = `
     a.ApplicantName, a.Mobile, a.Email,
     cu.name AS CreatedByName,
     pu.Email AS PortalEmail, pu.IsActive AS PortalActive, pu.MustChangePassword AS PortalMustChangePassword,
-    al.Status AS AllotmentLetterStatus, al.IssuedOn AS AllotmentLetterIssuedOn
+    al.Status AS AllotmentLetterStatus, al.IssuedOn AS AllotmentLetterIssuedOn,
+    -- AFS Query Payment figures — used to pre-fill the mark-registered dialog so
+    -- staff don't re-type the same government figure they already entered and
+    -- customer-confirmed on the AFS QP record. ConfirmedAmount wins when set
+    -- (it's what the customer actually paid), falling back to StampDuty /
+    -- RegistrationFee (the estimate that was sent to the customer). NULL when
+    -- no AFS QP record exists for this booking yet (pre-Sales-Deed stage).
+    (SELECT TOP 1 StampDuty        FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpStampDuty,
+    (SELECT TOP 1 RegistrationFee  FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpRegistrationFee,
+    (SELECT TOP 1 ConfirmedAmount  FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpConfirmedAmount
   FROM dbo.CrmAgreement ag
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
