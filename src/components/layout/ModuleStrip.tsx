@@ -337,7 +337,7 @@ export const ModuleStrip: React.FC = () => {
               className="cursor-pointer rounded-full"
             >
               <img
-                src="/loader.gif"
+                src="/loader.webp"
                 alt="Refresh"
                 width={56}
                 height={56}
