@@ -1298,6 +1298,7 @@ const SupplierMaster: React.FC = () => {
                     }}
                     className={`${inputCls} appearance-none ${errors.LGSTType ? "border-red-400" : ""}`}
                   >
+                    <option value="" disabled>Select…</option>
                     {GST_TYPES.map((t) => (
                       <option key={t} value={t}>{t}</option>
                     ))}

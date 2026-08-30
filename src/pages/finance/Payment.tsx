@@ -1119,11 +1119,35 @@ const Payment: React.FC = () => {
 
       let chequeAccountNumber = "";
       let chequeIfsc = "";
-      if (isChequeMode && sanction.ChequeLotId) {
+      let resolvedLotId: number | null = sanction.ChequeLotId ?? null;
+      let resolvedLotNumber = sanction.ChequeLotNumber || "";
+      if (isChequeMode) {
         const lots = await fetchChequeLots(bankAccountId ?? undefined);
-        const lot = lots.find((l) => l.CId === sanction.ChequeLotId);
-        chequeAccountNumber = lot?.AccountNumber || "";
-        chequeIfsc = lot?.IFSCCode || "";
+        let lot = resolvedLotId ? lots.find((l) => l.CId === resolvedLotId) : undefined;
+        // Some sanction records never had ChequeLotId persisted (only the
+        // raw cheque number), so the id lookup above finds nothing even
+        // though a real lot — and thus a real cheque — is on file. Fall
+        // back to whichever of this bank's lots actually covers the
+        // sanctioned cheque number's range, so the auto-fill still works
+        // instead of silently leaving bank/cheque blank.
+        if (!lot && sanction.ChequeNo) {
+          const chequeNum = Number(sanction.ChequeNo);
+          if (Number.isFinite(chequeNum)) {
+            lot = lots.find(
+              (l) =>
+                l.ChequeStartNumber != null &&
+                l.ChequeEndNumber != null &&
+                chequeNum >= l.ChequeStartNumber &&
+                chequeNum <= l.ChequeEndNumber,
+            );
+          }
+        }
+        if (lot) {
+          resolvedLotId = lot.CId;
+          resolvedLotNumber = lot.ChequeLotNumber;
+          chequeAccountNumber = lot.AccountNumber || "";
+          chequeIfsc = lot.IFSCCode || "";
+        }
       }
 
       setForm((prev) => ({
@@ -1133,8 +1157,8 @@ const Payment: React.FC = () => {
         bankName: bank?.label?.split(" — ")[0] ?? prev.bankName,
         ...(isChequeMode
           ? {
-              chequeLotId: sanction.ChequeLotId ?? null,
-              chequeLotNumber: sanction.ChequeLotNumber || "",
+              chequeLotId: resolvedLotId,
+              chequeLotNumber: resolvedLotNumber,
               chequeNo: sanction.ChequeNo || "",
               chequeDate: sanction.ChequeDate ? sanction.ChequeDate.slice(0, 10) : prev.chequeDate,
               chequeAccountNumber,
@@ -1533,9 +1557,24 @@ const Payment: React.FC = () => {
                       )
                     : Math.round(t.totalInclGST * 100) / 100;
 
+                // netPayable is the full GST-inclusive gross — it does NOT yet
+                // account for TDS withheld or anything already paid. Left
+                // unadjusted, this silently overwrote the correct TDS-net/
+                // paid-net amount the synchronous set above (line ~1433)
+                // already computed, making form.amount exceed the invoice's
+                // real outstanding balance by the TDS amount (and any prior
+                // payments) — which then made the Payment Breakdown card's
+                // "entered > prevOutstanding" check misfire and mislabel a
+                // perfectly normal payment as "On A/c" overpayment. Apply
+                // the same TDS/paid-so-far subtraction here.
+                const paidSoFarGrn = selectedOption?.totalPaid ?? 0;
+                const trueRemainingGrn = Math.max(0, netPayable - freshTdsAmt - paidSoFarGrn);
+                const netPayableAfterTdsAndPaid =
+                  trueRemainingGrn > 0 ? trueRemainingGrn : netPayable - freshTdsAmt;
+
                 setForm((prev) => ({
                   ...prev,
-                  amount: amountOverride != null ? amountOverride : netPayable,
+                  amount: amountOverride != null ? amountOverride : netPayableAfterTdsAndPaid,
                   baseAmount: Math.round(t.totalBase * 100) / 100,
                   cgstRate: Math.round(avgCGST * 100) / 100,
                   sgstRate: Math.round(avgSGST * 100) / 100,
@@ -1607,9 +1646,18 @@ const Payment: React.FC = () => {
                   )
                 : Math.round(totals.totalInclGST * 100) / 100;
 
+            // Same TDS/paid-so-far adjustment as applyGrnBreakdown — see the
+            // comment there for why this is required (netPayable is the raw
+            // GST-inclusive gross across every linked GRN, not yet net of
+            // TDS or prior payments).
+            const paidSoFarMulti = selectedOption?.totalPaid ?? 0;
+            const trueRemainingMulti = Math.max(0, netPayable - freshTdsAmt - paidSoFarMulti);
+            const netPayableAfterTdsAndPaid =
+              trueRemainingMulti > 0 ? trueRemainingMulti : netPayable - freshTdsAmt;
+
             setForm((prev) => ({
               ...prev,
-              amount: amountOverride != null ? amountOverride : netPayable,
+              amount: amountOverride != null ? amountOverride : netPayableAfterTdsAndPaid,
               baseAmount: Math.round(totals.totalBase * 100) / 100,
               cgstRate: Math.round(avgCGST * 100) / 100,
               sgstRate: Math.round(avgSGST * 100) / 100,
