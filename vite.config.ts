@@ -49,17 +49,6 @@ export default defineConfig(({ mode }) => ({
     // intentionally large and can't be split further without async imports.
     chunkSizeWarningLimit: 600,
 
-    rolldownOptions: {
-      // Silence the lottie-web eval() warning — it's a third-party player
-      // that uses indirect eval internally; we cannot change its source.
-      onwarn(warning, defaultHandler) {
-        if (warning.code === "EVAL" && warning.id?.includes("lottie-web")) {
-          return;
-        }
-        defaultHandler(warning);
-      },
-    },
-
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -110,11 +99,6 @@ export default defineConfig(({ mode }) => ({
           if (n.includes("/node_modules/xlsx/")) return "vendor-xlsx";
 
           // ── Animation ───────────────────────────────────────────────────
-          if (
-            n.includes("/node_modules/lottie-web/") ||
-            n.includes("/node_modules/@lottiefiles/")
-          )
-            return "vendor-lottie";
           if (
             n.includes("/node_modules/framer-motion/") ||
             n.includes("/node_modules/motion-dom/")

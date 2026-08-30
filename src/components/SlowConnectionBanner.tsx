@@ -1,41 +1,35 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useIsFetching } from "@tanstack/react-query";
-import { useLottie } from "lottie-react";
-import signalAnimationRaw from "@/assets/mobile-signal.json";
 
-const AMBER = [1, 0.706, 0, 1];
-
-// The bundled animation is authored in black; recolor every stroke to the
-// banner's amber accent so it actually reads on the dark glass background.
-function recolorToAmber(data: any) {
-  const clone = JSON.parse(JSON.stringify(data));
-  for (const layer of clone.layers ?? []) {
-    for (const group of layer.shapes ?? []) {
-      for (const item of group.it ?? []) {
-        if (item.ty === "st" && item.c?.k) item.c.k = AMBER;
-      }
-    }
-  }
-  return clone;
-}
-
+// Lightweight CSS signal-bars icon — a full Lottie animation engine (~300KB)
+// is too heavy to ship to users who are, by definition, on a slow connection.
 function SignalLottie() {
-  const animationData = useMemo(() => recolorToAmber(signalAnimationRaw), []);
-  const { View, setDirection, animationLoaded } = useLottie({
-    animationData,
-    loop: true,
-    autoplay: true,
-    style: { width: 24, height: 24, flexShrink: 0 },
-  });
-
-  // The bundled animation plays bars-full-to-empty by default, which reads
-  // backwards for a "connecting…" indicator — play it in reverse so the
-  // bars build up instead of draining.
-  useEffect(() => {
-    if (animationLoaded) setDirection(-1);
-  }, [animationLoaded, setDirection]);
-
-  return <>{View}</>;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "flex-end",
+        gap: "2px",
+        width: 20,
+        height: 16,
+        flexShrink: 0,
+      }}
+    >
+      {[6, 10, 16].map((h, i) => (
+        <div
+          key={i}
+          style={{
+            width: "4px",
+            height: `${h}px`,
+            borderRadius: "1px",
+            background: "rgba(255,180,0,0.85)",
+            animation: `scb-bar 1s ease-in-out ${i * 0.15}s infinite`,
+            transformOrigin: "bottom",
+          }}
+        />
+      ))}
+    </div>
+  );
 }
 
 // ─── slow-connection hook ─────────────────────────────────────────────────────
@@ -146,6 +140,10 @@ export default function SlowConnectionBanner() {
         @keyframes scb-dot {
           0%,100% { opacity:1; }
           50%      { opacity:0.35; }
+        }
+        @keyframes scb-bar {
+          0%,100% { transform: scaleY(0.5); opacity:0.5; }
+          50%      { transform: scaleY(1);   opacity:1;   }
         }
       `}</style>
 
