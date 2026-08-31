@@ -721,7 +721,7 @@ export default function ReceivedPaymentPage() {
     form.finYear &&
     form.mode &&
     form.customerName &&
-    form.depositBankId &&
+    (form.mode === "Cash" || form.depositBankId) &&
     Number(form.amount) > 0
   );
 
@@ -802,7 +802,7 @@ export default function ReceivedPaymentPage() {
       toast.error("Customer name is required");
       return;
     }
-    if (!form.depositBankId) {
+    if (form.mode !== "Cash" && !form.depositBankId) {
       toast.error("Deposit bank is required");
       return;
     }
@@ -1605,7 +1605,16 @@ export default function ReceivedPaymentPage() {
                     <FieldLabel required>Payment Type</FieldLabel>
                     <Select
                       value={form.mode}
-                      onValueChange={(v) => setField("mode", v as PaymentMode)}
+                      onValueChange={(v) => {
+                        // Cash never has a depositing bank -- clear any bank
+                        // picked while a different mode was selected instead
+                        // of silently submitting it alongside a cash receipt.
+                        if (v === "Cash") {
+                          setForm((f) => ({ ...f, mode: v as PaymentMode, depositBankId: "", depositBankName: "" }));
+                        } else {
+                          setField("mode", v as PaymentMode);
+                        }
+                      }}
                     >
                       <SelectTrigger className="h-9 text-sm">
                         <SelectValue />
@@ -1630,10 +1639,10 @@ export default function ReceivedPaymentPage() {
                     />
                   </div>
                   <div>
-                    <FieldLabel required>Deposit Bank</FieldLabel>
+                    <FieldLabel required={form.mode !== "Cash"}>Deposit Bank</FieldLabel>
                     <Select
                       value={form.depositBankId}
-                      disabled={!form.companyId}
+                      disabled={!form.companyId || form.mode === "Cash"}
                       onValueChange={(v) => {
                         const bank = depositBanks.find(
                           (b) => String(b.BId) === v,
@@ -1650,7 +1659,9 @@ export default function ReceivedPaymentPage() {
                       <SelectTrigger className="h-9 text-sm">
                         <SelectValue
                           placeholder={
-                            form.companyId
+                            form.mode === "Cash"
+                              ? "Not applicable for cash"
+                              : form.companyId
                               ? "Select deposit bank…"
                               : "Select company first"
                           }
