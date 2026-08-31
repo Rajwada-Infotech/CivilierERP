@@ -55,7 +55,7 @@ const IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
 ];
 
 const DepartmentMaster: React.FC = () => {
-  usePageRights("department-master");
+  usePageRights("followup-department-master");
   const queryClient = useQueryClient();
 
   const { data: departments, isLoading, error } = useQuery({

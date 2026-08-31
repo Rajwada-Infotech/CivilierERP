@@ -536,7 +536,7 @@ export default function MenuRights() {
           </div>
           {subject === "role" && (
             <p className="text-xs text-muted-foreground/70 mb-3">
-              Sets the baseline every user with this role inherits, effective immediately — a user's own overrides (Custom User-wise) can only add on top of this.
+              Sets the baseline every user with this role inherits, effective immediately — a user's own overrides (Custom User-wise) take full precedence over this for any page they touch, whether that's granting more or restricting less.
             </p>
           )}
 

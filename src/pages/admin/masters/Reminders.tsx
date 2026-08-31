@@ -355,7 +355,7 @@ function ReminderRow({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function FollowupReminders() {
-  usePageRights("reminders");
+  usePageRights("followup-reminders");
   const queryClient = useQueryClient();
   const { currentUser } = useAuth();
 

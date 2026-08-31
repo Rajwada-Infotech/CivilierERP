@@ -328,7 +328,7 @@ const exportColumns: ExportColumn[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 const RoomMaster: React.FC = () => {
-  usePageRights("room-master");
+  usePageRights("followup-room-master");
   const queryClient = useQueryClient();
 
   const {

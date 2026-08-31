@@ -66,7 +66,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const ExtraChargeMaster: React.FC = () => {
-  usePageRights("extra-charge-master");
+  usePageRights("followup-extra-charge-master");
   const queryClient = useQueryClient();
 
   const { data: types, isLoading, error } = useQuery({
