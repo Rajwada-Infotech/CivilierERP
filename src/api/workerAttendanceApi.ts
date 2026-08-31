@@ -34,6 +34,7 @@ export interface WorkerSearchResult {
   id: number;
   name: string;
   skillType: string;
+  aadhaarNo: string | null;
   contractorName: string | null;
 }
 
@@ -99,7 +100,7 @@ export const searchWorkers = async (filters?: { search?: string; contractorId?: 
   return handle<WorkerSearchResult[]>(res);
 };
 
-export const createWorker = async (payload: { name: string; contractorId: number; skillType?: string }): Promise<{ id: number; existed: boolean }> => {
+export const createWorker = async (payload: { name: string; contractorId: number; skillType?: string; aadhaarNo: string }): Promise<{ id: number; existed: boolean }> => {
   const res = await fetchWithAuth(`${BASE}/workers`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

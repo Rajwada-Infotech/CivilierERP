@@ -87,11 +87,11 @@ router.get("/workers", async (req, res) => {
       .input("contractorId", sql.Int, contractorId)
       .query(`
         SELECT TOP 100 w.WorkerId AS id, w.Name AS name, w.SkillType AS skillType,
-               ahm.LHeadName AS contractorName
+               w.AadhaarNo AS aadhaarNo, ahm.LHeadName AS contractorName
         FROM dbo.Worker w
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = w.ContractorLHeadId
         WHERE w.IsActive = 1
-          AND (@search IS NULL OR w.Name LIKE @search)
+          AND (@search IS NULL OR w.Name LIKE @search OR w.AadhaarNo LIKE @search)
           AND (@contractorId IS NULL OR w.ContractorLHeadId = @contractorId)
         ORDER BY w.Name
       `);
@@ -103,30 +103,40 @@ router.get("/workers", async (req, res) => {
 });
 
 // ─── POST /workers — create a new Worker (used by the "+ Add Worker"
-//     picker when the search finds no existing match) ───────────────────────
+//     picker when the search finds no existing match). Aadhaar is the real
+//     dedup key — most workers here are casual labour re-registered from
+//     scratch every time they come back (see workerRetentionService.js), so
+//     the Aadhaar number is what stops the same person from picking up two
+//     rows if they're re-added mid-engagement rather than actually purged. ─
 router.post("/workers", requirePageRight(PAGE_KEY, "create"), async (req, res) => {
-  const { name, contractorId, skillType } = req.body;
+  const { name, contractorId, skillType, aadhaarNo } = req.body;
   if (!name || !contractorId) return res.status(400).json({ error: "Worker name and contractor are required" });
+  const aadhaar = String(aadhaarNo || "").replace(/\s/g, "");
+  if (!/^\d{12}$/.test(aadhaar)) return res.status(400).json({ error: "A valid 12-digit Aadhaar number is required" });
+
   try {
     const pool = getPool();
     const existing = await pool.request()
-      .input("name", sql.NVarChar, cleanStr(name, 150))
-      .input("contractorId", sql.Int, contractorId)
-      .query(`SELECT WorkerId AS id FROM dbo.Worker WHERE Name = @name AND ContractorLHeadId = @contractorId`);
+      .input("aadhaar", sql.Char(12), aadhaar)
+      .query(`SELECT WorkerId AS id FROM dbo.Worker WHERE AadhaarNo = @aadhaar`);
     if (existing.recordset.length) return res.status(200).json({ id: existing.recordset[0].id, existed: true });
 
     const inserted = await pool.request()
       .input("name", sql.NVarChar, cleanStr(name, 150))
       .input("contractorId", sql.Int, contractorId)
       .input("skillType", sql.NVarChar, cleanStr(skillType, 20) || "Skilled")
+      .input("aadhaar", sql.Char(12), aadhaar)
       .input("createdBy", sql.NVarChar, actorOf(req))
       .query(`
-        INSERT INTO dbo.Worker (Name, ContractorLHeadId, SkillType, CreatedBy, CreatedAt)
+        INSERT INTO dbo.Worker (Name, ContractorLHeadId, SkillType, AadhaarNo, CreatedBy, CreatedAt)
         OUTPUT INSERTED.WorkerId AS id
-        VALUES (@name, @contractorId, @skillType, @createdBy, GETDATE())
+        VALUES (@name, @contractorId, @skillType, @aadhaar, @createdBy, GETDATE())
       `);
     res.status(201).json({ id: inserted.recordset[0].id, existed: false });
   } catch (err) {
+    if (err?.number === 2627 || err?.number === 2601) {
+      return res.status(409).json({ error: "A worker with this Aadhaar number is already registered" });
+    }
     console.error("WorkerAttendance POST /workers error:", err);
     res.status(500).json({ error: "Failed to create worker" });
   }

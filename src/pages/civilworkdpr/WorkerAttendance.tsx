@@ -72,10 +72,13 @@ export function AddWorkerDialog({
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [newName, setNewName] = useState("");
   const [newContractorId, setNewContractorId] = useState<number | "">("");
+  const [newAadhaar, setNewAadhaar] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const aadhaarValid = /^\d{12}$/.test(newAadhaar);
+
   useEffect(() => {
-    if (!open) { setQuery(""); setSelected(new Set()); setNewName(""); setNewContractorId(""); }
+    if (!open) { setQuery(""); setSelected(new Set()); setNewName(""); setNewContractorId(""); setNewAadhaar(""); }
   }, [open]);
 
   const { data: results = [], isFetching } = useQuery({
@@ -116,12 +119,12 @@ export function AddWorkerDialog({
   };
 
   const handleCreateAndAdd = async () => {
-    if (!rungId || !newName.trim() || !newContractorId) return;
+    if (!rungId || !newName.trim() || !newContractorId || !aadhaarValid) return;
     setBusy(true);
     try {
-      const { id } = await createWorker({ name: newName.trim(), contractorId: newContractorId });
+      const { id, existed } = await createWorker({ name: newName.trim(), contractorId: newContractorId, aadhaarNo: newAadhaar });
       await addToRoster(rungId, [id]);
-      toast.success(`${newName.trim()} added to this activity`);
+      toast.success(existed ? `${newName.trim()} is already registered — added to this activity` : `${newName.trim()} added to this activity`);
       onAdded();
       onOpenChange(false);
     } catch (err: any) {
@@ -206,9 +209,21 @@ export function AddWorkerDialog({
                 <option key={c.id} value={c.id}>{c.label}</option>
               ))}
             </select>
+            <div>
+              <input
+                value={newAadhaar}
+                onChange={(e) => setNewAadhaar(e.target.value.replace(/\D/g, "").slice(0, 12))}
+                placeholder="Aadhaar number (12 digits)"
+                inputMode="numeric"
+                className={inputCls}
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Used to recognize this worker if they're re-added later — the record itself is auto-removed after 4 months with no attendance.
+              </p>
+            </div>
             <button
               onClick={handleCreateAndAdd}
-              disabled={busy || !newName.trim() || !newContractorId}
+              disabled={busy || !newName.trim() || !newContractorId || !aadhaarValid}
               className="w-full py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-40 flex items-center justify-center gap-2"
             >
               {busy && <Loader2 size={14} className="animate-spin" />}
