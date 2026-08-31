@@ -336,7 +336,7 @@ const exportColumns: ExportColumn[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 const BlockMaster: React.FC = () => {
-  usePageRights("followup-block-master");
+  const rights = usePageRights("followup-block-master");
   const queryClient = useQueryClient();
 
   const {
@@ -466,8 +466,10 @@ const BlockMaster: React.FC = () => {
       <FollowupShell title="Block Master">
       <SpecPanel blocks={mappedData} />
       <MasterPage
-
         title="Block"
+        canCreate={rights.canCreate}
+        canEdit={rights.canEdit}
+        canDelete={rights.canDelete}
         fields={fields}
         columns={columns}
         initialData={mappedData}

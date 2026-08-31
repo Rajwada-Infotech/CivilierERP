@@ -95,6 +95,7 @@ const NONE = "__none__";
 // only reserves the unit against the matrix so no one else can book it
 // while the customer decides.
 function PlaceHoldDialog({ unit, projectId, onClose }: { unit: MatrixUnit; projectId: string; onClose: () => void }) {
+  const rights = usePageRights("crm-unit-matrix");
   const qc = useQueryClient();
   const [applicationId, setApplicationId] = useState("");
   const [holdDays, setHoldDays] = useState("3");
@@ -169,10 +170,12 @@ function PlaceHoldDialog({ unit, projectId, onClose }: { unit: MatrixUnit; proje
         </div>
         <div className="flex justify-end gap-2 pt-3 border-t border-border">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-          <button onClick={handlePlace} disabled={saving}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-            {saving ? "Placing..." : "Place Hold"}
-          </button>
+          {rights.canCreate && (
+            <button onClick={handlePlace} disabled={saving}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {saving ? "Placing..." : "Place Hold"}
+            </button>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -190,6 +193,7 @@ function PlaceHoldDialog({ unit, projectId, onClose }: { unit: MatrixUnit; proje
 // Application, so a tap always answers "who, what, and via which record"
 // instead of just the bare status label.
 function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => void }) {
+  const rights = usePageRights("crm-unit-matrix");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [releasing, setReleasing] = useState(false);
@@ -356,10 +360,12 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
               <input type="number" min={1} max={90} value={extendDays} onChange={(e) => setExtendDays(e.target.value)}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>
-            <button onClick={handleExtend} disabled={extending}
-              className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {extending ? "Extending..." : "Confirm"}
-            </button>
+            {rights.canEdit && (
+              <button onClick={handleExtend} disabled={extending}
+                className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                {extending ? "Extending..." : "Confirm"}
+              </button>
+            )}
           </div>
         )}
 
@@ -367,13 +373,13 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
           {hasUnpaidBooking ? (
             <>
-              {unit.BookingStatus === CrmStatus.PENDING && (
+              {rights.canEdit && unit.BookingStatus === CrmStatus.PENDING && (
                 <button onClick={handleCancelBooking} disabled={cancelling}
                   className="px-3 py-1.5 text-sm border border-rose-200 text-rose-600 rounded-lg font-medium hover:bg-rose-50 disabled:opacity-40">
                   {cancelling ? "Cancelling..." : "Cancel Booking"}
                 </button>
               )}
-              {unit.HoldId && (
+              {rights.canEdit && unit.HoldId && (
                 <button onClick={() => setShowExtend((s) => !s)}
                   className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted">
                   Extend Hold
@@ -385,10 +391,12 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
               </button>
             </>
           ) : isHold ? (
-            <button onClick={handleRelease} disabled={releasing}
-              className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
-              {releasing ? "Releasing..." : "Release Hold"}
-            </button>
+            rights.canEdit && (
+              <button onClick={handleRelease} disabled={releasing}
+                className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
+                {releasing ? "Releasing..." : "Release Hold"}
+              </button>
+            )
           ) : (
             <button onClick={() => navigate(`/crm/bookings?applicationId=${unit.ApplicationId}`)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">

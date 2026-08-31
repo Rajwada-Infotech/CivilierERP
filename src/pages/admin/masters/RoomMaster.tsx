@@ -328,7 +328,7 @@ const exportColumns: ExportColumn[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 const RoomMaster: React.FC = () => {
-  usePageRights("followup-room-master");
+  const rights = usePageRights("followup-room-master");
   const queryClient = useQueryClient();
 
   const {
@@ -468,6 +468,9 @@ const RoomMaster: React.FC = () => {
       />
       <MasterPage
         title="Room"
+        canCreate={rights.canCreate}
+        canEdit={rights.canEdit}
+        canDelete={rights.canDelete}
         fields={fields}
         columns={columns}
         initialData={mappedData}

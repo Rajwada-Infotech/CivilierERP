@@ -55,7 +55,7 @@ const IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
 ];
 
 const DepartmentMaster: React.FC = () => {
-  usePageRights("followup-department-master");
+  const rights = usePageRights("followup-department-master");
   const queryClient = useQueryClient();
 
   const { data: departments, isLoading, error } = useQuery({
@@ -216,6 +216,9 @@ const DepartmentMaster: React.FC = () => {
       >
         <MasterPage
           title="Department"
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           fields={fields}
           columns={columns}
           initialData={mappedData}

@@ -47,7 +47,7 @@ const cardCls = "rounded-xl border border-border p-4 space-y-3";
 
 const CrmProjectAutoSetupParking: React.FC = () => {
   const qc = useQueryClient();
-  usePageRights("crm-auto-project-setup");
+  const rights = usePageRights("crm-auto-project-setup");
   // Strict Company -> Project gate — matches the cascade now enforced in
   // CrmProjectAutoSetup.tsx and every other Company->Project master page.
   const [companyId, setCompanyId] = useState("");
@@ -314,10 +314,12 @@ const CrmProjectAutoSetupParking: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <button onClick={() => addTemplateRow(b.Id)} className="text-xs text-primary hover:underline">+ Add Type</button>
                       <span className="text-[11px] text-muted-foreground ml-auto">Total: {templateTotal(b.Id)} slot(s)</span>
-                      <button onClick={() => handleSaveTemplate(b.Id)} disabled={savingTemplateBlockId === b.Id}
-                        className="px-2.5 py-1 text-[11px] bg-muted rounded-lg font-medium hover:bg-muted/70 disabled:opacity-40">
-                        Save Template
-                      </button>
+                      {rights.canEdit && (
+                        <button onClick={() => handleSaveTemplate(b.Id)} disabled={savingTemplateBlockId === b.Id}
+                          className="px-2.5 py-1 text-[11px] bg-muted rounded-lg font-medium hover:bg-muted/70 disabled:opacity-40">
+                          Save Template
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -334,6 +336,8 @@ const CrmProjectAutoSetupParking: React.FC = () => {
                       onCancelEdit={() => { setEditingSlotId(null); setEditingSlot(null); }}
                       onSave={handleSaveSlot}
                       onDelete={handleDeleteSlot}
+                      canEdit={rights.canEdit}
+                      canDelete={rights.canDelete}
                     />
                   )}
                 </div>
@@ -341,10 +345,12 @@ const CrmProjectAutoSetupParking: React.FC = () => {
             })}
           </div>
 
-          <button onClick={handleGenerate} disabled={generating}
-            className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-            Generate Parking Slots
-          </button>
+          {rights.canCreate && (
+            <button onClick={handleGenerate} disabled={generating}
+              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              Generate Parking Slots
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -366,7 +372,9 @@ const ParkingSlotList: React.FC<{
   onCancelEdit: () => void;
   onSave: (blockId: number, slot: any) => void;
   onDelete: (blockId: number, slot: any) => void;
-}> = ({ blockId, slots, loading, editingSlotId, editingSlot, savingSlotId, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete }) => (
+  canEdit: boolean;
+  canDelete: boolean;
+}> = ({ blockId, slots, loading, editingSlotId, editingSlot, savingSlotId, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete, canEdit, canDelete }) => (
   <div className="ml-4 mt-1 space-y-1 border-l border-border pl-3">
     {loading ? (
       <div className="text-[11px] text-muted-foreground">Loading...</div>
@@ -404,10 +412,14 @@ const ParkingSlotList: React.FC<{
               </>
             ) : (
               <>
-                <button onClick={() => onStartEdit(s)} disabled={!!lockReason}
-                  className="text-muted-foreground hover:text-primary disabled:opacity-40"><Pencil size={10} /></button>
-                <button onClick={() => onDelete(blockId, s)} disabled={!!lockReason}
-                  className="text-muted-foreground hover:text-red-600 disabled:opacity-40"><X size={10} /></button>
+                {canEdit && (
+                  <button onClick={() => onStartEdit(s)} disabled={!!lockReason}
+                    className="text-muted-foreground hover:text-primary disabled:opacity-40"><Pencil size={10} /></button>
+                )}
+                {canDelete && (
+                  <button onClick={() => onDelete(blockId, s)} disabled={!!lockReason}
+                    className="text-muted-foreground hover:text-red-600 disabled:opacity-40"><X size={10} /></button>
+                )}
               </>
             )}
           </span>

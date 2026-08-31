@@ -501,7 +501,7 @@ function PaymentHistoryTable({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Payment() {
-  usePageRights("sales-payment");
+  const rights = usePageRights("sales-payment");
   const qc = useQueryClient();
   const { finYears } = useFinYear();
 
@@ -598,6 +598,7 @@ export default function Payment() {
   });
 
   const canSubmit =
+    rights.canCreate &&
     !!selectedOrder &&
     !!bankId &&
     !!mode &&

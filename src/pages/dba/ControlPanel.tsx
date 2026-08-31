@@ -138,7 +138,7 @@ const ACCESS_LEVEL_CONFIG = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function ControlPanel() {
-  usePageRights("dba-control-panel");
+  const rights = usePageRights("dba-control-panel");
   const queryClient = useQueryClient();
 
   const { data: accesses = [], refetch } = useQuery<TenantAccess[]>({
@@ -331,13 +331,15 @@ export default function ControlPanel() {
         subtitle="Manage tenant database access, plans & expiry"
         icon={ShieldCheck}
         action={
-          <Button
-            size="sm"
-            className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700"
-            onClick={() => setGrantOpen(true)}
-          >
-            <Plus size={13} /> Grant Access
-          </Button>
+          rights.canCreate && (
+            <Button
+              size="sm"
+              className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700"
+              onClick={() => setGrantOpen(true)}
+            >
+              <Plus size={13} /> Grant Access
+            </Button>
+          )
         }
       >
       {/* Stats */}
@@ -498,7 +500,7 @@ export default function ControlPanel() {
                             onClick={() => { setSelectedAccess(acc); setDetailOpen(true); }}>
                             <Eye size={12} />
                           </Button>
-                          {acc.status === "active" ? (
+                          {rights.canEdit && (acc.status === "active" ? (
                             <Button variant="ghost" size="sm"
                               className="h-7 w-7 p-0 rounded-lg text-orange-500 hover:text-orange-600 hover:bg-orange-500/10"
                               onClick={() => setRevokeTarget(acc)}>
@@ -510,7 +512,7 @@ export default function ControlPanel() {
                               onClick={() => handleReactivate(acc)}>
                               <Unlock size={12} />
                             </Button>
-                          )}
+                          ))}
                         </div>
                       </TableCell>
                     </TableRow>

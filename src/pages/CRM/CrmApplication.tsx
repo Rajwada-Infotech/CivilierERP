@@ -638,6 +638,7 @@ const CrmApplication: React.FC = () => {
   const { currentUser, canDoAction } = useAuth();
   const isAdmin = ["admin", "super_admin"].includes(normalizeRole(currentUser?.role));
   const canEditApplications = canDoAction("crm-applications", "edit");
+  const canCreateApplications = canDoAction("crm-applications", "create");
   const canRequestBookingCancellation = canDoAction("crm-cancellations", "create");
   const { theme } = useTheme();
   const isDark = theme !== "light";
@@ -1821,10 +1822,12 @@ const CrmApplication: React.FC = () => {
         title="CRM — Applications"
       subtitle="Every detail captured once, here — Bookings is review-only from this point on"
       action={
-        <button onClick={() => { resetWizard(); setDialogOpen(true); }}
-          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
-          <Plus size={14} /> New Application
-        </button>
+        canCreateApplications && (
+          <button onClick={() => { resetWizard(); setDialogOpen(true); }}
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+            <Plus size={14} /> New Application
+          </button>
+        )
       }
     >
       {/* ── Pipeline stats ── */}

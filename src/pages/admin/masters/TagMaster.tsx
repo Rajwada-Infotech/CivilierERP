@@ -48,7 +48,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const TagMaster: React.FC = () => {
-  usePageRights("followup-tag-master");
+  const rights = usePageRights("followup-tag-master");
   const queryClient = useQueryClient();
 
   const { data: tags, isLoading, error } = useQuery({
@@ -113,6 +113,9 @@ const TagMaster: React.FC = () => {
       <FollowupShell title="Tag Master">
         <MasterPage
           title="Tag"
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           fields={fields}
           columns={columns}
           initialData={mappedData}

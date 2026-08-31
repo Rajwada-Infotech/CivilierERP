@@ -93,6 +93,7 @@ async function fetchCustomerBank(bookingId: string): Promise<any> {
 }
 
 const CrmPaymentMilestones: React.FC = () => {
+  const rights = usePageRights("crm-payments");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp] = useSearchParams();
@@ -489,7 +490,7 @@ const CrmPaymentMilestones: React.FC = () => {
         const m = i.row.original;
         return (
           <div className="flex items-center gap-1.5 whitespace-nowrap">
-            {m.Status !== CrmStatus.PAID && m.Status !== "Waived" && (
+            {rights.canEdit && m.Status !== CrmStatus.PAID && m.Status !== "Waived" && (
               <>
                 <button onClick={() => handleOpenPayment(m)}
                   className="text-xs px-2 py-1 border border-primary text-primary rounded-md hover:bg-primary hover:text-primary-foreground transition-colors font-medium">
@@ -514,8 +515,6 @@ const CrmPaymentMilestones: React.FC = () => {
         );
       } },
   ];
-
-  usePageRights("crm-payments");
 
   const collectionPct = pct(summary.totalPaid || 0, summary.totalDue || 0);
   const pendingPct = summary.totalDue > 0
@@ -546,18 +545,22 @@ const CrmPaymentMilestones: React.FC = () => {
           </div>
           {selectedBookingId && (
             <>
-              <button onClick={() => setAddDialog(true)}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
-                <Plus size={14} /> Add Milestone
-              </button>
-              <button onClick={() => {
-                setOnAccountForm((f) => ({ ...f, DepositBankId: projectBanks.length === 1 ? String(projectBanks[0].BId) : f.DepositBankId }));
-                setOnAccountDialog(true);
-              }}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
-                <Wallet size={14} /> Deposit On Account
-              </button>
-              {needsResync && (
+              {rights.canCreate && (
+                <button onClick={() => setAddDialog(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
+                  <Plus size={14} /> Add Milestone
+                </button>
+              )}
+              {rights.canCreate && (
+                <button onClick={() => {
+                  setOnAccountForm((f) => ({ ...f, DepositBankId: projectBanks.length === 1 ? String(projectBanks[0].BId) : f.DepositBankId }));
+                  setOnAccountDialog(true);
+                }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">
+                  <Wallet size={14} /> Deposit On Account
+                </button>
+              )}
+              {rights.canEdit && needsResync && (
                 <button onClick={handleResyncSchedule} disabled={resyncing}
                   className="flex items-center gap-1.5 px-3 py-2 text-sm border border-amber-300 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
                   <RefreshCw size={14} className={resyncing ? "animate-spin" : ""} /> {resyncing ? "Resyncing..." : "Resync Schedule"}
