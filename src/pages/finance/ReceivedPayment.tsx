@@ -105,6 +105,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
 export type PaymentMode =
   | "Cash"
   | "Cheque"
+  | "Demand Draft"
   | "UPI"
   | "IMPS"
   | "NEFT"
@@ -178,6 +179,7 @@ function mapReceivedPaymentRow(r: ReceivedPaymentRecord): ReceivedPayment {
 const PAYMENT_MODES: PaymentMode[] = [
   "Cash",
   "Cheque",
+  "Demand Draft",
   "UPI",
   "IMPS",
   "NEFT",
@@ -220,6 +222,7 @@ const MINOR_BANKS = [
   "South Indian Bank",
   "Karnataka Bank",
   "RBL Bank",
+  "Bandhan Bank",
   "City Union Bank",
   "DCB Bank",
   "Karur Vysya Bank",
@@ -230,7 +233,6 @@ const MINOR_BANKS = [
   "AU Small Finance Bank",
   "Equitas Small Finance Bank",
   "Ujjivan Small Finance Bank",
-  "Bandhan Bank",
 ];
 const OTHER_BANK_VALUE = "__other__";
 
@@ -238,6 +240,7 @@ const modeIcon = (mode: string) => {
   if (mode === "Cash")
     return <Banknote size={13} className="text-emerald-500" />;
   if (mode === "Cheque") return <FileText size={13} className="text-blue-500" />;
+  if (mode === "Demand Draft") return <FileText size={13} className="text-blue-500" />;
   if (mode === "UPI")
     return <Smartphone size={13} className="text-violet-500" />;
   if (mode === "Card")
@@ -249,6 +252,7 @@ const modeIcon = (mode: string) => {
 const modeColor: Record<string, string> = {
   Cash: "bg-emerald-500/10 text-emerald-600",
   Cheque: "bg-blue-500/10 text-blue-600",
+  "Demand Draft": "bg-blue-500/10 text-blue-600",
   UPI: "bg-violet-500/10 text-violet-600",
   IMPS: "bg-teal-500/10 text-teal-600",
   NEFT: "bg-sky-500/10 text-sky-600",
@@ -959,9 +963,12 @@ export default function ReceivedPaymentPage() {
     },
   ];
 
-  const needsBankRef = ["Cheque", "UPI", "IMPS", "NEFT", "RTGS", "Card"].includes(
+  const needsBankRef = ["Cheque", "Demand Draft", "UPI", "IMPS", "NEFT", "RTGS", "Card"].includes(
     form.mode,
   );
+  // Cheque and Demand Draft both capture an instrument number + date.
+  const isInstrument = form.mode === "Cheque" || form.mode === "Demand Draft";
+  const instrumentLabel = form.mode === "Demand Draft" ? "DD" : "Cheque";
 
   // ── Print receipt ─────────────────────────────────────────────────────────────
   const handlePrintPayment = (p: ReceivedPayment) => {
@@ -988,7 +995,7 @@ export default function ReceivedPaymentPage() {
       field("Project", p.projectName),
       field("Deposit Bank", p.depositBankName || "—"),
       field("Customer Bank", p.bankName || "—"),
-      field("Cheque No.", p.checkNumber || null),
+      field(p.mode === "Demand Draft" ? "DD No." : "Cheque No.", p.checkNumber || null),
       field("Transaction ID", p.transactionId || null),
       field("Remarks", p.remarks || null),
     ].join("");
@@ -1768,12 +1775,12 @@ export default function ReceivedPaymentPage() {
                 {/* Row 5: Bank ref (conditional) */}
                 {needsBankRef && (
                   <div className="grid grid-cols-2 gap-4">
-                    {form.mode === "Cheque" ? (
+                    {isInstrument ? (
                       <div>
-                        <FieldLabel>Cheque Number</FieldLabel>
+                        <FieldLabel>{instrumentLabel} Number</FieldLabel>
                         <Input
                           className="h-9 text-sm"
-                          placeholder="Cheque No."
+                          placeholder={`${instrumentLabel} No.`}
                           value={form.checkNumber}
                           onChange={(e) =>
                             setField("checkNumber", e.target.value)
@@ -1781,7 +1788,7 @@ export default function ReceivedPaymentPage() {
                         />
                         <div className="flex items-end gap-2 mt-2">
                           <div className="flex-1">
-                            <FieldLabel>Cheque Date</FieldLabel>
+                            <FieldLabel>{instrumentLabel} Date</FieldLabel>
                             <Input
                               type="date"
                               className="h-9 text-sm"
@@ -1792,20 +1799,28 @@ export default function ReceivedPaymentPage() {
                                 // Auto-flag as post-dated when the cheque date
                                 // is in the future — same convention the
                                 // outgoing Payment page already uses for
-                                // PIsPostDated, applied here for parity.
+                                // PIsPostDated, applied here for parity. A
+                                // Demand Draft is prepaid, so it's never
+                                // treated as post-dated.
+                                if (form.mode === "Demand Draft") {
+                                  setField("isPostDated", false);
+                                  return;
+                                }
                                 const today = new Date().toISOString().slice(0, 10);
                                 setField("isPostDated", !!date && date > today);
                               }}
                             />
                           </div>
-                          <label className="flex items-center gap-1.5 h-9 text-xs text-muted-foreground select-none">
-                            <input
-                              type="checkbox"
-                              checked={form.isPostDated}
-                              onChange={(e) => setField("isPostDated", e.target.checked)}
-                            />
-                            Post-dated
-                          </label>
+                          {form.mode === "Cheque" && (
+                            <label className="flex items-center gap-1.5 h-9 text-xs text-muted-foreground select-none">
+                              <input
+                                type="checkbox"
+                                checked={form.isPostDated}
+                                onChange={(e) => setField("isPostDated", e.target.checked)}
+                              />
+                              Post-dated
+                            </label>
+                          )}
                         </div>
                       </div>
                     ) : (
@@ -2161,7 +2176,7 @@ export default function ReceivedPaymentPage() {
                   value: viewingPayment.bankName || "—",
                 },
                 ...(viewingPayment.checkNumber
-                  ? [{ label: "Cheque No.", value: viewingPayment.checkNumber }]
+                  ? [{ label: viewingPayment.mode === "Demand Draft" ? "DD No." : "Cheque No.", value: viewingPayment.checkNumber }]
                   : []),
                 ...(viewingPayment.transactionId
                   ? [
