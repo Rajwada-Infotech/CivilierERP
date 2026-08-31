@@ -621,9 +621,9 @@ const WorkerAttendance: React.FC = () => {
               <button
                 onClick={handleSave}
                 disabled={saving || attendanceRows.length === 0 || !rights.canCreate || !isDirty}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-40"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium disabled:opacity-40"
               >
-                {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
                 {isDirty ? "Save Attendance" : "Saved"}
               </button>
             </div>
