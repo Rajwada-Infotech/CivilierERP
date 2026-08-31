@@ -12,6 +12,8 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
+import { WorkerAttendanceLogGroups } from "@/pages/civilworkdpr/WorkerAttendance";
+import type { AttendanceReportRow } from "@/api/workerAttendanceApi";
 import {
   Building2,
   Calendar,
@@ -2019,6 +2021,10 @@ const ReportTable: React.FC<{
       .catch(() => {});
   }, [isStockSummary]);
 
+  // ── Worker Attendance renders as the same grouped/collapsible log the
+  //     Worker Attendance page itself uses, instead of a flat table. ─────────
+  const isWorkerAttendance = report.id === "worker-attendance";
+
   // ── Payment Reason switcher (payment-reason-report only) ─────────────────
   const isPaymentReasonReport = report.id === "payment-reason-report";
   const [reasonFilter, setReasonFilter] = useState<string>("");
@@ -2248,8 +2254,12 @@ const ReportTable: React.FC<{
         </div>
       )}
 
-      {/* Table */}
+      {/* Table (or, for Worker Attendance, the same grouped/collapsible log
+          the Worker Attendance page itself uses) */}
       {!loading && !error && rows.length > 0 && (
+        isWorkerAttendance ? (
+          <WorkerAttendanceLogGroups rows={rows as unknown as AttendanceReportRow[]} />
+        ) : (
         <>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -2319,6 +2329,7 @@ const ReportTable: React.FC<{
             </div>
           )}
         </>
+        )
       )}
     </div>
 
