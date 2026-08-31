@@ -40,6 +40,12 @@ import {
 export const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30";
 
+// Leaner variant for the filter bar — same look, smaller footprint so
+// Company/Project/Activity/Date fit comfortably in a row without feeling
+// oversized relative to how little text most of them hold.
+const filterInputCls =
+  "w-full px-2.5 py-1.5 rounded-lg text-xs bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30";
+
 export const STATUS_LABEL: Record<AttendanceStatus, string> = { P: "Present", A: "Absent", H: "Half Day" };
 export const STATUS_CLS: Record<AttendanceStatus, string> = {
   P: "bg-emerald-500/15 border-emerald-500/40 text-emerald-700 dark:text-emerald-400",
@@ -357,7 +363,7 @@ const WorkerAttendance: React.FC = () => {
               <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
                 <HardHat size={11} /> Company
               </label>
-              <select value={companyId} onChange={(e) => handleCompanyChange(e.target.value)} className={inputCls}>
+              <select value={companyId} onChange={(e) => handleCompanyChange(e.target.value)} className={filterInputCls}>
                 <option value="">All Companies</option>
                 {companies.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
@@ -371,7 +377,7 @@ const WorkerAttendance: React.FC = () => {
               <select
                 value={projectId}
                 onChange={(e) => handleProjectChange(e.target.value)}
-                className={inputCls}
+                className={filterInputCls}
                 disabled={projectsForCompany.length === 0}
               >
                 <option value="">All Projects</option>
@@ -387,7 +393,7 @@ const WorkerAttendance: React.FC = () => {
               <select
                 value={rungId}
                 onChange={(e) => setRungId(e.target.value ? Number(e.target.value) : "")}
-                className={inputCls}
+                className={filterInputCls}
                 disabled={!projectId}
               >
                 <option value="">{loadingActivities ? "Loading…" : "All Activities"}</option>
@@ -400,7 +406,7 @@ const WorkerAttendance: React.FC = () => {
               <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
                 <CalendarDays size={11} /> Date
               </label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={filterInputCls} />
             </div>
           </div>
 
@@ -411,7 +417,7 @@ const WorkerAttendance: React.FC = () => {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search worker…"
-              className={`${inputCls} pl-9`}
+              className={`${filterInputCls} pl-9`}
             />
           </div>
         </div>
