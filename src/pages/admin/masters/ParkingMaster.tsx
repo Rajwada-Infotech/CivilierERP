@@ -118,7 +118,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const ParkingMaster: React.FC = () => {
-  usePageRights("parking-master");
+  usePageRights("followup-parking-master");
   const queryClient = useQueryClient();
 
   const { data: rates, isLoading, error } = useQuery({

@@ -280,7 +280,7 @@ const exportColumns: ExportColumn[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 const UnitMaster: React.FC = () => {
-  usePageRights("unit-master");
+  usePageRights("followup-unit-master");
   const queryClient = useQueryClient();
 
   const {

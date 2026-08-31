@@ -48,7 +48,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const TagMaster: React.FC = () => {
-  usePageRights("tag-master");
+  usePageRights("followup-tag-master");
   const queryClient = useQueryClient();
 
   const { data: tags, isLoading, error } = useQuery({

@@ -336,7 +336,7 @@ const exportColumns: ExportColumn[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 const BlockMaster: React.FC = () => {
-  usePageRights("block-master");
+  usePageRights("followup-block-master");
   const queryClient = useQueryClient();
 
   const {

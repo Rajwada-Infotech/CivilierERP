@@ -122,7 +122,7 @@ const columnRenderers = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function TCMaster() {
-  const rights = usePageRights("tc-master");
+  const rights = usePageRights("t-c-master");
   const queryClient = useQueryClient();
 
   const {

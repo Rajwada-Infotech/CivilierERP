@@ -1525,7 +1525,7 @@ router.put(
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
 router.put(
   "/:id/approve",
-  requirePageRight("grns", "edit"),
+  requirePageRight("grn-master", "edit"),
   async (req, res) => {
     const id = parseInt(req.params.id, 10);
     try {
@@ -1557,7 +1557,7 @@ router.put(
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
 router.put(
   "/:id/reject",
-  requirePageRight("grns", "edit"),
+  requirePageRight("grn-master", "edit"),
   async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const { note } = req.body;

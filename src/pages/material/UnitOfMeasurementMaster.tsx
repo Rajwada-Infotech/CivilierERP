@@ -141,7 +141,7 @@ const columnRenderers = {
 };
 
 export default function UnitOfMeasurementMaster() {
-  const rights = usePageRights("uom-master");
+  const rights = usePageRights("unit-of-measurement");
   const queryClient = useQueryClient();
 
   const {
