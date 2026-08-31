@@ -18,8 +18,13 @@ import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
 import Maintenance from "./pages/Maintenance";
 
-// Layout
-import { AppLayout } from "./components/layout/AppLayout";
+// Layout — lazy-loaded so its own dependencies (notification dropdowns,
+// widgets, etc. — pulling in radix/charts/jspdf-adjacent code) aren't part
+// of the eager entry bundle every route pays for, including public routes
+// like Landing/Login that never render it at all.
+const AppLayout = lazy(() =>
+  import("./components/layout/AppLayout").then((m) => ({ default: m.AppLayout })),
+);
 
 // Contexts
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
@@ -501,11 +506,13 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
     <RequireAuth>
       <RequireRole allowed={[...ADMIN_ROLES]}>
         <ProtectedProviders>
-          <AppLayout>
-            <RouteErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-            </RouteErrorBoundary>
-          </AppLayout>
+          <Suspense fallback={<PageSkeleton />}>
+            <AppLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+              </RouteErrorBoundary>
+            </AppLayout>
+          </Suspense>
         </ProtectedProviders>
       </RequireRole>
     </RequireAuth>
@@ -525,11 +532,13 @@ function ApprovalInboxRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
       <ProtectedProviders>
-        <AppLayout>
-          <RouteErrorBoundary>
-            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-          </RouteErrorBoundary>
-        </AppLayout>
+        <Suspense fallback={<PageSkeleton />}>
+          <AppLayout>
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+            </RouteErrorBoundary>
+          </AppLayout>
+        </Suspense>
       </ProtectedProviders>
     </RequireAuth>
   );
@@ -541,11 +550,13 @@ function SuperAdminRoute({ children }: { children: React.ReactNode }) {
     <RequireAuth>
       <RequireRole allowed={["super_admin"]}>
         <ProtectedProviders>
-          <AppLayout>
-            <RouteErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-            </RouteErrorBoundary>
-          </AppLayout>
+          <Suspense fallback={<PageSkeleton />}>
+            <AppLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+              </RouteErrorBoundary>
+            </AppLayout>
+          </Suspense>
         </ProtectedProviders>
       </RequireRole>
     </RequireAuth>
@@ -583,17 +594,19 @@ function ProtectedRoute({
   return (
     <RequireAuth>
       <ProtectedProviders>
-        <AppLayout>
-          <RouteErrorBoundary>
-            <Suspense fallback={<PageSkeleton />}>
-              {pageKey ? (
-                <PageGuard pageKey={pageKey}>{children}</PageGuard>
-              ) : (
-                children
-              )}
-            </Suspense>
-          </RouteErrorBoundary>
-        </AppLayout>
+        <Suspense fallback={<PageSkeleton />}>
+          <AppLayout>
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageSkeleton />}>
+                {pageKey ? (
+                  <PageGuard pageKey={pageKey}>{children}</PageGuard>
+                ) : (
+                  children
+                )}
+              </Suspense>
+            </RouteErrorBoundary>
+          </AppLayout>
+        </Suspense>
       </ProtectedProviders>
     </RequireAuth>
   );
