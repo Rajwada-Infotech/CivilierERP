@@ -280,7 +280,7 @@ const exportColumns: ExportColumn[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 const UnitMaster: React.FC = () => {
-  usePageRights("followup-unit-master");
+  const rights = usePageRights("followup-unit-master");
   const queryClient = useQueryClient();
 
   const {
@@ -473,6 +473,9 @@ const UnitMaster: React.FC = () => {
       <FollowupShell title="Unit Master">
       <MasterPage
         title="Unit"
+        canCreate={rights.canCreate}
+        canEdit={rights.canEdit}
+        canDelete={rights.canDelete}
         fields={fields}
         columns={columns}
         columnRenderers={{

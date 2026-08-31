@@ -814,7 +814,7 @@ const IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
 ];
 
 const TaskMaster: React.FC = () => {
-  usePageRights("task-master");
+  const rights = usePageRights("task-master");
   const queryClient = useQueryClient();
 
   // Which parent tasks currently have their subtasks expanded — collapsed
@@ -1211,6 +1211,9 @@ const TaskMaster: React.FC = () => {
       >
         <MasterPage
           title="Task"
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           gridCols={3}
           fields={fields}
           columns={columns}

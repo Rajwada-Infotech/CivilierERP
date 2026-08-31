@@ -118,7 +118,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const ParkingMaster: React.FC = () => {
-  usePageRights("followup-parking-master");
+  const rights = usePageRights("followup-parking-master");
   const queryClient = useQueryClient();
 
   const { data: rates, isLoading, error } = useQuery({
@@ -236,6 +236,9 @@ const ParkingMaster: React.FC = () => {
       <FollowupShell title="Parking Master">
         <MasterPage
           title="Parking Rate"
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           fields={fields}
           columns={columns}
           initialData={mappedData}

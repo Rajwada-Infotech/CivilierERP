@@ -66,7 +66,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const ExtraChargeMaster: React.FC = () => {
-  usePageRights("followup-extra-charge-master");
+  const rights = usePageRights("followup-extra-charge-master");
   const queryClient = useQueryClient();
 
   const { data: types, isLoading, error } = useQuery({
@@ -133,6 +133,9 @@ const ExtraChargeMaster: React.FC = () => {
       <FollowupShell title="Extra Charges Master">
         <MasterPage
           title="Extra Charge Type"
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           fields={fields}
           columns={columns}
           initialData={mappedData}

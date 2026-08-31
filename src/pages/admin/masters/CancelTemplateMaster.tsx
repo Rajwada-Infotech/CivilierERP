@@ -47,7 +47,7 @@ const exportColumns: ExportColumn[] = [
 ];
 
 const CancelTemplateMaster: React.FC = () => {
-  usePageRights("followup-cancel-template-master");
+  const rights = usePageRights("followup-cancel-template-master");
   const queryClient = useQueryClient();
 
   const { data: templates, isLoading, error } = useQuery({
@@ -112,6 +112,9 @@ const CancelTemplateMaster: React.FC = () => {
       <FollowupShell title="Cancel Template">
         <MasterPage
           title="Cancel Template"
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           fields={fields}
           columns={columns}
           initialData={mappedData}
