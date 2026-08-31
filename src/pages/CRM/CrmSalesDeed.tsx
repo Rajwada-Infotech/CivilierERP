@@ -93,6 +93,7 @@ async function fetchBookingContext(bookingId: string): Promise<any> {
 }
 
 const CrmSalesDeed: React.FC = () => {
+  const rights = usePageRights("crm-sales-deed");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
@@ -146,7 +147,7 @@ const CrmSalesDeed: React.FC = () => {
   // Deep-link from Legal Milestones: pre-fill New Deed with this booking if
   // it doesn't have one yet.
   useEffect(() => {
-    if (!deepLinkBookingId || dialogOpen) return;
+    if (!rights.canCreate || !deepLinkBookingId || dialogOpen) return;
     if ((deeds as any[]).some((d: any) => String(d.BookingId) === deepLinkBookingId)) return;
     if ((bookings as any[]).some((b: any) => String(b.Id) === deepLinkBookingId)) {
       setForm((f) => ({ ...f, BookingId: deepLinkBookingId }));
@@ -351,10 +352,12 @@ const CrmSalesDeed: React.FC = () => {
               {isFetching ? "Refreshing�" : "Refresh"}
             </button>
           )}
-          <button onClick={() => setDialogOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-            <Plus size={14} /> New Deed
-          </button>
+          {rights.canCreate && (
+            <button onClick={() => setDialogOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+              <Plus size={14} /> New Deed
+            </button>
+          )}
         </div>
       }
     >
@@ -505,7 +508,7 @@ const CrmSalesDeed: React.FC = () => {
                 </div>
 
                 <div>
-                  <SectionLabel action={!deedFieldsLocked && !deedFormEditing && (
+                  <SectionLabel action={rights.canEdit && !deedFieldsLocked && !deedFormEditing && (
                     <button onClick={() => setDeedFormEditing(true)} className="flex items-center gap-1 text-[11px] font-medium text-primary hover:underline">
                       <Pencil size={11} /> Edit
                     </button>

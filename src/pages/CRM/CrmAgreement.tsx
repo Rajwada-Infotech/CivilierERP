@@ -799,7 +799,7 @@ const CrmAgreement: React.FC = () => {
     }
   };
 
-  usePageRights("crm-agreements");
+  const rights = usePageRights("crm-agreements");
 
   return (
     <>
@@ -955,7 +955,7 @@ const CrmAgreement: React.FC = () => {
                         ⚠ Booking {detail.agreement.BookingStatus || "Inactive"}
                       </span>
                     )}
-                    {detail.agreement?.Status === CrmStatus.DRAFT && (
+                    {rights.canEdit && detail.agreement?.Status === CrmStatus.DRAFT && (
                       isBookingCancelled(detail.agreement) ? (
                         <span title="Booking is cancelled — cannot edit" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
                           Edit Details

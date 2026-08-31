@@ -1661,7 +1661,7 @@ const CrmApplication: React.FC = () => {
     { id: "actions", header: "", size: 200, enableSorting: false,
       cell: (i) => {
         const a = i.row.original;
-        const canResume = activeStage === "InProcess" && isResumeEditable(a);
+        const canResume = canEditApplications && activeStage === "InProcess" && isResumeEditable(a);
         return (
           <div className="flex flex-col gap-1.5 py-0.5">
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -2917,7 +2917,7 @@ const CrmApplication: React.FC = () => {
                 Delete Application
               </button>
             )}
-            {viewingAppDetail && (isResumable(viewingAppDetail.application) || isEditableApplication(viewingAppDetail.application)) && (
+            {canEditApplications && viewingAppDetail && (isResumable(viewingAppDetail.application) || isEditableApplication(viewingAppDetail.application)) && (
               <button
                 onClick={() => { const id = viewingAppDetail.application.Id; closeApplication(); setTimeout(() => loadApplicationIntoWizard(id), 180); }}
                 disabled={loadingApplication}
