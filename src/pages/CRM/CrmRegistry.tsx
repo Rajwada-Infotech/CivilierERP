@@ -162,8 +162,8 @@ const CrmRegistry: React.FC = () => {
 
   return (
     <CrmShell
-      title="CRM � Registry"
-      subtitle="Deed registration at the Sub-Registrar Office � gated on Query Payment being confirmed"
+      title="Sale Deed Registration — Sub-Registrar Visit 2"
+      subtitle="Both parties appear at the Sub-Registrar Office to officially register the Sale Deed — legally transfers ownership to the buyer"
       action={
         <div className="flex items-center gap-3">
           {dataUpdatedAt > 0 && (

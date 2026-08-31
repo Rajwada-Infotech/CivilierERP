@@ -222,10 +222,10 @@ const CrmNoc: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "CRM", "NOC"]} />
+      <Breadcrumbs items={["Dashboard", "CRM", "No Objection Certificates"]} />
       <CrmShell
-        title="CRM — NOC (Organisation & Bank)"
-      subtitle="No-objection certificates and bank loan sanction/disbursement tracking"
+        title="No Objection Certificates (NOC)"
+        subtitle="Organisation NOC confirming no outstanding dues, and Bank NOC releasing the lender's charge on the property after the loan is cleared"
       action={
           <div className="flex items-center gap-3">
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />

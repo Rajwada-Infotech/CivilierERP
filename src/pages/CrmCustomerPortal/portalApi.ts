@@ -126,6 +126,10 @@ export async function respondSalesDeed(applicationId: number, decision: "Approve
 
 export const fetchQueryPaymentAttachments = (applicationId: number) => get(withAppId("/query-payment/attachments", applicationId)).catch(() => []);
 
+export const fetchAllotmentLetter = (applicationId: number) => get(withAppId("/allotment-letter", applicationId)).catch(() => null);
+export const allotmentLetterPdfUrl  = (applicationId: number, download = false) =>
+  `${API}/allotment-letter/pdf?applicationId=${applicationId}${download ? "&download=1" : ""}`;
+
 // Files travel as base64 JSON, decoded server-side into the same
 // VARBINARY(MAX) column staff uploads use — see crmPortal.js POST
 // /query-payment/proof.

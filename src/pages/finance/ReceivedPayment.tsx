@@ -104,8 +104,9 @@ const EXPORT_COLUMNS: ExportColumn[] = [
 
 export type PaymentMode =
   | "Cash"
-  | "Check"
+  | "Cheque"
   | "UPI"
+  | "IMPS"
   | "NEFT"
   | "RTGS"
   | "Card"
@@ -176,8 +177,9 @@ function mapReceivedPaymentRow(r: ReceivedPaymentRecord): ReceivedPayment {
 
 const PAYMENT_MODES: PaymentMode[] = [
   "Cash",
-  "Check",
+  "Cheque",
   "UPI",
+  "IMPS",
   "NEFT",
   "RTGS",
   "Card",
@@ -234,7 +236,7 @@ const OTHER_BANK_VALUE = "__other__";
 const modeIcon = (mode: string) => {
   if (mode === "Cash")
     return <Banknote size={13} className="text-emerald-500" />;
-  if (mode === "Check") return <FileText size={13} className="text-blue-500" />;
+  if (mode === "Cheque") return <FileText size={13} className="text-blue-500" />;
   if (mode === "UPI")
     return <Smartphone size={13} className="text-violet-500" />;
   if (mode === "Card")
@@ -245,8 +247,9 @@ const modeIcon = (mode: string) => {
 
 const modeColor: Record<string, string> = {
   Cash: "bg-emerald-500/10 text-emerald-600",
-  Check: "bg-blue-500/10 text-blue-600",
+  Cheque: "bg-blue-500/10 text-blue-600",
   UPI: "bg-violet-500/10 text-violet-600",
+  IMPS: "bg-teal-500/10 text-teal-600",
   NEFT: "bg-sky-500/10 text-sky-600",
   RTGS: "bg-cyan-500/10 text-cyan-600",
   Card: "bg-orange-500/10 text-orange-600",
@@ -955,7 +958,7 @@ export default function ReceivedPaymentPage() {
     },
   ];
 
-  const needsBankRef = ["Check", "UPI", "NEFT", "RTGS", "Card"].includes(
+  const needsBankRef = ["Cheque", "UPI", "IMPS", "NEFT", "RTGS", "Card"].includes(
     form.mode,
   );
 
@@ -1601,11 +1604,7 @@ export default function ReceivedPaymentPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {PAYMENT_MODES.map((m) => (
-                          <SelectItem key={m} value={m}>
-                            <span className="flex items-center gap-2">
-                              {modeIcon(m)} {m}
-                            </span>
-                          </SelectItem>
+                          <SelectItem key={m} value={m}>{m}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -1768,7 +1767,7 @@ export default function ReceivedPaymentPage() {
                 {/* Row 5: Bank ref (conditional) */}
                 {needsBankRef && (
                   <div className="grid grid-cols-2 gap-4">
-                    {form.mode === "Check" ? (
+                    {form.mode === "Cheque" ? (
                       <div>
                         <FieldLabel>Cheque Number</FieldLabel>
                         <Input

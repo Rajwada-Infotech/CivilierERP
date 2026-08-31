@@ -45,7 +45,10 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        b.Id AS BookingId, b.BookingNo, b.ProjectName, b.UnitNo, b.Status AS BookingStatus, b.AssignedTo,
+        b.Id AS BookingId, b.BookingNo,
+        COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+        COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+        b.Status AS BookingStatus, b.AssignedTo,
         b.FinancingType,
         a.ApplicantName, a.Mobile,
         wc.Outcome AS LastCallOutcome,
@@ -63,6 +66,7 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
         THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS IsComplete
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       LEFT JOIN dbo.CrmCustomerBankDetail d ON d.BookingId = b.Id
       OUTER APPLY (
         SELECT TOP 1 Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = b.Id ORDER BY CallDate DESC, CreatedAt DESC

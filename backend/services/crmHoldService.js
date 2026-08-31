@@ -79,18 +79,37 @@ async function placeHold(pool, { entityType, entityId, applicationId, holdDays, 
   const existing = await findActiveHold(pool, entityType, entityId);
   if (existing) { const e = new Error("This item already has an active hold"); e.status = 409; throw e; }
 
-  const result = await pool.request()
-    .input("et", sql.NVarChar(20), entityType)
-    .input("eid", sql.Int, entityId)
-    .input("aid", sql.Int, applicationId)
-    .input("days", sql.Int, days)
-    .input("reason", sql.NVarChar(500), reason || null)
-    .input("cb", sql.Int, userId)
-    .query(`
-      INSERT INTO dbo.CrmInventoryHold (EntityType, EntityId, ApplicationId, HoldDays, HoldUntil, Reason, Status, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.Id, INSERTED.HoldUntil
-      VALUES (@et, @eid, @aid, @days, DATEADD(DAY, @days, SYSDATETIME()), @reason, 'Active', @cb, SYSDATETIME())
-    `);
+  // The UQ_CrmInventoryHold_ActiveEntity filtered unique index is the DB-level
+  // backstop for the race that the findActiveHold() check above can't close
+  // (two concurrent requests both read 0 rows before either INSERT commits).
+  // Without this try/catch, the loser gets a raw SQL constraint-violation
+  // message surfaced as a generic 500 instead of the same clean 409 the
+  // app-layer check already produces for the non-race case.
+  let result;
+  try {
+    result = await pool.request()
+      .input("et", sql.NVarChar(20), entityType)
+      .input("eid", sql.Int, entityId)
+      .input("aid", sql.Int, applicationId)
+      .input("days", sql.Int, days)
+      .input("reason", sql.NVarChar(500), reason || null)
+      .input("cb", sql.Int, userId)
+      .query(`
+        INSERT INTO dbo.CrmInventoryHold (EntityType, EntityId, ApplicationId, HoldDays, HoldUntil, Reason, Status, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id, INSERTED.HoldUntil
+        VALUES (@et, @eid, @aid, @days, DATEADD(DAY, @days, SYSDATETIME()), @reason, 'Active', @cb, SYSDATETIME())
+      `);
+  } catch (insertErr) {
+    // Re-throw unique-constraint violations as the same clean 409 the
+    // app-layer duplicate check above produces — keeps the error contract
+    // identical whether the race is caught at the JS or DB level.
+    if (insertErr.message && (insertErr.message.includes("UQ_CrmInventoryHold") || insertErr.message.toLowerCase().includes("unique"))) {
+      const e = new Error("This item already has an active hold");
+      e.status = 409;
+      throw e;
+    }
+    throw insertErr;
+  }
 
   // unitMaster.js's GET / caches LockHoldId/LockBookingNo per unit (server-side,
   // via the cache() middleware) and only ever gets invalidated by Unit Master's

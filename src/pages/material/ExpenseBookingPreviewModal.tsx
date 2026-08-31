@@ -50,12 +50,17 @@ interface ExpenseBookingPreviewModalProps {
   previewRecord: ExpenseRecord | null;
   onClose: () => void;
   onEdit: (record: ExpenseRecord) => void;
+  /** Gates the Edit button — defaults to true so existing callers that
+   *  don't pass this (yet) keep their current behavior; the real
+   *  MaterialExpenseBooking.tsx caller now passes rights.canEdit. */
+  canEdit?: boolean;
 }
 
 export function ExpenseBookingPreviewModal({
   previewRecord,
   onClose,
   onEdit,
+  canEdit = true,
 }: ExpenseBookingPreviewModalProps) {
   // GRN item-level GST breakdown (fetched when eSourceType === 'GRN')
   const [grnBreakdown, setGrnBreakdown] = useState<{
@@ -479,12 +484,14 @@ export function ExpenseBookingPreviewModal({
               >
                 <Printer size={13} /><span className="hidden sm:inline">Print</span>
               </button>
-              <button
-                onClick={() => { onClose(); onEdit(previewRecord); }}
-                className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
-              >
-                <Edit size={13} /><span className="hidden sm:inline">Edit</span>
-              </button>
+              {canEdit && (
+                <button
+                  onClick={() => { onClose(); onEdit(previewRecord); }}
+                  className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
+                >
+                  <Edit size={13} /><span className="hidden sm:inline">Edit</span>
+                </button>
+              )}
               <button
                 onClick={onClose}
                 className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground"

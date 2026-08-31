@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard, Building2, FileText, CreditCard, HardHat, LifeBuoy, IdCard,
-  LogOut, Menu, X, Bell, ChevronRight, Radio, ChevronLeft, Layers,
+  LogOut, Menu, X, Bell, ChevronRight, Radio, ChevronLeft, Layers, FolderOpen,
 } from "lucide-react";
 import { fetchMe, fetchApplications, fetchTimeline } from "./portalApi";
 import {
@@ -17,6 +17,7 @@ const NAV_GROUPS: { label: string; items: { to: string; label: string; icon: any
   ]},
   { label: "My Property", items: [
     { to: "/crm-client-portal/booking", label: "My Booking", icon: Building2 },
+    { to: "/crm-client-portal/documents", label: "Documents", icon: FolderOpen },
     { to: "/crm-client-portal/construction", label: "Construction", icon: HardHat },
   ]},
   { label: "Finance", items: [

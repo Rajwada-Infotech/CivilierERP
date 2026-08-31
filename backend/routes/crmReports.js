@@ -36,7 +36,7 @@ router.get("/booking-register", requirePageRight("crm-bookings", "view"), async 
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(b.BookingDate AS DATE)");
-    const conds = ["b.IsActive = 1", "b.Status NOT IN (CrmStatus.CANCELLED,CrmStatus.REJECTED)", ...dr.clauses];
+    const conds = ["b.IsActive = 1", `b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')`, ...dr.clauses];
     const r = pool.request();
     dr.bind(r);
     const result = await r.query(`
@@ -58,7 +58,7 @@ router.get("/payment-collection", requirePageRight("crm-payments", "view"), asyn
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(m.DueDate AS DATE)");
-    const conds = ["b.IsActive = 1", "b.Status NOT IN (CrmStatus.CANCELLED,CrmStatus.REJECTED)", ...dr.clauses];
+    const conds = ["b.IsActive = 1", `b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')`, ...dr.clauses];
     const r = pool.request();
     dr.bind(r);
     const result = await r.query(`

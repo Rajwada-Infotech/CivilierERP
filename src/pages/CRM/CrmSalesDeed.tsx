@@ -12,8 +12,9 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { formatINR } from "@/utils/formatCurrency";
 import {
-  Plus, CheckCircle2, AlertTriangle, XCircle, ExternalLink, Lock, Pencil, ScrollText, RotateCcw,
+  Plus, CheckCircle2, AlertTriangle, XCircle, ExternalLink, Lock, Pencil, ScrollText, RotateCcw, UserCircle2,
 } from "lucide-react";
+import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
@@ -74,8 +75,8 @@ function fmtDate(d?: string | null) {
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-const EMPTY_FORM = { BookingId: "", DeedValue: "", StampDuty: "", RegistrationFee: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "" };
-const EMPTY_DEED_FORM = { DeedValue: "", StampDuty: "", RegistrationFee: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "" };
+const EMPTY_FORM = { BookingId: "", DeedValue: "", StampDuty: "", RegistrationFee: "", StampDutyCredit: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "" };
+const EMPTY_DEED_FORM = { DeedValue: "", StampDuty: "", RegistrationFee: "", StampDutyCredit: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "" };
 const EMPTY_PROGRESS_FORM = { ExecutedBy: "", RegistrationNo: "", BookNo: "", PartNo: "", RegistrationDate: "", PossessionDate: "" };
 
 async function fetchAll(): Promise<any[]> {
@@ -93,6 +94,7 @@ async function fetchBookingContext(bookingId: string): Promise<any> {
 }
 
 const CrmSalesDeed: React.FC = () => {
+  const rights = usePageRights("crm-sales-deed");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
@@ -110,6 +112,9 @@ const CrmSalesDeed: React.FC = () => {
   const [progressForm, setProgressForm] = useState({ ...EMPTY_PROGRESS_FORM });
   const [savingProgress, setSavingProgress] = useState(false);
   const [sendingToCustomer, setSendingToCustomer] = useState(false);
+  const [proxyApproveDialog, setProxyApproveDialog] = useState(false);
+  const [proxyRecheckDialog, setProxyRecheckDialog] = useState(false);
+  const [proxySaving, setProxySaving] = useState(false);
 
   const { data: deeds = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-sales-deed"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
@@ -120,9 +125,14 @@ const CrmSalesDeed: React.FC = () => {
   });
 
   const trackedBookingIds = new Set((deeds as any[]).map((d: any) => d.BookingId));
-  const eligibleBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
+  // Sale Deed requires Handover Completed (backend gate). Show only bookings whose
+  // Agreement is at least Executed so the list isn't flooded with early-stage bookings.
+  const eligibleBookings = (bookings as any[]).filter((b: any) =>
+    !trackedBookingIds.has(b.Id) &&
+    (b.AgreementStatus === "Executed" || b.AgreementStatus === "Registered")
+  );
 
-  const agreementExecuted = context?.agreement?.Status === CrmStatus.EXECUTED;
+  const agreementExecuted = ["Executed", "Registered"].includes(context?.agreement?.Status ?? "");
   // Loan Processing only exists as a gate at all for a booking explicitly
   // marked Loan-Financed � Self-Funded and undeclared bookings never had a
   // loan to process, so they clear immediately (see
@@ -131,7 +141,8 @@ const CrmSalesDeed: React.FC = () => {
   // genuinely parallel track and never gate this either.
   const isLoanFinanced = context?.booking?.FinancingType === "LoanFinanced";
   const loanCleared = !context?.loanBlockReason;
-  const canCreate = !!form.BookingId && agreementExecuted && loanCleared && !contextLoading;
+  const handoverCompleted = context?.handoverCompleted === true;
+  const canCreate = !!form.BookingId && agreementExecuted && loanCleared && handoverCompleted && !contextLoading;
 
   const detail = detailId != null ? (deeds as any[]).find((d: any) => d.Id === detailId) : null;
   // Deed Value / Stamp Duty / Registration Fee / Sub-Registrar Office / Deed
@@ -146,7 +157,7 @@ const CrmSalesDeed: React.FC = () => {
   // Deep-link from Legal Milestones: pre-fill New Deed with this booking if
   // it doesn't have one yet.
   useEffect(() => {
-    if (!deepLinkBookingId || dialogOpen) return;
+    if (!rights.canCreate || !deepLinkBookingId || dialogOpen) return;
     if ((deeds as any[]).some((d: any) => String(d.BookingId) === deepLinkBookingId)) return;
     if ((bookings as any[]).some((b: any) => String(b.Id) === deepLinkBookingId)) {
       setForm((f) => ({ ...f, BookingId: deepLinkBookingId }));
@@ -154,6 +165,23 @@ const CrmSalesDeed: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkBookingId, deeds.length, bookings.length]);
+
+  // Auto-fill StampDutyCredit from the AFS registration figures on the agreement
+  // once context loads. crmSalesDeed.js's GET /booking/:id/context already returns
+  // agreement.AfsStampDuty + AfsRegistrationFee — this just wires them to the field
+  // instead of leaving it blank for staff to re-type from memory.
+  // Only fires when the field is still empty (never overwrites a value the staff has
+  // already typed or a deed that was opened from the existing list).
+  useEffect(() => {
+    if (!context?.agreement) return;
+    // Only AfsStampDuty is creditable against Sale Deed stamp duty;
+    // AfsRegistrationFee is a separate sub-registrar charge, not a credit.
+    const credit = Number(context.agreement.AfsStampDuty ?? 0) || 0;
+    if (credit > 0) {
+      setForm((f) => ({ ...f, StampDutyCredit: f.StampDutyCredit === "" ? String(credit) : f.StampDutyCredit }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context?.agreement?.AfsStampDuty, context?.agreement?.AfsRegistrationFee]);
 
   // Row clicks (openDetail below) only ever set local state — the URL
   // stayed plain /crm/sales-deed, so a refresh lost the open detail dialog
@@ -200,6 +228,7 @@ const CrmSalesDeed: React.FC = () => {
       DeedValue: d.DeedValue != null ? String(d.DeedValue) : "",
       StampDuty: d.StampDuty != null ? String(d.StampDuty) : "",
       RegistrationFee: d.RegistrationFee != null ? String(d.RegistrationFee) : "",
+      StampDutyCredit: d.StampDutyCredit != null ? String(d.StampDutyCredit) : "",
       SubRegistrarOffice: d.SubRegistrarOffice || "",
       DeedDate: d.DeedDate ? String(d.DeedDate).slice(0, 10) : "",
       RegistrationDeadline: d.RegistrationDeadline ? String(d.RegistrationDeadline).slice(0, 10) : "",
@@ -273,6 +302,48 @@ const CrmSalesDeed: React.FC = () => {
   // missed a deed whose ExecutedBy and RegistrationNo were set together in
   // one request � a real bug that left a deed fully Registered with the
   // customer never having been asked to approve it).
+  const handleProxyApprove = async (method: ProxyMethod, remarks: string) => {
+    if (!detailId) return;
+    setProxySaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${detailId}/proxy-customer-approve`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Customer approval recorded on their behalf");
+      setProxyApproveDialog(false);
+      qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setProxySaving(false);
+    }
+  };
+
+  const handleProxyRecheck = async (method: ProxyMethod, remarks: string) => {
+    if (!detailId) return;
+    setProxySaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${detailId}/proxy-customer-recheck`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Customer recheck request recorded on their behalf");
+      setProxyRecheckDialog(false);
+      qc.invalidateQueries({ queryKey: ["crm-sales-deed"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setProxySaving(false);
+    }
+  };
+
   const handleSendToCustomer = async () => {
     if (!detailId) return;
     setSendingToCustomer(true);
@@ -340,8 +411,8 @@ const CrmSalesDeed: React.FC = () => {
 
   return (
     <CrmShell
-      title="CRM � Sale Deed"
-      subtitle="Deed execution and registration tracking"
+      title="Sale Deed"
+      subtitle="The legal document that transfers property ownership from the developer to the buyer"
       action={
         <div className="flex items-center gap-3">
           {dataUpdatedAt > 0 && (
@@ -351,10 +422,12 @@ const CrmSalesDeed: React.FC = () => {
               {isFetching ? "Refreshing�" : "Refresh"}
             </button>
           )}
-          <button onClick={() => setDialogOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-            <Plus size={14} /> New Deed
-          </button>
+          {rights.canCreate && (
+            <button onClick={() => setDialogOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+              <Plus size={14} /> New Deed
+            </button>
+          )}
         </div>
       }
     >
@@ -450,6 +523,19 @@ const CrmSalesDeed: React.FC = () => {
                 <Input type="number" className="h-10 font-mono" value={form.RegistrationFee} onChange={(e) => setForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">AFS Stamp Duty Credit</label>
+                <Input type="number" className="h-10 font-mono" placeholder="0" value={form.StampDutyCredit} onChange={(e) => setForm((f) => ({ ...f, StampDutyCredit: e.target.value }))} />
+                {context?.agreement?.AfsStampDuty != null ? (
+                  <p className="text-[10px] text-emerald-600">
+                    ✓ Pre-filled from AFS registration{context.agreement.AgreementNo ? ` (${context.agreement.AgreementNo})` : ""} —
+                    stamp duty ₹{Number(context.agreement.AfsStampDuty).toLocaleString("en-IN")} already paid is creditable here.
+                    Verify against Sub-Registrar receipt before saving.
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-muted-foreground">Stamp duty already paid at AFS registration — creditable against Sale Deed stamp duty.</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
                 <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Deed Date</label>
                 <Input type="date" className="h-10" value={form.DeedDate} onChange={(e) => setForm((f) => ({ ...f, DeedDate: e.target.value }))} />
               </div>
@@ -505,7 +591,7 @@ const CrmSalesDeed: React.FC = () => {
                 </div>
 
                 <div>
-                  <SectionLabel action={!deedFieldsLocked && !deedFormEditing && (
+                  <SectionLabel action={rights.canEdit && !deedFieldsLocked && !deedFormEditing && (
                     <button onClick={() => setDeedFormEditing(true)} className="flex items-center gap-1 text-[11px] font-medium text-primary hover:underline">
                       <Pencil size={11} /> Edit
                     </button>
@@ -533,6 +619,10 @@ const CrmSalesDeed: React.FC = () => {
                           <Input type="number" className="h-10 font-mono" value={deedForm.RegistrationFee} onChange={(e) => setDeedForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
                         </div>
                         <div className="space-y-1.5">
+                          <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">AFS Stamp Duty Credit</label>
+                          <Input type="number" className="h-10 font-mono" placeholder="0" value={deedForm.StampDutyCredit} onChange={(e) => setDeedForm((f) => ({ ...f, StampDutyCredit: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1.5">
                           <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Deed Date</label>
                           <Input type="date" className="h-10" value={deedForm.DeedDate} onChange={(e) => setDeedForm((f) => ({ ...f, DeedDate: e.target.value }))} />
                         </div>
@@ -558,6 +648,9 @@ const CrmSalesDeed: React.FC = () => {
                       <DetailRow label="Deed Value" value={detail.DeedValue ? formatINR(detail.DeedValue) : "�"} mono />
                       <DetailRow label="Stamp Duty" value={detail.StampDuty ? formatINR(detail.StampDuty) : "�"} mono />
                       <DetailRow label="Registration Fee" value={detail.RegistrationFee ? formatINR(detail.RegistrationFee) : "�"} mono />
+                      {detail.StampDutyCredit != null && (
+                        <DetailRow label="AFS Stamp Duty Credit" value={String.fromCharCode(8722) + " " + formatINR(detail.StampDutyCredit)} mono />
+                      )}
                       <DetailRow label="Deed Date" value={fmtDate(detail.DeedDate)} />
                       <DetailRow label="Registration Deadline" value={fmtDate(detail.RegistrationDeadline)} />
                       <DetailRow label="Sub-Registrar Office" value={detail.SubRegistrarOffice || "�"} />
@@ -617,12 +710,30 @@ const CrmSalesDeed: React.FC = () => {
                 <div>
                   <SectionLabel>Approvals</SectionLabel>
                   <DetailRow label="Customer Approval" value={<StatusBadge status={detail.CustomerApprovalStatus || "NotSent"} cfg={APPROVAL_CFG} />} />
+                  {detail.CustomerRecheckRemarks && (
+                    <p className="text-xs text-red-600 px-1 pb-1">Recheck: {detail.CustomerRecheckRemarks}</p>
+                  )}
                   {!detail.SentToCustomerAt && detail.Status !== CrmStatus.REGISTERED && (
                     <div className="flex justify-end pb-2">
                       <button onClick={handleSendToCustomer} disabled={sendingToCustomer}
                         className="px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted disabled:opacity-40 transition-colors">
                         {sendingToCustomer ? "Sending..." : "Send to Customer for Approval"}
                       </button>
+                    </div>
+                  )}
+                  {detail.SentToCustomerAt && detail.CustomerApprovalStatus !== CrmStatus.APPROVED && detail.Status !== CrmStatus.REGISTERED && (
+                    <div className="flex flex-col gap-1.5 pb-2">
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-1"><UserCircle2 size={11} /> Customer not on portal?</p>
+                      <div className="flex gap-2 flex-wrap">
+                        <button onClick={() => setProxyApproveDialog(true)}
+                          className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 flex items-center gap-1.5">
+                          <UserCircle2 size={11} /> Record Approval on Their Behalf
+                        </button>
+                        <button onClick={() => setProxyRecheckDialog(true)}
+                          className="text-xs px-3 py-1.5 bg-red-50 border border-red-200 text-red-800 rounded-lg font-semibold hover:bg-red-100 flex items-center gap-1.5">
+                          <UserCircle2 size={11} /> Record Recheck Request on Their Behalf
+                        </button>
+                      </div>
                     </div>
                   )}
                   {detail.DirectorApprovalStatus && detail.DirectorApprovalStatus !== "NotRequired" && (
@@ -655,6 +766,26 @@ const CrmSalesDeed: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
+      {proxyApproveDialog && (
+        <ProxyActionDialog
+          title="Record Customer Approval — Sales Deed"
+          description="You are recording that the customer has reviewed and approved the sales deed without using the portal."
+          confirmLabel="Record Approval"
+          saving={proxySaving}
+          onClose={() => setProxyApproveDialog(false)}
+          onConfirm={handleProxyApprove}
+        />
+      )}
+      {proxyRecheckDialog && (
+        <ProxyActionDialog
+          title="Record Customer Recheck Request — Sales Deed"
+          description="You are recording that the customer flagged an issue or requested changes to the sales deed without using the portal."
+          confirmLabel="Record Recheck Request"
+          saving={proxySaving}
+          onClose={() => setProxyRecheckDialog(false)}
+          onConfirm={handleProxyRecheck}
+        />
+      )}
     </CrmShell>
   );
 };

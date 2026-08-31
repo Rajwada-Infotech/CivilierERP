@@ -287,7 +287,7 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
     // booking is Confirmed, sweep those MRs through approveMoneyReceipt so the
     // ReceivedPayment row lands in Finance's queue automatically.
     try {
-      const { approveMoneyReceipt } = require("./crmMoneyReceiptWorkflow");
+      const { approveMoneyReceipt, createMoneyReceiptAfterDataReview } = require("./crmMoneyReceiptWorkflow");
       const pendingMrs = await pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT Id FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status = 'Pending' AND ReceivedPaymentId IS NULL");
       for (const mr of pendingMrs.recordset) {
@@ -295,6 +295,20 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
           await approveMoneyReceipt(pool, mr.Id, userId, userEmail);
         } catch (mrErr) {
           console.error("[crmBookingStageService] auto-approve pending MR", mr.Id, "on confirm failed:", mrErr.message);
+        }
+      }
+      // Safety net: if no MR exists at all (auto-creation failed silently on
+      // Confirm & Book and no Pending rows were found above), create one now.
+      // assertDataReviewComplete skips the checklist for past-Review bookings
+      // (already verified at submitForApproval), so this always clears unless
+      // the booking amount is zero or PDF generation is broken — logged, never fatal.
+      const mrExists = await pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT TOP 1 Id FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Bounced'");
+      if (!mrExists.recordset.length) {
+        try {
+          await createMoneyReceiptAfterDataReview(pool, bookingId, userId);
+        } catch (createErr) {
+          console.error("[crmBookingStageService] safety-net MR creation on confirm failed:", createErr.message);
         }
       }
     } catch (e) {

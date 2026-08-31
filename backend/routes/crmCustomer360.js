@@ -80,7 +80,10 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
         ORDER BY a.CreatedAt DESC
       `),
       pool.request().input("mob", sql.NVarChar(20), mobile).query(`
-        SELECT b.Id, b.BookingNo, b.ProjectName, b.UnitNo, b.TotalValue, b.Status,
+        SELECT b.Id, b.BookingNo,
+               COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+               COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+               b.TotalValue, b.Status,
                b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
                b.BookingDate, a.ApplicationNo,
                ag.Status AS AgreementStatus,
@@ -98,6 +101,7 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
                (SELECT COUNT(*) FROM dbo.CrmCancellation WHERE BookingId = b.Id AND Status IN ('Requested','${CrmStatus.APPROVED}')) AS HasCancellation
         FROM dbo.CrmBooking b
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
         LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
         LEFT JOIN dbo.CrmHandover h ON h.BookingId = b.Id
         LEFT JOIN dbo.CrmLegalMilestone lm ON lm.BookingId = b.Id

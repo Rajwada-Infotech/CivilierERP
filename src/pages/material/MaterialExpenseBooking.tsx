@@ -451,12 +451,17 @@ export default function MaterialExpenseBooking() {
 
   // Deep-link support — Linked Documents panels and Trial Balance's ledger
   // drill-down navigate here as /material/expense-booking?view=<Eid> to open
-  // this exact Invoice/booking directly in its real form view (openEditForm
-  // does its own fetch), not just a preview card.
+  // this exact Invoice/booking. View-only users get the read-only preview
+  // instead of the editable form — openEditForm had no permission check at
+  // all here, letting a deep link bypass rights.canEdit entirely.
   useEffect(() => {
     const viewId = searchParams.get("view");
     if (!viewId) return;
-    openEditForm({ id: viewId } as unknown as ExpenseRecord);
+    if (rights.canEdit) {
+      openEditForm({ id: viewId } as unknown as ExpenseRecord);
+    } else {
+      openPreview({ id: viewId } as unknown as ExpenseRecord);
+    }
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2961,6 +2966,7 @@ export default function MaterialExpenseBooking() {
           previewRecord={previewRecord}
           onClose={() => setPreviewRecord(null)}
           onEdit={(record) => openEditForm(record)}
+          canEdit={rights.canEdit}
         />
 
         {/* Remaining GRN Items — auto-created silently on save */}

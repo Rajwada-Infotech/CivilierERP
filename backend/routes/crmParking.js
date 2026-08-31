@@ -41,10 +41,20 @@ async function rollupBookingTotals(pool, bookingId) {
 
 // A slot can only ever back one active allotment at a time — same rule as a
 // unit only ever having one active (non-Cancelled/Rejected) booking.
-async function assertSlotAvailable(pool, parkingSlotId) {
+//
+// `db` must be the active transaction (tx.request()), NOT the bare pool.
+// The WITH (UPDLOCK, ROWLOCK) hint turns the availability check into a
+// lock-acquisition step: the first concurrent request acquires an exclusive
+// lock on the matched row (or a key-range lock when no row exists yet),
+// blocking any second concurrent request from passing the same check until
+// the first transaction commits. Without this, two simultaneous requests
+// for the same slot can both read 0 rows and both proceed to INSERT —
+// the exact race that was already fixed for Unit bookings in
+// services/crmEntityCreation.js (see the UPDLOCK comment there).
+async function assertSlotAvailable(db, parkingSlotId) {
   if (!parkingSlotId) return;
-  const existing = await pool.request().input("sid", sql.Int, parkingSlotId)
-    .query("SELECT Id FROM dbo.CrmParkingAllotment WHERE ParkingSlotId = @sid AND IsActive = 1");
+  const existing = await db.request().input("sid", sql.Int, parkingSlotId)
+    .query("SELECT Id FROM dbo.CrmParkingAllotment WITH (UPDLOCK, ROWLOCK) WHERE ParkingSlotId = @sid AND IsActive = 1");
   if (existing.recordset.length) {
     const err = new Error("This parking slot is already allotted");
     err.status = 409;
@@ -94,13 +104,19 @@ async function resolveParkingRateForSlot(pool, parkingSlotId) {
   return rate.recordset[0] || null;
 }
 
+// ParkingMaster is LEFT JOIN — unrated allotments (NeedsRate flow) store
+// ParkingMasterId = NULL, so an INNER JOIN would silently exclude them.
+// ParkingType falls back to the slot's own type for those rows.
 const ALLOTMENT_SELECT = `
-  SELECT pa.*, p.ParkingType AS CurrentParkingType, p.ProjectId, p.BlockId,
+  SELECT pa.*,
+         COALESCE(p.ParkingType, s.ParkingType) AS CurrentParkingType,
+         COALESCE(p.ProjectId,   s.ProjectId)   AS ProjectId,
+         COALESCE(p.BlockId,     s.BlockId)      AS BlockId,
          s.SlotNo, a.ApplicantName, a.Mobile,
          b.BookingNo, b.Status AS BookingStatus, b.GrandTotal AS BookingGrandTotal,
          ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0) AS BookingTotalPaid
   FROM dbo.CrmParkingAllotment pa
-  JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
+  LEFT JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
   LEFT JOIN dbo.ParkingSlot s ON s.Id = pa.ParkingSlotId
   LEFT JOIN dbo.CrmApplication a ON a.Id = pa.ApplicationId
   LEFT JOIN dbo.CrmBooking b ON b.Id = pa.BookingId
@@ -112,7 +128,7 @@ const ALLOTMENT_SELECT = `
 // crmBookingAmendments.js when an approver signs off on a queued request.
 
 async function applyAddParking(pool, bookingId, b, actorUserId) {
-  if (!b.ParkingMasterId) throw parkingError("ParkingMasterId is required");
+  if (!b.ParkingMasterId && !b.ParkingType) throw parkingError("ParkingMasterId or ParkingType is required");
   const qty = b.Quantity != null ? parseInt(b.Quantity) : 1;
   if (!Number.isFinite(qty) || qty < 1) throw parkingError("Quantity must be at least 1");
 
@@ -123,35 +139,37 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
     .query("SELECT Id, BookingNo, ApplicationId, ProjectId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
   if (!booking.recordset.length) throw parkingError("Booking not found", 404);
 
-  const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
-    .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
-  if (!rate.recordset.length) throw parkingError("Selected parking rate is not active");
-  const { GstRate, ParkingType } = rate.recordset[0];
-  // Staff can override the Parking Rate Master's default figure for a
-  // genuine one-off negotiated price — validated the same way an amount
-  // typed anywhere else in CRM is (finite, positive). Falls back to the
-  // master rate when omitted, exactly as before this existed.
-  let Charge = rate.recordset[0].Charge;
-  if (b.RateOverride != null && b.RateOverride !== "") {
-    const override = parseFloat(b.RateOverride);
-    if (!Number.isFinite(override) || override <= 0) throw parkingError("Rate override must be a positive number");
-    Charge = override;
-  }
+  let ParkingType, GstRate, Charge;
 
-  // Same rule already enforced for standalone parking sales (POST
-  // /standalone below) and hold placement (crmHoldService.js placeHold) —
-  // without it, parking from one Project's rate card could get sold onto a
-  // Booking for a different Project entirely, a nonsensical record that'd
-  // never reconcile against real inventory. This unit-linked path was
-  // missing the check both of its siblings already have.
-  if (rate.recordset[0].ProjectId !== booking.recordset[0].ProjectId) {
-    throw parkingError("This booking is for a different project than the selected parking rate/slot");
+  if (b.ParkingMasterId) {
+    const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
+      .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
+    if (!rate.recordset.length) throw parkingError("Selected parking rate is not active");
+    if (rate.recordset[0].ProjectId !== booking.recordset[0].ProjectId) {
+      throw parkingError("This booking is for a different project than the selected parking rate/slot");
+    }
+    ParkingType = rate.recordset[0].ParkingType;
+    GstRate = rate.recordset[0].GstRate;
+    // Staff can override the Parking Rate Master's default figure for a genuine
+    // one-off negotiated price — falls back to the master rate when omitted.
+    Charge = rate.recordset[0].Charge;
+    if (b.RateOverride != null && b.RateOverride !== "") {
+      const override = parseFloat(b.RateOverride);
+      if (!Number.isFinite(override) || override <= 0) throw parkingError("Rate override must be a positive number");
+      Charge = override;
+    }
+  } else {
+    // Unrated type — no ParkingMaster row; caller supplies ParkingType + Charge directly.
+    if (b.Charge == null || parseFloat(b.Charge) <= 0) throw parkingError("A price is required for unrated parking types");
+    ParkingType = b.ParkingType;
+    Charge = parseFloat(b.Charge);
+    GstRate = b.GstRate != null ? parseFloat(b.GstRate) : 0;
   }
 
   const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
   assertSlotSelected(ParkingType, parkingSlotId);
-  await assertSlotAvailable(pool, parkingSlotId);
-  await guardAndConvertHold(pool, "Parking", parkingSlotId, booking.recordset[0].ApplicationId);
+
+
   const slot = await pool.request().input("sid", sql.Int, parkingSlotId)
     .query("SELECT SlotNo FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");
   if (!slot.recordset.length) throw parkingError("Selected parking slot is not active");
@@ -161,26 +179,48 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   const gstAmount = Math.round((lineAmount * GstRate) / 100 * 100) / 100;
   const totalAmount = lineAmount + gstAmount;
 
-  const result = await pool.request()
-    .input("bid",  sql.Int, bookingId)
-    .input("aid",  sql.Int, booking.recordset[0].ApplicationId)
-    .input("pmid", sql.Int, parseInt(b.ParkingMasterId))
-    .input("sid",  sql.Int, parkingSlotId)
-    .input("slot", sql.NVarChar(50), slotNo)
-    .input("qty",  sql.Int, qty)
-    .input("rate", sql.Decimal(18, 2), Charge)
-    .input("gstr", sql.Decimal(5, 2), GstRate)
-    .input("gsta", sql.Decimal(18, 2), gstAmount)
-    .input("tot",  sql.Decimal(18, 2), totalAmount)
-    .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-    .input("cb",   sql.Int, actorUserId)
-    .query(`
-      INSERT INTO dbo.CrmParkingAllotment
-        (BookingId, ApplicationId, ParkingMasterId, ParkingSlotId, ParkingSlotNo, Quantity, RateSnapshot, GstRateSnapshot, GstAmount, TotalAmount, PaymentStatus, Notes, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.Id
-      VALUES (@bid, @aid, @pmid, @sid, @slot, @qty, @rate, @gstr, @gsta, @tot, 'Pending', @note, @cb, SYSDATETIME())
-    `);
-  const allotmentId = result.recordset[0].Id;
+  // ── BEGIN ATOMIC SECTION ────────────────────────────────────────────────
+  // assertSlotAvailable, guardAndConvertHold, and the INSERT all run inside
+  // a single transaction so they are fully atomic:
+  //   • assertSlotAvailable (UPDLOCK) locks the slot against concurrent sales.
+  //   • guardAndConvertHold converts this application's hold on the same tx
+  //     connection — if the INSERT subsequently fails/rolls back, the hold
+  //     conversion rolls back too, leaving the slot still held and retryable.
+  //     Previously guardAndConvertHold ran outside the tx: a failed INSERT
+  //     would permanently orphan the conversion (hold gone, slot unallotted).
+  const tx = pool.transaction();
+  await tx.begin();
+  let allotmentId;
+  try {
+    await assertSlotAvailable(tx, parkingSlotId);
+    await guardAndConvertHold(tx, "Parking", parkingSlotId, booking.recordset[0].ApplicationId);
+
+    const result = await tx.request()
+      .input("bid",  sql.Int, bookingId)
+      .input("aid",  sql.Int, booking.recordset[0].ApplicationId)
+      .input("pmid", sql.Int, b.ParkingMasterId ? parseInt(b.ParkingMasterId) : null)
+      .input("sid",  sql.Int, parkingSlotId)
+      .input("slot", sql.NVarChar(50), slotNo)
+      .input("qty",  sql.Int, qty)
+      .input("rate", sql.Decimal(18, 2), Charge)
+      .input("gstr", sql.Decimal(5, 2), GstRate)
+      .input("gsta", sql.Decimal(18, 2), gstAmount)
+      .input("tot",  sql.Decimal(18, 2), totalAmount)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("cb",   sql.Int, actorUserId)
+      .query(`
+        INSERT INTO dbo.CrmParkingAllotment
+          (BookingId, ApplicationId, ParkingMasterId, ParkingSlotId, ParkingSlotNo, Quantity, RateSnapshot, GstRateSnapshot, GstAmount, TotalAmount, PaymentStatus, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@bid, @aid, @pmid, @sid, @slot, @qty, @rate, @gstr, @gsta, @tot, 'Pending', @note, @cb, SYSDATETIME())
+      `);
+    allotmentId = result.recordset[0].Id;
+    await tx.commit();
+  } catch (txErr) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    throw txErr;
+  }
+  // ── END ATOMIC SECTION ──────────────────────────────────────────────────
 
   // No longer gets a dedicated milestone of its own — its ₹ value folds
   // straight into the shared %-based milestones via rollupBookingTotals's
@@ -497,7 +537,20 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
     const ratedTypes = new Set(rates.recordset.map((r) => r.ParkingType));
     const unratedTypesWithInventory = [...typesWithInventory].filter((t) => !ratedTypes.has(t));
 
-    res.json({ rates: out, unratedTypesWithInventory });
+    // Include unrated types so staff can still select them and enter a price manually.
+    const unratedOut = unratedTypesWithInventory.map((type) => {
+      const blockScoped = slotsByType.get(type) || [];
+      const freeAnyBlock = freeCountByType.get(type) || 0;
+      return {
+        ParkingMasterId: null, ParkingType: type, Charge: null, GstRate: 0,
+        HasSlots: true, NoInventory: false, NeedsRate: true,
+        AvailableSlots: blockScoped,
+        SoldOutProjectWide: blockId != null && freeAnyBlock === 0,
+        FreeCountProjectWide: freeAnyBlock,
+      };
+    });
+
+    res.json({ rates: [...out, ...unratedOut], unratedTypesWithInventory });
   } catch (e) {
     console.error("[crm-parking] GET /available error:", e.message);
     res.status(500).json({ error: e.message });
@@ -573,7 +626,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const pool = getPool();
     const b = req.body;
     if (!b.ApplicationId) return res.status(400).json({ error: "ApplicationId is required — parking must be sold to a real customer/applicant" });
-    if (!b.ParkingMasterId) return res.status(400).json({ error: "ParkingMasterId is required" });
+    if (!b.ParkingMasterId && !b.ParkingType) return res.status(400).json({ error: "ParkingMasterId or ParkingType is required" });
     const qty = b.Quantity != null ? parseInt(b.Quantity) : 1;
     if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity must be at least 1" });
 
@@ -581,22 +634,35 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
       .query("SELECT Id, ProjectId, Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!application.recordset.length) return res.status(404).json({ error: "Application not found" });
 
-    const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
-      .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
-    if (!rate.recordset.length) return res.status(400).json({ error: "Selected parking rate is not active" });
-    const { GstRate, ParkingType } = rate.recordset[0];
-    // Defaults to the Parking Rate Master's own figure — staff can type a
-    // different amount for a genuine one-off negotiated price, same
-    // "defaults but overridable" pattern as Token Amount elsewhere in CRM.
-    let Charge = rate.recordset[0].Charge;
-    if (b.RateOverride != null && b.RateOverride !== "") {
-      const override = parseFloat(b.RateOverride);
-      if (!Number.isFinite(override) || override <= 0) return res.status(400).json({ error: "Rate override must be a positive number" });
-      Charge = override;
-    }
+    let ParkingType, Charge, GstRate;
 
-    if (rate.recordset[0].ProjectId !== application.recordset[0].ProjectId) {
-      return res.status(400).json({ error: "This Application is for a different project than the selected parking rate/slot" });
+    if (b.ParkingMasterId) {
+      const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
+        .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
+      if (!rate.recordset.length) return res.status(400).json({ error: "Selected parking rate is not active" });
+      if (rate.recordset[0].ProjectId !== application.recordset[0].ProjectId) {
+        return res.status(400).json({ error: "This Application is for a different project than the selected parking rate/slot" });
+      }
+      ParkingType = rate.recordset[0].ParkingType;
+      GstRate = rate.recordset[0].GstRate;
+      // Defaults to the Parking Rate Master's own figure — staff can type a
+      // different amount for a genuine one-off negotiated price.
+      Charge = rate.recordset[0].Charge;
+      if (b.RateOverride != null && b.RateOverride !== "") {
+        const override = parseFloat(b.RateOverride);
+        if (!Number.isFinite(override) || override <= 0) return res.status(400).json({ error: "Rate override must be a positive number" });
+        Charge = override;
+      }
+    } else {
+      // Unrated parking type — no ParkingMaster row exists yet; price is mandatory.
+      if (b.RateOverride == null || b.RateOverride === "") {
+        return res.status(400).json({ error: "A price is required for parking types without a configured rate" });
+      }
+      const override = parseFloat(b.RateOverride);
+      if (!Number.isFinite(override) || override <= 0) return res.status(400).json({ error: "Price must be a positive number" });
+      ParkingType = b.ParkingType;
+      Charge = override;
+      GstRate = 0;
     }
 
     const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
@@ -643,33 +709,51 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
       });
     }
 
-    await assertSlotAvailable(pool, parkingSlotId);
-    await guardAndConvertHold(pool, "Parking", parkingSlotId, parseInt(b.ApplicationId));
+    // ── BEGIN ATOMIC SECTION ──────────────────────────────────────────────
+    // assertSlotAvailable (UPDLOCK), guardAndConvertHold, and the INSERT all
+    // run on the same transaction connection:
+    //   • assertSlotAvailable locks the slot against concurrent sales.
+    //   • guardAndConvertHold converts this application's hold atomically —
+    //     if the INSERT fails, the conversion rolls back, leaving the slot
+    //     still held and the application able to retry cleanly.
+    const tx = pool.transaction();
+    await tx.begin();
+    let newId;
+    try {
+      await assertSlotAvailable(tx, parkingSlotId);
+      await guardAndConvertHold(tx, "Parking", parkingSlotId, parseInt(b.ApplicationId));
 
-    const result = await pool.request()
-      .input("aid",  sql.Int, parseInt(b.ApplicationId))
-      .input("pmid", sql.Int, parseInt(b.ParkingMasterId))
-      .input("sid",  sql.Int, parkingSlotId)
-      .input("slot", sql.NVarChar(50), slotNo)
-      .input("qty",  sql.Int, qty)
-      .input("rate", sql.Decimal(18, 2), Charge)
-      .input("gstr", sql.Decimal(5, 2), GstRate)
-      .input("gsta", sql.Decimal(18, 2), gstAmount)
-      .input("tot",  sql.Decimal(18, 2), totalAmount)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cb",   sql.Int, actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmParkingAllotment
-          (BookingId, ApplicationId, ParkingMasterId, ParkingSlotId, ParkingSlotNo, Quantity, RateSnapshot, GstRateSnapshot, GstAmount, TotalAmount, PaymentStatus, Notes, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (NULL, @aid, @pmid, @sid, @slot, @qty, @rate, @gstr, @gsta, @tot, 'Pending', @note, @cb, SYSDATETIME())
-      `);
+      const result = await tx.request()
+        .input("aid",  sql.Int, parseInt(b.ApplicationId))
+        .input("pmid", sql.Int, b.ParkingMasterId ? parseInt(b.ParkingMasterId) : null)
+        .input("sid",  sql.Int, parkingSlotId)
+        .input("slot", sql.NVarChar(50), slotNo)
+        .input("qty",  sql.Int, qty)
+        .input("rate", sql.Decimal(18, 2), Charge)
+        .input("gstr", sql.Decimal(5, 2), GstRate)
+        .input("gsta", sql.Decimal(18, 2), gstAmount)
+        .input("tot",  sql.Decimal(18, 2), totalAmount)
+        .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("cb",   sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmParkingAllotment
+            (BookingId, ApplicationId, ParkingMasterId, ParkingSlotId, ParkingSlotNo, Quantity, RateSnapshot, GstRateSnapshot, GstAmount, TotalAmount, PaymentStatus, Notes, CreatedBy, CreatedAt)
+          OUTPUT INSERTED.Id
+          VALUES (NULL, @aid, @pmid, @sid, @slot, @qty, @rate, @gstr, @gsta, @tot, 'Pending', @note, @cb, SYSDATETIME())
+        `);
+      newId = result.recordset[0].Id;
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+    // ── END ATOMIC SECTION ────────────────────────────────────────────────
 
     await logCrmAudit(pool, "Application", parseInt(b.ApplicationId), actorId(req), [
       { field: "StandaloneParkingAllotment", oldVal: null, newVal: `${ParkingType} x${qty} = ₹${totalAmount}` },
     ]);
 
-    res.status(201).json({ success: true, id: result.recordset[0].Id, TotalAmount: totalAmount });
+    res.status(201).json({ success: true, id: newId, TotalAmount: totalAmount });
   } catch (e) {
     console.error("[crm-parking] POST /standalone error:", e.message);
     res.status(e.status || 500).json({ error: e.message });

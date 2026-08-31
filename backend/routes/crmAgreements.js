@@ -10,7 +10,7 @@ const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
-const { validateAgreementPreparationPrerequisites, maybeAutoCreateSalesDeed, maybeAutoCreateLegalMilestone, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep, syncLegalMilestoneFromDocument, maybeUnlockBrokerageOnAgreementExecuted } = require("../services/crmWorkflowGuards");
+const { validateAgreementPreparationPrerequisites, maybeAutoCreateLegalMilestone, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep, syncLegalMilestoneFromDocument, maybeUnlockBrokerageOnAgreementExecuted } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 // Senior approval is gated to admin/super_admin/dba via this shared engine —
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
@@ -53,6 +53,8 @@ const AGR_SELECT = `
     ag.CustomerApprovalStatus, ag.CustomerApprovedAt,
     ag.RecheckCount, ag.LastRecheckRemarks,
     ag.ProposedDate, ag.ProposedDateStatus, ag.SentToCustomerAt, ag.DateApprovalStatus,
+    ag.AfsRegistrationNo, ag.AfsRegistrationDate,
+    ag.AfsStampDuty, ag.AfsRegistrationFee,
     ag.LegalExecutiveId, le.name AS LegalExecutiveName,
     b.BookingNo,
     COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
@@ -62,7 +64,17 @@ const AGR_SELECT = `
     b.Status AS BookingStatus, b.IsActive AS BookingIsActive,
     a.ApplicantName, a.Mobile, a.Email,
     cu.name AS CreatedByName,
-    pu.Email AS PortalEmail, pu.IsActive AS PortalActive, pu.MustChangePassword AS PortalMustChangePassword
+    pu.Email AS PortalEmail, pu.IsActive AS PortalActive, pu.MustChangePassword AS PortalMustChangePassword,
+    al.Status AS AllotmentLetterStatus, al.IssuedOn AS AllotmentLetterIssuedOn,
+    -- AFS Query Payment figures — used to pre-fill the mark-registered dialog so
+    -- staff don't re-type the same government figure they already entered and
+    -- customer-confirmed on the AFS QP record. ConfirmedAmount wins when set
+    -- (it's what the customer actually paid), falling back to StampDuty /
+    -- RegistrationFee (the estimate that was sent to the customer). NULL when
+    -- no AFS QP record exists for this booking yet (pre-Sales-Deed stage).
+    (SELECT TOP 1 StampDuty        FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpStampDuty,
+    (SELECT TOP 1 RegistrationFee  FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpRegistrationFee,
+    (SELECT TOP 1 ConfirmedAmount  FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpConfirmedAmount
   FROM dbo.CrmAgreement ag
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -70,6 +82,7 @@ const AGR_SELECT = `
   LEFT JOIN dbo.Users cu     ON cu.id = ag.CreatedBy
   LEFT JOIN dbo.Users le     ON le.id = ag.LegalExecutiveId
   LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = a.CustomerId
+  LEFT JOIN dbo.CrmAllotmentLetter al    ON al.BookingId  = b.Id
 `;
 
 // Shared lock check — nothing here previously checked whether the Booking
@@ -276,6 +289,11 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
       });
     }
 
+    const wc = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT TOP 1 PreferredAgreementDate FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CreatedAt DESC
+    `);
+    const preferredDate = wc.recordset[0]?.PreferredAgreementDate || null;
+
     // System-assigned unique agreement number
     const agNo = await getNextDocNumber(pool, "AGR", "AGR");
 
@@ -301,14 +319,26 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
       .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
       .input("leg",   sql.Int,           b.LegalExecutiveId ? parseInt(b.LegalExecutiveId) : null)
+      .input("pd",    sql.Date,          preferredDate)
       .input("cb",    sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmAgreement
-          (AgreementNo, BookingId, LegalName, LegalAddress, PanNo, AadhaarNo, Status, Notes, LegalExecutiveId, CreatedBy, CreatedAt)
+          (AgreementNo, BookingId, LegalName, LegalAddress, PanNo, AadhaarNo, Status, Notes, LegalExecutiveId, ProposedDate, ProposedDateStatus, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@agno, @bid, @lname, @laddr, @pan, @aadh, 'Draft', @note, @leg, @cb, SYSDATETIME())
+        VALUES (@agno, @bid, @lname, @laddr, @pan, @aadh, 'Draft', @note, @leg, @pd, CASE WHEN @pd IS NOT NULL THEN 'PendingCustomerReview' ELSE NULL END, @cb, SYSDATETIME())
       `);
     const agreementId = result.recordset[0].Id;
+    
+    if (preferredDate) {
+      await pool.request()
+        .input("agid", sql.Int, agreementId)
+        .input("pd",   sql.Date, preferredDate)
+        .input("cb",   sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
+          VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
+        `);
+    }
 
     // Same standing SaleAgreement request maybeAutoCreateAgreement() seeds
     // for the normal (auto-created) path — this manual "New Agreement"
@@ -416,16 +446,15 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
     if (!legalCheck0.recordset[0].LegalExecutiveId) {
       return res.status(400).json({ error: "A Legal Executive must be assigned before this agreement can receive senior approval — use PUT /:id/assign-legal" });
     }
-    // Agreement Followup gate — mandatory paperwork must actually be
-    // attached (100% of required document types have a real file) before
-    // this can be senior-approved. Computed live, never cached, so a
-    // reject/resend cycle can never leave a stale "done" behind.
+    // Agreement Followup gate — all mandatory documents must be uploaded
+    // (100% have a file attached) before senior approval. Verification happens
+    // after approval; this gate only checks that files exist.
     const followup0 = await agreementFollowupProgress(pool0, id);
     if (followup0.required === 0) {
       return res.status(400).json({ error: "No mandatory agreement documents have been requested/attached yet — add the required paperwork before this can receive senior approval" });
     }
     if (followup0.percent < 100) {
-      return res.status(400).json({ error: `Agreement Followup is only ${followup0.percent}% complete (${followup0.uploaded}/${followup0.required} mandatory documents attached) — all required paperwork must be attached before senior approval` });
+      return res.status(400).json({ error: `Agreement Followup is only ${followup0.percent}% complete (${followup0.uploaded}/${followup0.required} mandatory documents uploaded) — all required paperwork must be attached before senior approval` });
     }
     // The Admin Approval Inbox's Approve/Reject buttons render through the
     // shared ApprovalActions component (src/components/ApprovalActions.tsx),
@@ -915,6 +944,21 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
     // agreement date can only ever come from both sides' proposals matching.
     const touchesLegalContent = b.LegalName != null
       || b.LegalAddress != null || b.PanNo != null || b.AadhaarNo != null;
+
+    // Once the Allotment Letter is Issued, the legal identity fields in this
+    // agreement are formally committed — the customer holds a document citing
+    // them. Any subsequent change is a legal amendment that must carry a
+    // traceable reason, not a silent correction.
+    if (touchesLegalContent && !b.RevisionReason?.trim()) {
+      const alRow = await pool.request().input("bid", sql.Int, oldRow.BookingId)
+        .query("SELECT TOP 1 Status FROM dbo.CrmAllotmentLetter WHERE BookingId = @bid");
+      if (alRow.recordset[0]?.Status === "Issued") {
+        return res.status(400).json({
+          error: "Amendment reason required — the Allotment Letter for this booking has been issued. These legal details are formally committed. You must provide a reason for this amendment.",
+        });
+      }
+    }
+
     if (touchesLegalContent) {
       await pool.request()
         .input("agid", sql.Int, id)
@@ -1086,9 +1130,6 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
       { field: "Status", oldVal: CrmStatus.DRAFT, newVal: CrmStatus.EXECUTED },
     ]);
 
-    // Auto-flow: execution is one of two sales-deed prerequisites — fire the
-    // auto-create check (no-op if milestones aren't fully settled yet).
-    await maybeAutoCreateSalesDeed(pool, row.BookingId, actor);
     await syncLegalMilestoneStep(pool, row.BookingId, "FinalExecution", actor);
     // Releases any brokerage tranche waiting on Agreement Executed — TwoPart's
     // second half, or AgreementOnly's single tranche. No-op for OneTime
@@ -1102,14 +1143,26 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
   }
 });
 
-// PUT /:id/mark-registered — Executed -> Registered. Gated on the linked
-// CrmSalesDeed actually carrying a RegistrationNo — the real evidence of
-// registration, not a free-form pick.
+// PUT /:id/mark-registered — Executed -> Registered.
+// The AFS is physically registered at the Sub-Registrar Office before the
+// Sale Deed exists at all. The caller must supply the Doc No and date they
+// receive from the Sub-Registrar as proof of the real-world event —
+// AfsRegistrationNo is required, AfsRegistrationDate is required.
+// There is no dependency on CrmSalesDeed here; that is a separate document
+// registered much later at a separate Sub-Registrar visit.
 router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
     const actor = actorId(req);
+    const { AfsRegistrationNo, AfsRegistrationDate, AfsStampDuty, AfsRegistrationFee } = req.body || {};
+
+    if (!AfsRegistrationNo || !String(AfsRegistrationNo).trim()) {
+      return res.status(400).json({ error: "AFS Registration No. is required — enter the Doc No received from the Sub-Registrar" });
+    }
+    if (!AfsRegistrationDate) {
+      return res.status(400).json({ error: "AFS Registration Date is required — enter the date of Sub-Registrar registration" });
+    }
 
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status FROM dbo.CrmAgreement WHERE Id = @id");
@@ -1118,25 +1171,41 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
       return res.status(400).json({ error: `Cannot mark-registered from status '${cur.recordset[0].Status}'` });
     }
 
-    const deed = await pool.request().input("id", sql.Int, id)
-      .query("SELECT TOP 1 RegistrationNo FROM dbo.CrmSalesDeed WHERE AgreementId = @id");
-    if (!deed.recordset.length || !deed.recordset[0].RegistrationNo) {
-      return res.status(400).json({ error: "A Sales Deed with a Registration No. must exist before this agreement can be marked Registered" });
-    }
     const lockReason = await getAgreementBookingLockReason(pool, id);
     if (lockReason) return res.status(409).json({ error: `Cannot mark registered — ${lockReason}. Cancel the agreement instead.` });
 
+    const regNo = String(AfsRegistrationNo).trim();
+    const regDate = AfsRegistrationDate;
+    const afsStamp = AfsStampDuty != null && AfsStampDuty !== "" ? parseFloat(AfsStampDuty) : null;
+    const afsRegFee = AfsRegistrationFee != null && AfsRegistrationFee !== "" ? parseFloat(AfsRegistrationFee) : null;
+
     await pool.request()
-      .input("id", sql.Int, id)
-      .input("ub", sql.Int, actor)
+      .input("id",       sql.Int,           id)
+      .input("ub",       sql.Int,           actor)
+      .input("regNo",    sql.NVarChar(100), regNo)
+      .input("regDt",    sql.Date,          regDate)
+      .input("afsStamp", sql.Decimal(18,2), afsStamp)
+      .input("afsRegFee",sql.Decimal(18,2), afsRegFee)
       .query(`
-        UPDATE dbo.CrmAgreement SET Status = '${CrmStatus.REGISTERED}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        UPDATE dbo.CrmAgreement SET
+          Status              = '${CrmStatus.REGISTERED}',
+          AfsRegistrationNo   = @regNo,
+          AfsRegistrationDate = @regDt,
+          AfsStampDuty        = @afsStamp,
+          AfsRegistrationFee  = @afsRegFee,
+          UpdatedBy           = @ub,
+          UpdatedAt           = SYSDATETIME()
         WHERE Id = @id
       `);
 
-    await logCrmAudit(pool, "Agreement", id, actor, [
-      { field: "Status", oldVal: CrmStatus.EXECUTED, newVal: CrmStatus.REGISTERED },
-    ]);
+    const auditFields = [
+      { field: "Status",              oldVal: CrmStatus.EXECUTED, newVal: CrmStatus.REGISTERED },
+      { field: "AfsRegistrationNo",   oldVal: null,               newVal: regNo },
+      { field: "AfsRegistrationDate", oldVal: null,               newVal: regDate },
+    ];
+    if (afsStamp != null)  auditFields.push({ field: "AfsStampDuty",       oldVal: null, newVal: afsStamp });
+    if (afsRegFee != null) auditFields.push({ field: "AfsRegistrationFee", oldVal: null, newVal: afsRegFee });
+    await logCrmAudit(pool, "Agreement", id, actor, auditFields);
 
     res.json({ success: true, status: CrmStatus.REGISTERED });
   } catch (e) {
@@ -1440,11 +1509,12 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
         ag.AgreementNo, ag.Status AS AgreementStatus,
         ag.SeniorApprovalStatus, ag.SentToCustomerAt, ag.CustomerApprovalStatus, ag.AgreementDate,
         ag.LegalExecutiveId, le.name AS LegalExecutiveName,
-        b.BookingNo, b.UnitNo, a.ApplicantName
+        b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName
       FROM dbo.CrmAgreementDocument d
       JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       LEFT JOIN dbo.Users le ON le.id = ag.LegalExecutiveId
       ${where}
       ORDER BY d.CreatedAt DESC
@@ -1545,6 +1615,341 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
     res.status(500).json({ error: e.message });
   }
 });
+
+// ─── Staff Proxy Actions ────────────────────────────────────────────────────
+// These endpoints let CRM staff perform portal-side customer actions on behalf
+// of a customer who doesn't use (or won't log into) the customer portal.
+// Every proxy action is permanently stamped with ProxyMethod (how the customer
+// communicated) and the acting staff member — the audit trail is identical to
+// a real portal action, just with ActorType = 'StaffProxy' instead of 'Customer'.
+//
+// Supported proxy actions:
+//   PUT /:id/proxy-customer-approve     — record customer approval (Phone/InPerson/Email/etc.)
+//   PUT /:id/proxy-date-accept          — record customer acceptance of a company-proposed date
+//   POST /:id/documents/:docId/proxy-attach — upload a document on behalf of the customer
+
+const PROXY_METHODS = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
+
+// PUT /:id/proxy-customer-approve — CRM staff records that the customer
+// approved this agreement off-portal (by phone, in-person, etc.).
+// Mirrors exactly what the customer's own portal approve endpoint does,
+// but stamps the action as StaffProxy so the audit trail is unambiguous.
+router.put("/:id/proxy-customer-approve", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) {
+      return res.status(400).json({ error: "ProxyRemarks is required — describe how the customer communicated their approval (e.g. verbal confirmation in office, WhatsApp message)." });
+    }
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: lockReason });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, SentToCustomerAt, CustomerApprovalStatus, BookingId, AgreementNo FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const a = cur.recordset[0];
+
+    if (!a.SentToCustomerAt) {
+      return res.status(400).json({ error: "Agreement must be sent to the customer first before their approval can be recorded." });
+    }
+    if (a.CustomerApprovalStatus === CrmStatus.APPROVED) {
+      return res.status(400).json({ error: "Customer has already approved this agreement." });
+    }
+
+    const actorRow = await pool.request().input("uid", sql.Int, actor)
+      .query("SELECT name FROM dbo.Users WHERE id = @uid");
+    const actorName = actorRow.recordset[0]?.name || "Staff";
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("ub", sql.Int, actor)
+      .query(`
+        UPDATE dbo.CrmAgreement SET
+          CustomerApprovalStatus = '${CrmStatus.APPROVED}',
+          CustomerApprovedAt = SYSDATETIME(),
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    await pool.request()
+      .input("agid",   sql.Int,           id)
+      .input("actor",  sql.Int,           actor)
+      .input("aname",  sql.NVarChar(200), actorName)
+      .input("method", sql.NVarChar(30),  ProxyMethod)
+      .input("rem",    sql.NVarChar(sql.MAX), ProxyRemarks.trim())
+      .query(`
+        INSERT INTO dbo.CrmAgreementApprovalLog
+          (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+        VALUES (@agid, 'CustomerApprove', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+      `);
+
+    if (a.BookingId) {
+      await syncLegalMilestoneStep(pool, a.BookingId, "MutualAgreement", actor);
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] proxy-customer-approve error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/proxy-date-accept — CRM staff records that the customer accepted
+// the company's proposed agreement date off-portal.
+// Only valid when ProposedDateStatus = 'PendingCustomerReview' (company proposed,
+// customer's turn to respond) — any other state is a logic error.
+router.put("/:id/proxy-date-accept", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) {
+      return res.status(400).json({ error: "ProxyRemarks is required — describe how the customer communicated their acceptance." });
+    }
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: lockReason });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT ProposedDate, ProposedDateStatus, CustomerApprovalStatus, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const a = cur.recordset[0];
+
+    if (a.CustomerApprovalStatus !== CrmStatus.APPROVED) {
+      return res.status(400).json({ error: "Customer must approve the agreement content before a date can be accepted." });
+    }
+    if (a.ProposedDateStatus !== "PendingCustomerReview") {
+      return res.status(400).json({
+        error: `Cannot proxy-accept date — ProposedDateStatus is '${a.ProposedDateStatus || "none"}'. A company-proposed date must be awaiting the customer's response.`,
+      });
+    }
+
+    const actorRow = await pool.request().input("uid", sql.Int, actor)
+      .query("SELECT name FROM dbo.Users WHERE id = @uid");
+    const actorName = actorRow.recordset[0]?.name || "Staff";
+
+    // Treat this as if the customer called acceptAgreementDate — same DB
+    // mutations, same DateApprovalStatus transition, just logged differently.
+    await acceptAgreementDate(pool, id, actor);
+
+    await pool.request()
+      .input("agid",   sql.Int,           id)
+      .input("actor",  sql.Int,           actor)
+      .input("aname",  sql.NVarChar(200), actorName)
+      .input("method", sql.NVarChar(30),  ProxyMethod)
+      .input("rem",    sql.NVarChar(sql.MAX), ProxyRemarks.trim())
+      .query(`
+        INSERT INTO dbo.CrmAgreementApprovalLog
+          (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+        VALUES (@agid, 'DateAccept', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+      `);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] proxy-date-accept error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/proxy-customer-recheck — CRM staff records that the customer
+// requested a recheck (flagged an issue) without using the portal.
+// Mirrors portal POST /agreement/respond with decision="Recheck".
+router.put("/:id/proxy-customer-recheck", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) {
+      return res.status(400).json({ error: "ProxyRemarks (what the customer's concern is) are required for a recheck" });
+    }
+
+    const agRes = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, SentToCustomerAt, CustomerApprovalStatus, BookingId, AgreementNo, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!agRes.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const a = agRes.recordset[0];
+    if (!a.SentToCustomerAt) return res.status(400).json({ error: "Agreement has not been sent to the customer yet" });
+    if (a.CustomerApprovalStatus === CrmStatus.APPROVED) return res.status(400).json({ error: "Agreement has already been approved — cannot record a recheck" });
+
+    const actorRow = await pool.request().input("uid", sql.Int, actor).query("SELECT TOP 1 name FROM dbo.Users WHERE id = @uid");
+    const actorName = actorRow.recordset[0]?.name || "Staff";
+    const remarksTrimmed = ProxyRemarks.trim();
+
+    await pool.request().input("id", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), remarksTrimmed).query(`
+      UPDATE dbo.CrmAgreement SET
+        CustomerApprovalStatus = 'RecheckRequested',
+        RecheckCount = RecheckCount + 1,
+        CustomerApprovedAt = NULL,
+        LastRecheckRemarks = @rem
+      WHERE Id = @id
+    `);
+
+    await pool.request()
+      .input("agid",  sql.Int, id)
+      .input("ver",   sql.Int, a.VersionNo)
+      .input("adt",   sql.Date, a.AgreementDate)
+      .input("lname", sql.NVarChar(300), a.LegalName)
+      .input("laddr", sql.NVarChar(sql.MAX), a.LegalAddress)
+      .input("pan",   sql.NVarChar(20), a.PanNo)
+      .input("aadh",  sql.NVarChar(20), a.AadhaarNo)
+      .input("note",  sql.NVarChar(sql.MAX), a.Notes)
+      .input("reason",sql.NVarChar(500), `Customer recheck requested via ${ProxyMethod}: ${remarksTrimmed}`)
+      .query(`
+        INSERT INTO dbo.CrmAgreementRevision
+          (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
+        VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, NULL, SYSDATETIME())
+      `);
+
+    await pool.request()
+      .input("agid",  sql.Int, id)
+      .input("actor", sql.Int, actor)
+      .input("aname", sql.NVarChar(200), actorName)
+      .input("method",sql.NVarChar(30), ProxyMethod)
+      .input("rem",   sql.NVarChar(sql.MAX), remarksTrimmed)
+      .query(`
+        INSERT INTO dbo.CrmAgreementApprovalLog
+          (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+        VALUES (@agid, 'CustomerRecheck', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+      `);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] proxy-customer-recheck error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/proxy-propose-date — CRM staff records a date the customer proposed
+// (via phone, in-person, WhatsApp, etc.) without using the portal.
+// Mirrors portal POST /agreement/propose-date.
+// Gate: CustomerApprovalStatus must be 'Approved' and it must be the customer's
+// turn to propose (ProposedDateStatus is null/matched, i.e. not PendingCustomerReview).
+router.put("/:id/proxy-propose-date", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks, ProposedDate } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks are required" });
+    if (!ProposedDate) return res.status(400).json({ error: "ProposedDate is required (YYYY-MM-DD)" });
+
+    const agRes = await pool.request().input("id", sql.Int, id)
+      .query("SELECT CustomerApprovalStatus, ProposedDateStatus, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!agRes.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const a = agRes.recordset[0];
+    if (a.CustomerApprovalStatus !== CrmStatus.APPROVED) {
+      return res.status(400).json({ error: "Customer must have approved the agreement content before proposing a date" });
+    }
+    if (a.ProposedDateStatus === "PendingCompanyReview") {
+      return res.status(400).json({ error: "A customer-proposed date is already pending company review" });
+    }
+
+    await proposeAgreementDate(pool, id, "Customer", ProposedDate, null);
+
+    const actorRow = await pool.request().input("uid", sql.Int, actor).query("SELECT TOP 1 name FROM dbo.Users WHERE id = @uid");
+    const actorName = actorRow.recordset[0]?.name || "Staff";
+
+    await pool.request()
+      .input("agid",  sql.Int, id)
+      .input("actor", sql.Int, actor)
+      .input("aname", sql.NVarChar(200), actorName)
+      .input("method",sql.NVarChar(30), ProxyMethod)
+      .input("rem",   sql.NVarChar(sql.MAX), `Customer proposed date ${ProposedDate} via ${ProxyMethod}: ${ProxyRemarks.trim()}`)
+      .query(`
+        INSERT INTO dbo.CrmAgreementApprovalLog
+          (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+        VALUES (@agid, 'CustomerProposeDate', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+      `);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] proxy-propose-date error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/documents/:docId/proxy-attach — upload a document on behalf of a
+// customer who handed it in physically, emailed it, or sent it via WhatsApp.
+// The file is stored identically to a customer-uploaded file, but the audit
+// trail records ActorType = 'StaffProxy' + ProxyMethod so it's clear who
+// actually submitted the physical copy.
+router.post("/:id/documents/:docId/proxy-attach",
+  requirePageRight("crm-agreements", "edit"),
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const agreementId = parseInt(req.params.id);
+      const docId       = parseInt(req.params.docId);
+      const actor       = actorId(req);
+      const { ProxyMethod, ProxyRemarks } = req.body;
+
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+        return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+      }
+
+      const doc = await pool.request().input("id", sql.Int, docId)
+        .query("SELECT AgreementId, Status FROM dbo.CrmAgreementDocument WHERE Id = @id");
+      if (!doc.recordset.length || doc.recordset[0].AgreementId !== agreementId) {
+        return res.status(404).json({ error: "Document not found on this agreement" });
+      }
+
+      const fileBase64 = req.file.buffer.toString("base64");
+      const proxyNote  = ProxyRemarks?.trim()
+        ? `[Submitted on behalf of customer via ${ProxyMethod}] ${ProxyRemarks.trim()}`
+        : `[Submitted on behalf of customer via ${ProxyMethod}]`;
+
+      await pool.request()
+        .input("id",     sql.Int,              docId)
+        .input("b64",    sql.NVarChar(sql.MAX), fileBase64)
+        .input("fname",  sql.NVarChar(300),     req.file.originalname)
+        .input("fsize",  sql.BigInt,            req.file.size)
+        .input("mime",   sql.NVarChar(150),     req.file.mimetype)
+        .input("rem",    sql.NVarChar(sql.MAX), proxyNote)
+        .input("ub",     sql.Int,              actor)
+        .query(`
+          UPDATE dbo.CrmAgreementDocument SET
+            FileBase64 = @b64, FileName = @fname, FileSize = @fsize, MimeType = @mime,
+            Status = 'Uploaded', Remarks = @rem, UploadedAt = SYSDATETIME(),
+            UploadedByType = 'StaffProxy'
+          WHERE Id = @id
+        `);
+
+      await syncLegalMilestoneFromDocument(pool, docId, actor);
+
+      await logCrmAudit(pool, "CrmAgreementDocument", docId, actor, [
+        { field: "Status", oldVal: "Requested", newVal: "Uploaded" },
+        { field: "ProxyMethod", oldVal: null, newVal: `${ProxyMethod}${ProxyRemarks ? " — " + ProxyRemarks.trim() : ""}` },
+      ]);
+
+      res.json({ success: true });
+    } catch (e) {
+      console.error("[crm-agreements] proxy-attach error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
 
 // PUT /:id/portal/deactivate, PUT /:id/portal/reactivate — flip the
 // customer's portal account IsActive flag. Was previously a display-only

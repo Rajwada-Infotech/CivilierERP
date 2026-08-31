@@ -33,6 +33,10 @@ import {
   Receipt,
   HeartHandshake,
   CalendarClock,
+  Activity,
+  Bell,
+  Cpu,
+  ArrowUpRight,
 } from "lucide-react";
 import {
   fetchHomeDashboard,
@@ -55,6 +59,50 @@ type UserRoleStr = string;
 function isPrivileged(role: UserRoleStr) {
   return ["super_admin", "admin", "dba"].includes(role);
 }
+
+// ─── Universal activity feed ──────────────────────────────────────────────────
+interface LiveActivityItem {
+  Kind: string;
+  Module: string;
+  DocNo: string | null;
+  Title: string;
+  Subtitle: string | null;
+  Actor: string | null;
+  Amount: number | null;
+  Status: string | null;
+  At: string;
+  Href: string;
+}
+
+const MODULE_META: Record<string, { label: string; color: string; icon: React.ElementType }> = {
+  finance:     { label: "Finance",     color: "#3b82f6", icon: IndianRupee },
+  material:    { label: "Material",    color: "#8b5cf6", icon: Package },
+  engineering: { label: "Engineering", color: "#ec4899", icon: Wrench },
+  sales:       { label: "Sales",       color: "#7c3aed", icon: ShoppingCart },
+  crm:         { label: "CRM",         color: "#e11d48", icon: HeartHandshake },
+  ticket:      { label: "Tickets",     color: "#ef4444", icon: Ticket },
+  followup:    { label: "Follow-Up",   color: "#0d9488", icon: CalendarClock },
+  fixedasset:  { label: "Fixed Asset", color: "#eab308", icon: Cpu },
+  admin:       { label: "Admin",       color: "#a855f7", icon: ShieldCheck },
+};
+const moduleMeta = (m: string) => MODULE_META[m] ?? { label: m, color: "#64748b", icon: Activity };
+
+function relTime(iso: string): string {
+  const d = new Date(iso).getTime();
+  if (!d || d < 946684800000) return ""; // pre-2000 sentinel = unknown
+  const s = Math.floor((Date.now() - d) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 604800) return `${Math.floor(s / 86400)}d ago`;
+  return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+}
+
+const compactINR = (n: number) =>
+  n >= 1e7 ? `₹${(n / 1e7).toFixed(2)}Cr`
+  : n >= 1e5 ? `₹${(n / 1e5).toFixed(1)}L`
+  : n >= 1e3 ? `₹${(n / 1e3).toFixed(1)}K`
+  : `₹${Math.round(n)}`;
 
 
 // ─── Animated Counter ─────────────────────────────────────────────────────────
@@ -120,172 +168,160 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ─── Module Card ──────────────────────────────────────────────────────────────
-interface StatRow {
-  label: string;
-  value: string | number;
-  accent?: string;
+// ─── Bento primitives ─────────────────────────────────────────────────────────
+function Bento({
+  children, className = "", title, icon: Icon, accent = "#6366f1", action,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  title?: string;
   icon?: React.ElementType;
-}
-interface ModuleCardProps {
-  title: string;
-  href: string;
-  icon: React.ElementType;
-  accent: string;
-  stats: StatRow[];
-  badge?: number;
-  badgeLabel?: string;
-  delay?: number;
-  loading?: boolean;
-}
-
-function ModuleCard({
-  title,
-  href,
-  icon: Icon,
-  accent,
-  stats,
-  badge,
-  badgeLabel,
-  delay = 0,
-  loading,
-}: ModuleCardProps) {
-  const navigate = useNavigate();
-  const ref = useRef(null);
-  const inView = useInView(ref, { once: true, margin: "-30px" });
-
+  accent?: string;
+  action?: React.ReactNode;
+}) {
   return (
     <motion.div
-      ref={ref}
-      initial={{ y: 24, opacity: 0 }}
-      animate={inView ? { y: 0, opacity: 1 } : {}}
-      transition={{ duration: 0.55, delay, ease: [0.16, 1, 0.3, 1] }}
-      onClick={() => navigate(href)}
-      className="group relative rounded-xl border border-border/50 bg-card/70 backdrop-blur-sm overflow-hidden cursor-pointer select-none"
-      style={{ boxShadow: `0 0 0 0 ${accent}00` }}
-      whileHover={{ y: -2, boxShadow: `0 8px 24px -6px ${accent}22` } as any}
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      className={`relative rounded-2xl border border-border/50 bg-card/60 backdrop-blur-sm overflow-hidden flex flex-col ${className}`}
     >
-      {/* Accent left bar */}
       <div
-        className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl"
-        style={{ background: `linear-gradient(to bottom, ${accent}, ${accent}40)` }}
+        className="absolute inset-x-0 top-0 h-px opacity-60"
+        style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }}
       />
-
-      {/* Hover bg wash */}
-      <div
-        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-400 pointer-events-none"
-        style={{ background: `linear-gradient(135deg, ${accent}08 0%, transparent 60%)` }}
-      />
-
-      <div className="pl-4 pr-3 pt-3 pb-3 ml-[3px]">
-        {/* Header row */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+      {title && (
+        <div className="flex items-center gap-2 px-4 pt-3.5 pb-2.5">
+          {Icon && (
+            <span
+              className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
               style={{ background: `${accent}18`, border: `1px solid ${accent}30` }}
             >
-              <Icon size={13} style={{ color: accent }} />
-            </div>
-            <span className="font-heading font-bold text-[12px] text-foreground tracking-tight leading-tight">
-              {title}
+              <Icon size={12} style={{ color: accent }} />
             </span>
-            {badge != null && badge > 0 && (
-              <span
-                className="px-1.5 py-px text-[8px] font-black rounded-full leading-none"
-                style={{ background: `${accent}22`, color: accent }}
-              >
-                {badge}
-              </span>
-            )}
-          </div>
-          <ArrowRight
-            size={11}
-            className="text-muted-foreground/20 group-hover:text-muted-foreground/50 group-hover:translate-x-0.5 transition-all shrink-0"
-          />
+          )}
+          <span className="font-heading text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+            {title}
+          </span>
+          {action && <span className="ml-auto">{action}</span>}
         </div>
-
-        {/* Stats grid */}
-        <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
-          {loading
-            ? Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="animate-pulse space-y-1">
-                  <div className="h-4 w-10 bg-muted rounded" />
-                  <div className="h-2 w-14 bg-muted rounded" />
-                </div>
-              ))
-            : stats.map((s, i) => (
-                <div key={i} className="flex flex-col min-w-0">
-                  <span
-                    className="font-heading font-bold text-base tracking-tight tabular-nums leading-none"
-                    style={{ color: s.accent ?? "hsl(var(--foreground))" }}
-                  >
-                    {typeof s.value === "number" ? (
-                      <AnimatedCounter target={s.value} />
-                    ) : (
-                      s.value
-                    )}
-                  </span>
-                  <span className="text-[9.5px] font-medium text-muted-foreground/55 leading-tight mt-0.5 flex items-center gap-0.5 truncate">
-                    {s.icon && <s.icon size={8} className="shrink-0" />}
-                    {s.label}
-                  </span>
-                </div>
-              ))}
-        </div>
-      </div>
+      )}
+      <div className="flex-1 min-h-0">{children}</div>
     </motion.div>
   );
 }
 
-// ─── Feed item ────────────────────────────────────────────────────────────────
-function FeedItem({
-  item,
-  i,
-  total,
+interface Attention {
+  severity: "high" | "med" | "low";
+  label: string;
+  count: number;
+  hint: string;
+  href: string;
+  icon: React.ElementType;
+}
+const SEV_COLOR: Record<Attention["severity"], string> = {
+  high: "#ef4444",
+  med: "#f59e0b",
+  low: "#3b82f6",
+};
+
+function AttentionRow({ a, i, onGo }: { a: Attention; i: number; onGo: (h: string) => void }) {
+  const c = SEV_COLOR[a.severity];
+  return (
+    <motion.button
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.4, delay: 0.05 + i * 0.05 }}
+      onClick={() => onGo(a.href)}
+      className="group w-full flex items-center gap-3 px-4 py-2.5 border-b border-border/25 last:border-0 hover:bg-muted/30 transition-colors text-left"
+    >
+      <span className="relative flex h-2 w-2 shrink-0">
+        {a.severity === "high" && (
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: c }} />
+        )}
+        <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: c }} />
+      </span>
+      <span
+        className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+        style={{ background: `${c}14` }}
+      >
+        <a.icon size={13} style={{ color: c }} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-semibold text-foreground leading-tight truncate">{a.label}</p>
+        <p className="text-[10px] text-muted-foreground/55 mt-0.5 truncate">{a.hint}</p>
+      </div>
+      <span className="font-heading font-bold text-lg tabular-nums shrink-0" style={{ color: c }}>
+        {a.count.toLocaleString("en-IN")}
+      </span>
+      <ArrowUpRight size={13} className="text-muted-foreground/20 group-hover:text-muted-foreground/60 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all shrink-0" />
+    </motion.button>
+  );
+}
+
+function KpiPill({
+  label, value, prefix = "", suffix = "", color, icon: Icon, i,
 }: {
-  item: {
-    label: string;
-    sub: string;
-    icon: React.ElementType;
-    color: string;
-    time?: string;
-  };
+  label: string;
+  value: number | string | null;
+  prefix?: string;
+  suffix?: string;
+  color: string;
+  icon: React.ElementType;
   i: number;
-  total: number;
 }) {
   return (
     <motion.div
-      initial={{ x: 16, opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      transition={{ duration: 0.45, delay: 0.8 + i * 0.07, ease: "easeOut" }}
-      className="flex items-start gap-3 py-3 border-b border-border/30 last:border-0"
+      initial={{ opacity: 0, scale: 0.94 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.4, delay: 0.1 + i * 0.04 }}
+      className="rounded-xl border border-border/45 bg-card/50 backdrop-blur-sm px-3.5 py-3 flex flex-col gap-1"
     >
-      <div className="flex flex-col items-center shrink-0 mt-0.5">
-        <div
-          className="w-[22px] h-[22px] rounded-full flex items-center justify-center"
-          style={{ background: `${item.color}18` }}
-        >
-          <item.icon size={11} style={{ color: item.color }} />
-        </div>
-        {i < total - 1 && (
-          <div className="w-px bg-border/30 flex-1 mt-1 min-h-[10px]" />
+      <div className="flex items-center gap-1.5">
+        <Icon size={11} style={{ color }} />
+        <span className="text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground/55 truncate">{label}</span>
+      </div>
+      <span className="font-heading font-bold text-[1.35rem] leading-none tabular-nums" style={{ color }}>
+        {value == null ? (
+          <span className="animate-pulse inline-block h-5 w-14 bg-muted rounded" />
+        ) : typeof value === "number" ? (
+          <AnimatedCounter target={value} prefix={prefix} suffix={suffix} duration={1.1} />
+        ) : (
+          `${prefix}${value}${suffix}`
         )}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-semibold text-foreground leading-snug">
-          {item.label}
-        </p>
-        <p className="text-[10px] text-muted-foreground/50 mt-0.5 truncate">
-          {item.sub}
-        </p>
-      </div>
-      {item.time && (
-        <span className="text-[10px] text-muted-foreground/30 shrink-0 font-mono tabular-nums mt-0.5">
-          {item.time}
-        </span>
-      )}
+      </span>
     </motion.div>
+  );
+}
+
+function LiveRow({ item, onGo }: { item: LiveActivityItem; onGo: (h: string) => void }) {
+  const m = moduleMeta(item.Module);
+  const t = relTime(item.At);
+  return (
+    <button
+      onClick={() => onGo(item.Href)}
+      className="group w-full flex items-start gap-2.5 px-4 py-2.5 border-b border-border/20 last:border-0 hover:bg-muted/25 transition-colors text-left"
+    >
+      <span className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 mt-0.5" style={{ background: `${m.color}16` }}>
+        <m.icon size={11} style={{ color: m.color }} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="text-[11.5px] font-semibold text-foreground leading-snug truncate">{item.Title}</p>
+        <p className="text-[10px] text-muted-foreground/50 mt-0.5 truncate">
+          <span style={{ color: m.color }}>{m.label}</span>
+          {item.Subtitle ? ` · ${item.Subtitle}` : ""}
+          {item.Actor ? ` · ${item.Actor}` : ""}
+        </p>
+      </div>
+      <div className="flex flex-col items-end shrink-0 gap-0.5">
+        {item.Amount != null && item.Amount > 0 && (
+          <span className="text-[10.5px] font-heading font-bold tabular-nums" style={{ color: m.color }}>
+            {compactINR(item.Amount)}
+          </span>
+        )}
+        {t && <span className="text-[9.5px] text-muted-foreground/35 font-mono tabular-nums">{t}</span>}
+      </div>
+    </button>
   );
 }
 
@@ -538,6 +574,13 @@ export default function HomePage() {
       "crm-bookings",
       "crm-payments",
     ],
+    fixedasset: [
+      "fixed-asset-record",
+      "fixed-asset-tagging",
+      "fixed-asset-assignment",
+      "asset-transfer",
+      "fixed-asset-quality-check",
+    ],
   };
 
   const hasModuleAccess = (moduleId: string): boolean => {
@@ -557,6 +600,7 @@ export default function HomePage() {
     salesAutomation: hasModuleAccess("salesAutomation"),
     civilworkdpr: hasModuleAccess("civilworkdpr"),
     crm: hasModuleAccess("crm"),
+    fixedasset: hasModuleAccess("fixedasset"),
     approvals: privileged,
     admin: privileged && !isDba,
     dba: isDba,
@@ -612,6 +656,27 @@ export default function HomePage() {
     retry: 1,
   });
 
+  // ── Universal recent-activity feed (server-side UNION across every module) ──
+  const feedModules = privileged
+    ? ""
+    : Object.entries(access)
+        .filter(([, v]) => v)
+        .map(([k]) => (k === "approvals" ? "" : k))
+        .filter(Boolean)
+        .join(",");
+  const { data: liveFeed } = useQuery<{ items: LiveActivityItem[] }>({
+    queryKey: ["home-activity-feed", feedModules],
+    queryFn: async () => {
+      const qs = feedModules ? `?modules=${encodeURIComponent(feedModules)}&limit=50` : "?limit=50";
+      const res = await fetchWithAuth(`/api/home/activity-feed${qs}`);
+      if (!res.ok) throw new Error("activity feed unavailable");
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 90 * 1000,
+    retry: 1,
+  });
+
   const fin  = data?.finance;
   const mat  = data?.material;
   const adm  = data?.admin;
@@ -638,199 +703,41 @@ export default function HomePage() {
       })
     : null;
 
-  // ── Activity feed — only show items for modules the user can access ──
-  const feed: {
-    label: string;
-    sub: string;
-    icon: React.ElementType;
-    color: string;
-    time?: string;
-  }[] = [];
+  // ── Actionable insights — "needs your attention" ─────────────────────────
+  type Sev = "high" | "med" | "low";
+  const rawAttn: Array<Attention | false> = [
+    access.approvals && { severity: "high" as Sev, label: "Approvals awaiting you", count: pendingApprovals.length, hint: `${new Set(pendingApprovals.map((a: ApprovalInboxItem) => a.Module)).size} module(s) affected`, href: "/admin/approval/inbox", icon: FileCheck },
+    access.followup && { severity: "high" as Sev, label: "Follow-ups overdue", count: fol?.overdue ?? 0, hint: "Past their due date", href: "/followup", icon: CalendarClock },
+    access.ticket && { severity: "high" as Sev, label: "Urgent tickets open", count: tick?.urgent ?? 0, hint: "High-priority, unresolved", href: "/ticket", icon: TriangleAlert },
+    access.crm && { severity: "high" as Sev, label: "CRM payments overdue", count: crmOverdue, hint: "Milestones past due", href: "/crm/dashboard", icon: IndianRupee },
+    access.sales && { severity: "med" as Sev, label: "Sale orders pending approval", count: sal?.pendingApproval ?? 0, hint: "Waiting in the approval queue", href: "/sales/sale-order", icon: ShoppingCart },
+    access.engineering && { severity: "med" as Sev, label: "Work done pending certification", count: eng?.workDone?.pending ?? 0, hint: "Awaiting engineer sign-off", href: "/engineering", icon: Hammer },
+    access.civilworkdpr && { severity: "med" as Sev, label: "DPR entries pending review", count: civilDpr?.progress?.pendingReviewCount ?? 0, hint: "Daily progress awaiting review", href: "/civilworkdpr", icon: Pickaxe },
+    access.followup && { severity: "med" as Sev, label: "Follow-ups due today", count: fol?.dueToday ?? 0, hint: "Scheduled for today", href: "/followup", icon: CalendarClock },
+    access.crm && { severity: "med" as Sev, label: "CRM applications pending", count: crmPendingApps, hint: "Not yet processed", href: "/crm/dashboard", icon: HeartHandshake },
+    access.ticket && { severity: "low" as Sev, label: "Tickets open", count: (tick?.pending ?? 0) + (tick?.inProgress ?? 0), hint: "Pending + in progress", href: "/ticket", icon: Ticket },
+    access.material && { severity: "low" as Sev, label: "Purchase orders open", count: mat?.purchaseOrders?.open ?? 0, hint: "Not yet closed / cancelled", href: "/purchase-orders", icon: Package },
+  ];
+  const sevRank: Record<Sev, number> = { high: 0, med: 1, low: 2 };
+  const attention: Attention[] = (rawAttn.filter(Boolean) as Attention[])
+    .filter((a) => a.count > 0)
+    .sort((a, b) => sevRank[a.severity] - sevRank[b.severity] || b.count - a.count);
 
-  if (access.material) {
-    (data?.material?.recentGRNs ?? []).slice(0, 2).forEach((g: RecentGRN) => {
-      feed.push({
-        label: `GRN ${g.GRNNo}`,
-        sub: g.SupplierName ?? "—",
-        icon: Package,
-        color: "#10b981",
-        time: g.GRNDate
-          ? new Date(g.GRNDate).toLocaleDateString("en-IN", {
-              day: "2-digit",
-              month: "short",
-            })
-          : undefined,
-      });
-    });
+  // ── KPI pills (wrap → scale with module count) ───────────────────────────
+  const kpis = [
+    access.finance && { label: "Transferred all-time", value: isLoading ? null : Math.round((fin?.payments?.totalAmount ?? 0) / 100000), prefix: "₹", suffix: "L", color: "#10b981", icon: IndianRupee },
+    (access.material || access.finance) && { label: "Open PO value", value: isLoading ? null : Math.round((mat?.purchaseOrders?.openValue ?? fin?.purchaseOrders?.openValue ?? 0) / 100000), prefix: "₹", suffix: "L", color: "#f59e0b", icon: Layers },
+    access.material && { label: "GRNs this month", value: isLoading ? null : (mat?.grns?.thisMonth ?? 0), color: "#8b5cf6", icon: Warehouse },
+    { label: "Active projects", value: isLoading ? null : (eng?.projects?.active ?? 0), color: "#06b6d4", icon: Building2 },
+    access.finance && { label: "Active suppliers", value: isLoading ? null : (fin?.parties?.activeSupplierCount ?? 0), color: "#3b82f6", icon: Building2 },
+    access.sales && { label: "Sales this month", value: isLoading ? null : (() => { const a = sal?.thisMonthAmount ?? 0; return a >= 1e5 ? Math.round(a / 1e5) : a; })(), prefix: "₹", suffix: (sal?.thisMonthAmount ?? 0) >= 1e5 ? "L" : "", color: "#7c3aed", icon: TrendingUp },
+    access.crm && { label: "Total bookings", value: isLoading ? null : crmTotalBookings, color: "#e11d48", icon: HeartHandshake },
+    access.ticket && { label: "Resolution rate", value: isLoading ? null : `${tick?.resolvedPct ?? 0}%`, color: "#0d9488", icon: CheckCircle2 },
+    (access.admin || access.dba) && { label: "Active users", value: isLoading ? null : (adm?.stats?.activeUsers ?? 0), color: "#a855f7", icon: Users },
+    access.engineering && { label: "Open work orders", value: isLoading ? null : (eng?.workOrders?.open ?? 0), color: "#ec4899", icon: Hammer },
+  ].filter(Boolean) as Array<{ label: string; value: number | string | null; prefix?: string; suffix?: string; color: string; icon: React.ElementType }>;
 
-    // "Other Expenses" — direct invoices with no linked PO/GRN/WO
-    // (ESourceType='TOD'). GRN/PO-linked invoices already surface above via
-    // recentGRNs, so this only adds the ones that would otherwise never
-    // appear in the activity feed at all.
-    (data?.material?.recentExpenses ?? [])
-      .filter((e: RecentExpense) => e.ESourceType === "TOD")
-      .slice(0, 2)
-      .forEach((e: RecentExpense) => {
-        feed.push({
-          label: `${e.EDocNo} booked for ₹${Number(e.EAmount ?? 0).toLocaleString("en-IN")}`,
-          sub: e.SupplierName ? `for ${e.SupplierName}` : (e.EStatus ?? "—"),
-          icon: Receipt,
-          color: "#ec4899",
-          time: e.EDocDate
-            ? new Date(e.EDocDate).toLocaleDateString("en-IN", {
-                day: "2-digit",
-                month: "short",
-              })
-            : undefined,
-        });
-      });
-  }
-
-  if (access.finance) {
-    (data?.finance?.recentPayments ?? [])
-      .slice(0, 2)
-      .forEach((p: RecentPayment) => {
-        feed.push({
-          label: `₹${Number(p.PAmount ?? 0).toLocaleString("en-IN")} paid via ${p.PMode ?? "—"}`,
-          sub: p.PPaymentName ? `to ${p.PPaymentName}` : (p.PProject ?? "—"),
-          icon: IndianRupee,
-          color: "#f59e0b",
-          time: p.PDate
-            ? new Date(p.PDate).toLocaleDateString("en-IN", {
-                day: "2-digit",
-                month: "short",
-              })
-            : undefined,
-        });
-      });
-  }
-
-  if (access.approvals) {
-    pendingApprovals.slice(0, 2).forEach((a: ApprovalInboxItem) => {
-      feed.push({
-        label: `${a.ModuleLabel} ${a.Reference}`,
-        sub: "Pending approval",
-        icon: FileCheck,
-        color: "#ef4444",
-        time: a.RecordDate
-          ? new Date(a.RecordDate).toLocaleDateString("en-IN", {
-              day: "2-digit",
-              month: "short",
-            })
-          : undefined,
-      });
-    });
-  }
-
-  (data?.recentTasks ?? []).slice(0, 2).forEach((t: TaskSummary) => {
-    feed.push({
-      label: t.title,
-      sub: `${t.priority} · ${t.status}`,
-      icon: ClipboardList,
-      color: "#8b5cf6",
-      time: t.dueDate
-        ? new Date(t.dueDate).toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-          })
-        : undefined,
-    });
-  });
-
-  if (access.followup) {
-    (fol?.recent ?? []).forEach((t) => {
-      feed.push({
-        label: `${t.taskNo || "Task"} — ${t.subject}`,
-        sub: t.status,
-        icon: CalendarClock,
-        color: "#0d9488",
-        time: t.dueDate
-          ? new Date(t.dueDate).toLocaleDateString("en-IN", {
-              day: "2-digit",
-              month: "short",
-            })
-          : undefined,
-      });
-    });
-  }
-
-  const activityFeed = feed.slice(0, 7);
-
-  // ── How many visible module cards exist (for staggered delay calculation) ──
-  let cardIdx = 0;
-  const nextDelay = () => {
-    const d = cardIdx * 0.05 + 0.05;
-    cardIdx++;
-    return d;
-  };
-
-  // ── Determine which "key numbers" to show based on access ──
-  const keyNumbers = [
-    access.finance && {
-      label: "Total payments (₹)",
-      value: isLoading
-        ? null
-        : Math.round((fin?.payments?.totalAmount ?? 0) / 100000),
-      suffix: "L",
-      prefix: "₹",
-      color: "#10b981",
-      icon: IndianRupee,
-    },
-    (access.material || access.finance) && {
-      label: "Open PO value (₹)",
-      value: isLoading
-        ? null
-        : Math.round(
-            (mat?.purchaseOrders?.openValue ??
-              fin?.purchaseOrders?.openValue ??
-              0) / 100000,
-          ),
-      suffix: "L",
-      prefix: "₹",
-      color: "#f59e0b",
-      icon: Layers,
-    },
-    access.engineering && {
-      label: "BOQ certified (₹)",
-      value: isLoading
-        ? null
-        : Math.round((eng?.workDone?.certifiedAmount ?? 0) / 100000),
-      suffix: "L",
-      prefix: "₹",
-      color: "#8b5cf6",
-      icon: LineChart,
-    },
-    access.finance && {
-      label: "Supplier count",
-      value: isLoading ? null : (fin?.parties?.supplierCount ?? 0),
-      color: "#06b6d4",
-      icon: Building2,
-    },
-    access.ticket &&
-      !access.finance &&
-      !access.material && {
-        label: "Open tickets",
-        value: isLoading
-          ? null
-          : (tick?.pending ?? 0) + (tick?.inProgress ?? 0),
-        color: "#f97316",
-        icon: Ticket,
-      },
-    access.engineering &&
-      !access.finance && {
-        label: "Active projects",
-        value: isLoading ? null : (eng?.projects?.active ?? 0),
-        color: "#10b981",
-        icon: Building2,
-      },
-  ].filter(Boolean) as Array<{
-    label: string;
-    value: number | null;
-    suffix?: string;
-    prefix?: string;
-    color: string;
-    icon: React.ElementType;
-  }>;
+  const feedItems: LiveActivityItem[] = liveFeed?.items ?? [];
 
   // Always show at least something
   const hasAnyAccess = Object.values(access).some(Boolean);
@@ -976,244 +883,92 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* ── Module Cards ── */}
         <section className="mb-10">
-          <SectionLabel>
-            {hasAnyAccess ? "Operations at a glance" : "Your workspace"}
-          </SectionLabel>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-
-            {/* 1 · Finance */}
-            {access.finance && (
-              <ModuleCard title="Finance" href="/finance" icon={BarChart3} accent="#3b82f6" delay={nextDelay()} loading={isLoading}
-                stats={[
-                  { label: "Total payments", value: fin?.payments?.totalCount ?? 0, accent: "#3b82f6" },
-                  { label: "Paid this month (₹L)", value: Math.round((fin?.payments?.thisMonthAmount ?? 0) / 100000), accent: "#10b981", icon: TrendingUp },
-                  { label: "Active suppliers", value: fin?.parties?.activeSupplierCount ?? 0, accent: "#8b5cf6" },
-                  { label: "Cheque lots", value: fin?.cheques?.totalCount ?? 0, accent: fin?.cheques?.totalCount ? "#0891b2" : undefined, icon: CreditCard },
-                ]} />
-            )}
-
-            {/* 2 · Material */}
-            {access.material && (
-              <ModuleCard title="Material" href="/material" icon={Package} accent="#8b5cf6" delay={nextDelay()} loading={isLoading}
-                stats={[
-                  { label: "GRNs this month", value: mat?.grns?.thisMonth ?? 0, accent: "#8b5cf6" },
-                  { label: "Open POs", value: mat?.purchaseOrders?.open ?? 0, accent: "#f59e0b" },
-                  { label: "Total items", value: mat?.items?.count ?? 0, accent: "#06b6d4", icon: Warehouse },
-                  { label: "Today's GRNs", value: mat?.grns?.today ?? 0, accent: mat?.grns?.today ? "#10b981" : undefined },
-                ]} />
-            )}
-
-            {/* 3 · Engineering */}
-            {access.engineering && (
-              <ModuleCard title="Engineering" href="/engineering" icon={Wrench} accent="#ec4899" delay={nextDelay()} loading={isLoading}
-                stats={[
-                  { label: "Open work orders", value: eng?.workOrders?.open ?? 0, accent: "#ec4899" },
-                  { label: "Active projects", value: eng?.projects?.active ?? 0, accent: "#10b981", icon: Building2 },
-                  { label: "Work done pending", value: eng?.workDone?.pending ?? 0, accent: eng?.workDone?.pending ? "#f59e0b" : undefined },
-                  { label: "BOQ approved", value: eng?.boq?.approved ?? 0, accent: "#06b6d4", icon: FileText },
-                ]} />
-            )}
-
-            {/* 4 · Civil Work DPR */}
-            {access.civilworkdpr && (
-              <ModuleCard title="Civil DPR" href="/civilworkdpr" icon={Pickaxe} accent="#0891b2" delay={nextDelay()} loading={isLoading}
-                badge={civilDpr?.progress?.pendingReviewCount}
-                stats={[
-                  { label: "Active activities", value: civilDpr?.activities?.activeCount ?? 0, accent: "#0891b2" },
-                  { label: "Workers assigned", value: civilDpr?.allocations?.workerCount ?? 0, accent: "#3b82f6", icon: HardHat },
-                  { label: "Pending review", value: civilDpr?.progress?.pendingReviewCount ?? 0, accent: civilDpr?.progress?.pendingReviewCount ? "#f59e0b" : undefined },
-                  { label: "Labour on site today", value: civilDpr?.labour?.totalToday ?? 0, accent: "#10b981", icon: Users },
-                ]} />
-            )}
-
-            {/* 5 · Follow-Up */}
-            {access.followup && (
-              <ModuleCard title="Follow-Up" href="/followup" icon={Users} accent="#0d9488" delay={nextDelay()} loading={isLoading}
-                badge={fol?.overdue}
-                stats={[
-                  { label: "Active tasks", value: fol?.totalActive ?? 0, accent: "#0d9488" },
-                  { label: "Due today", value: fol?.dueToday ?? 0, accent: "#3b82f6" },
-                  { label: "Overdue", value: fol?.overdue ?? 0, accent: fol?.overdue ? "#ef4444" : undefined },
-                  { label: "On hold", value: fol?.onHold ?? 0, accent: "#f59e0b" },
-                ]} />
-            )}
-
-            {/* 6 · Approval Inbox */}
-            {access.approvals && (
-              <ModuleCard title="Approvals" href="/admin/approval/inbox" icon={FileCheck} accent="#f59e0b" delay={nextDelay()} loading={isLoading}
-                badge={pendingApprovals.length}
-                stats={[
-                  { label: "Awaiting action", value: pendingApprovals.length, accent: pendingApprovals.length ? "#f59e0b" : undefined },
-                  { label: "Modules affected", value: new Set(pendingApprovals.map((a: ApprovalInboxItem) => a.Module)).size, accent: "#8b5cf6" },
-                  { label: "PO approvals", value: pendingApprovals.filter((a: ApprovalInboxItem) => a.Module === "PurchaseOrders").length },
-                  { label: "GRN approvals", value: pendingApprovals.filter((a: ApprovalInboxItem) => a.Module === "GoodsReceiptNotes").length },
-                ]} />
-            )}
-
-            {/* 7 · Sales */}
-            {access.sales && (
-              <ModuleCard title="Sales" href="/sales/sale-order" icon={ShoppingCart} accent="#7c3aed" delay={nextDelay()} loading={isLoading}
-                stats={[
-                  { label: "Total orders", value: sal?.total ?? 0, accent: "#7c3aed" },
-                  { label: "Approved", value: sal?.approved ?? 0, accent: "#10b981", icon: CheckCircle2 },
-                  { label: "Pending approval", value: sal?.pendingApproval ?? 0, accent: sal?.pendingApproval ? "#f59e0b" : undefined },
-                  { label: "This month", value: (() => { const a = sal?.thisMonthAmount ?? 0; return a === 0 ? "₹0" : a < 100000 ? `₹${(a/1000).toFixed(1)}K` : `₹${(a/100000).toFixed(1)}L`; })(), accent: "#06b6d4", icon: TrendingUp },
-                ]} />
-            )}
-
-            {/* 8 · CRM */}
-            {access.crm && (
-              <ModuleCard title="CRM" href="/crm/dashboard" icon={HeartHandshake} accent="#e11d48" delay={nextDelay()} loading={isLoading}
-                badge={crmOverdue > 0 ? crmOverdue : undefined}
-                stats={[
-                  { label: "Confirmed bookings", value: crmConfirmed, accent: "#e11d48" },
-                  { label: "Total bookings", value: crmTotalBookings, accent: "#f43f5e", icon: CheckCircle2 },
-                  { label: "Pending applications", value: crmPendingApps, accent: crmPendingApps ? "#f59e0b" : undefined },
-                  { label: "Open service tickets", value: crmOpenTickets, accent: crmOpenTickets ? "#ef4444" : undefined },
-                ]} />
-            )}
-
-            {/* 9 · Tickets */}
-            {access.ticket && (
-              <ModuleCard title="Tickets" href="/ticket" icon={Ticket} accent="#ef4444" delay={nextDelay()} loading={isLoading}
-                badge={tick?.urgent}
-                stats={[
-                  { label: "Open", value: (tick?.pending ?? 0) + (tick?.inProgress ?? 0), accent: "#ef4444" },
-                  { label: "Urgent", value: tick?.urgent ?? 0, accent: tick?.urgent ? "#f97316" : undefined, icon: TriangleAlert },
-                  { label: "Resolved", value: tick?.resolved ?? 0, accent: "#10b981", icon: CheckCircle2 },
-                  { label: "Resolution %", value: `${tick?.resolvedPct ?? 0}%`, accent: "#06b6d4" },
-                ]} />
-            )}
-
-            {/* 10 · Admin */}
-            {access.admin && !isDba && (
-              <ModuleCard title="Admin" href="/admin" icon={ShieldCheck} accent="#a855f7" delay={nextDelay()} loading={isLoading}
-                stats={[
-                  { label: "Total users", value: adm?.stats?.totalUsers ?? 0, accent: "#a855f7" },
-                  { label: "Active users", value: adm?.stats?.activeUsers ?? 0, accent: "#10b981", icon: Users },
-                  { label: "Roles", value: adm?.stats?.totalRoles ?? 0, accent: "#06b6d4" },
-                  { label: "Work orders open", value: eng?.workOrders?.open ?? 0, accent: "#f59e0b", icon: Hammer },
-                ]} />
-            )}
-
-            {/* 11 · DBA Console */}
-            {access.dba && (
-              <ModuleCard title="DBA Console" href="/dba" icon={Database} accent="#10b981" delay={nextDelay()} loading={isLoading}
-                stats={[
-                  { label: "Total users", value: adm?.stats?.totalUsers ?? 0, accent: "#10b981" },
-                  { label: "Active users", value: adm?.stats?.activeUsers ?? 0, accent: "#3b82f6" },
-                  { label: "Roles", value: adm?.stats?.totalRoles ?? 0 },
-                  { label: "Open tickets", value: (tick?.pending ?? 0) + (tick?.inProgress ?? 0), accent: "#f97316", icon: Ticket },
-                ]} />
-            )}
-
-            {!hasAnyAccess && (
-              <div className="col-span-2 sm:col-span-3 lg:col-span-4 xl:col-span-5">
-                <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}
-                  className="rounded-xl border border-border/40 bg-card/40 p-8 text-center"
-                >
-                  <ShieldCheck size={28} className="text-muted-foreground/30 mx-auto mb-3" />
-                  <p className="text-sm font-medium text-muted-foreground/60">No module access assigned.</p>
-                  <p className="text-xs text-muted-foreground/40 mt-1">Contact your administrator to get module permissions.</p>
-                </motion.div>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* ── Bottom: Key numbers + Activity ── */}
-        {hasAnyAccess && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Key numbers — only shown when user has at least one financial/ops module */}
-            {keyNumbers.length > 0 && (
-              <div className="lg:col-span-1">
-                <SectionLabel>Key numbers</SectionLabel>
-                <div className="rounded-2xl border border-border/60 bg-card/50 backdrop-blur-sm p-5 space-y-5">
-                  {keyNumbers.map((item, i) => (
-                    <motion.div
-                      key={i}
-                      initial={{ opacity: 0, x: -12 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{
-                        duration: 0.55,
-                        delay: 0.5 + i * 0.08,
-                        ease: "easeOut",
-                      }}
-                      className="flex items-center justify-between gap-3"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className="p-1.5 rounded-lg shrink-0"
-                          style={{ background: `${item.color}15` }}
-                        >
-                          <item.icon size={12} style={{ color: item.color }} />
-                        </div>
-                        <span className="text-[11px] text-muted-foreground/65 font-medium">
-                          {item.label}
-                        </span>
+        {!hasAnyAccess ? (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            className="rounded-2xl border border-border/40 bg-card/40 p-10 text-center max-w-lg mx-auto"
+          >
+            <ShieldCheck size={28} className="text-muted-foreground/30 mx-auto mb-3" />
+            <p className="text-sm font-medium text-muted-foreground/60">No module access assigned.</p>
+            <p className="text-xs text-muted-foreground/40 mt-1">Contact your administrator to get module permissions.</p>
+          </motion.div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+            {/* Left column: attention + KPIs */}
+            <div className="lg:col-span-2 space-y-4">
+              <Bento title={`Needs your attention${attention.length ? ` · ${attention.length}` : ""}`} icon={Bell} accent="#ef4444">
+                {isLoading ? (
+                  <div className="px-4 py-6 space-y-3">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="flex items-center gap-3 animate-pulse">
+                        <div className="w-7 h-7 rounded-lg bg-muted shrink-0" />
+                        <div className="flex-1 space-y-1.5"><div className="h-3 bg-muted rounded w-2/3" /><div className="h-2 bg-muted rounded w-1/3" /></div>
                       </div>
-                      <span
-                        className="font-heading font-bold text-base tabular-nums"
-                        style={{ color: item.color }}
-                      >
-                        {item.value == null ? (
-                          <span className="animate-pulse inline-block h-4 w-12 bg-muted rounded" />
-                        ) : (
-                          <AnimatedCounter
-                            target={item.value}
-                            prefix={item.prefix ?? ""}
-                            suffix={item.suffix ?? ""}
-                          />
-                        )}
-                      </span>
-                    </motion.div>
+                    ))}
+                  </div>
+                ) : attention.length === 0 ? (
+                  <div className="px-4 py-10 flex flex-col items-center gap-2 text-center">
+                    <div className="w-10 h-10 rounded-full bg-emerald-500/12 flex items-center justify-center">
+                      <CheckCircle2 size={18} className="text-emerald-500" />
+                    </div>
+                    <p className="text-sm font-semibold text-foreground">All clear</p>
+                    <p className="text-[11px] text-muted-foreground/50">Nothing needs your action right now.</p>
+                  </div>
+                ) : (
+                  <div className="max-h-[420px] overflow-y-auto">
+                    {attention.slice(0, 10).map((a, i) => (
+                      <AttentionRow key={a.label} a={a} i={i} onGo={navigate} />
+                    ))}
+                  </div>
+                )}
+              </Bento>
+
+              <div>
+                <SectionLabel>Key numbers</SectionLabel>
+                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {kpis.map((k, i) => (
+                    <KpiPill key={k.label} label={k.label} value={k.value} prefix={k.prefix} suffix={k.suffix} color={k.color} icon={k.icon} i={i} />
                   ))}
                 </div>
               </div>
-            )}
+            </div>
 
-            {/* Recent activity */}
-            <div
-              className={
-                keyNumbers.length > 0 ? "lg:col-span-2" : "lg:col-span-3"
+            {/* Right column: live activity */}
+            <Bento
+              title="Live activity"
+              icon={Activity}
+              accent="#6366f1"
+              className="lg:sticky lg:top-4"
+              action={
+                <div className="flex items-center gap-1.5">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                  </span>
+                  <button onClick={() => refetch()} disabled={isFetching} className="p-1 rounded hover:bg-muted/50 disabled:opacity-40">
+                    <RefreshCw size={11} className={`text-muted-foreground/40 ${isFetching ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
               }
             >
-              <SectionLabel>Recent activity</SectionLabel>
-              <div className="rounded-2xl border border-border/60 bg-card/50 backdrop-blur-sm px-5 py-1">
-                {isLoading ? (
-                  Array.from({ length: 5 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-3 py-3.5 border-b border-border/30 last:border-0 animate-pulse"
-                    >
-                      <div className="w-5 h-5 rounded-full bg-muted shrink-0 mt-0.5" />
-                      <div className="flex-1 space-y-1.5">
-                        <div className="h-3 bg-muted rounded w-3/4" />
-                        <div className="h-2.5 bg-muted rounded w-1/2" />
-                      </div>
-                    </div>
-                  ))
-                ) : activityFeed.length === 0 ? (
-                  <div className="py-10 text-center text-sm text-muted-foreground/40">
-                    No recent activity.
-                  </div>
-                ) : (
-                  activityFeed.map((item, i) => (
-                    <FeedItem
-                      key={i}
-                      item={item}
-                      i={i}
-                      total={activityFeed.length}
-                    />
-                  ))
-                )}
-              </div>
-            </div>
+              {feedItems.length === 0 ? (
+                <div className="px-4 py-12 text-center text-xs text-muted-foreground/40">
+                  {isLoading ? "Loading activity…" : "No recent activity."}
+                </div>
+              ) : (
+                <div className="max-h-[calc(100vh-11rem)] min-h-[300px] overflow-y-auto">
+                  {feedItems.map((it, i) => (
+                    <LiveRow key={`${it.Kind}-${it.DocNo ?? i}-${it.At}`} item={it} onGo={navigate} />
+                  ))}
+                </div>
+              )}
+            </Bento>
           </div>
         )}
+        </section>
 
         {/* Footer */}
         <motion.div

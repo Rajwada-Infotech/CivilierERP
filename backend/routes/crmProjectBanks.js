@@ -43,18 +43,29 @@ router.get("/for-project/:projectId", requirePageRight("crm-project-banks", "vie
   try {
     const pool = getPool();
     const projectId = parseInt(req.params.projectId);
-    // ah.LHeadStatus = 1 matters here too, not just in the untagged fallback
-    // below — a bank deactivated after being tagged must stop being offered
-    // for its Project rather than staying selectable forever because the
-    // tag row itself is still IsActive.
-    const tagged = await pool.request().input("pid", sql.Int, projectId).query(`
-      SELECT ah.LHeadId AS BId, ah.LHeadName AS BName
+    // Fetch ALL of this project's tag rows first (not filtered on the
+    // tagged bank's own LHeadStatus). Whether we're in branch (1) or (2)
+    // above must be decided from "does this project have any tag row at
+    // all" — NOT "does this project have any tag row pointing to a
+    // currently-active bank". Filtering on LHeadStatus before checking
+    // that would mean a project whose only tagged bank(s) are temporarily
+    // deactivated (e.g. a bank head disabled for correction) silently
+    // fell through to branch (2) and leaked every untagged bank in the
+    // system into a project meant to be exclusive to specific banks.
+    const rows = await pool.request().input("pid", sql.Int, projectId).query(`
+      SELECT ah.LHeadId AS BId, ah.LHeadName AS BName, ah.LHeadStatus AS BStatus
       FROM dbo.CrmProjectBank pb
       JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = pb.BankLHeadId
-      WHERE pb.ProjectId = @pid AND pb.IsActive = 1 AND ah.LHeadStatus = 1
+      WHERE pb.ProjectId = @pid AND pb.IsActive = 1
       ORDER BY ah.LHeadName
     `);
-    if (tagged.recordset.length) return res.json(tagged.recordset);
+    if (rows.recordset.length) {
+      // Project has tag(s) -> stays in the exclusive branch even if every
+      // tagged bank happens to be currently inactive. An empty array here
+      // (all tagged banks temporarily deactivated) is the correct result,
+      // not a signal to fall through to the untagged pool below.
+      return res.json(rows.recordset.filter((r) => r.BStatus === 1).map(({ BId, BName }) => ({ BId, BName })));
+    }
 
     const untagged = await pool.request().query(`
       SELECT ah.LHeadId AS BId, ah.LHeadName AS BName
