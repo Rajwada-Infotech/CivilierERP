@@ -30,6 +30,8 @@ const MANUAL_STEPS = new Set(["DirectorMeeting"]);
 // links out so the team can see the entire journey in one place.
 const LM_SELECT = `
   SELECT m.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
+    -- Agreement status (Executed / Registered / etc.)
+    ag.Status AS AgreementStatus, ag.AgreementNo,
     -- Allotment Letter (issued right after booking, before agreement signing)
     al.Id AS AllotmentLetterId, al.AlNo, al.Status AS AllotmentLetterStatus,
     -- Sub-Registrar Visit 1: Agreement for Sale registration
@@ -50,6 +52,7 @@ const LM_SELECT = `
   JOIN dbo.CrmBooking b ON b.Id = m.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = m.BookingId
   LEFT JOIN dbo.CrmAllotmentLetter al ON al.BookingId = m.BookingId
   LEFT JOIN dbo.CrmAfsQueryPayment aqp ON aqp.BookingId = m.BookingId
   LEFT JOIN dbo.CrmAfsRegistry areg ON areg.BookingId = m.BookingId

@@ -156,6 +156,7 @@ const BOOKING_SELECT = `
     ) THEN 1 ELSE 0 END AS BIT) AS BankDetailsComplete,
     ag.Id AS AgreementId, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus,
     ag.AgreementDate, ag.DateApprovalStatus, ag.Status AS AgreementStatus,
+    ag.AfsStampDuty, ag.AfsRegistrationFee,
     (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.Status = '${CrmStatus.PENDING}') AS PendingMilestoneCount,
     (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalCleared,
     (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS ApprovedOnAccount,

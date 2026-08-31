@@ -422,6 +422,34 @@ export function getEffectiveAmount(item: InboxItem): number | null {
 // (icon + count badge) when inactive, and as the solid fill once selected —
 // avoids the "wall of pastel pills" look of having every tab fully colored
 // all the time.
+// Left-rail accent border colour per module (tailwind border-* class)
+export const MODULE_ACCENT_BORDER: Record<string, string> = {
+  "purchase-orders":      "border-blue-500",
+  "work-orders":          "border-amber-500",
+  payments:               "border-emerald-500",
+  "goods-receipt":        "border-violet-500",
+  "expense-booking":      "border-rose-500",
+  "received-payment":     "border-teal-500",
+  "work-done":            "border-emerald-600",
+  boq:                    "border-indigo-500",
+  "material-requests":    "border-orange-500",
+  "material-issues":      "border-cyan-500",
+  "sale-orders":          "border-fuchsia-500",
+  "vehicle-in-out":       "border-sky-500",
+  "journal-voucher":      "border-amber-600",
+  "inter-company-transfer":"border-fuchsia-600",
+  "fund-transfer":        "border-violet-600",
+  "crm-money-receipts":   "border-teal-600",
+  contracts:              "border-purple-500",
+  "crm-bookings":         "border-orange-500",
+  "crm-agreements":       "border-indigo-500",
+  "crm-agreement-date":   "border-indigo-400",
+  "crm-sales-deed-director":"border-purple-500",
+  "crm-brokerage":        "border-amber-500",
+  "crm-cancellations":    "border-rose-500",
+  "crm-noc":              "border-teal-500",
+};
+
 const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
   "purchase-orders": { icon: "text-blue-500", active: "bg-blue-500 border-blue-500" },
   "work-orders": { icon: "text-amber-500", active: "bg-amber-500 border-amber-500" },
@@ -767,26 +795,44 @@ const InboxRow: React.FC<{
       </div>
 
       {/* ── Desktop row (≥ md) ─────────────────────────────────────────── */}
-      <div className="hidden md:grid grid-cols-[190px_100px_1fr_110px_150px_120px_1fr] items-center gap-2 px-4 py-3.5 border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+      <div className={`hidden md:flex items-stretch border-b border-border last:border-0 hover:bg-muted/20 transition-colors group`}>
+        {/* Left accent rail */}
+        <div className="w-[3px] shrink-0 self-stretch rounded-tl-sm rounded-bl-sm"
+          style={{ background: (() => {
+            const c = cfg?.color ?? "";
+            const m = c.match(/text-(\w+)-(\d+)/);
+            if (!m) return "var(--border)";
+            const map: Record<string, Record<string, string>> = {
+              blue: { 500: "#3b82f6" }, amber: { 500: "#f59e0b", 600: "#d97706" },
+              emerald: { 500: "#10b981", 600: "#059669" }, violet: { 500: "#8b5cf6", 600: "#7c3aed" },
+              rose: { 500: "#f43f5e" }, teal: { 500: "#14b8a6", 600: "#0d9488" },
+              indigo: { 400: "#818cf8", 500: "#6366f1" }, orange: { 500: "#f97316" },
+              cyan: { 500: "#06b6d4" }, fuchsia: { 500: "#d946ef", 600: "#c026d3" },
+              sky: { 500: "#0ea5e9" }, purple: { 500: "#a855f7" }, lime: { 600: "#65a30d" },
+            };
+            return map[m[1]]?.[m[2]] ?? "var(--border)";
+          })() }}
+        />
+        <div className={`flex-1 grid grid-cols-[190px_100px_1fr_120px_150px_110px_1fr] items-center gap-2 pl-3 pr-4 py-3.5`}>
         {/* Col 1 — Module */}
         <div className="flex items-center gap-3 min-w-0">
-          <div
-            className={`p-2 rounded-lg shrink-0 ${cfg?.color ?? "bg-muted text-muted-foreground"}`}
-          >
-            <Icon size={14} />
+          <div className={`p-2.5 rounded-xl shrink-0 shadow-sm ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
+            <Icon size={15} />
           </div>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-foreground truncate">
+            <p className="text-[13px] font-semibold text-foreground truncate leading-tight">
               {item.ModuleLabel}
             </p>
-            <p className="text-[11px] text-muted-foreground font-mono truncate">
+            <p className="text-[11px] text-muted-foreground font-mono truncate mt-0.5">
               {item.Reference || `#${item.RecordId}`}
             </p>
           </div>
         </div>
 
         {/* Col 2 — Date */}
-        <p className="text-xs text-foreground">{fmtDate(item.RecordDate)}</p>
+        <div>
+          <p className="text-xs font-medium text-foreground">{fmtDate(item.RecordDate)}</p>
+        </div>
 
         {/* Col 3 — Party / Transfer route */}
         {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
@@ -834,9 +880,11 @@ const InboxRow: React.FC<{
         )}
 
         {/* Col 4 — Amount */}
-        <p className="text-xs font-mono font-semibold text-foreground">
-          {fmtAmount(effectiveAmount)}
-        </p>
+        <div className="inline-flex items-center px-2 py-1 rounded-lg bg-foreground/5 border border-border/60">
+          <p className="text-[13px] font-mono font-bold text-foreground tabular-nums">
+            {fmtAmount(effectiveAmount)}
+          </p>
+        </div>
 
         {/* Col 5 — Approved/Rejected By */}
         <div className="flex items-center gap-1.5 min-w-0">
@@ -850,6 +898,9 @@ const InboxRow: React.FC<{
               <XCircle size={9} /> {rejectedBy}
             </span>
           )}
+          {!approvedBy && !rejectedBy && (
+            <span className="text-[10px] text-muted-foreground/50 italic">—</span>
+          )}
         </div>
 
         {/* Col 6 — Status */}
@@ -860,6 +911,7 @@ const InboxRow: React.FC<{
         {/* Col 7 — Actions */}
         <div className="flex items-center gap-2 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
           {actions}
+        </div>
         </div>
       </div>
     </div>
@@ -1034,7 +1086,9 @@ const ApprovalInbox: React.FC = () => {
           ) : (
             <>
               {/* Desktop table header */}
-              <div className="hidden md:grid grid-cols-[190px_100px_1fr_110px_150px_120px_1fr] gap-2 px-4 py-2.5 bg-muted/40 border-b border-border rounded-t-xl">
+              <div className="hidden md:flex items-center border-b border-border rounded-t-xl bg-muted/40">
+                <div className="w-[3px] shrink-0 self-stretch" />
+                <div className="flex-1 grid grid-cols-[190px_100px_1fr_120px_150px_110px_1fr] gap-2 pl-3 pr-4 py-2.5">
                 {[
                   "Module / Ref",
                   "Date",
@@ -1051,6 +1105,7 @@ const ApprovalInbox: React.FC = () => {
                     {h}
                   </p>
                 ))}
+                </div>
               </div>
 
               <div>

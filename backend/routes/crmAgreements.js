@@ -289,6 +289,11 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
       });
     }
 
+    const wc = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT TOP 1 PreferredAgreementDate FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CreatedAt DESC
+    `);
+    const preferredDate = wc.recordset[0]?.PreferredAgreementDate || null;
+
     // System-assigned unique agreement number
     const agNo = await getNextDocNumber(pool, "AGR", "AGR");
 
@@ -314,14 +319,26 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
       .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
       .input("leg",   sql.Int,           b.LegalExecutiveId ? parseInt(b.LegalExecutiveId) : null)
+      .input("pd",    sql.Date,          preferredDate)
       .input("cb",    sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmAgreement
-          (AgreementNo, BookingId, LegalName, LegalAddress, PanNo, AadhaarNo, Status, Notes, LegalExecutiveId, CreatedBy, CreatedAt)
+          (AgreementNo, BookingId, LegalName, LegalAddress, PanNo, AadhaarNo, Status, Notes, LegalExecutiveId, ProposedDate, ProposedDateStatus, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@agno, @bid, @lname, @laddr, @pan, @aadh, 'Draft', @note, @leg, @cb, SYSDATETIME())
+        VALUES (@agno, @bid, @lname, @laddr, @pan, @aadh, 'Draft', @note, @leg, @pd, CASE WHEN @pd IS NOT NULL THEN 'PendingCustomerReview' ELSE NULL END, @cb, SYSDATETIME())
       `);
     const agreementId = result.recordset[0].Id;
+    
+    if (preferredDate) {
+      await pool.request()
+        .input("agid", sql.Int, agreementId)
+        .input("pd",   sql.Date, preferredDate)
+        .input("cb",   sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
+          VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
+        `);
+    }
 
     // Same standing SaleAgreement request maybeAutoCreateAgreement() seeds
     // for the normal (auto-created) path — this manual "New Agreement"
@@ -429,16 +446,15 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
     if (!legalCheck0.recordset[0].LegalExecutiveId) {
       return res.status(400).json({ error: "A Legal Executive must be assigned before this agreement can receive senior approval — use PUT /:id/assign-legal" });
     }
-    // Agreement Followup gate — mandatory paperwork must actually be
-    // attached (100% of required document types have a real file) before
-    // this can be senior-approved. Computed live, never cached, so a
-    // reject/resend cycle can never leave a stale "done" behind.
+    // Agreement Followup gate — all mandatory documents must be uploaded
+    // (100% have a file attached) before senior approval. Verification happens
+    // after approval; this gate only checks that files exist.
     const followup0 = await agreementFollowupProgress(pool0, id);
     if (followup0.required === 0) {
       return res.status(400).json({ error: "No mandatory agreement documents have been requested/attached yet — add the required paperwork before this can receive senior approval" });
     }
     if (followup0.percent < 100) {
-      return res.status(400).json({ error: `Agreement Followup is only ${followup0.percent}% complete (${followup0.uploaded}/${followup0.required} mandatory documents attached) — all required paperwork must be attached before senior approval` });
+      return res.status(400).json({ error: `Agreement Followup is only ${followup0.percent}% complete (${followup0.uploaded}/${followup0.required} mandatory documents uploaded) — all required paperwork must be attached before senior approval` });
     }
     // The Admin Approval Inbox's Approve/Reject buttons render through the
     // shared ApprovalActions component (src/components/ApprovalActions.tsx),
@@ -1905,20 +1921,22 @@ router.post("/:id/documents/:docId/proxy-attach",
         : `[Submitted on behalf of customer via ${ProxyMethod}]`;
 
       await pool.request()
-        .input("id",     sql.Int,           docId)
+        .input("id",     sql.Int,              docId)
         .input("b64",    sql.NVarChar(sql.MAX), fileBase64)
-        .input("fname",  sql.NVarChar(255), req.file.originalname)
-        .input("fsize",  sql.Int,           req.file.size)
-        .input("mime",   sql.NVarChar(100), req.file.mimetype)
+        .input("fname",  sql.NVarChar(300),     req.file.originalname)
+        .input("fsize",  sql.BigInt,            req.file.size)
+        .input("mime",   sql.NVarChar(150),     req.file.mimetype)
         .input("rem",    sql.NVarChar(sql.MAX), proxyNote)
-        .input("ub",     sql.Int,           actor)
+        .input("ub",     sql.Int,              actor)
         .query(`
           UPDATE dbo.CrmAgreementDocument SET
             FileBase64 = @b64, FileName = @fname, FileSize = @fsize, MimeType = @mime,
             Status = 'Uploaded', Remarks = @rem, UploadedAt = SYSDATETIME(),
-            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+            UploadedByType = 'StaffProxy'
           WHERE Id = @id
         `);
+
+      await syncLegalMilestoneFromDocument(pool, docId, actor);
 
       await logCrmAudit(pool, "CrmAgreementDocument", docId, actor, [
         { field: "Status", oldVal: "Requested", newVal: "Uploaded" },

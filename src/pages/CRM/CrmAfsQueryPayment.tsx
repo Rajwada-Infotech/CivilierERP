@@ -18,11 +18,8 @@ import {
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
+  DialogClose,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/afs-query-payment";
@@ -127,13 +124,14 @@ const CrmAfsQueryPayment: React.FC = () => {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newForm, setNewForm] = useState({ BookingId: "", StampDuty: "", RegistrationFee: "" });
+  const [dialogFeesLocked, setDialogFeesLocked] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [step, setStep] = useState(1);
   const [confirmAmount, setConfirmAmount] = useState("");
   const [confirmRemarks, setConfirmRemarks] = useState("");
   const [pendingInfoFiles, setPendingInfoFiles] = useState<StagedFile[]>([]);
-  const [confirmSendOpen, setConfirmSendOpen] = useState(false);
+  const [awaitingSendConfirm, setAwaitingSendConfirm] = useState(false);
   const [sendingInfo, setSendingInfo] = useState(false);
   const [proofFile, setProofFile] = useState<StagedFile | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -149,7 +147,17 @@ const CrmAfsQueryPayment: React.FC = () => {
   });
 
   const trackedBookingIds = new Set((rows as any[]).map((r: any) => r.BookingId));
-  const startableBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
+  const startableBookings = (bookings as any[]).filter(
+    (b: any) => !trackedBookingIds.has(b.Id) && (b.AgreementStatus === "Executed" || b.AgreementStatus === "Registered")
+  );
+
+  // The booking the user navigated to from Legal Journey (may or may not have a record)
+  const deepLinkedBooking = deepLinkBookingId
+    ? (bookings as any[]).find((b: any) => String(b.Id) === deepLinkBookingId)
+    : null;
+  const deepLinkedRow = deepLinkBookingId
+    ? (rows as any[]).find((r: any) => String(r.BookingId) === deepLinkBookingId)
+    : null;
 
   useEffect(() => {
     if (detail) setStep(detail.Status === CrmStatus.PENDING ? 1 : 2);
@@ -159,15 +167,19 @@ const CrmAfsQueryPayment: React.FC = () => {
   }, [detail?.Id]);
 
   useEffect(() => {
-    if (!deepLinkBookingId || !rows.length) return;
+    if (!deepLinkBookingId || !(rows as any[]).length || !(bookings as any[]).length) return;
     const existing = (rows as any[]).find((r: any) => String(r.BookingId) === deepLinkBookingId);
-    if (existing) setSelectedId(existing.Id);
-    else if (startableBookings.some((b: any) => String(b.Id) === deepLinkBookingId)) {
-      setNewForm((f) => ({ ...f, BookingId: deepLinkBookingId }));
-      setDialogOpen(true);
+    if (existing) {
+      setSelectedId(existing.Id);
+    } else {
+      const bk = (bookings as any[]).find((b: any) => String(b.Id) === deepLinkBookingId);
+      if (bk && (bk.AgreementStatus === "Executed" || bk.AgreementStatus === "Registered")) {
+        setNewForm((f) => ({ ...f, BookingId: deepLinkBookingId }));
+        setDialogOpen(true);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkBookingId, rows.length]);
+  }, [deepLinkBookingId, (rows as any[]).length, (bookings as any[]).length]);
 
   const handleStart = async () => {
     if (!newForm.BookingId) { toast.error("Booking is required"); return; }
@@ -255,7 +267,7 @@ const CrmAfsQueryPayment: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
       toast.success("Sent to customer");
       setPendingInfoFiles([]);
-      setConfirmSendOpen(false);
+      setAwaitingSendConfirm(false);
       refetchDetail();
       qc.invalidateQueries({ queryKey: ["crm-afs-query-payment"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
@@ -327,23 +339,215 @@ const CrmAfsQueryPayment: React.FC = () => {
   const goNext = () => setStep((s) => Math.min(2, s + 1));
   const goPrev = () => setStep((s) => Math.max(1, s - 1));
 
+  // ── Inline workflow panel (shown when deep-linked to a booking with an existing record) ──
+  const InlineDetail = () => {
+    if (!detail) return <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>;
+    return (
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-border bg-muted/20 flex items-center gap-3 flex-wrap">
+          <div className="w-9 h-9 shrink-0 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+            <ReceiptIndianRupee size={16} className="text-primary" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-mono text-sm font-bold">{detail.AfsQPNo}</span>
+              <StatusBadge status={detail.Status} />
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">{detail.ApplicantName} · {detail.BookingNo} · {detail.UnitNo}</p>
+          </div>
+        </div>
+
+        {/* Amount summary */}
+        <div className="px-5 py-3 border-b border-border bg-muted/10">
+          {detail.RequiredAmount > 0 ? (
+            <div className="flex items-center gap-6 flex-wrap">
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Stamp Duty</p>
+                <p className="text-sm font-mono font-semibold">{formatINR(detail.StampDuty)}</p>
+              </div>
+              <span className="text-muted-foreground">+</span>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Registration Fee</p>
+                <p className="text-sm font-mono font-semibold">{formatINR(detail.RegistrationFee)}</p>
+              </div>
+              <span className="text-muted-foreground">=</span>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Total Payable</p>
+                <p className="text-base font-mono font-bold text-primary">{formatINR(detail.RequiredAmount)}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-amber-600 text-xs">
+              <AlertTriangle size={13} /> Stamp Duty and Registration Fee not set yet — fill them in before sending to the customer.
+            </div>
+          )}
+          {detail.AfsRegistrationNo && (
+            <p className="text-[11px] text-green-700 dark:text-green-400 mt-2">
+              ✓ AFS Registered: {detail.AfsRegistrationNo} · {detail.AfsRegistrationDate ? String(detail.AfsRegistrationDate).slice(0, 10) : "—"}
+            </p>
+          )}
+        </div>
+
+        {detail.Status === "Confirmed" ? (
+          <div className="px-5 py-5 space-y-4">
+            <div className="flex items-center gap-3 bg-green-500/[0.06] border border-green-200 dark:border-green-900/50 rounded-xl px-4 py-3">
+              <CheckCircle2 size={18} className="text-green-600 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-green-700 dark:text-green-300">Government payment confirmed</p>
+                <p className="text-xs text-green-600/80 dark:text-green-400/80 mt-0.5">
+                  {detail.ConfirmedAt ? String(detail.ConfirmedAt).slice(0, 10) : ""}
+                  {detail.ConfirmedAmount ? ` · ${formatINR(detail.ConfirmedAmount)} received` : ""}
+                </p>
+              </div>
+            </div>
+            {detail.attachments?.length > 0 && (
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Proof &amp; Documents</p>
+                <AttachmentList attachments={detail.attachments} apiBase={API} />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {/* Step 1: Send paperwork */}
+            <div className={`px-5 py-4 space-y-3 ${step === 1 ? "" : "opacity-60 pointer-events-none"}`}>
+              <div className="flex items-center gap-2">
+                <span className={`w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center shrink-0 ${step > 1 ? "bg-green-500 text-white" : "bg-primary text-primary-foreground"}`}>
+                  {step > 1 ? <Check size={10} /> : "1"}
+                </span>
+                <p className="text-sm font-semibold">Send Fee Breakdown to Customer</p>
+              </div>
+              <p className="text-xs text-muted-foreground pl-7">Attach any paperwork and send the stamp duty amount so the buyer knows what to bring to the Sub-Registrar's Office.</p>
+              {detail.attachments?.filter((a: any) => a.DocType === "info").length > 0 && (
+                <div className="pl-7">
+                  <p className="text-[11px] text-muted-foreground font-medium mb-1.5">Already sent</p>
+                  <AttachmentList attachments={detail.attachments.filter((a: any) => a.DocType === "info")} apiBase={API} />
+                </div>
+              )}
+              <div className="pl-7 space-y-2">
+                {pendingInfoFiles.length > 0 && (
+                  <ul className="space-y-1.5">
+                    {pendingInfoFiles.map((f, idx) => (
+                      <li key={`${f.name}-${idx}`} className="flex items-center gap-2 text-xs bg-muted/30 border border-border rounded-lg px-2.5 py-1.5">
+                        {f.type.startsWith("image/") ? (
+                          <img src={f.dataUri} alt={f.name} className="w-7 h-7 object-cover rounded shrink-0 border border-border" />
+                        ) : (
+                          <div className="w-7 h-7 rounded bg-muted flex items-center justify-center shrink-0"><FileText size={12} /></div>
+                        )}
+                        <span className="truncate flex-1">{f.name}</span>
+                        <span className="text-muted-foreground shrink-0 text-[10px]">{(f.size / 1024).toFixed(0)} KB</span>
+                        <button onClick={() => removeStagedFile(idx)} className="text-muted-foreground hover:text-rose-600 shrink-0"><X size={11} /></button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <input type="file" multiple ref={infoInputRef} className="hidden" onChange={(e) => stageInfoFiles(e.target.files)} />
+                <div className="flex items-center gap-2">
+                  <button onClick={() => infoInputRef.current?.click()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-dashed border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground">
+                    <Upload size={11} /> Attach files
+                  </button>
+                  {awaitingSendConfirm ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Send {pendingInfoFiles.length} file{pendingInfoFiles.length !== 1 ? "s" : ""}?</span>
+                      <button onClick={() => setAwaitingSendConfirm(false)} disabled={sendingInfo} className="px-2.5 py-1 text-xs rounded-lg border border-border hover:bg-muted transition-colors">Cancel</button>
+                      <button onClick={handleSendInfo} disabled={sendingInfo} className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                        <Send size={10} /> {sendingInfo ? "Sending…" : "Confirm Send"}
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setAwaitingSendConfirm(true)} disabled={!pendingInfoFiles.length}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                      <Send size={11} /> {detail.Status === CrmStatus.PENDING ? "Send to Customer" : "Send More"}
+                    </button>
+                  )}
+                </div>
+                {detail.Status === "InfoSent" && (
+                  <div className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400">
+                    <CheckCircle2 size={11} /> Sent — waiting for customer to pay at the Sub-Registrar.
+                    <button onClick={() => setStep(2)} className="ml-auto text-xs text-primary font-medium hover:underline">Go to Step 2 →</button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Step 2: Confirm payment */}
+            <div className={`px-5 py-4 space-y-3 ${step === 2 ? "" : "opacity-60"}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className={`w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center shrink-0 ${step === 2 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>2</span>
+                  <p className="text-sm font-semibold">Confirm Customer Paid the Government</p>
+                </div>
+                {step !== 2 && (
+                  <button onClick={() => setStep(2)} className="text-xs text-primary font-medium hover:underline shrink-0">Open →</button>
+                )}
+              </div>
+              {step === 2 && (
+                <div className="pl-7 space-y-3">
+                  <p className="text-xs text-muted-foreground">Once the customer has paid stamp duty and registration fees at the Sub-Registrar's Office, record the confirmation here.</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] text-muted-foreground block mb-1">Amount Actually Paid (₹)</label>
+                      <Input type="number" className="h-9 font-mono text-sm" placeholder="Optional" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-muted-foreground block mb-1">Remarks</label>
+                      <Input className="h-9 text-sm" placeholder="Optional" value={confirmRemarks} onChange={(e) => setConfirmRemarks(e.target.value)} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-muted-foreground block mb-1">Proof of Payment (optional)</label>
+                    {proofFile ? (
+                      <div className="flex items-center gap-2 text-xs bg-muted/30 border border-border rounded-lg px-2.5 py-1.5">
+                        {proofFile.type.startsWith("image/") ? (
+                          <img src={proofFile.dataUri} alt={proofFile.name} className="w-7 h-7 object-cover rounded shrink-0 border border-border" />
+                        ) : (
+                          <div className="w-7 h-7 rounded bg-muted flex items-center justify-center shrink-0"><FileText size={12} /></div>
+                        )}
+                        <span className="truncate flex-1">{proofFile.name}</span>
+                        <button onClick={() => { setProofFile(null); if (proofInputRef.current) proofInputRef.current.value = ""; }} className="text-muted-foreground hover:text-rose-600 shrink-0"><X size={11} /></button>
+                      </div>
+                    ) : (
+                      <>
+                        <input type="file" ref={proofInputRef} className="hidden" onChange={(e) => stageProofFile(e.target.files)} />
+                        <button onClick={() => proofInputRef.current?.click()}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium border border-dashed border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground">
+                          <Upload size={11} /> Attach receipt / proof
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  <button onClick={handleConfirm} disabled={confirming}
+                    className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-40 transition-colors">
+                    <CheckCircle2 size={14} /> {confirming ? "Confirming…" : "Mark as Paid — Government Fees Confirmed"}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <CrmShell
       title="Agreement Registration Fees"
       subtitle="Stamp duty & registration fee the buyer must pay before the Agreement for Sale is registered at the Sub-Registrar's Office (Visit 1)"
       action={
         <div className="flex items-center gap-3">
-          {listUpdatedAt > 0 && (
+          {listUpdatedAt > 0 && !deepLinkBookingId && (
             <button onClick={() => refetchList()} disabled={listFetching}
               className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
               <RotateCcw size={12} className={listFetching ? "animate-spin" : ""} />
               {listFetching ? "Refreshing…" : "Refresh"}
             </button>
           )}
-          {canCreate && (
+          {canCreate && !deepLinkBookingId && (
             <button onClick={() => setDialogOpen(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-              <Plus size={14} /> Start AFS Query Payment
+              <Plus size={14} /> Start Registration Fees
             </button>
           )}
         </div>
@@ -351,303 +555,377 @@ const CrmAfsQueryPayment: React.FC = () => {
     >
       <Breadcrumbs items={[{ label: "CRM" }, { label: "Legal" }, { label: "Agreement Registration Fees" }]} />
 
-      <DataTable
-        data={rows as any[]}
-        columns={columns}
-        loading={isLoading}
-        emptyMessage="No AFS Query Payment trackers yet"
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
-
-      {/* Start dialog */}
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setNewForm({ BookingId: "", StampDuty: "", RegistrationFee: "" }); } }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="font-heading">Start AFS Query Payment</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select value={newForm.BookingId} onChange={(e) => setNewForm((f) => ({ ...f, BookingId: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select booking</option>
-                {startableBookings.map((b: any) => (
-                  <option key={b.Id} value={String(b.Id)}>{b.BookingNo} · {b.ApplicantName}</option>
-                ))}
-              </select>
-              <p className="text-[11px] text-muted-foreground mt-1">Requires the Agreement for Sale to be Executed.</p>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Stamp Duty</label>
-                <Input type="number" className="h-9 font-mono text-sm" placeholder="Optional" value={newForm.StampDuty} onChange={(e) => setNewForm((f) => ({ ...f, StampDuty: e.target.value }))} />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Registration Fee</label>
-                <Input type="number" className="h-9 font-mono text-sm" placeholder="Optional" value={newForm.RegistrationFee} onChange={(e) => setNewForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
+      {/* ── BOOKING-FOCUSED MODE (came from Legal Journey) ── */}
+      {deepLinkBookingId ? (
+        <div className="space-y-3">
+          {/* Booking identity card */}
+          {deepLinkedBooking && (
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="px-5 py-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold">{deepLinkedBooking.ApplicantName}</p>
+                  <p className="text-xs text-muted-foreground">{deepLinkedBooking.BookingNo} · {deepLinkedBooking.UnitNo} · Agreement {deepLinkedBooking.AgreementStatus}</p>
+                </div>
+                <span className={`shrink-0 text-[11px] px-2.5 py-1 rounded-lg border font-semibold ${
+                  deepLinkedBooking.AgreementStatus === "Registered" ? "bg-green-100 border-green-300 text-green-700 dark:bg-green-900/30 dark:border-green-700 dark:text-green-300"
+                  : deepLinkedBooking.AgreementStatus === "Executed" ? "bg-blue-100 border-blue-300 text-blue-700 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-300"
+                  : "bg-muted/40 border-border text-muted-foreground"
+                }`}>Agreement {deepLinkedBooking.AgreementStatus}</span>
               </div>
             </div>
-            <p className="text-[11px] text-muted-foreground">Amount can be filled in now or updated before paperwork is sent to the customer.</p>
-          </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); setNewForm({ BookingId: "", StampDuty: "", RegistrationFee: "" }); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleStart} disabled={saving || !newForm.BookingId}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Starting..." : "Start"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
+          )}
 
-      {/* Detail dialog */}
-      <Dialog open={!!selectedId} onOpenChange={(o) => !o && setSelectedId(null)}>
-        <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
-          {detail && (
-            <>
-              <DialogHeader className="px-6 py-4 border-b border-border">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <ReceiptIndianRupee size={15} className="text-primary" />
+          {/* Case A: already registered — no tracker needed */}
+          {deepLinkedBooking?.AgreementStatus === "Registered" && !deepLinkedRow && (
+            <div className="rounded-xl border border-green-200 dark:border-green-900/50 bg-green-500/[0.05] overflow-hidden">
+              <div className="px-5 py-5 flex items-start gap-4">
+                <div className="w-10 h-10 shrink-0 rounded-full bg-green-100 dark:bg-green-900/40 border-2 border-green-400 dark:border-green-600 flex items-center justify-center">
+                  <CheckCircle2 size={18} className="text-green-600 dark:text-green-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-green-700 dark:text-green-300">Agreement for Sale is Registered</p>
+                  <p className="text-xs text-green-600/80 dark:text-green-400/70 mt-1 max-w-lg">
+                    This agreement was registered at the Sub-Registrar's Office. The stamp duty and registration fees were settled directly — no in-system fee tracker was created. All registration details are on the Agreement page.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Case B: existing record — show inline workflow */}
+          {deepLinkedRow && selectedId && <InlineDetail />}
+
+          {/* Case C: Executed but no record yet — inline start form */}
+          {deepLinkedBooking && !deepLinkedRow && deepLinkedBooking.AgreementStatus !== "Registered" && canCreate && (
+            <div className="rounded-xl border border-primary/30 bg-primary/[0.03] overflow-hidden">
+              <div className="px-5 py-4 border-b border-primary/20 bg-primary/[0.04]">
+                <p className="text-sm font-semibold">Start Registration Fee Process</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Enter the stamp duty and registration fee amounts. The buyer will be notified and can confirm payment through their portal.</p>
+              </div>
+              <div className="px-5 py-4 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground block mb-1.5">Stamp Duty (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
+                    <Input type="number" className="h-9 font-mono text-sm" placeholder="e.g. 50000"
+                      value={newForm.StampDuty} onChange={(e) => setNewForm((f) => ({ ...f, StampDuty: e.target.value }))} />
                   </div>
-                  <div className="min-w-0">
-                    <DialogTitle className="text-sm font-semibold font-heading font-mono">{detail.AfsQPNo}</DialogTitle>
-                    <DialogDescription className="text-[11px] mt-0.5">AFS Query Payment — Sub-Registrar Visit 1</DialogDescription>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground block mb-1.5">Registration Fee (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
+                    <Input type="number" className="h-9 font-mono text-sm" placeholder="e.g. 30000"
+                      value={newForm.RegistrationFee} onChange={(e) => setNewForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
                   </div>
-                  <div className="ml-auto">
-                    <StatusBadge status={detail.Status} />
+                </div>
+                <p className="text-[11px] text-muted-foreground">Amounts can be left blank now and filled in later before sending to the customer.</p>
+                <button onClick={handleStart} disabled={saving}
+                  className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                  <CheckCircle2 size={14} /> {saving ? "Starting…" : "Start — Create Registration Fee Tracker"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ── LIST MODE (admin overview, no bookingId param) ── */
+        <>
+          <DataTable
+            data={rows as any[]}
+            columns={columns}
+            loading={isLoading}
+            emptyMessage="No registration fee trackers started yet. Click 'Start Registration Fees' to begin for a booking whose Agreement for Sale has been executed."
+            className="rounded-xl border border-border overflow-hidden bg-card"
+          />
+
+          {/* Start dialog (list-mode only) */}
+          <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setDialogFeesLocked(false); setNewForm({ BookingId: "", StampDuty: "", RegistrationFee: "" }); } }}>
+            <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+              <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 shrink-0 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                    <ReceiptIndianRupee size={16} className="text-primary" />
+                  </div>
+                  <div>
+                    <DialogTitle className="font-heading text-base">Start Registration Fee Tracker</DialogTitle>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Select a booking whose Agreement for Sale is Executed, then enter the government-calculated stamp duty and registration fees.</p>
                   </div>
                 </div>
               </DialogHeader>
-
-              <div className="px-6 pt-3">
-                <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
-                  <p className="text-sm font-semibold text-foreground">{detail.ApplicantName}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {detail.BookingNo} · {detail.UnitNo} · Agreement {detail.AgreementNo || "—"}
-                  </p>
-                  {detail.RequiredAmount > 0 ? (
-                    <p className="text-xs mt-1.5">
-                      Stamp Duty {formatINR(detail.StampDuty)} + Reg. Fee {formatINR(detail.RegistrationFee)}
-                      {" "}= <span className="font-semibold font-mono">{formatINR(detail.RequiredAmount)}</span> payable
-                    </p>
-                  ) : (
-                    <p className="text-xs mt-1.5 text-muted-foreground">Amount not set yet — enter Stamp Duty and Registration Fee.</p>
-                  )}
-                  {detail.AfsRegistrationNo && (
-                    <p className="text-[11px] mt-1 text-emerald-700">
-                      AFS Registered: {detail.AfsRegistrationNo} on {detail.AfsRegistrationDate ? String(detail.AfsRegistrationDate).slice(0, 10) : "—"}
-                    </p>
+              <div className="px-5 py-4 space-y-4">
+                <div>
+                  <label className="text-xs font-semibold text-foreground block mb-1.5">Booking <span className="text-red-500">*</span></label>
+                  <select value={newForm.BookingId} onChange={(e) => {
+                    const bid = e.target.value;
+                    const bk = (bookings as any[]).find((b: any) => String(b.Id) === bid);
+                    const stamp = bk?.AfsStampDuty != null ? String(bk.AfsStampDuty) : "";
+                    const fee   = bk?.AfsRegistrationFee != null ? String(bk.AfsRegistrationFee) : "";
+                    setNewForm((f) => ({ ...f, BookingId: bid, StampDuty: stamp, RegistrationFee: fee }));
+                    setDialogFeesLocked(stamp !== "" || fee !== "");
+                  }}
+                    className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary">
+                    <option value="">Select booking…</option>
+                    {startableBookings.map((b: any) => (
+                      <option key={b.Id} value={String(b.Id)}>{b.BookingNo} · {b.ApplicantName} ({b.AgreementStatus})</option>
+                    ))}
+                  </select>
+                  {startableBookings.length === 0 && (
+                    <p className="text-[11px] text-amber-600 mt-1">No eligible bookings — Agreement for Sale must be Executed first. Go to <span className="font-semibold">Documents → Agreements</span>.</p>
                   )}
                 </div>
-                {detail.Status !== "Confirmed" && detail.RequiredAmount === 0 && (
-                  <div className="flex items-center gap-1.5 text-xs text-amber-600 mt-2">
-                    <AlertTriangle size={12} /> Stamp Duty and Registration Fee are not set — enter them before sending to customer.
-                  </div>
-                )}
-              </div>
 
-              {detail.Status === "Confirmed" ? (
-                <div className="px-6 py-5">
-                  <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
-                    <CheckCircle2 size={16} />
+                {/* Fee fields — pre-filled from Agreement record when booking selected */}
+                <div className={`rounded-lg border p-3 space-y-2 ${dialogFeesLocked ? "border-green-200 bg-green-500/[0.04] dark:border-green-900/50" : "border-border"}`}>
+                  <div className="flex items-center justify-between">
                     <div>
-                      <div className="font-medium">Government payment confirmed</div>
-                      <div className="text-xs text-emerald-700/80 mt-0.5">
-                        {detail.ConfirmedAt ? String(detail.ConfirmedAt).slice(0, 10) : ""}
-                        {detail.ConfirmedAmount ? ` · ${formatINR(detail.ConfirmedAmount)}` : ""}
-                      </div>
+                      <p className="text-xs font-semibold text-foreground">Government Fees</p>
+                      {dialogFeesLocked && (
+                        <p className="text-[11px] text-green-700 dark:text-green-400 mt-0.5">Pre-filled from Agreement record — verify and edit if needed</p>
+                      )}
+                    </div>
+                    {dialogFeesLocked ? (
+                      <button type="button" onClick={() => setDialogFeesLocked(false)}
+                        className="shrink-0 text-[11px] px-2 py-1 rounded-lg border border-border text-muted-foreground hover:bg-muted font-medium">Edit</button>
+                    ) : (newForm.StampDuty !== "" || newForm.RegistrationFee !== "") ? (
+                      <button type="button" onClick={() => setDialogFeesLocked(true)}
+                        className="shrink-0 text-[11px] px-2 py-1 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 font-medium dark:border-green-700 dark:text-green-400">Lock</button>
+                    ) : null}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] text-muted-foreground block mb-1">Stamp Duty (₹)</label>
+                      <Input type="number" className={`h-9 font-mono text-sm ${dialogFeesLocked ? "bg-muted/30" : ""}`} placeholder="Optional"
+                        value={newForm.StampDuty} readOnly={dialogFeesLocked}
+                        onChange={(e) => setNewForm((f) => ({ ...f, StampDuty: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-muted-foreground block mb-1">Registration Fee (₹)</label>
+                      <Input type="number" className={`h-9 font-mono text-sm ${dialogFeesLocked ? "bg-muted/30" : ""}`} placeholder="Optional"
+                        value={newForm.RegistrationFee} readOnly={dialogFeesLocked}
+                        onChange={(e) => setNewForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
                     </div>
                   </div>
-                  {detail.attachments?.length > 0 && (
-                    <div className="mt-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading mb-2">Attachments</p>
-                      <AttachmentList attachments={detail.attachments} apiBase={API} />
-                    </div>
-                  )}
                 </div>
+              </div>
+              <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/10">
+                <button onClick={() => { setDialogOpen(false); setDialogFeesLocked(false); setNewForm({ BookingId: "", StampDuty: "", RegistrationFee: "" }); }}
+                  className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted font-medium">Cancel</button>
+                <button onClick={handleStart} disabled={saving || !newForm.BookingId}
+                  className="px-5 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40 flex items-center gap-1.5">
+                  {saving ? "Starting…" : <><CheckCircle2 size={14} /> Start Tracker</>}
+                </button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Detail dialog (list-mode: row click → dialog) */}
+          <Dialog open={!!selectedId && !deepLinkBookingId} onOpenChange={(o) => { if (!o) { setSelectedId(null); setAwaitingSendConfirm(false); setPendingInfoFiles([]); } }}>
+            <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden rounded-xl">
+              {/* DialogTitle/Description must always be present for a11y */}
+              <DialogTitle className="sr-only">{detail ? `${detail.AfsQPNo} — AFS Query Payment` : "AFS Query Payment"}</DialogTitle>
+              <DialogDescription className="sr-only">{detail ? `${detail.ApplicantName} · ${detail.BookingNo}` : "Loading record…"}</DialogDescription>
+
+              {!detail ? (
+                <div className="flex items-center justify-center h-40 text-sm text-muted-foreground">Loading…</div>
               ) : (
                 <>
-                  <StepTabs step={step} onChange={setStep} confirmed={false} />
-                  <div className="px-6 py-5 max-h-[50vh] overflow-y-auto">
-                    {step === 1 ? (
-                      <div className="space-y-3">
-                        <p className="text-xs text-muted-foreground">
-                          Send the customer the AFS stamp duty amount and any paperwork they need to bring to the Sub-Registrar.
-                        </p>
-                        {detail.attachments?.length > 0 && (
-                          <div>
-                            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading mb-2">Already Sent</p>
-                            <AttachmentList attachments={detail.attachments} apiBase={API} />
-                          </div>
-                        )}
-                        <div>
-                          <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading mb-2">
-                            {pendingInfoFiles.length ? `Staged for sending (${pendingInfoFiles.length})` : "Attach Files"}
-                          </p>
-                          {pendingInfoFiles.length > 0 && (
-                            <ul className="space-y-1.5 mb-2">
-                              {pendingInfoFiles.map((f, idx) => (
-                                <li key={`${f.name}-${idx}`} className="flex items-center gap-2 text-xs bg-muted/30 border border-border rounded-lg px-2.5 py-1.5">
-                                  {f.type.startsWith("image/") ? (
-                                    <img src={f.dataUri} alt={f.name} className="w-8 h-8 object-cover rounded shrink-0 border border-border" />
-                                  ) : (
-                                    <div className="w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0">
-                                      <FileText size={13} className="text-muted-foreground" />
-                                    </div>
-                                  )}
-                                  <span className="truncate flex-1">{f.name}</span>
-                                  <span className="text-muted-foreground shrink-0">{(f.size / 1024).toFixed(0)} KB</span>
-                                  <button onClick={() => removeStagedFile(idx)} className="text-muted-foreground hover:text-rose-600 shrink-0" title="Remove">
-                                    <X size={12} />
-                                  </button>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                          <input type="file" multiple ref={infoInputRef} className="hidden" onChange={(e) => stageInfoFiles(e.target.files)} />
-                          <button onClick={() => infoInputRef.current?.click()}
-                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium border border-dashed border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground">
-                            <Upload size={12} /> Choose Files...
-                          </button>
+                  {/* Header */}
+                  <div className="px-5 pt-5 pb-4 border-b border-border">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <ReceiptIndianRupee size={16} className="text-primary" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-semibold font-mono text-foreground">{detail.AfsQPNo}</span>
+                          <StatusBadge status={detail.Status} />
                         </div>
-                        <button
-                          onClick={() => setConfirmSendOpen(true)}
-                          disabled={!pendingInfoFiles.length}
-                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 disabled:pointer-events-none transition-colors">
-                          <Send size={12} /> {detail.Status === CrmStatus.PENDING ? "Send Info & Paperwork to Customer" : "Send Additional Documents"}
+                        <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{detail.ApplicantName} · {detail.BookingNo}</p>
+                      </div>
+                      <DialogClose asChild>
+                        <button className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                          <X size={14} />
                         </button>
-                        {!pendingInfoFiles.length && (
-                          <p className="text-[11px] text-muted-foreground text-center">Attach at least one file before sending.</p>
-                        )}
-                        {detail.Status === "InfoSent" && (
-                          <div className="flex items-center gap-1.5 text-xs text-blue-700">
-                            <CheckCircle2 size={12} /> Sent — waiting on the customer to pay at the Sub-Registrar.
-                          </div>
-                        )}
+                      </DialogClose>
+                    </div>
+
+                    {/* Fee summary strip */}
+                    {detail.RequiredAmount > 0 ? (
+                      <div className="mt-3 flex items-center gap-2 flex-wrap text-[11px] text-muted-foreground">
+                        <span className="px-2 py-0.5 rounded bg-muted font-mono">Stamp {formatINR(detail.StampDuty)}</span>
+                        <span className="text-muted-foreground/50">+</span>
+                        <span className="px-2 py-0.5 rounded bg-muted font-mono">Reg. Fee {formatINR(detail.RegistrationFee)}</span>
+                        <span className="text-muted-foreground/50">=</span>
+                        <span className="px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold font-mono">{formatINR(detail.RequiredAmount)}</span>
                       </div>
                     ) : (
-                      <div className="space-y-3">
-                        <p className="text-xs text-muted-foreground">Once the customer has paid the AFS stamp duty to the Sub-Registrar, confirm it here.</p>
-                        <div className="space-y-1.5">
-                          <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Amount Actually Paid</label>
-                          <Input type="number" className="h-10 font-mono" placeholder="Optional" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Remarks</label>
-                          <Textarea rows={2} placeholder="Optional" value={confirmRemarks} onChange={(e) => setConfirmRemarks(e.target.value)} className="resize-none" />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Proof of Payment</label>
-                          {proofFile ? (
-                            <div className="flex items-center gap-2 text-xs bg-muted/30 border border-border rounded-lg px-2.5 py-1.5">
-                              {proofFile.type.startsWith("image/") ? (
-                                <img src={proofFile.dataUri} alt={proofFile.name} className="w-8 h-8 object-cover rounded shrink-0 border border-border" />
-                              ) : (
-                                <div className="w-8 h-8 rounded bg-muted flex items-center justify-center shrink-0">
-                                  <FileText size={13} className="text-muted-foreground" />
-                                </div>
-                              )}
-                              <span className="truncate flex-1">{proofFile.name}</span>
-                              <button onClick={() => { setProofFile(null); if (proofInputRef.current) proofInputRef.current.value = ""; }} className="text-muted-foreground hover:text-rose-600 shrink-0" title="Remove">
-                                <X size={12} />
-                              </button>
-                            </div>
-                          ) : (
-                            <>
-                              <input type="file" ref={proofInputRef} className="hidden" onChange={(e) => stageProofFile(e.target.files)} />
-                              <button onClick={() => proofInputRef.current?.click()}
-                                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium border border-dashed border-border rounded-lg hover:bg-muted transition-colors text-muted-foreground">
-                                <ImageIcon size={12} /> Attach Proof (optional)
-                              </button>
-                            </>
-                          )}
-                        </div>
-                        <button onClick={handleConfirm} disabled={confirming}
-                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40 transition-colors">
-                          <CheckCircle2 size={12} /> {confirming ? "Confirming..." : "Confirm Customer Paid the Government"}
-                        </button>
+                      <div className="mt-3 flex items-center gap-1.5 text-[11px] text-amber-600 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+                        <AlertTriangle size={11} /> Amounts not set — fill before sending to customer.
                       </div>
                     )}
                   </div>
-                </>
-              )}
 
-              <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20 flex items-center justify-between sm:justify-between">
-                {detail.Status !== "Confirmed" ? (
-                  <>
-                    <button onClick={goPrev} disabled={step === 1}
-                      className="flex items-center gap-1 px-3 py-2 text-xs font-medium rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:pointer-events-none transition-colors">
+                  {/* Body */}
+                  {detail.Status === "Confirmed" ? (
+                    <div className="px-5 py-5 space-y-4">
+                      <div className="flex items-center gap-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-xl px-4 py-3 dark:bg-green-900/20 dark:border-green-800/60 dark:text-green-400">
+                        <CheckCircle2 size={18} className="shrink-0" />
+                        <div>
+                          <div className="font-semibold text-[13px]">Government payment confirmed</div>
+                          <div className="text-[11px] opacity-80 mt-0.5">
+                            {detail.ConfirmedAt ? String(detail.ConfirmedAt).slice(0, 10) : ""}
+                            {detail.ConfirmedAmount ? ` · ${formatINR(detail.ConfirmedAmount)}` : ""}
+                          </div>
+                        </div>
+                      </div>
+                      {detail.attachments?.length > 0 && (
+                        <div>
+                          <p className="text-[11px] font-medium text-muted-foreground mb-2 uppercase tracking-wide">Attachments</p>
+                          <AttachmentList attachments={detail.attachments} apiBase={API} />
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <StepTabs step={step} onChange={setStep} confirmed={false} />
+                      <div className="px-5 py-4 max-h-[45vh] overflow-y-auto thin-scroll space-y-3">
+                        {step === 1 ? (
+                          <>
+                            {detail.attachments?.filter((a: any) => a.DocType === "info").length > 0 && (
+                              <div>
+                                <p className="text-[11px] font-medium text-muted-foreground mb-2">Previously sent</p>
+                                <AttachmentList attachments={detail.attachments.filter((a: any) => a.DocType === "info")} apiBase={API} />
+                              </div>
+                            )}
+                            {pendingInfoFiles.length > 0 && (
+                              <div>
+                                <p className="text-[11px] font-medium text-muted-foreground mb-2">Ready to send ({pendingInfoFiles.length})</p>
+                                <ul className="space-y-1.5">
+                                  {pendingInfoFiles.map((f, idx) => (
+                                    <li key={`${f.name}-${idx}`} className="flex items-center gap-2 text-xs bg-primary/5 border border-primary/20 rounded-lg px-2.5 py-1.5">
+                                      {f.type.startsWith("image/") ? (
+                                        <img src={f.dataUri} alt={f.name} className="w-7 h-7 object-cover rounded shrink-0 border border-border" />
+                                      ) : (
+                                        <div className="w-7 h-7 rounded bg-muted flex items-center justify-center shrink-0"><FileText size={12} /></div>
+                                      )}
+                                      <span className="truncate flex-1 font-medium">{f.name}</span>
+                                      <button onClick={() => removeStagedFile(idx)} className="text-muted-foreground hover:text-rose-500 shrink-0 p-0.5 rounded hover:bg-rose-50 dark:hover:bg-rose-900/20">
+                                        <X size={11} />
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            <input type="file" multiple ref={infoInputRef} className="hidden" onChange={(e) => stageInfoFiles(e.target.files)} />
+                            <button onClick={() => infoInputRef.current?.click()} className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium border border-dashed border-border rounded-lg hover:bg-muted text-muted-foreground transition-colors">
+                              <Upload size={12} /> Choose Files
+                            </button>
+                            {awaitingSendConfirm ? (
+                              <div className="flex items-center gap-2">
+                                <span className="flex-1 text-xs text-muted-foreground">Send {pendingInfoFiles.length} file{pendingInfoFiles.length !== 1 ? "s" : ""} to customer?</span>
+                                <button onClick={() => setAwaitingSendConfirm(false)} disabled={sendingInfo} className="px-2.5 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors shrink-0">Cancel</button>
+                                <button onClick={handleSendInfo} disabled={sendingInfo} className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 transition-colors shrink-0">
+                                  <Send size={11} /> {sendingInfo ? "Sending…" : "Confirm"}
+                                </button>
+                              </div>
+                            ) : (
+                              <button onClick={() => setAwaitingSendConfirm(true)} disabled={!pendingInfoFiles.length} className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                                <Send size={12} /> Send to Customer
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <div className="space-y-3">
+                            <p className="text-xs text-muted-foreground">Once the customer has paid at the Sub-Registrar, confirm receipt here to advance the record.</p>
+                            <div>
+                              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Amount paid (optional)</label>
+                              <Input type="number" className="h-9 font-mono" placeholder="e.g. 16500" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
+                            </div>
+                            <input type="file" ref={proofInputRef} className="hidden" onChange={(e) => stageProofFile(e.target.files)} />
+                            {proofFile ? (
+                              <div className="flex items-center gap-2 text-xs bg-muted/40 border border-border rounded-lg px-2.5 py-1.5">
+                                <FileText size={12} className="text-muted-foreground shrink-0" />
+                                <span className="truncate flex-1">{proofFile.name}</span>
+                                <button onClick={() => { setProofFile(null); if (proofInputRef.current) proofInputRef.current.value = ""; }} className="text-muted-foreground hover:text-rose-500 shrink-0"><X size={11} /></button>
+                              </div>
+                            ) : (
+                              <button onClick={() => proofInputRef.current?.click()} className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs border border-dashed border-border rounded-lg hover:bg-muted text-muted-foreground transition-colors">
+                                <Upload size={12} /> Attach proof (optional)
+                              </button>
+                            )}
+                            <button onClick={handleConfirm} disabled={confirming} className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-40 transition-colors">
+                              <CheckCircle2 size={12} /> {confirming ? "Confirming…" : "Confirm Payment Received"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Footer */}
+                  <div className="px-5 py-3 border-t border-border bg-muted/20 flex items-center justify-between">
+                    <button onClick={goPrev} disabled={step === 1 || detail.Status === "Confirmed"} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:pointer-events-none transition-colors">
                       <ChevronLeft size={13} /> Previous
                     </button>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => setSelectedId(null)} className="px-3 py-2 text-xs font-medium rounded-lg text-muted-foreground hover:bg-muted transition-colors">Close</button>
-                      <button onClick={goNext} disabled={step === 2}
-                        className="flex items-center gap-1 px-3 py-2 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-30 disabled:pointer-events-none transition-colors">
+                      <button onClick={() => setSelectedId(null)} className="px-3 py-1.5 text-xs font-medium rounded-lg text-muted-foreground hover:bg-muted transition-colors">Close</button>
+                      <button onClick={goNext} disabled={step === 2 || detail.Status === "Confirmed"} className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-30 disabled:pointer-events-none transition-colors">
                         Next <ChevronRight size={13} />
                       </button>
                     </div>
-                  </>
-                ) : (
-                  <button onClick={() => setSelectedId(null)} className="ml-auto px-4 py-2 text-sm font-medium rounded-lg text-muted-foreground hover:bg-muted transition-colors">Close</button>
-                )}
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+                  </div>
+                </>
+              )}
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
 
-      <AlertDialog open={confirmSendOpen} onOpenChange={(o) => !sendingInfo && setConfirmSendOpen(o)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Send to customer?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This sends {pendingInfoFiles.length} file{pendingInfoFiles.length === 1 ? "" : "s"} to {detail?.ApplicantName} and marks this step as sent. This cannot be undone from here.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {pendingInfoFiles.length > 0 && (
-            <ul className="space-y-1.5 text-xs text-muted-foreground max-h-32 overflow-y-auto">
-              {pendingInfoFiles.map((f, idx) => (
-                <li key={`${f.name}-${idx}`} className="flex items-center gap-1.5">
-                  {f.type.startsWith("image/") ? (
-                    <img src={f.dataUri} alt={f.name} className="w-5 h-5 object-cover rounded shrink-0 border border-border" />
-                  ) : (
-                    <FileText size={11} className="shrink-0" />
-                  )}
-                  <span className="truncate">{f.name}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={sendingInfo}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSendInfo} disabled={sendingInfo}>
-              {sendingInfo ? "Sending..." : "Send"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </CrmShell>
   );
 };
 
 function AttachmentList({ attachments, apiBase }: { attachments: any[]; apiBase: string }) {
+  const isImage = (mime: string) => mime?.startsWith("image/");
+  const fmtSize = (bytes: number) =>
+    bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
+
   return (
-    <ul className="space-y-1.5">
-      {attachments.map((a) => (
-        <li key={a.AttachmentId}>
-          <a
-            href={`${apiBase}/attachment/${a.AttachmentId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 text-xs text-primary hover:underline bg-muted/30 border border-border rounded-lg px-2.5 py-1.5"
-          >
-            {a.MimeType?.startsWith("image/") ? <ImageIcon size={12} /> : <FileText size={12} />}
-            <span className="truncate flex-1">{a.FileName}</span>
-            <span className="text-muted-foreground shrink-0 capitalize">{a.DocType}</span>
-          </a>
-        </li>
-      ))}
+    <ul className="space-y-2">
+      {attachments.map((a) => {
+        const url = `${apiBase}/attachment/${a.AttachmentId}`;
+        return (
+          <li key={a.AttachmentId} className="flex items-center gap-2.5 rounded-lg border border-border bg-muted/20 px-3 py-2 hover:bg-muted/40 transition-colors group">
+            {/* Thumbnail or icon */}
+            {isImage(a.MimeType) ? (
+              <div className="w-9 h-9 rounded-md shrink-0 overflow-hidden border border-border bg-muted">
+                <img src={url} alt={a.FileName} className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              <div className="w-9 h-9 rounded-md shrink-0 bg-primary/10 border border-primary/20 flex items-center justify-center">
+                <FileText size={15} className="text-primary" />
+              </div>
+            )}
+
+            {/* Name + meta */}
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-foreground truncate">{a.FileName}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {a.FileSize ? fmtSize(a.FileSize) : ""}
+                {a.UploadedAt ? ` · ${String(a.UploadedAt).slice(0, 10)}` : ""}
+              </p>
+            </div>
+
+            {/* Open link */}
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 flex items-center gap-1 text-[11px] font-medium text-primary opacity-0 group-hover:opacity-100 transition-opacity hover:underline"
+            >
+              Open <ChevronRight size={11} />
+            </a>
+          </li>
+        );
+      })}
     </ul>
   );
 }

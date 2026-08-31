@@ -97,12 +97,16 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-sales-deed", "vi
     const existingDeed = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Id, DeedNo FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
 
+    const handover = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+
     res.json({
       booking: booking.recordset[0],
       agreement: agreement.recordset[0] || null,
       loanDetail: loanDetail.recordset[0] || null,
       loanBlockReason,
       existingDeed: existingDeed.recordset[0] || null,
+      handoverCompleted: handover.recordset[0]?.Status === "Completed",
     });
   } catch (e) {
     console.error("[crm-sales-deed] context error:", e.message);

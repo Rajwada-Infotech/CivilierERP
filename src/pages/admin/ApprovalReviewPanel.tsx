@@ -180,11 +180,13 @@ const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step, isLas
   );
 };
 
-const FormField: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
+const FormField: React.FC<{ label: string; value: React.ReactNode; accent?: boolean }> = ({ label, value, accent }) => (
   <div className="min-w-0">
-    <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-1">{label}</p>
-    <div className="text-xs text-foreground bg-muted/30 border border-border/60 rounded-lg px-2.5 py-2 break-words min-h-[30px] flex items-center">
-      {value ?? "—"}
+    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">{label}</p>
+    <div className={`text-[13px] font-medium text-foreground rounded-xl px-3 py-2.5 break-words min-h-[38px] flex items-center border ${
+      accent ? "bg-primary/5 border-primary/20 text-primary" : "bg-muted/30 border-border/50"
+    }`}>
+      {value ?? <span className="text-muted-foreground/40">—</span>}
     </div>
   </div>
 );
@@ -282,9 +284,13 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
         <UserCheck size={11} /> Approval Chain
       </p>
       {!approvalTable ? (
-        <p className="text-xs text-muted-foreground">
-          No approval workflow is configured to track this module's chain yet.
-        </p>
+        <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
+          <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center mx-auto mb-2">
+            <UserCheck size={16} className="text-muted-foreground/50" />
+          </div>
+          <p className="text-xs font-medium text-muted-foreground">No tracked workflow</p>
+          <p className="text-[11px] text-muted-foreground/60 mt-0.5">This module's approval chain is managed directly.</p>
+        </div>
       ) : loadingChain ? (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -313,23 +319,39 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
 
       {/* Modal takeover */}
       <div className="relative w-full h-full sm:h-[min(90vh,880px)] sm:w-[min(94vw,1160px)] bg-background sm:rounded-2xl shadow-2xl ring-1 ring-border/60 flex flex-col overflow-hidden animate-in zoom-in-95 fade-in duration-200">
-        {/* Header */}
-        <div className="shrink-0 border-b border-border px-5 sm:px-6 py-4 flex items-start gap-3 bg-muted/10">
-          <div className={`p-2 rounded-lg shrink-0 ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
-            <Icon size={18} />
+        {/* Header — coloured gradient keyed to the module accent */}
+        <div className="shrink-0 border-b border-border px-5 sm:px-6 py-4 flex items-center gap-3"
+          style={{ background: (() => {
+            const c = cfg?.color ?? "";
+            const m = c.match(/text-(\w+)-(\d+)/);
+            if (!m) return undefined;
+            const map: Record<string, Record<string, string>> = {
+              blue: { 500: "#3b82f6" }, amber: { 500: "#f59e0b", 600: "#d97706" },
+              emerald: { 500: "#10b981", 600: "#059669" }, violet: { 500: "#8b5cf6", 600: "#7c3aed" },
+              rose: { 500: "#f43f5e" }, teal: { 500: "#14b8a6", 600: "#0d9488" },
+              indigo: { 400: "#818cf8", 500: "#6366f1" }, orange: { 500: "#f97316" },
+              cyan: { 500: "#06b6d4" }, fuchsia: { 500: "#d946ef", 600: "#c026d3" },
+              sky: { 500: "#0ea5e9" }, purple: { 500: "#a855f7" }, lime: { 600: "#65a30d" },
+            };
+            const hex = map[m[1]]?.[m[2]];
+            return hex ? `linear-gradient(135deg, ${hex}18 0%, ${hex}06 100%)` : undefined;
+          })() }}
+        >
+          <div className={`p-2.5 rounded-xl shrink-0 shadow-sm ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
+            <Icon size={20} />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-foreground truncate">{item.ModuleLabel}</p>
-            <p className="text-[11px] text-muted-foreground font-mono truncate">
+            <p className="text-[15px] font-bold text-foreground truncate leading-tight">{item.ModuleLabel}</p>
+            <p className="text-[12px] text-muted-foreground font-mono truncate mt-0.5">
               {item.Reference || `#${item.RecordId}`}
             </p>
           </div>
           <StatusBadge status={item.Status} />
           <button
             onClick={onClose}
-            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+            className="ml-2 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors shrink-0"
           >
-            <X size={16} />
+            <X size={17} />
           </button>
         </div>
 
@@ -338,11 +360,34 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
           {/* Left: record details */}
           <div className="flex-1 min-w-0 overflow-y-auto px-5 sm:px-6 py-5 space-y-5">
             {/* Amount hero */}
-            <div className="rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/15 px-4 py-3">
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/70">Amount</p>
-              <p className="text-2xl font-bold font-heading text-foreground mt-0.5 tabular-nums">
-                {fmtAmount(effectiveAmount)}
-              </p>
+            <div className="rounded-2xl border border-border overflow-hidden"
+              style={{ background: (() => {
+                const c = cfg?.color ?? "";
+                const m = c.match(/text-(\w+)-(\d+)/);
+                if (!m) return undefined;
+                const map: Record<string, Record<string, string>> = {
+                  blue: { 500: "#3b82f6" }, amber: { 500: "#f59e0b", 600: "#d97706" },
+                  emerald: { 500: "#10b981", 600: "#059669" }, violet: { 500: "#8b5cf6", 600: "#7c3aed" },
+                  rose: { 500: "#f43f5e" }, teal: { 500: "#14b8a6", 600: "#0d9488" },
+                  indigo: { 400: "#818cf8", 500: "#6366f1" }, orange: { 500: "#f97316" },
+                  cyan: { 500: "#06b6d4" }, fuchsia: { 500: "#d946ef", 600: "#c026d3" },
+                  sky: { 500: "#0ea5e9" }, purple: { 500: "#a855f7" }, lime: { 600: "#65a30d" },
+                };
+                const hex = map[m[1]]?.[m[2]];
+                return hex ? `linear-gradient(135deg, ${hex}22 0%, ${hex}0a 100%)` : undefined;
+              })() }}
+            >
+              <div className="px-5 py-4">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Total Amount</p>
+                <p className="text-3xl font-bold font-heading text-foreground tabular-nums tracking-tight">
+                  {fmtAmount(effectiveAmount)}
+                </p>
+                {item.Status === "Pending" && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1 font-medium">
+                    <Clock size={10} /> Awaiting your approval
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* Overview — form-style fields */}
@@ -438,10 +483,10 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                   onClose();
                   navigate(openInModulePath(item, cfg.navPath));
                 }}
-                className="flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                className="flex items-center justify-center gap-2 w-full py-2.5 px-3 rounded-xl border border-border text-xs font-semibold text-muted-foreground hover:text-primary hover:bg-primary/8 hover:border-primary/30 transition-all"
               >
-                <ArrowUpRight size={13} className="shrink-0" />
-                Open in {item.ModuleLabel}
+                <ArrowUpRight size={14} className="shrink-0" />
+                Open full record in {item.ModuleLabel}
               </button>
             )}
           </div>
@@ -453,7 +498,10 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
         </div>
 
         {/* Footer — the action bar, spanning full width */}
-        <div className="shrink-0 border-t border-border px-5 sm:px-6 py-3.5 bg-muted/20 flex items-center justify-end gap-2">
+        <div className="shrink-0 border-t border-border px-5 sm:px-6 py-4 bg-muted/10 flex items-center justify-between gap-3">
+          <p className="text-[11px] text-muted-foreground hidden sm:block">
+            {item.Status === "Pending" ? "Review the details above before taking action." : `This record is ${item.Status.toLowerCase()}.`}
+          </p>
           <ApprovalActions
             status={item.Status}
             recordId={item.RecordId}
@@ -465,7 +513,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               : undefined
             }
             restricted={RESTRICTED_MODULES.has(item.Module)}
-            className="[&_button]:h-9 [&_button]:px-4"
+            className="[&_button]:h-10 [&_button]:px-5 [&_button]:text-sm [&_button]:font-semibold [&_button]:rounded-xl"
             onSuccess={(action) => {
               if (action === "approve" || action === "reject") {
                 onActionDone(action);

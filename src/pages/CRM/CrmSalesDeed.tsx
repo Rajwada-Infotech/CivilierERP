@@ -124,9 +124,14 @@ const CrmSalesDeed: React.FC = () => {
   });
 
   const trackedBookingIds = new Set((deeds as any[]).map((d: any) => d.BookingId));
-  const eligibleBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
+  // Sale Deed requires Handover Completed (backend gate). Show only bookings whose
+  // Agreement is at least Executed so the list isn't flooded with early-stage bookings.
+  const eligibleBookings = (bookings as any[]).filter((b: any) =>
+    !trackedBookingIds.has(b.Id) &&
+    (b.AgreementStatus === "Executed" || b.AgreementStatus === "Registered")
+  );
 
-  const agreementExecuted = context?.agreement?.Status === CrmStatus.EXECUTED;
+  const agreementExecuted = ["Executed", "Registered"].includes(context?.agreement?.Status ?? "");
   // Loan Processing only exists as a gate at all for a booking explicitly
   // marked Loan-Financed � Self-Funded and undeclared bookings never had a
   // loan to process, so they clear immediately (see
@@ -135,7 +140,8 @@ const CrmSalesDeed: React.FC = () => {
   // genuinely parallel track and never gate this either.
   const isLoanFinanced = context?.booking?.FinancingType === "LoanFinanced";
   const loanCleared = !context?.loanBlockReason;
-  const canCreate = !!form.BookingId && agreementExecuted && loanCleared && !contextLoading;
+  const handoverCompleted = context?.handoverCompleted === true;
+  const canCreate = !!form.BookingId && agreementExecuted && loanCleared && handoverCompleted && !contextLoading;
 
   const detail = detailId != null ? (deeds as any[]).find((d: any) => d.Id === detailId) : null;
   // Deed Value / Stamp Duty / Registration Fee / Sub-Registrar Office / Deed
@@ -167,10 +173,11 @@ const CrmSalesDeed: React.FC = () => {
   // already typed or a deed that was opened from the existing list).
   useEffect(() => {
     if (!context?.agreement) return;
-    const afsTotal =
-      (Number(context.agreement.AfsStampDuty ?? 0) + Number(context.agreement.AfsRegistrationFee ?? 0)) || 0;
-    if (afsTotal > 0) {
-      setForm((f) => ({ ...f, StampDutyCredit: f.StampDutyCredit === "" ? String(afsTotal) : f.StampDutyCredit }));
+    // Only AfsStampDuty is creditable against Sale Deed stamp duty;
+    // AfsRegistrationFee is a separate sub-registrar charge, not a credit.
+    const credit = Number(context.agreement.AfsStampDuty ?? 0) || 0;
+    if (credit > 0) {
+      setForm((f) => ({ ...f, StampDutyCredit: f.StampDutyCredit === "" ? String(credit) : f.StampDutyCredit }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context?.agreement?.AfsStampDuty, context?.agreement?.AfsRegistrationFee]);
@@ -515,16 +522,14 @@ const CrmSalesDeed: React.FC = () => {
               <div className="space-y-1.5">
                 <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading">AFS Stamp Duty Credit</label>
                 <Input type="number" className="h-10 font-mono" placeholder="0" value={form.StampDutyCredit} onChange={(e) => setForm((f) => ({ ...f, StampDutyCredit: e.target.value }))} />
-                {context?.agreement?.AfsStampDuty != null || context?.agreement?.AfsRegistrationFee != null ? (
+                {context?.agreement?.AfsStampDuty != null ? (
                   <p className="text-[10px] text-emerald-600">
-                    ✓ Pre-filled from AFS registration
-                    {context.agreement.AgreementNo ? ` (${context.agreement.AgreementNo})` : ""} —
-                    Stamp Duty {context.agreement.AfsStampDuty != null ? `₹${Number(context.agreement.AfsStampDuty).toLocaleString("en-IN")}` : "—"}{" "}
-                    + Reg. Fee {context.agreement.AfsRegistrationFee != null ? `₹${Number(context.agreement.AfsRegistrationFee).toLocaleString("en-IN")}` : "—"}.
-                    Verify against receipt before saving.
+                    ✓ Pre-filled from AFS registration{context.agreement.AgreementNo ? ` (${context.agreement.AgreementNo})` : ""} —
+                    stamp duty ₹{Number(context.agreement.AfsStampDuty).toLocaleString("en-IN")} already paid is creditable here.
+                    Verify against Sub-Registrar receipt before saving.
                   </p>
                 ) : (
-                  <p className="text-[10px] text-muted-foreground">Stamp duty already paid at AFS registration — deducted from net payable at Sale Deed registration.</p>
+                  <p className="text-[10px] text-muted-foreground">Stamp duty already paid at AFS registration — creditable against Sale Deed stamp duty.</p>
                 )}
               </div>
               <div className="space-y-1.5">

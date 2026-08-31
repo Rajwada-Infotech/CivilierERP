@@ -220,6 +220,11 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
   `);
   const legalName = applicant.recordset[0]?.ApplicantName || null;
 
+  const wc = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 PreferredAgreementDate FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CreatedAt DESC
+  `);
+  const preferredDate = wc.recordset[0]?.PreferredAgreementDate || null;
+
   const agNo = await getNextDocNumber(pool, "AGR", "AGR");
   let result;
   try {
@@ -229,13 +234,25 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
       .input("lname",sql.NVarChar(200), legalName)
       .input("pan",  sql.NVarChar(20), customerDetails.PanNo || null)
       .input("aadh", sql.NVarChar(20), customerDetails.AadhaarNo || null)
+      .input("pd",   sql.Date,         preferredDate)
       .input("cb",   sql.Int, actorUserId || null)
       .query(`
         INSERT INTO dbo.CrmAgreement
-          (AgreementNo, BookingId, LegalName, PanNo, AadhaarNo, Status, Notes, CreatedBy, CreatedAt)
+          (AgreementNo, BookingId, LegalName, PanNo, AadhaarNo, Status, Notes, ProposedDate, ProposedDateStatus, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@agno, @bid, @lname, @pan, @aadh, 'Draft', 'Auto-created — all agreement-prep prerequisites met', @cb, SYSDATETIME())
+        VALUES (@agno, @bid, @lname, @pan, @aadh, 'Draft', 'Auto-created — all agreement-prep prerequisites met', @pd, CASE WHEN @pd IS NOT NULL THEN 'PendingCustomerReview' ELSE NULL END, @cb, SYSDATETIME())
       `);
+    
+    if (preferredDate) {
+      await pool.request()
+        .input("agid", sql.Int, result.recordset[0].Id)
+        .input("pd",   sql.Date, preferredDate)
+        .input("cb",   sql.Int, actorUserId || null)
+        .query(`
+          INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
+          VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
+        `);
+    }
   } catch (e) {
     // Race: welcome-call logging and bank-detail saving can both complete
     // the last prerequisite at nearly the same time and both reach here.
