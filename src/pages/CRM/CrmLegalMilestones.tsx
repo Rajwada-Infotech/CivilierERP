@@ -63,13 +63,19 @@ interface JourneySection {
 
 // Builds the full post-agreement journey as clearly-labeled sections so
 // any team member — not just legal staff — can follow what happens and why.
+// Sequence per legal workflow (under-construction):
+//   AFS Visit 1 → NOC → Possession/Handover → Sale Deed → Sale Deed Visit 2 → Mutation
 function buildJourneySections(t: any, agrDone: boolean): JourneySection[] {
   const deedStatus = t.DeedRegistrationNo ? "Registered"
     : t.DeedExecutedBy ? "Executed"
     : t.SalesDeedId ? "Drafted"
     : null;
 
+  const afsRegistered = t.AgreementStatus === "Registered";
+  const handoverDone = t.HandoverStatus === "Completed";
+
   return [
+    // ── 1. Allotment Letter ──────────────────────────────────────────────────
     {
       title: "Allotment Letter",
       description:
@@ -88,10 +94,12 @@ function buildJourneySections(t: any, agrDone: boolean): JourneySection[] {
         },
       ],
     },
+
+    // ── 2. Sub-Registrar Visit 1 — AFS Registration ─────────────────────────
     {
       title: "Sub-Registrar Visit 1 — Registering the Agreement for Sale",
       description:
-        "Before the property deal is legally recognised, the Agreement for Sale must be registered at the Sub-Registrar's Office. First the buyer confirms the stamp duty & registration fees, then both parties attend in person to register the document.",
+        "The Agreement for Sale must be registered at the Sub-Registrar's Office before the deal is legally recognised. First the buyer confirms the stamp duty & registration fees (via the AFS Query Payment), then both parties attend in person to register the document.",
       stages: [
         {
           key: "afsQP",
@@ -100,50 +108,139 @@ function buildJourneySections(t: any, agrDone: boolean): JourneySection[] {
           path: "/crm/afs-query-payment",
           no: t.AfsQPNo || null,
           status: t.AfsQPStatus || null,
-          isDone: t.AfsQPStatus === "Confirmed" || t.AgreementStatus === "Registered",
+          isDone: t.AfsQPStatus === "Confirmed" || afsRegistered,
           isLocked: !agrDone,
           unlockedHint: "Unlocks once the Agreement is executed (step 8 above)",
         },
         {
           key: "afsReg",
           label: "Agreement Registration Visit",
-          sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 1)",
+          sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 1) — Agreement becomes Registered",
           path: "/crm/afs-registry",
           no: t.AfsRegNo || null,
           status: t.AfsRegistryStatus || null,
-          isDone: t.AfsRegistryStatus === "Completed" || t.AgreementStatus === "Registered",
-          isLocked: !agrDone || (t.AfsQPStatus !== "Confirmed" && t.AgreementStatus !== "Registered"),
+          isDone: afsRegistered,
+          isLocked: !agrDone || (t.AfsQPStatus !== "Confirmed" && !afsRegistered),
           unlockedHint: "Requires Agreement Registration Fees to be Confirmed first",
         },
       ],
     },
+
+    // ── 3. NOC — issued after AFS registration, before possession ────────────
+    {
+      title: "No Objection Certificates",
+      description:
+        "Once the Agreement for Sale is registered, the legal team obtains No Objection Certificates from the bank (for loan-financed buyers, confirming the lender has no objection to the AFS) and from the developer organisation (confirming no outstanding dues).",
+      stages: [
+        {
+          key: "bankNoc",
+          label: "No Objection Certificate — Bank",
+          sublabel: "Bank confirms it has no objection to the AFS registration (loan-case NOC)",
+          path: "/crm/noc",
+          no: t.BankNocNo || null,
+          status: t.BankNocStatus || null,
+          isDone: t.BankNocStatus === "Issued",
+          isLocked: !afsRegistered,
+          unlockedHint: "Unlocks once the Agreement for Sale is registered (Visit 1 completed)",
+        },
+        {
+          key: "orgNoc",
+          label: "No Objection Certificate — Organisation",
+          sublabel: "Developer confirms no outstanding dues or objections",
+          path: "/crm/noc",
+          no: t.OrgNocNo || null,
+          status: t.OrgNocStatus || null,
+          isDone: t.OrgNocStatus === "Issued",
+          isLocked: !afsRegistered,
+          unlockedHint: "Unlocks once the Agreement for Sale is registered (Visit 1 completed)",
+        },
+      ],
+    },
+
+    // ── 4. Possession & Key Handover (before Sale Deed for under-construction) ─
+    //   OC/CC (project-level) → Pre-Possession → Possession Notice → Handover
+    {
+      title: "Possession & Key Handover",
+      description:
+        "Once the AFS is registered and the project receives its Occupancy Certificate, the developer schedules a pre-possession inspection, issues a Possession Notice, and hands over keys. Handover must be completed before the Sale Deed is created.",
+      stages: [
+        {
+          key: "ocCc",
+          label: "OC / CC",
+          sublabel: "Project's Occupancy or Completion Certificate from the authority — project-level prerequisite",
+          path: "/crm/oc-cc",
+          no: null,
+          status: null,
+          isDone: t.OcCcReceived === 1,
+          isLocked: !afsRegistered,
+          unlockedHint: "Unlocks once the Agreement for Sale is registered",
+        },
+        {
+          key: "prePossession",
+          label: "Pre-Possession Inspection",
+          sublabel: "Site inspection and snag list before offering possession to the buyer",
+          path: "/crm/pre-possession",
+          no: null,
+          status: t.PrePossessionStatus || null,
+          isDone: t.PrePossessionStatus === "Ready",
+          isLocked: !afsRegistered || t.OcCcReceived !== 1,
+          unlockedHint: "Unlocks once AFS is registered and OC/CC is received",
+        },
+        {
+          key: "possessionNotice",
+          label: "Possession Notice",
+          sublabel: "Developer issues notice with offered possession date; buyer acknowledges or disputes",
+          path: "/crm/possession-notice",
+          no: null,
+          status: t.PossessionNoticeStatus || null,
+          isDone: t.PossessionNoticeStatus === "Acknowledged",
+          isLocked: t.PrePossessionStatus !== "Ready",
+          unlockedHint: "Unlocks once Pre-Possession Inspection is Ready",
+        },
+        {
+          key: "handover",
+          label: "Handover",
+          sublabel: "Physical key handover — all NOCs issued, no open snags, no outstanding dues",
+          path: "/crm/handover",
+          no: null,
+          status: t.HandoverStatus || null,
+          isDone: t.HandoverStatus === "Completed",
+          isLocked: t.PossessionNoticeStatus !== "Acknowledged",
+          unlockedHint: "Unlocks once the Possession Notice is Acknowledged by the customer",
+        },
+      ],
+    },
+
+    // ── 5. Sale Deed (post-handover for under-construction) ──────────────────
     {
       title: "Sale Deed Preparation",
       description:
-        "After the Agreement for Sale is registered, the legal team prepares the Sale Deed — the document that legally transfers ownership of the property to the buyer. This is typically done closer to the handover date.",
+        "The Sale Deed is the final document that legally transfers ownership of the property to the buyer. For under-construction properties it is prepared after physical possession is handed over. The stamp duty credit from the AFS registration is applied to reduce the net payable amount.",
       stages: [
         {
           key: "salesDeed",
           label: "Sale Deed",
-          sublabel: "Ownership-transfer document prepared by the legal team",
+          sublabel: "Ownership-transfer document prepared after handover",
           path: "/crm/sales-deed",
           no: t.DeedNo || null,
           status: deedStatus,
           isDone: !!t.SalesDeedId,
-          isLocked: !agrDone,
-          unlockedHint: "Unlocks once the Agreement is executed (step 8 above)",
+          isLocked: !handoverDone,
+          unlockedHint: "Unlocks once Handover is Completed",
         },
       ],
     },
+
+    // ── 6. Sub-Registrar Visit 2 — Sale Deed Registration ───────────────────
     {
       title: "Sub-Registrar Visit 2 — Registering the Sale Deed",
       description:
-        "Once the Sale Deed is ready, the same process as Visit 1 repeats for the Sale Deed: confirm the stamp duty & registration fees, then attend in person to register the Sale Deed. After this, the property is legally transferred.",
+        "Once the Sale Deed is ready, the same process as Visit 1 repeats: confirm the stamp duty & registration fees (net of AFS credit), then both parties attend in person to register the Sale Deed. After this, ownership is officially and permanently transferred.",
       stages: [
         {
           key: "queryPayment",
           label: "Sale Deed Registration Fees",
-          sublabel: "Stamp duty & registration fee due before Visit 2",
+          sublabel: "Net stamp duty & registration fee due before Visit 2 (AFS credit applied)",
           path: "/crm/query-payment",
           no: t.QPNo || null,
           status: t.QueryPaymentStatus || null,
@@ -154,7 +251,7 @@ function buildJourneySections(t: any, agrDone: boolean): JourneySection[] {
         {
           key: "registry",
           label: "Sale Deed Registration Visit",
-          sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 2)",
+          sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 2) — ownership transferred",
           path: "/crm/registry",
           no: t.RegNo || null,
           status: t.RegistryStatus || null,
@@ -164,59 +261,21 @@ function buildJourneySections(t: any, agrDone: boolean): JourneySection[] {
         },
       ],
     },
+
+    // ── 7. Post-Registration ─────────────────────────────────────────────────
     {
-      title: "Post-Registration Formalities",
+      title: "Post-Registration",
       description:
-        "Once the Sale Deed is officially registered at the Sub-Registrar's Office, the municipal records are updated to reflect the new owner (Mutation/Khata Transfer) and any outstanding Bank or Organisation approvals are obtained.",
+        "Once the Sale Deed is officially registered, the municipal land records are updated to reflect the new owner (Mutation / Khata Transfer / Dakhil Kharij). This is mandatory under the 2025 government ruling.",
       stages: [
         {
           key: "mutation",
           label: "Property Mutation (Khata Transfer)",
-          sublabel: "Municipal land records updated to the new owner's name",
+          sublabel: "Municipal land records updated to the new owner — mandatory post Sale Deed registration",
           path: "/crm/mutation",
           no: t.MutationNo || null,
           status: t.MutationStatus || null,
           isDone: t.MutationStatus === "Approved",
-          isLocked: t.RegistryStatus !== "Completed",
-          unlockedHint: "Requires Sale Deed Registration Visit to be Completed first",
-        },
-        {
-          key: "bankNoc",
-          label: "No Objection Certificate — Bank",
-          sublabel: "Bank confirms it has no objection to the transfer (loan-case NOC)",
-          path: "/crm/noc",
-          no: t.BankNocNo || null,
-          status: t.BankNocStatus || null,
-          isDone: t.BankNocStatus === "Issued",
-          isLocked: !t.SalesDeedId,
-          unlockedHint: "Requires the Sale Deed to exist first",
-        },
-        {
-          key: "orgNoc",
-          label: "No Objection Certificate — Organisation",
-          sublabel: "Developer confirms no outstanding dues or objections",
-          path: "/crm/noc",
-          no: t.OrgNocNo || null,
-          status: t.OrgNocStatus || null,
-          isDone: t.OrgNocStatus === "Issued",
-          isLocked: false,
-          unlockedHint: "",
-        },
-      ],
-    },
-    {
-      title: "Possession & Key Handover",
-      description:
-        "Once all registrations and formalities are complete, the developer issues a Possession Notice to the buyer with the offered possession date. The buyer acknowledges receipt to confirm key handover.",
-      stages: [
-        {
-          key: "possessionNotice",
-          label: "Possession Notice",
-          sublabel: "Developer issues notice; buyer acknowledges or disputes",
-          path: "/crm/possession-notice",
-          no: null,
-          status: t.PossessionNoticeStatus || null,
-          isDone: t.PossessionNoticeStatus === "Acknowledged",
           isLocked: t.RegistryStatus !== "Completed",
           unlockedHint: "Requires Sale Deed Registration Visit to be Completed first",
         },

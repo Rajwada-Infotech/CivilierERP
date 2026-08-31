@@ -811,7 +811,7 @@ const CrmPaymentMilestones: React.FC = () => {
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs text-muted-foreground block mb-1">
-                    Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project` : ""}
+                    Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project` : ""} <span className="text-muted-foreground/60">(optional)</span>
                   </label>
                   <select value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
@@ -846,7 +846,7 @@ const CrmPaymentMilestones: React.FC = () => {
               <button onClick={() => setEditingId(null)}
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleRecordPayment}
-                disabled={saving || !!(payForm.AmountPaid && bankOptions.length > 0 && !payForm.DepositBankId)}
+                disabled={saving}
                 className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
                 {saving ? "Submitting..." : "Submit for Approval"}
               </button>
@@ -962,7 +962,7 @@ const CrmPaymentMilestones: React.FC = () => {
               <button onClick={() => setOnAccountDialog(false)}
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleDepositOnAccount}
-                disabled={saving || !onAccountForm.Amount || (bankOptions.length > 0 && !onAccountForm.DepositBankId)}
+                disabled={saving || !onAccountForm.Amount}
                 className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
                 {saving ? "Submitting..." : "Submit for Approval"}
               </button>

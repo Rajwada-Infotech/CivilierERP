@@ -100,6 +100,46 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-noc", "view"), a
   }
 });
 
+// GET /eligible-bookings?type=Bank|Organisation — bookings eligible for a new
+// NOC of the requested type. Gates: active booking, AFS Registered, no
+// existing non-Rejected NOC of that type. Must be registered before POST / so
+// Express doesn't try to parse "eligible-bookings" as an :id param later.
+router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (req, res) => {
+  const type = NOC_TYPES.includes(req.query.type) ? req.query.type : "Organisation";
+  try {
+    const pool = getPool();
+    const candidates = await pool.request()
+      .input("type", sql.NVarChar(30), type)
+      .query(`
+        SELECT b.Id, b.BookingNo,
+               COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+               a.ApplicantName
+        FROM dbo.CrmBooking b
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+        WHERE b.IsActive = 1
+          AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+          AND NOT EXISTS (
+            SELECT 1 FROM dbo.CrmNoc n
+            WHERE n.BookingId = b.Id AND n.NocType = @type AND n.Status <> '${CrmStatus.REJECTED}'
+          )
+        ORDER BY b.BookingNo
+      `);
+
+    const eligible = [];
+    for (const c of candidates.recordset) {
+      const agr = await pool.request().input("bid", sql.Int, c.Id)
+        .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+      if (!agr.recordset.length || agr.recordset[0].Status !== CrmStatus.REGISTERED) continue;
+      eligible.push({ Id: c.Id, BookingNo: c.BookingNo, UnitNo: c.UnitNo, ApplicantName: c.ApplicantName });
+    }
+    res.json(eligible);
+  } catch (e) {
+    console.error("[crm-noc] GET /eligible-bookings error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST / — request a NOC. Gated on an Agreement existing for the booking —
 // deliberately not a stricter "Executed" gate: a Bank NOC (loan clearance/
 // disbursement condition) can legitimately need to be requested while the
@@ -117,24 +157,22 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    const agr = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
-    if (!agr.recordset.length) {
-      return res.status(400).json({ error: "NOC requires an agreement to exist for this booking first" });
+    // Both NOC types require the Agreement for Sale to be physically registered
+    // at the Sub-Registrar's Office (AgreementStatus = 'Registered').
+    // Bank NOC: releases the lender's charge on the unit.
+    // Org NOC: confirms builder has no objection — only meaningful once AFS is
+    // legally registered, not just drafted or executed.
+    const agrStatus = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+    const agrStatusVal = agrStatus.recordset[0]?.Status;
+    if (!agrStatusVal) {
+      return res.status(400).json({ error: "NOC requires an Agreement for Sale to exist for this booking first" });
+    }
+    if (agrStatusVal !== "Registered") {
+      return res.status(400).json({ error: "NOC can only be requested once the Agreement for Sale is registered at the Sub-Registrar's Office (current status: " + agrStatusVal + ")" });
     }
 
     const nocType = NOC_TYPES.includes(b.NocType) ? b.NocType : "Organisation";
-
-    // Sales Deed must come before Bank NOC — a Bank NOC releases the
-    // lending bank's charge against the unit, which only makes sense once
-    // the deed itself exists. Org NOC has no such dependency.
-    if (nocType === "Bank") {
-      const deed = await pool.request().input("bid", sql.Int, bookingId)
-        .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
-      if (!deed.recordset.length) {
-        return res.status(400).json({ error: "A Bank NOC requires the Sales Deed to exist for this booking first" });
-      }
-    }
 
     // Duplicate guard: a non-Rejected NOC of the same type already means one
     // is either in progress or already issued — a second row for the same type

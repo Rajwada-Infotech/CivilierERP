@@ -46,8 +46,11 @@ const LM_SELECT = `
     mut.Id AS MutationId, mut.MutationNo, mut.Status AS MutationStatus,
     bankNoc.Id AS BankNocId, bankNoc.NocNo AS BankNocNo, bankNoc.Status AS BankNocStatus,
     orgNoc.Id AS OrgNocId, orgNoc.NocNo AS OrgNocNo, orgNoc.Status AS OrgNocStatus,
-    -- Possession Notice (key handover)
-    pn.Id AS PossessionNoticeId, pn.Status AS PossessionNoticeStatus
+    -- Possession sequence (OC/CC is project-level; fetched via booking's ProjectId)
+    occc.HasReceived AS OcCcReceived,
+    pp.Status AS PrePossessionStatus,
+    pn.Id AS PossessionNoticeId, pn.Status AS PossessionNoticeStatus,
+    hov.Status AS HandoverStatus
   FROM dbo.CrmLegalMilestone m
   JOIN dbo.CrmBooking b ON b.Id = m.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -61,9 +64,23 @@ const LM_SELECT = `
   LEFT JOIN dbo.CrmRegistry reg ON reg.BookingId = m.BookingId
   LEFT JOIN dbo.CrmMutation mut ON mut.BookingId = m.BookingId
   OUTER APPLY (
+    SELECT CASE WHEN EXISTS (
+      SELECT 1 FROM dbo.CrmOccupancyCertificate
+      WHERE ProjectId = b.ProjectId AND Status = 'Received'
+    ) THEN 1 ELSE 0 END AS HasReceived
+  ) occc
+  OUTER APPLY (
+    SELECT TOP 1 Status FROM dbo.CrmPrePossession
+    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+  ) pp
+  OUTER APPLY (
     SELECT TOP 1 Id, Status FROM dbo.CrmPossessionNotice
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) pn
+  OUTER APPLY (
+    SELECT TOP 1 Status FROM dbo.CrmHandover
+    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+  ) hov
   OUTER APPLY (
     SELECT TOP 1 Id, NocNo, Status FROM dbo.CrmNoc
     WHERE BookingId = m.BookingId AND NocType = 'Bank' ORDER BY CreatedAt DESC

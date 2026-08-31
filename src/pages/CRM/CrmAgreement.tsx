@@ -829,7 +829,7 @@ const CrmAgreement: React.FC = () => {
       if (action === "mark-executed") {
         promptNextStep(navigate, "Agreement executed — Legal Milestones and NOC can now begin.", "/crm/legal-milestones", "Go to Legal Milestones");
       } else if (action === "mark-registered") {
-        promptNextStep(navigate, "Agreement registered — Sales Deed can now be created.", "/crm/sales-deed", "Go to Sales Deed");
+        promptNextStep(navigate, "Agreement registered — you may now request NOC and begin the possession process.", "/crm/noc", "Go to NOC");
       }
     } catch (e: any) {
       toast.error(translateError(e.message));

@@ -87,6 +87,18 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
         .query("SELECT TOP 1 Id FROM dbo.CrmNoc WHERE BookingId = @bid AND Status IN ('Pending','Approved')");
       if (openNoc.recordset.length) continue;
 
+      // 4. No outstanding payment dues (mirrors the POST / dues check)
+      const dues = await pool.request().input("bid", sql.Int, bid)
+        .query(`
+          SELECT SUM(m.Amount - ISNULL(m.PaidAmount,0) - ISNULL(m.WaivedAmount,0)) AS Bal
+          FROM dbo.CrmPaymentMilestone m
+          WHERE m.BookingId = @bid
+            AND m.Status NOT IN ('Paid','Waived')
+            AND m.DueDate < GETDATE()
+        `);
+      const bal = dues.recordset[0]?.Bal ?? 0;
+      if (bal > 0) continue;
+
       eligible.push({ Id: c.Id, BookingNo: c.BookingNo, UnitNo: c.UnitNo, ApplicantName: c.ApplicantName });
     }
 

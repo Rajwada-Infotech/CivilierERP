@@ -53,6 +53,17 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
       return res.status(400).json({ error: "Possession notice requires the pre-possession check to be Ready first" });
     }
 
+    // OC / CC must be received for the project (same check as Pre-Possession).
+    const bk = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 ProjectId FROM dbo.CrmBooking WHERE Id = @bid");
+    if (bk.recordset[0]?.ProjectId) {
+      const occc = await pool.request().input("pid", sql.Int, bk.recordset[0].ProjectId)
+        .query("SELECT TOP 1 Id FROM dbo.CrmOccupancyCertificate WHERE ProjectId = @pid AND Status = 'Received'");
+      if (!occc.recordset.length) {
+        return res.status(400).json({ error: "Possession notice requires the project's OC / CC to be received first" });
+      }
+    }
+
     const noticeNo = await getNextDocNumber(pool, "PN", "PN");
 
     const result = await pool.request()

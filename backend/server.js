@@ -304,6 +304,7 @@ const ALL_ROUTES = [
   { path: "/api/crm/customers",      file: "./routes/crmCustomers"      },
   { path: "/api/crm/applications",   file: "./routes/crmApplications"   },
   { path: "/api/crm/bookings",       file: "./routes/crmBookings"       },
+  { path: "/api/crm/loan-summary",   file: "./routes/crmLoanSummary"    },
   { path: "/api/crm/welcome-calls",     file: "./routes/crmWelcomeCalls"     },
   { path: "/api/crm/welcome-checklist", file: "./routes/crmWelcomeChecklist" },
   { path: "/api/crm/co-applicants",  file: "./routes/crmCoApplicant"    },
