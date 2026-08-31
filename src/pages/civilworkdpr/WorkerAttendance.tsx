@@ -13,6 +13,9 @@ import {
   Plus,
   Save,
   UserX,
+  History,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -26,6 +29,7 @@ import {
   createWorker,
   addToRoster,
   removeFromRoster,
+  getWorkerCalendar,
   type AttendanceStatus,
   type ActivityOption,
   type WorkerSearchResult,
@@ -242,6 +246,109 @@ export function AddWorkerDialog({
   );
 }
 
+// ─── Attendance Record — a worker's full history across activities/projects,
+//     one month at a time (backed by GET /workers/:id/calendar, previously
+//     unused by any page). ───────────────────────────────────────────────────
+function WorkerHistoryDialog({
+  workerId,
+  workerName,
+  open,
+  onOpenChange,
+}: {
+  workerId: number | null;
+  workerName: string;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const [month, setMonth] = useState(() => todayIso().slice(0, 7));
+
+  useEffect(() => {
+    if (open) setMonth(todayIso().slice(0, 7));
+  }, [open]);
+
+  const { data, isFetching } = useQuery({
+    queryKey: ["workerAttendanceCalendar", workerId, month],
+    queryFn: () => getWorkerCalendar(workerId as number, month),
+    enabled: open && !!workerId,
+  });
+
+  const days = data?.days ?? [];
+  const counts = useMemo(() => {
+    const c: Record<AttendanceStatus, number> = { P: 0, A: 0, H: 0 };
+    for (const d of days) c[d.status]++;
+    return c;
+  }, [days]);
+
+  const shiftMonth = (delta: number) => {
+    const [y, m] = month.split("-").map(Number);
+    const dt = new Date(y, m - 1 + delta, 1);
+    setMonth(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-heading text-base truncate">{workerName} — Attendance Record</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <button onClick={() => shiftMonth(-1)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-sm font-medium">
+              {new Date(`${month}-01`).toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
+            </span>
+            <button onClick={() => shiftMonth(1)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
+              <ChevronRight size={16} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 py-2">
+              <p className="text-lg font-semibold text-emerald-700 dark:text-emerald-400">{counts.P}</p>
+              <p className="text-[10px] text-muted-foreground">Present</p>
+            </div>
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 py-2">
+              <p className="text-lg font-semibold text-red-700 dark:text-red-400">{counts.A}</p>
+              <p className="text-[10px] text-muted-foreground">Absent</p>
+            </div>
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 py-2">
+              <p className="text-lg font-semibold text-amber-700 dark:text-amber-400">{counts.H}</p>
+              <p className="text-[10px] text-muted-foreground">Half Day</p>
+            </div>
+          </div>
+
+          <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border/60">
+            {isFetching ? (
+              <div className="p-6 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+                <Loader2 size={14} className="animate-spin" /> Loading…
+              </div>
+            ) : days.length === 0 ? (
+              <div className="p-6 text-center text-xs text-muted-foreground">No attendance recorded this month.</div>
+            ) : (
+              days.map((d) => (
+                <div key={d.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-foreground">
+                      {new Date(d.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", weekday: "short" })}
+                    </p>
+                    {d.activityLabel && <p className="text-[10px] text-muted-foreground truncate">{d.activityLabel}</p>}
+                    {d.remarks && <p className="text-[10px] text-muted-foreground truncate italic">— {d.remarks}</p>}
+                  </div>
+                  <span className={`text-[10px] font-medium px-2 py-1 rounded-full border shrink-0 ${STATUS_CLS[d.status]}`}>
+                    {STATUS_LABEL[d.status]}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 const WorkerAttendance: React.FC = () => {
   const rights = usePageRights("civilworkdpr-worker-attendance");
@@ -253,6 +360,7 @@ const WorkerAttendance: React.FC = () => {
   const [date, setDate] = useState(todayIso());
   const [search, setSearch] = useState("");
   const [addWorkerOpen, setAddWorkerOpen] = useState(false);
+  const [historyTarget, setHistoryTarget] = useState<{ id: number; name: string } | null>(null);
   const [statusByWorker, setStatusByWorker] = useState<Record<number, AttendanceStatus>>({});
   const [saving, setSaving] = useState(false);
 
@@ -299,6 +407,15 @@ const WorkerAttendance: React.FC = () => {
     for (const row of attendanceRows) next[row.workerId] = row.status ?? "P";
     setStatusByWorker(next);
   }, [attendanceRows]);
+
+  // Dirty when a row has never been saved at all (attendanceId still null —
+  // the "default everyone to Present" sync above doesn't count as saved) or
+  // its status was edited since the last load/save. Drives disabling Save
+  // Attendance once there's genuinely nothing new to persist, instead of it
+  // staying clickable (and re-toasting "saved") forever after a real save.
+  const isDirty = attendanceRows.some(
+    (row) => row.attendanceId == null || statusByWorker[row.workerId] !== row.status,
+  );
 
   const visibleRows = search
     ? attendanceRows.filter((r) => r.workerName.toLowerCase().includes(search.toLowerCase()))
@@ -474,6 +591,13 @@ const WorkerAttendance: React.FC = () => {
                           ))}
                         </select>
                         <button
+                          onClick={() => setHistoryTarget({ id: row.workerId, name: row.workerName })}
+                          title="Attendance record"
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-cyan-600 hover:bg-cyan-500/10"
+                        >
+                          <History size={13} />
+                        </button>
+                        <button
                           onClick={() => handleRemoveWorker(row.workerId)}
                           title="Remove from activity"
                           className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
@@ -496,11 +620,11 @@ const WorkerAttendance: React.FC = () => {
               </button>
               <button
                 onClick={handleSave}
-                disabled={saving || attendanceRows.length === 0 || !rights.canCreate}
+                disabled={saving || attendanceRows.length === 0 || !rights.canCreate || !isDirty}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-40"
               >
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                Save Attendance
+                {isDirty ? "Save Attendance" : "Saved"}
               </button>
             </div>
           </div>
@@ -513,6 +637,13 @@ const WorkerAttendance: React.FC = () => {
         rungId={rungId || null}
         existingWorkerIds={existingWorkerIds}
         onAdded={refreshRoster}
+      />
+
+      <WorkerHistoryDialog
+        workerId={historyTarget?.id ?? null}
+        workerName={historyTarget?.name ?? ""}
+        open={!!historyTarget}
+        onOpenChange={(v) => !v && setHistoryTarget(null)}
       />
     </>
   );
