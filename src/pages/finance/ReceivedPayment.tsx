@@ -106,6 +106,7 @@ export type PaymentMode =
   | "Cash"
   | "Cheque"
   | "UPI"
+  | "IMPS"
   | "NEFT"
   | "RTGS"
   | "Card"
@@ -178,6 +179,7 @@ const PAYMENT_MODES: PaymentMode[] = [
   "Cash",
   "Cheque",
   "UPI",
+  "IMPS",
   "NEFT",
   "RTGS",
   "Card",
@@ -247,6 +249,7 @@ const modeColor: Record<string, string> = {
   Cash: "bg-emerald-500/10 text-emerald-600",
   Cheque: "bg-blue-500/10 text-blue-600",
   UPI: "bg-violet-500/10 text-violet-600",
+  IMPS: "bg-teal-500/10 text-teal-600",
   NEFT: "bg-sky-500/10 text-sky-600",
   RTGS: "bg-cyan-500/10 text-cyan-600",
   Card: "bg-orange-500/10 text-orange-600",
@@ -955,7 +958,7 @@ export default function ReceivedPaymentPage() {
     },
   ];
 
-  const needsBankRef = ["Cheque", "UPI", "NEFT", "RTGS", "Card"].includes(
+  const needsBankRef = ["Cheque", "UPI", "IMPS", "NEFT", "RTGS", "Card"].includes(
     form.mode,
   );
 
@@ -1601,11 +1604,7 @@ export default function ReceivedPaymentPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {PAYMENT_MODES.map((m) => (
-                          <SelectItem key={m} value={m}>
-                            <span className="flex items-center gap-2">
-                              {modeIcon(m)} {m}
-                            </span>
-                          </SelectItem>
+                          <SelectItem key={m} value={m}>{m}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

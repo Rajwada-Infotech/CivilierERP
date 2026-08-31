@@ -444,7 +444,7 @@ const FinanceDashboard = () => {
 
         {/* ── Primary stat cards ────────────────────────────────────────────── */}
         <GlassSection
-          title="Today's Activity"
+          title="Cumulative Transfers"
           icon={Receipt}
           accentColor="#6366f1"
         >
@@ -455,18 +455,18 @@ const FinanceDashboard = () => {
                 ))
               : [
                   {
-                    label: "Payments Made Today",
-                    value: data?.paymentsMade.todayCount.toString() ?? "0",
-                    sub: `${fmt(data?.paymentsMade.todayAmount ?? 0)} paid today · ${data?.paymentsMade.totalCount ?? 0} total`,
+                    label: "Total Payments Made",
+                    value: fmt(data?.paymentsMade.totalAmount ?? 0),
+                    sub: `${data?.paymentsMade.totalCount ?? 0} transfers · all-time`,
                     icon: Receipt,
                     accentColor: "#f43f5e",
                     onClick: () => navigate("/payments"),
                     trend: "up" as const,
                   },
                   {
-                    label: "Received Today",
-                    value: data?.receivedPayments.todayCount.toString() ?? "0",
-                    sub: `${fmt(data?.receivedPayments.todayAmount ?? 0)} received · ${data?.receivedPayments.totalCount ?? 0} total`,
+                    label: "Total Received",
+                    value: fmt(data?.receivedPayments.totalAmount ?? 0),
+                    sub: `${data?.receivedPayments.totalCount ?? 0} receipts · all-time`,
                     icon: BadgeDollarSign,
                     accentColor: "#10b981",
                     onClick: () => navigate("/received-payments"),
