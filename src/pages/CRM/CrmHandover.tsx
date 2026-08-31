@@ -253,7 +253,7 @@ const CrmHandover: React.FC = () => {
   const currentStatus = detail?.handover?.Status ?? "";
   const allowedNextStatuses = ALLOWED_TRANSITIONS[currentStatus] ?? [];
 
-  usePageRights("crm-handover");
+  const rights = usePageRights("crm-handover");
 
   return (
     <>
@@ -264,10 +264,12 @@ const CrmHandover: React.FC = () => {
       action={
           <div className="flex items-center gap-3">
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-          <button onClick={() => setNewDialog(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-          <Key size={14} /> Schedule Handover
-        </button>
+          {rights.canCreate && (
+            <button onClick={() => setNewDialog(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            <Key size={14} /> Schedule Handover
+          </button>
+          )}
         </div>
       }
     >
@@ -283,10 +285,12 @@ const CrmHandover: React.FC = () => {
               <p className="text-xs text-muted-foreground leading-relaxed">
                 Handover can be scheduled once the Sales Deed is approved by both the customer and the Director, and all NOCs have been issued.
               </p>
-              <button onClick={() => setNewDialog(true)}
-                className="mt-1 text-xs text-primary hover:underline font-medium">
-                Schedule First Handover →
-              </button>
+              {rights.canCreate && (
+                <button onClick={() => setNewDialog(true)}
+                  className="mt-1 text-xs text-primary hover:underline font-medium">
+                  Schedule First Handover →
+                </button>
+              )}
             </div>
           ) : (handovers as any[]).map((h: any) => (
             <button key={h.Id} onClick={() => setSelectedId(h.Id)}
@@ -351,7 +355,7 @@ const CrmHandover: React.FC = () => {
                 </div>
 
                 {/* State-machine-aware transition buttons */}
-                {allowedNextStatuses.length > 0 && (
+                {rights.canEdit && allowedNextStatuses.length > 0 && (
                   <div className="flex gap-2 flex-wrap pt-2 border-t border-border">
                     {allowedNextStatuses.map((s) => (
                       <button key={s} onClick={() => handleTransition(s)}
@@ -373,7 +377,7 @@ const CrmHandover: React.FC = () => {
               <div className="rounded-xl border border-border overflow-hidden">
                 <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
                   <h3 className="text-sm font-semibold">Snag / Defect List ({detail.snags?.length || 0})</h3>
-                  {!["Completed", "Cancelled"].includes(currentStatus) && (
+                  {rights.canEdit && !["Completed", "Cancelled"].includes(currentStatus) && (
                     <button onClick={() => setSnagDialog(true)} className="flex items-center gap-1 text-xs text-primary hover:underline">
                       <Plus size={12} /> Raise Snag
                     </button>
@@ -391,11 +395,11 @@ const CrmHandover: React.FC = () => {
                     </div>
                     {s.Status === CrmStatus.RESOLVED ? (
                       <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 size={12} /> Resolved</span>
-                    ) : (
+                    ) : rights.canEdit ? (
                       <button onClick={() => handleResolveSnag(s.Id)} className="text-xs text-primary hover:underline whitespace-nowrap">
                         Mark Resolved
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 ))}
               </div>
