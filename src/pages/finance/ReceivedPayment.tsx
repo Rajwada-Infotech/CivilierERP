@@ -230,6 +230,7 @@ const MINOR_BANKS = [
   "AU Small Finance Bank",
   "Equitas Small Finance Bank",
   "Ujjivan Small Finance Bank",
+  "Bandhan Bank",
 ];
 const OTHER_BANK_VALUE = "__other__";
 
