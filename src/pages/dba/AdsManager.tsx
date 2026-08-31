@@ -118,7 +118,7 @@ const CREATIVE_STATUS_CONFIG = {
 };
 
 export default function AdsManager() {
-  usePageRights("dba-ads");
+  const rights = usePageRights("dba-ads");
   const queryClient = useQueryClient();
 
   const { data: serverAds = [] } = useQuery<Ad[]>({
@@ -385,13 +385,15 @@ export default function AdsManager() {
         subtitle="All campaigns managed exclusively by DBA — tenants contact us to get started"
         icon={Megaphone}
         action={
-          <Button
-            size="sm"
-            className="gap-1.5 text-xs bg-violet-600 hover:bg-violet-700"
-            onClick={() => setCreateOpen(true)}
-          >
-            <Plus size={13} /> New Campaign
-          </Button>
+          rights.canCreate && (
+            <Button
+              size="sm"
+              className="gap-1.5 text-xs bg-violet-600 hover:bg-violet-700"
+              onClick={() => setCreateOpen(true)}
+            >
+              <Plus size={13} /> New Campaign
+            </Button>
+          )
         }
       >
       <div className="flex items-start gap-3 bg-violet-500/8 border border-violet-500/20 rounded-lg p-3">
@@ -761,7 +763,7 @@ export default function AdsManager() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center gap-1 justify-end">
-                            {c.status === "pending" && (
+                            {rights.canEdit && c.status === "pending" && (
                               <>
                                 <Button
                                   variant="ghost"
@@ -785,14 +787,16 @@ export default function AdsManager() {
                                 </Button>
                               </>
                             )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 w-6 p-0 text-muted-foreground hover:text-red-500"
-                              onClick={() => handleDeleteCreative(c.adId, c.id)}
-                            >
-                              <Trash2 size={10} />
-                            </Button>
+                            {rights.canDelete && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 text-muted-foreground hover:text-red-500"
+                                onClick={() => handleDeleteCreative(c.adId, c.id)}
+                              >
+                                <Trash2 size={10} />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1029,7 +1033,7 @@ export default function AdsManager() {
             >
               Close
             </Button>
-            {uploadingFiles.length > 0 && (
+            {rights.canCreate && uploadingFiles.length > 0 && (
               <Button
                 size="sm"
                 className="text-xs gap-1 bg-violet-600 hover:bg-violet-700"
