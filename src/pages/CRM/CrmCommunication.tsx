@@ -157,6 +157,10 @@ function EditLogDialog({
   const [deleting, setDeleting] = useState(false);
   // Always opens on an existing log entry, so always opens locked.
   const [locked, setLocked] = useState(true);
+  // System entries are the audit trail for what actually happened on the record
+  // (agreement sent, deed sent, etc.) — not a note staff typed, so they're
+  // view-only here, mirroring the backend's PUT/DELETE guard for Channel='System'.
+  const isSystem = log.Channel === "System";
 
   const relatedBooking = useMemo(() =>
     log.BookingId ? bookings.find((b) => b.Id === log.BookingId) : null,
@@ -235,7 +239,7 @@ function EditLogDialog({
             <span className="flex items-center gap-2">
               <MessageSquare size={16} className="text-amber-600 dark:text-amber-400" /> Communication Detail
             </span>
-            {locked && (
+            {locked && !isSystem && (
               <button onClick={() => setLocked(false)}
                 className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
                 <Pencil size={12} /> Edit
@@ -243,7 +247,11 @@ function EditLogDialog({
             )}
           </DialogTitle>
         </DialogHeader>
-        {locked && (
+        {isSystem ? (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
+            <Lock size={11} /> System-generated entry — part of the audit trail, cannot be edited or deleted.
+          </div>
+        ) : locked && (
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
             <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
           </div>
@@ -373,11 +381,13 @@ function EditLogDialog({
         </div>
 
         <div className="flex justify-between items-center pt-3 border-t border-border">
-          <button onClick={handleDelete} disabled={deleting}
-            className="text-xs px-3 py-1.5 border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-40 flex items-center gap-1">
-            <Trash2 size={13} /> {deleting ? "Removing..." : "Delete"}
-          </button>
-          <div className="flex gap-2">
+          {!isSystem && (
+            <button onClick={handleDelete} disabled={deleting}
+              className="text-xs px-3 py-1.5 border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-40 flex items-center gap-1">
+              <Trash2 size={13} /> {deleting ? "Removing..." : "Delete"}
+            </button>
+          )}
+          <div className="flex gap-2 ml-auto">
             {locked ? (
               <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
             ) : (

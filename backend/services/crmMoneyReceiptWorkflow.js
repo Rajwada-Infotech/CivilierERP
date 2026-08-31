@@ -1,7 +1,6 @@
 const { sql } = require("../db");
 const { getNextDocNumber } = require("./docNumber");
 const { generateMoneyReceiptPdf, getMoneyReceiptByReceivedPaymentId } = require("./moneyReceiptPdf");
-const { ensureChecklistRows } = require("./crmApplicationChecklist");
 const { STAGE_REVIEW, stageLabel } = require("./crmBookingStageService");
 
 const APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
@@ -32,17 +31,17 @@ async function assertDataReviewComplete(pool, bookingId) {
   if (row.IsActive === 0 || ["Cancelled", "Rejected"].includes(row.Status)) {
     throw new MoneyReceiptError(`This booking has been ${row.Status} - money receipt actions are blocked`);
   }
-
-  const items = await ensureChecklistRows(pool, row.ApplicationId, 1);
-  const uncheckedCount = items.filter((it) => it.CheckStatus !== "Checked").length;
-  if (uncheckedCount > 0) {
-    throw new MoneyReceiptError(`Data Review is not complete - ${uncheckedCount} checklist item(s) still open`);
-  }
-  // Checklist-complete alone isn't the real gate — the booking must have
-  // actually been submitted for approval (Confirm & Book / "ready-for-
-  // approval", which itself re-checks this same checklist) before a Money
-  // Receipt can exist. Otherwise it can be checked off and then left
-  // sitting at Review indefinitely while a receipt is already circulating.
+  // The booking must have been submitted for approval (Confirm & Book /
+  // "ready-for-approval") before a Money Receipt can exist. submitForApproval
+  // already hard-requires all 7 checklist items checked before it advances
+  // WorkflowStage past Review — re-checking the checklist here is therefore
+  // redundant and actively harmful: if any new CHECKLIST_ITEMS key is added
+  // after a booking cleared Review, ensureChecklistRows inserts it as Pending
+  // (it was never checkable at that stage — the check/flag routes both gate
+  // on WorkflowStage='Review'), and counting it as a blocker permanently
+  // prevents Money Receipt creation for an already-approved booking. The
+  // real gate is the stage check: Review means not yet submitted; anything
+  // past Review means the checklist has already been verified.
   if (row.WorkflowStage === STAGE_REVIEW) {
     throw new MoneyReceiptError(`This booking hasn't been submitted for approval yet (still at ${stageLabel(row.WorkflowStage)}) — Money Receipt becomes available once it's submitted`);
   }
@@ -252,8 +251,14 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
     if (!mrRow) throw new MoneyReceiptError("Money receipt not found", 404);
     if (mrRow.Status !== "Pending") throw new MoneyReceiptError(`Cannot approve from status "${mrRow.Status}"`);
     if (mrRow.ReceivedPaymentId) throw new MoneyReceiptError("Money receipt is already linked to Finance Received Payment");
-    if (mrRow.WorkflowStage !== "Confirmed") {
-      throw new MoneyReceiptError("Booking must complete Level 1 and Level 2 approval before payment approval");
+    // Gate: booking must have been submitted for approval (past Review) — it
+    // does NOT need to wait for Director/Level-2 sign-off. Finance records the
+    // payment as soon as first-level verification is done; the booking's own
+    // L1/L2 approval is a business-terms sign-off, independent of whether the
+    // money was received. A still-at-Review booking has not been verified at all
+    // and should not yet have a payable Money Receipt.
+    if (mrRow.WorkflowStage === STAGE_REVIEW) {
+      throw new MoneyReceiptError("Booking must be submitted for approval (Verify & Send for Approval) before the Money Receipt can be approved");
     }
 
     // Payment goes to On Account — NOT directly to a milestone.

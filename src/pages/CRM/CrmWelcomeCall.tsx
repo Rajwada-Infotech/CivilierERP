@@ -770,6 +770,9 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
   const [bpBankName, setBpBankName] = useState("");
   const [bpRemarks, setBpRemarks] = useState("");
   const [bpSaving, setBpSaving] = useState(false);
+  // Financing type quick-capture — saves immediately on button click so the
+  // telecaller doesn't need a separate Save step for a simple two-option pick.
+  const [ftSaving, setFtSaving] = useState(false);
 
   // Which Financial Summary card is expanded — Payment Plan and Bank
   // Preference are collapsed by default; tapping either flexes it open to
@@ -1093,6 +1096,29 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
       toast.success(`Removed — ${bankName}`);
     } catch (e: any) {
       toast.error(translateError(e.message));
+    }
+  };
+
+  // Financing type single-click save — no form, no Save button; tapping either
+  // option immediately writes it to CrmBooking.FinancingType via the welcome-
+  // call-specific endpoint (no Milestone-1 payment gate, unlike the Bank & KYC
+  // page). Invalidates call-context so the tab reflects the change instantly.
+  const handleSetFinancingType = async (ft: "SelfFunded" | "LoanFinanced") => {
+    setFtSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${booking.BookingId}/financing-type`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ FinancingType: ft }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to save");
+      toast.success(ft === "SelfFunded" ? "Marked as self-funded" : "Marked as loan-financed");
+      qc.invalidateQueries({ queryKey: ["crm-welcome-call-context", booking.BookingId] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setFtSaving(false);
     }
   };
 
@@ -1771,13 +1797,54 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
 
         {wcTab === "Bank Preference" && (
         <div className="space-y-4 pt-1">
+          {/* ── How is this purchase being financed? ── */}
+          <div className="rounded-xl border border-border p-4 space-y-3">
+            <div>
+              <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                <Wallet size={14} className="text-primary" /> How is this purchase being financed?
+              </h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Ask the customer during the call — this unlocks the loan-tracking step and prefills Bank &amp; KYC.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {(["SelfFunded", "LoanFinanced"] as const).map((opt) => {
+                const isSelected = callContext?.financingType === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    disabled={ftSaving}
+                    onClick={() => handleSetFinancingType(opt)}
+                    className={`text-sm rounded-lg border px-3 py-2.5 text-left transition-colors flex items-center gap-2 ${
+                      isSelected
+                        ? "border-primary bg-primary/10 text-primary font-medium"
+                        : "border-border bg-background hover:bg-muted/40"
+                    } ${ftSaving ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
+                  >
+                    <span className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center ${isSelected ? "border-primary" : "border-muted-foreground/40"}`}>
+                      {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-primary block" />}
+                    </span>
+                    {opt === "SelfFunded" ? "Self-funded" : "Home Loan"}
+                  </button>
+                );
+              })}
+            </div>
+            {!callContext?.financingType && (
+              <p className="text-[11px] text-amber-600 flex items-center gap-1.5">
+                <AlertTriangle size={11} className="shrink-0" /> Ask the customer and select above — required before agreement prep.
+              </p>
+            )}
+          </div>
+
           {/* ── Bank Preference ── */}
           <div className="rounded-xl border border-border p-4 space-y-4">
             <div>
               <h3 className="text-sm font-semibold flex items-center gap-1.5"><Landmark size={14} className="text-primary" /> Customer's Preferred Banks (Home Loan)</h3>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                Banks the customer prefers for their home loan — not the finalised/sanctioned loan.
-                Multiple banks can be recorded.
+                {callContext?.financingType === "SelfFunded"
+                  ? "Customer is self-funded — bank preferences are optional but can still be recorded."
+                  : "Banks the customer prefers for their home loan — not the finalised/sanctioned loan. Multiple banks can be recorded."}
               </p>
             </div>
 

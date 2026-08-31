@@ -21,7 +21,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { calculateTds } = require("../services/tds");
 
 const BROKERAGE_SELECT = `
-  SELECT br.*, b.BookingNo, b.UnitNo, b.TotalValue, a.ApplicantName,
+  SELECT br.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, b.TotalValue, a.ApplicantName,
          ahm.LHeadName AS BrokerMasterName, ahm.LHeadPhone AS BrokerMasterPhone,
          m.MilestoneName,
          ISNULL((SELECT SUM(Amount) FROM dbo.CrmBrokerPayment WHERE BrokerageId = br.Id), 0) AS TotalPaid,
@@ -32,6 +32,7 @@ const BROKERAGE_SELECT = `
   FROM dbo.CrmBrokerageMaster br
   JOIN dbo.CrmBooking b ON b.Id = br.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = br.BrokerId
   LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = br.MilestoneId
   OUTER APPLY (
@@ -73,12 +74,14 @@ router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, r
       SELECT p.Id, p.BrokerageId, p.Amount, p.PaidDate, p.PaymentMode, p.TransactionRef, p.Notes, p.CreatedAt,
              CAST(NULL AS INT) AS FinancePaymentId, CAST(NULL AS NVARCHAR(100)) AS FinancePaymentDocNo, 'Paid' AS FinancePaymentStatus,
              br.RateType, br.RateValue, br.ComputedAmount, br.Status AS BrokerageStatus,
-             br.BrokerName, br.BrokerFirm, b.BookingNo, b.UnitNo, a.ApplicantName,
+             br.BrokerName, br.BrokerFirm, b.BookingNo,
+             COALESCE(bn1.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
              cu.name AS CreatedByName
       FROM dbo.CrmBrokerPayment p
       JOIN dbo.CrmBrokerageMaster br ON br.Id = p.BrokerageId
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn1 ON bn1.BookingId = b.Id
       LEFT JOIN dbo.Users cu ON cu.id = p.CreatedBy
       ${where}
       UNION ALL
@@ -87,12 +90,14 @@ router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, r
              np.PRemarks AS Notes, np.PCreatedAt AS CreatedAt,
              np.PPaymentID AS FinancePaymentId, np.DocNo AS FinancePaymentDocNo, np.Status AS FinancePaymentStatus,
              br.RateType, br.RateValue, br.ComputedAmount, br.Status AS BrokerageStatus,
-             br.BrokerName, br.BrokerFirm, b.BookingNo, b.UnitNo, a.ApplicantName,
+             br.BrokerName, br.BrokerFirm, b.BookingNo,
+             COALESCE(bn2.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
              np.PCreatedBy AS CreatedByName
       FROM dbo.NewPayment np
       JOIN dbo.CrmBrokerageMaster br ON br.Id = np.SourceCrmBrokerageId
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn2 ON bn2.BookingId = b.Id
       WHERE np.Status IN ('${CrmStatus.DRAFT}','${CrmStatus.PENDING}','${CrmStatus.APPROVED}') ${status ? "AND br.Status = @st" : ""}
       ORDER BY PaidDate DESC, CreatedAt DESC
     `);

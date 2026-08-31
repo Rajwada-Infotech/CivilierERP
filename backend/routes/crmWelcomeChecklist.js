@@ -331,15 +331,18 @@ router.get("/recheck/queue", requirePageRight("crm-welcome-calls", "view"), asyn
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        b.Id AS BookingId, b.BookingNo, b.UnitNo, b.ProjectName,
+        b.Id AS BookingId, b.BookingNo,
+        COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+        COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
         a.ApplicantName, a.Mobile,
         COUNT(ci.Id) AS OpenRecheckCount,
         MIN(ci.RecheckRequestedAt) AS OldestFlaggedAt
       FROM dbo.CrmWelcomeChecklistItem ci
       JOIN dbo.CrmBooking b ON b.Id = ci.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE ci.RecheckStatus = '${CrmStatus.OPEN}'
-      GROUP BY b.Id, b.BookingNo, b.UnitNo, b.ProjectName, a.ApplicantName, a.Mobile
+      GROUP BY b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo), COALESCE(bn.ProjectName, b.ProjectName), a.ApplicantName, a.Mobile
       ORDER BY MIN(ci.RecheckRequestedAt)
     `);
     res.json(result.recordset);

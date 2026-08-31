@@ -17,10 +17,12 @@ router.use(authMiddleware);
 router.use(apiRateLimit);
 
 const DEED_SELECT = `
-  SELECT d.*, b.BookingNo, b.UnitNo, b.TotalValue AS BookingValue, b.Status AS BookingStatus, a.ApplicantName, a.Mobile
+  SELECT d.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+         b.TotalValue AS BookingValue, b.Status AS BookingStatus, a.ApplicantName, a.Mobile
   FROM dbo.CrmSalesDeed d
   JOIN dbo.CrmBooking b ON b.Id = d.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
 `;
 
 // Status is never a free pick — it is derived, level by level:
@@ -74,15 +76,18 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-sales-deed", "vi
     const bookingId = parseInt(req.params.bookingId);
 
     const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT b.Id, b.BookingNo, b.UnitNo, b.Status AS BookingStatus, b.FinancingType, a.ApplicantName, a.Mobile,
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+             b.Status AS BookingStatus, b.FinancingType, a.ApplicantName, a.Mobile,
              ISNULL(b.GrandTotal, b.TotalValue) AS GrandTotal
-      FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.Id = @bid
     `);
     if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });
 
     const agreement = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+      .query("SELECT TOP 1 Id, AgreementNo, Status, AfsStampDuty, AfsRegistrationFee FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
 
     const loanDetail = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT BankName, LoanAccountNo, LoanAmount, SanctionStatus FROM dbo.CrmLoanDetail WHERE BookingId = @bid");
@@ -92,12 +97,16 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-sales-deed", "vi
     const existingDeed = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Id, DeedNo FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
 
+    const handover = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+
     res.json({
       booking: booking.recordset[0],
       agreement: agreement.recordset[0] || null,
       loanDetail: loanDetail.recordset[0] || null,
       loanBlockReason,
       existingDeed: existingDeed.recordset[0] || null,
+      handoverCompleted: handover.recordset[0]?.Status === "Completed",
     });
   } catch (e) {
     console.error("[crm-sales-deed] context error:", e.message);
@@ -115,47 +124,52 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), async (req, res) 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    // Sale Deed (Conveyance Deed) is prepared after key handover — not before.
+    // The correct sequence for under-construction: AFS registered → possession
+    // → handover → Sale Deed drafted → registered.
+    const handover = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+    if (!handover.recordset.length || handover.recordset[0].Status !== "Completed") {
+      return res.status(400).json({ error: "Sale Deed can only be prepared after Handover is Completed" });
+    }
+
     const agreement = await pool.request().input("bid", sql.Int, bookingId).query(`
       SELECT TOP 1 Id, Status
       FROM dbo.CrmAgreement
       WHERE BookingId = @bid
       ORDER BY CreatedAt DESC
     `);
-    if (!agreement.recordset.length || agreement.recordset[0].Status !== CrmStatus.EXECUTED) {
-      return res.status(400).json({ error: "Agreement must be executed before a sales deed can be prepared" });
+    if (!agreement.recordset.length || agreement.recordset[0].Status !== CrmStatus.REGISTERED) {
+      return res.status(400).json({ error: "Sale Deed requires the Agreement for Sale to be Registered first" });
     }
 
-    // Loan Processing runs in parallel with the agreement/legal track, not
-    // after it — but it must be resolved before the Deed, per the pipeline:
-    // AGREEMENT -> PARALLEL LOAN PROCESS -> DEED -> QUERY PAYMENT -> REGISTRY.
-    // Construction milestone payments (Foundation, Slab Casting, etc.) are a
-    // separate, genuinely parallel track and never gate this — only the
-    // loan does.
+    // Loan processing must be resolved before the Deed is prepared.
     const loanErr = await checkLoanProcessingCleared(pool, bookingId);
     if (loanErr) return res.status(400).json({ error: loanErr });
 
     const deedNo = await getNextDocNumber(pool, "DEED", "DEED");
 
     const result = await pool.request()
-      .input("no",   sql.NVarChar(30),  deedNo)
-      .input("bid",  sql.Int,           bookingId)
-      .input("agid", sql.Int,           b.AgreementId ? parseInt(b.AgreementId) : agreement.recordset[0].Id)
-      .input("val",  sql.Decimal(18,2), b.DeedValue != null ? parseFloat(b.DeedValue) : null)
-      .input("stamp",sql.Decimal(18,2), b.StampDuty != null ? parseFloat(b.StampDuty) : null)
-      .input("regfee",sql.Decimal(18,2), b.RegistrationFee != null ? parseFloat(b.RegistrationFee) : null)
-      .input("sro",  sql.NVarChar(255), b.SubRegistrarOffice || null)
-      .input("dt",   sql.Date,          b.DeedDate || null)
-      .input("regdl",sql.Date,          b.RegistrationDeadline || null)
-      .input("exby", sql.NVarChar(200), b.ExecutedBy || null)
-      .input("wit",  sql.NVarChar(500), b.WitnessNames || null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cb",   sql.Int,           actorId(req))
-      .input("st",   sql.NVarChar(30),  deriveDeedStatus({ bookingStatus: null, registrationNo: null, executedBy: b.ExecutedBy || null, deedDate: b.DeedDate || null, registrationDeadline: b.RegistrationDeadline || null }))
+      .input("no",      sql.NVarChar(30),      deedNo)
+      .input("bid",     sql.Int,               bookingId)
+      .input("agid",    sql.Int,               b.AgreementId ? parseInt(b.AgreementId) : agreement.recordset[0].Id)
+      .input("val",     sql.Decimal(18,2),     b.DeedValue != null ? parseFloat(b.DeedValue) : null)
+      .input("stamp",   sql.Decimal(18,2),     b.StampDuty != null ? parseFloat(b.StampDuty) : null)
+      .input("regfee",  sql.Decimal(18,2),     b.RegistrationFee != null ? parseFloat(b.RegistrationFee) : null)
+      .input("credit",  sql.Decimal(18,2),     b.StampDutyCredit != null && b.StampDutyCredit !== "" ? parseFloat(b.StampDutyCredit) : null)
+      .input("sro",     sql.NVarChar(255),     b.SubRegistrarOffice || null)
+      .input("dt",      sql.Date,              b.DeedDate || null)
+      .input("regdl",   sql.Date,              b.RegistrationDeadline || null)
+      .input("exby",    sql.NVarChar(200),     b.ExecutedBy || null)
+      .input("wit",     sql.NVarChar(500),     b.WitnessNames || null)
+      .input("note",    sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("cb",      sql.Int,               actorId(req))
+      .input("st",      sql.NVarChar(30),      deriveDeedStatus({ bookingStatus: null, registrationNo: null, executedBy: b.ExecutedBy || null, deedDate: b.DeedDate || null, registrationDeadline: b.RegistrationDeadline || null }))
       .query(`
         INSERT INTO dbo.CrmSalesDeed
-          (DeedNo, BookingId, AgreementId, DeedValue, StampDuty, RegistrationFee, SubRegistrarOffice, DeedDate, RegistrationDeadline, ExecutedBy, WitnessNames, Status, Notes, CreatedBy, CreatedAt)
+          (DeedNo, BookingId, AgreementId, DeedValue, StampDuty, RegistrationFee, StampDutyCredit, SubRegistrarOffice, DeedDate, RegistrationDeadline, ExecutedBy, WitnessNames, Status, Notes, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@no, @bid, @agid, @val, @stamp, @regfee, @sro, @dt, @regdl, @exby, @wit, @st, @note, @cb, SYSDATETIME())
+        VALUES (@no, @bid, @agid, @val, @stamp, @regfee, @credit, @sro, @dt, @regdl, @exby, @wit, @st, @note, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id, DeedNo: deedNo });
   } catch (e) {
@@ -185,8 +199,8 @@ router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), 
     `);
     const activeErr = await requireActiveBooking(pool, bookingRow.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
-    if (deed.recordset[0].AgreementStatus !== CrmStatus.EXECUTED) {
-      return res.status(400).json({ error: "Agreement must be executed before sending the sales deed to the customer" });
+    if (!["Executed", "Registered"].includes(deed.recordset[0].AgreementStatus)) {
+      return res.status(400).json({ error: "Agreement must be at least Executed before sending the sales deed to the customer" });
     }
     if (deed.recordset[0].Status === CrmStatus.REGISTERED) {
       return res.status(400).json({ error: "Registered sales deed cannot be resent for customer approval" });
@@ -339,10 +353,10 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     // RequiredAmount, so changing them after the fact would silently
     // invalidate an approval already in flight or a payment amount already
     // communicated to the customer.
-    const CORE_FIELDS = ["DeedValue", "StampDuty", "RegistrationFee", "SubRegistrarOffice", "DeedDate"];
+    const CORE_FIELDS = ["DeedValue", "StampDuty", "RegistrationFee", "StampDutyCredit", "SubRegistrarOffice", "DeedDate"];
     const editingCoreFields = CORE_FIELDS.some((k) => b[k] !== undefined);
     if (editingCoreFields && row.SentToCustomerAt) {
-      return res.status(400).json({ error: "Deed Value, Stamp Duty, Registration Fee, Sub-Registrar Office and Deed Date can no longer be edited once the deed has been sent to the customer for approval." });
+      return res.status(400).json({ error: "Deed Value, Stamp Duty, Registration Fee, Stamp Duty Credit, Sub-Registrar Office and Deed Date can no longer be edited once the deed has been sent to the customer for approval." });
     }
 
     // Registry (a separate tracker — see crmRegistry.js) must be Completed
@@ -382,12 +396,13 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
       .input("exby",  sql.NVarChar(200), b.ExecutedBy || null)
       .input("st",    sql.NVarChar(30), newStatus)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("dval",  sql.Decimal(18,2), b.DeedValue != null && b.DeedValue !== "" ? parseFloat(b.DeedValue) : null)
-      .input("stamp", sql.Decimal(18,2), b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : null)
-      .input("regfee",sql.Decimal(18,2), b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : null)
-      .input("sro",   sql.NVarChar(255), b.SubRegistrarOffice || null)
-      .input("ddt",   sql.Date, b.DeedDate || null)
-      .input("ub",    sql.Int,  actorId(req))
+      .input("dval",   sql.Decimal(18,2), b.DeedValue != null && b.DeedValue !== "" ? parseFloat(b.DeedValue) : null)
+      .input("stamp",  sql.Decimal(18,2), b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : null)
+      .input("regfee", sql.Decimal(18,2), b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : null)
+      .input("credit", sql.Decimal(18,2), b.StampDutyCredit != null && b.StampDutyCredit !== "" ? parseFloat(b.StampDutyCredit) : null)
+      .input("sro",    sql.NVarChar(255), b.SubRegistrarOffice || null)
+      .input("ddt",    sql.Date, b.DeedDate || null)
+      .input("ub",     sql.Int,  actorId(req))
       .query(`
         UPDATE dbo.CrmSalesDeed SET
           RegistrationNo = ISNULL(@regno, RegistrationNo), BookNo = ISNULL(@bookno, BookNo),
@@ -395,7 +410,9 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
           PossessionDate = ISNULL(@posdt, PossessionDate), ExecutedBy = ISNULL(@exby, ExecutedBy),
           RegistrationDeadline = @regdl,
           DeedValue = ISNULL(@dval, DeedValue), StampDuty = ISNULL(@stamp, StampDuty),
-          RegistrationFee = ISNULL(@regfee, RegistrationFee), SubRegistrarOffice = ISNULL(@sro, SubRegistrarOffice),
+          RegistrationFee = ISNULL(@regfee, RegistrationFee),
+          StampDutyCredit = ISNULL(@credit, StampDutyCredit),
+          SubRegistrarOffice = ISNULL(@sro, SubRegistrarOffice),
           DeedDate = ISNULL(@ddt, DeedDate),
           Status = @st, Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
@@ -450,6 +467,98 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     res.json({ success: true, status: newStatus });
   } catch (e) {
     console.error("[crm-sales-deed] PUT error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Staff proxy actions for non-portal customers ───────────────────────────
+// When a customer doesn't use the portal, CRM staff can record their decision
+// on their behalf. Every proxy action stamps ProxyMethod in the audit trail.
+
+const PROXY_METHODS_SD = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
+
+// PUT /:id/proxy-customer-approve — record that the customer approved the
+// sales deed without logging into the portal. Mirrors portal /sales-deed/respond
+// with decision="Approve".
+router.put("/:id/proxy-customer-approve", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS_SD.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_SD.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks are required" });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT CustomerApprovalStatus, SentToCustomerAt, DeedNo, BookingId FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Sales deed not found" });
+    const row = cur.recordset[0];
+    if (!row.SentToCustomerAt) return res.status(400).json({ error: "Sales deed has not been sent to the customer yet" });
+    if (row.CustomerApprovalStatus === CrmStatus.APPROVED) return res.status(400).json({ error: "Sales deed already approved" });
+
+    await pool.request().input("id", sql.Int, id).query(`
+      UPDATE dbo.CrmSalesDeed SET
+        CustomerApprovalStatus = '${CrmStatus.APPROVED}',
+        CustomerApprovedAt = SYSDATETIME(),
+        CustomerRecheckRemarks = NULL,
+        DirectorApprovalStatus = '${CrmStatus.PENDING}'
+      WHERE Id = @id
+    `);
+
+    await logCommunication(pool, {
+      bookingId: row.BookingId, direction: "Inbound",
+      subject: `Customer approved sales deed ${row.DeedNo} (via ${ProxyMethod})`,
+      summary: `Staff recorded customer approval on their behalf via ${ProxyMethod}. ${ProxyRemarks.trim()}`,
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-sales-deed] proxy-customer-approve error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/proxy-customer-recheck — record that the customer flagged an issue
+// on the sales deed without logging into the portal.
+router.put("/:id/proxy-customer-recheck", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS_SD.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_SD.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks (customer's concern) are required for a recheck" });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT CustomerApprovalStatus, SentToCustomerAt, DeedNo, BookingId FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Sales deed not found" });
+    const row = cur.recordset[0];
+    if (!row.SentToCustomerAt) return res.status(400).json({ error: "Sales deed has not been sent to the customer yet" });
+    if (row.CustomerApprovalStatus === CrmStatus.APPROVED) return res.status(400).json({ error: "Sales deed already approved — cannot record a recheck" });
+
+    await pool.request().input("id", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), ProxyRemarks.trim()).query(`
+      UPDATE dbo.CrmSalesDeed SET
+        CustomerApprovalStatus = 'RecheckRequested',
+        CustomerApprovedAt = NULL,
+        CustomerRecheckRemarks = @rem
+      WHERE Id = @id
+    `);
+
+    await logCommunication(pool, {
+      bookingId: row.BookingId, direction: "Inbound",
+      subject: `Customer requested recheck on sales deed ${row.DeedNo} (via ${ProxyMethod})`,
+      summary: `Staff recorded customer recheck request via ${ProxyMethod}. Concern: ${ProxyRemarks.trim()}`,
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-sales-deed] proxy-customer-recheck error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

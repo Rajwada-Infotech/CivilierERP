@@ -12,10 +12,11 @@ router.use(authMiddleware);
 router.use(apiRateLimit);
 
 const PP_SELECT = `
-  SELECT p.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile
+  SELECT p.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile
   FROM dbo.CrmPrePossession p
   JOIN dbo.CrmBooking b ON b.Id = p.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
 `;
 
 router.get("/", requirePageRight("crm-pre-possession", "view"), async (req, res) => {
@@ -29,11 +30,11 @@ router.get("/", requirePageRight("crm-pre-possession", "view"), async (req, res)
   }
 });
 
-// Workflow guard: pre-possession inspection only makes sense once the sales
-// deed is customer-approved (not merely Executed/Registered) — tightened to
-// match crmHandover.js's own gate exactly, since a physical pre-possession
-// inspection is downstream of both parties agreeing the deed is final, the
-// same threshold Handover already enforces.
+// Workflow guard: a pre-possession physical site inspection can only be
+// initiated once the Agreement for Sale has been registered at the Sub-
+// Registrar (AFS Registration = the first legal milestone that locks the
+// unit to the buyer). The Sale Deed is a separate document prepared later —
+// gating the site inspection on it was sequentially inverted.
 router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, res) => {
   try {
     const pool = getPool();
@@ -44,13 +45,13 @@ router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, r
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    const deed = await pool.request().input("bid", sql.Int, bookingId)
-      .query(`SELECT TOP 1 CustomerApprovalStatus FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
-    if (!deed.recordset.length) {
-      return res.status(400).json({ error: "Pre-possession check requires the sales deed to be created first" });
+    const agr = await pool.request().input("bid", sql.Int, bookingId)
+      .query(`SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+    if (!agr.recordset.length) {
+      return res.status(400).json({ error: "Pre-possession check requires an Agreement for Sale to exist first" });
     }
-    if (deed.recordset[0].CustomerApprovalStatus !== CrmStatus.APPROVED) {
-      return res.status(400).json({ error: "Pre-possession check requires the customer to approve the sales deed first" });
+    if (agr.recordset[0].Status !== CrmStatus.REGISTERED) {
+      return res.status(400).json({ error: "Pre-possession check requires the Agreement for Sale to be Registered (AFS registered at Sub-Registrar) first" });
     }
 
     const result = await pool.request()

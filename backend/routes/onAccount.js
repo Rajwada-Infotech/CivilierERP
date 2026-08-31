@@ -551,9 +551,9 @@ router.get("/adjustable", requirePageRight("on-account-adjustment", "view"), asy
         pb.Balance             AS AvailableBalance,
         oa.Notes,
         'CRM'                  AS Source,
-        cb.BookingNo           AS CrmBookingNo,
-        cb.ProjectName         AS CrmProjectName,
-        cb.UnitNo              AS CrmUnitNo,
+        cb.BookingNo                                       AS CrmBookingNo,
+        COALESCE(cbn.ProjectName, cb.ProjectName)          AS CrmProjectName,
+        COALESCE(cbn.UnitNo,      cb.UnitNo)               AS CrmUnitNo,
         ca.ApplicantName       AS CrmApplicantName,
         nm.MilestoneName       AS CrmNextMilestoneName,
         (nm.AmountDue - ISNULL(nm.AmountPaid, 0)) AS CrmNextMilestoneDue,
@@ -564,6 +564,7 @@ router.get("/adjustable", requirePageRight("on-account-adjustment", "view"), asy
       LEFT JOIN dbo.CrmOnAccountPayment coa ON coa.Id = oa.RefId AND oa.RefType = 'CrmOnAccountPayment'
       LEFT JOIN dbo.CrmBooking cb ON cb.Id = coa.BookingId
       LEFT JOIN dbo.CrmApplication ca ON ca.Id = cb.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay cbn ON cbn.BookingId = cb.Id
       -- The next milestone still open on this booking — the "underpay" side
       -- of the picture, shown alongside the on-account credit itself so
       -- staff can see both at once (this deposit will auto-apply onto it,

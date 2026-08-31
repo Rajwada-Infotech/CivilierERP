@@ -45,6 +45,7 @@ export const crmNavItems: NavItem[] = [
     label: "Documents",
     icon: FileText,
     children: [
+      { label: "Allotment Letter", path: "/crm/allotment-letter", pageKey: "crm-allotment-letter" },
       { label: "Agreements",       path: "/crm/agreements",        pageKey: "crm-agreements" },
       { label: "Agreement Papers", path: "/crm/agreement-papers",  pageKey: "crm-documents"  },
     ],
@@ -55,14 +56,19 @@ export const crmNavItems: NavItem[] = [
     label: "Legal",
     icon: Scale,
     children: [
-      { label: "Legal Milestones", path: "/crm/legal-milestones", pageKey: "crm-legal-milestones" },
-      // Order follows the real post-agreement sequence: the Sale Deed must
-      // exist before Query Payment (which reads its stamp duty/reg fee) or
-      // Bank NOC (which releases the bank's charge against the unit).
-      { label: "Sale Deed",        path: "/crm/sales-deed",       pageKey: "crm-sales-deed"       },
-      { label: "Query Payment",    path: "/crm/query-payment",    pageKey: "crm-query-payment"    },
-      { label: "Registry",         path: "/crm/registry",         pageKey: "crm-registry"         },
-      { label: "NOC (Org & Bank)", path: "/crm/noc",              pageKey: "crm-noc"              },
+      { label: "Legal Milestones",   path: "/crm/legal-milestones",    pageKey: "crm-legal-milestones"    },
+      // Order follows the real workflow sequence:
+      //   Agreement Executed → AFS Query Payment (Sub-Registrar Visit 1:
+      //   communicate AFS stamp duty to customer) → AFS registered →
+      //   Handover → Sale Deed → Sale Deed Query Payment (Visit 2: net
+      //   payable = Stamp Duty + Reg Fee − AFS credit) → Registry → NOC.
+      { label: "AFS Query Payment", path: "/crm/afs-query-payment", pageKey: "crm-afs-query-payment" },
+      { label: "AFS Registry",     path: "/crm/afs-registry",     pageKey: "crm-afs-registry"     },
+      { label: "Sale Deed",         path: "/crm/sales-deed",        pageKey: "crm-sales-deed"        },
+      { label: "Query Payment",     path: "/crm/query-payment",     pageKey: "crm-query-payment"     },
+      { label: "Registry",          path: "/crm/registry",          pageKey: "crm-registry"          },
+      { label: "Mutation",          path: "/crm/mutation",          pageKey: "crm-mutation"          },
+      { label: "NOC (Org & Bank)",  path: "/crm/noc",               pageKey: "crm-noc"               },
     ],
   },
 
@@ -71,6 +77,7 @@ export const crmNavItems: NavItem[] = [
     label: "Closure",
     icon: HardHat,
     children: [
+      { label: "OC / CC",               path: "/crm/oc-cc",                pageKey: "crm-oc-cc"                },
       { label: "Pre-Possession Check", path: "/crm/pre-possession",       pageKey: "crm-pre-possession"       },
       { label: "Possession Notice",    path: "/crm/possession-notice",    pageKey: "crm-possession-notice"    },
       { label: "Construction Updates", path: "/crm/construction-updates", pageKey: "crm-construction-updates" },

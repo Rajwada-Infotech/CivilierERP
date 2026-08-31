@@ -105,7 +105,8 @@ const CrmPaymentMilestones: React.FC = () => {
   const [addForm, setAddForm] = useState({ MilestoneName: "", DueDate: "", AmountDue: "", ResponsibleDepartment: "", RequiredDocuments: "" });
   const [onAccountDialog, setOnAccountDialog] = useState(false);
   const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "", DepositBankId: "" });
-  const [applyingId, setApplyingId] = useState<number | null>(null);
+  const [applyDialog, setApplyDialog] = useState<{ payment: any; milestone: any | null; amount: string } | null>(null);
+  const [applyMilestoneId, setApplyMilestoneId] = useState<string>("");
   const [waiveDialog, setWaiveDialog] = useState<{ milestone: any; reason: string } | null>(null);
   const [remarksDialog, setRemarksDialog] = useState<{ milestone: any } | null>(null);
 
@@ -328,29 +329,37 @@ const CrmPaymentMilestones: React.FC = () => {
     }
   };
 
-  const handleApplyOnAccount = async (milestone: any) => {
-    if (!onAccountData?.payments?.length) return;
-    const available = onAccountData.payments.find((p: any) => Number(p.Amount) - Number(p.AppliedAmount) > 0);
-    if (!available) return;
-    const balance = Number(milestone.AmountDue) - Number(milestone.AmountPaid || 0);
-    const remaining = Number(available.Amount) - Number(available.AppliedAmount);
-    const amount = Math.min(balance, remaining);
-    setApplyingId(milestone.Id);
+  const openApplyDialog = (payment: any, milestone: any | null) => {
+    const remaining = Number(payment.Amount) - Number(payment.AppliedAmount || 0);
+    const milestoneBalance = milestone ? Number(milestone.AmountDue) - Number(milestone.AmountPaid || 0) : remaining;
+    const defaultAmount = milestone ? Math.min(remaining, milestoneBalance) : remaining;
+    setApplyMilestoneId(milestone ? String(milestone.Id) : "");
+    setApplyDialog({ payment, milestone, amount: String(defaultAmount) });
+  };
+
+  const handleConfirmApply = async () => {
+    if (!applyDialog) return;
+    const milId = applyDialog.milestone?.Id ?? parseInt(applyMilestoneId);
+    if (!milId) { toast.error("Select a milestone to apply to"); return; }
+    const amount = parseFloat(applyDialog.amount);
+    if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
+    setSaving(true);
     try {
-      const res = await fetchWithAuth(`${API}/on-account/${available.Id}/apply`, {
+      const res = await fetchWithAuth(`${API}/on-account/${applyDialog.payment.Id}/apply`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ MilestoneId: milestone.Id, Amount: amount }),
+        body: JSON.stringify({ MilestoneId: milId, Amount: amount }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(`₹${amount.toLocaleString("en-IN")} applied from on-account balance`);
+      toast.success(`₹${amount.toLocaleString("en-IN")} applied from ${applyDialog.payment.ReceiptNo}`);
+      setApplyDialog(null);
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
       qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
-      setApplyingId(null);
+      setSaving(false);
     }
   };
 
@@ -486,12 +495,15 @@ const CrmPaymentMilestones: React.FC = () => {
                   className="text-xs px-2 py-1 border border-primary text-primary rounded-md hover:bg-primary hover:text-primary-foreground transition-colors font-medium">
                   Pay
                 </button>
-                {onAccountBalance > 0 && (
-                  <button onClick={() => handleApplyOnAccount(m)} disabled={applyingId === m.Id}
-                    className="text-xs px-2 py-1 border border-blue-400 text-blue-600 rounded-md hover:bg-blue-50 transition-colors disabled:opacity-40 font-medium">
-                    {applyingId === m.Id ? "…" : "On A/c"}
-                  </button>
-                )}
+                {onAccountBalance > 0 && (() => {
+                  const pmt = onAccountData?.payments?.find((p: any) => Number(p.Amount) - Number(p.AppliedAmount || 0) > 0);
+                  return pmt ? (
+                    <button onClick={() => openApplyDialog(pmt, m)}
+                      className="text-xs px-2 py-1 border border-blue-400 text-blue-600 rounded-md hover:bg-blue-50 transition-colors font-medium">
+                      Adjust On A/c
+                    </button>
+                  ) : null;
+                })()}
                 <button onClick={() => handleWaive(m)}
                   className="text-xs px-2 py-1 border border-border text-muted-foreground rounded-md hover:bg-muted transition-colors font-medium">
                   Waive
@@ -696,26 +708,36 @@ const CrmPaymentMilestones: React.FC = () => {
                     {onAccountBalance > 0 && <ArrowUpCircle size={16} className="shrink-0" />}{fmt(onAccountBalance)}
                   </span>
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   {onAccountData.payments.map((p: any) => {
                     const remaining = Number(p.Amount) - Number(p.AppliedAmount || 0);
+                    const canApply = remaining > 0 && p.Status !== "Applied";
                     return (
-                      <div key={p.Id} className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">
-                          {p.ReceiptNo} · {fmt(p.Amount)}
+                      <div key={p.Id} className="flex items-center justify-between gap-3 text-xs">
+                        <span className="text-muted-foreground min-w-0">
+                          <span className="font-medium text-foreground">{p.ReceiptNo}</span>
+                          {" · "}{fmt(p.Amount)}
                           {p.PaymentMode ? ` · ${p.PaymentMode}` : ""}
                           {p.ReceivedDate ? ` · ${fmtDate(p.ReceivedDate)}` : ""}
                           {remaining > 0 && remaining < Number(p.Amount) && (
-                            <span className="text-emerald-700"> · {fmt(remaining)} remaining</span>
+                            <span className="text-emerald-700 font-medium"> · {fmt(remaining)} remaining</span>
                           )}
                         </span>
-                        <span className={`px-1.5 py-0.5 rounded-full border font-medium ${
-                          p.Status === "Applied" ? "text-green-600 bg-green-50 border-green-200"
-                          : p.Status === "PartiallyApplied" ? "text-blue-600 bg-blue-50 border-blue-200"
-                          : "text-orange-600 bg-orange-50 border-orange-200"
-                        }`}>
-                          {p.Status}
-                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className={`px-1.5 py-0.5 rounded-full border font-medium ${
+                            p.Status === "Applied" ? "text-green-600 bg-green-50 border-green-200"
+                            : p.Status === "PartiallyApplied" ? "text-blue-600 bg-blue-50 border-blue-200"
+                            : "text-orange-600 bg-orange-50 border-orange-200"
+                          }`}>
+                            {p.Status === "PartiallyApplied" ? "Partial" : p.Status}
+                          </span>
+                          {canApply && (
+                            <button onClick={() => openApplyDialog(p, null)}
+                              className="px-2 py-0.5 rounded border border-blue-400 text-blue-600 bg-white dark:bg-transparent hover:bg-blue-50 font-medium transition-colors">
+                              Apply →
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -945,6 +967,94 @@ const CrmPaymentMilestones: React.FC = () => {
                 {saving ? "Submitting..." : "Submit for Approval"}
               </button>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Apply On Account Dialog */}
+        <Dialog open={!!applyDialog} onOpenChange={(o) => { if (!o) setApplyDialog(null); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="font-heading flex items-center gap-1.5">
+                <Wallet size={16} className="text-blue-600" /> Apply On-Account to Milestone
+              </DialogTitle>
+            </DialogHeader>
+            {applyDialog && (() => {
+              const remaining = Number(applyDialog.payment.Amount) - Number(applyDialog.payment.AppliedAmount || 0);
+              const unpaidMilestones = milestones.filter((m: any) => m.Status !== CrmStatus.PAID && m.Status !== "Waived" && (Number(m.AmountDue) - Number(m.AmountPaid || 0)) > 0);
+              const chosenMilId = applyDialog.milestone?.Id ?? parseInt(applyMilestoneId);
+              const chosenMil = applyDialog.milestone ?? milestones.find((m: any) => m.Id === chosenMilId);
+              const milBalance = chosenMil ? Number(chosenMil.AmountDue) - Number(chosenMil.AmountPaid || 0) : 0;
+              return (
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Payment</span>
+                      <span className="font-medium">{applyDialog.payment.ReceiptNo}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Total received</span>
+                      <span>{fmt(applyDialog.payment.Amount)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Available to apply</span>
+                      <span className="font-semibold text-emerald-700">{fmt(remaining)}</span>
+                    </div>
+                  </div>
+
+                  {applyDialog.milestone ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Applying to milestone</p>
+                      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm font-medium">
+                        {applyDialog.milestone.MilestoneName}
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">({fmt(milBalance)} outstanding)</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Apply to milestone <span className="text-red-500">*</span></label>
+                      <select value={applyMilestoneId} onChange={(e) => {
+                        setApplyMilestoneId(e.target.value);
+                        const m = milestones.find((x: any) => String(x.Id) === e.target.value);
+                        if (m) {
+                          const bal = Number(m.AmountDue) - Number(m.AmountPaid || 0);
+                          setApplyDialog((d) => d ? { ...d, amount: String(Math.min(remaining, bal)) } : d);
+                        }
+                      }} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                        <option value="">— select —</option>
+                        {unpaidMilestones.map((m: any) => (
+                          <option key={m.Id} value={String(m.Id)}>
+                            {m.MilestoneName} — {fmt(Number(m.AmountDue) - Number(m.AmountPaid || 0))} due
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Amount to apply</label>
+                    <input type="number" min="1" max={remaining}
+                      value={applyDialog.amount}
+                      onChange={(e) => setApplyDialog((d) => d ? { ...d, amount: e.target.value } : d)}
+                      className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    {chosenMil && milBalance > 0 && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Milestone outstanding: {fmt(milBalance)} · Available: {fmt(remaining)}
+                        {parseFloat(applyDialog.amount) >= milBalance && <span className="text-emerald-700 ml-1">— will fully settle this milestone</span>}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1 border-t border-border">
+                    <button onClick={() => setApplyDialog(null)}
+                      className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                    <button onClick={handleConfirmApply} disabled={saving || !applyDialog.amount || (!applyDialog.milestone && !applyMilestoneId)}
+                      className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40">
+                      {saving ? "Applying…" : `Apply ${applyDialog.amount ? fmt(parseFloat(applyDialog.amount)) : ""}`}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </DialogContent>
         </Dialog>
 

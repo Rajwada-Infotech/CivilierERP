@@ -23,13 +23,16 @@ const TICKET_SELECT = `
     t.Id, t.TicketNo, t.BookingId, t.Category, t.Priority, t.Subject, t.Description,
     t.Status, t.AssignedTo, t.SlaDueDate, t.ResolvedAt, t.ResolutionNotes,
     t.CustomerRating, t.CustomerFeedback, t.RaisedByCustomer, t.CreatedAt, t.UpdatedAt,
-    b.BookingNo, b.UnitNo, b.ProjectName,
+    b.BookingNo,
+    COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+    COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
     a.ApplicantName, a.Mobile,
     u.name  AS AssigneeName,
     cu.name AS CreatedByName
   FROM dbo.CrmServiceTicket t
   JOIN  dbo.CrmBooking b     ON b.Id = t.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.Users u  ON u.id  = t.AssignedTo
   LEFT JOIN dbo.Users cu ON cu.id = t.CreatedBy
 `;

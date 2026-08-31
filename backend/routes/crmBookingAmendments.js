@@ -25,11 +25,16 @@ function isApprover(req) {
 }
 
 const LIST_SELECT = `
-  SELECT r.*, b.BookingNo, b.ProjectName, b.UnitNo, a.ApplicantName,
+  SELECT r.*,
+         b.BookingNo,
+         COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+         COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+         a.ApplicantName,
          reqBy.name AS RequestedByName, revBy.name AS ReviewedByName
   FROM dbo.CrmBookingAmendmentRequest r
   JOIN dbo.CrmBooking b ON b.Id = r.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.Users reqBy ON reqBy.id = r.RequestedBy
   LEFT JOIN dbo.Users revBy ON revBy.id = r.ReviewedBy
 `;

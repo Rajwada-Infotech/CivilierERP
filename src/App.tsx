@@ -412,6 +412,11 @@ const CrmLegalMilestones   = lazy(() => import("./pages/CRM/CrmLegalMilestones")
 const CrmNoc               = lazy(() => import("./pages/CRM/CrmNoc"));
 const CrmSalesDeed         = lazy(() => import("./pages/CRM/CrmSalesDeed"));
 const CrmLeads             = lazy(() => import("./pages/CRM/CrmLeads"));
+const CrmAfsQueryPayment   = lazy(() => import("./pages/CRM/CrmAfsQueryPayment"));
+const CrmAfsRegistry       = lazy(() => import("./pages/CRM/CrmAfsRegistry"));
+const CrmOcCc              = lazy(() => import("./pages/CRM/CrmOcCc"));
+const CrmAllotmentLetter   = lazy(() => import("./pages/CRM/CrmAllotmentLetter"));
+const CrmMutation          = lazy(() => import("./pages/CRM/CrmMutation"));
 const CrmQueryPayment      = lazy(() => import("./pages/CRM/CrmQueryPayment"));
 const CrmRegistry          = lazy(() => import("./pages/CRM/CrmRegistry"));
 const CrmPrePossession     = lazy(() => import("./pages/CRM/CrmPrePossession"));
@@ -435,6 +440,7 @@ const PortalBooking        = lazy(() => import("./pages/CrmCustomerPortal/Portal
 const PortalAgreement      = lazy(() => import("./pages/CrmCustomerPortal/PortalAgreement"));
 const PortalPayments       = lazy(() => import("./pages/CrmCustomerPortal/PortalPayments"));
 const PortalConstruction   = lazy(() => import("./pages/CrmCustomerPortal/PortalConstruction"));
+const PortalDocuments      = lazy(() => import("./pages/CrmCustomerPortal/PortalDocuments"));
 const PortalTickets        = lazy(() => import("./pages/CrmCustomerPortal/PortalTickets"));
 const PortalActivity       = lazy(() => import("./pages/CrmCustomerPortal/PortalActivity"));
 const PortalProfile        = lazy(() => import("./pages/CrmCustomerPortal/PortalProfile"));
@@ -635,6 +641,7 @@ function AppRoutes() {
         <Route path="booking" element={<PortalBooking />} />
         <Route path="agreement" element={<PortalAgreement />} />
         <Route path="payments" element={<PortalPayments />} />
+        <Route path="documents" element={<PortalDocuments />} />
         <Route path="construction" element={<PortalConstruction />} />
         <Route path="tickets" element={<PortalTickets />} />
         <Route path="activity" element={<PortalActivity />} />
@@ -2126,6 +2133,7 @@ function AppRoutes() {
       <Route path="/crm/applications"    element={<ProtectedRoute pageKey="crm-applications"><CrmApplication /></ProtectedRoute>} />
       <Route path="/crm/bookings"        element={<ProtectedRoute pageKey="crm-bookings"><CrmBooking /></ProtectedRoute>} />
       <Route path="/crm/welcome-calls"   element={<ProtectedRoute pageKey="crm-welcome-calls"><CrmWelcomeCall /></ProtectedRoute>} />
+      <Route path="/crm/allotment-letter" element={<ProtectedRoute pageKey="crm-allotment-letter"><CrmAllotmentLetter /></ProtectedRoute>} />
       <Route path="/crm/agreements"      element={<ProtectedRoute pageKey="crm-agreements"><CrmAgreement /></ProtectedRoute>} />
       <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-documents"><CrmAgreementPapers /></ProtectedRoute>} />
       <Route path="/crm/payments"         element={<ProtectedRoute pageKey="crm-payments"><CrmPaymentMilestones /></ProtectedRoute>} />
@@ -2143,8 +2151,12 @@ function AppRoutes() {
       <Route path="/crm/legal-milestones"      element={<ProtectedRoute pageKey="crm-legal-milestones"><CrmLegalMilestones /></ProtectedRoute>} />
       <Route path="/crm/noc"                   element={<ProtectedRoute pageKey="crm-noc"><CrmNoc /></ProtectedRoute>} />
       <Route path="/crm/sales-deed"            element={<ProtectedRoute pageKey="crm-sales-deed"><CrmSalesDeed /></ProtectedRoute>} />
+      <Route path="/crm/afs-query-payment"     element={<ProtectedRoute pageKey="crm-afs-query-payment"><CrmAfsQueryPayment /></ProtectedRoute>} />
+      <Route path="/crm/afs-registry"         element={<ProtectedRoute pageKey="crm-afs-registry"><CrmAfsRegistry /></ProtectedRoute>} />
       <Route path="/crm/query-payment"         element={<ProtectedRoute pageKey="crm-query-payment"><CrmQueryPayment /></ProtectedRoute>} />
       <Route path="/crm/registry"              element={<ProtectedRoute pageKey="crm-registry"><CrmRegistry /></ProtectedRoute>} />
+      <Route path="/crm/mutation"              element={<ProtectedRoute pageKey="crm-mutation"><CrmMutation /></ProtectedRoute>} />
+      <Route path="/crm/oc-cc"                 element={<ProtectedRoute pageKey="crm-oc-cc"><CrmOcCc /></ProtectedRoute>} />
       <Route path="/crm/pre-possession"        element={<ProtectedRoute pageKey="crm-pre-possession"><CrmPrePossession /></ProtectedRoute>} />
       <Route path="/crm/possession-notice"     element={<ProtectedRoute pageKey="crm-possession-notice"><CrmPossessionNotice /></ProtectedRoute>} />
       <Route path="/crm/construction-updates"  element={<ProtectedRoute pageKey="crm-construction-updates"><CrmConstructionUpdates /></ProtectedRoute>} />

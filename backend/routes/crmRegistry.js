@@ -19,10 +19,11 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 // Once this reaches Completed, that's what unlocks CrmSalesDeed.RegistrationNo
 // being settable (see crmSalesDeed.js PUT /:id).
 const REG_SELECT = `
-  SELECT r.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile, sd.DeedNo
+  SELECT r.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile, sd.DeedNo
   FROM dbo.CrmRegistry r
   JOIN dbo.CrmBooking b ON b.Id = r.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = r.SalesDeedId
 `;
 

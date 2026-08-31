@@ -5,7 +5,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { requireActiveBooking, recomputeLegalMilestoneCurrentStep } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, requireApprovedBooking, recomputeLegalMilestoneCurrentStep } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -23,27 +23,47 @@ const STEPS = [
 // step (scheduling/annotating is still manual for all of them).
 const MANUAL_STEPS = new Set(["DirectorMeeting"]);
 
-// The legal workflow doesn't actually end at step 8 (Final Execution) —
-// Sales Deed, Query Payment, Registry, and Bank NOC all follow it, gated on
-// each other (see crmSalesDeed.js / crmQueryPayment.js / crmRegistry.js /
-// crmNoc.js). This page is the natural home for showing that whole journey
-// in one place, not just the 8-step agreement-signing portion, so the
-// summary list carries enough from each downstream module to render it —
-// without duplicating any of their own create/update logic, which stays on
-// their own dedicated pages (this page only links out to them).
+// The legal workflow spans the full property transaction lifecycle from
+// Agreement Signing → AFS Registration (Visit 1) → Sale Deed → Sale Deed
+// Registration (Visit 2) → Mutation → NOC. Each module owns its own
+// create/update logic on its dedicated page; this page only summarises +
+// links out so the team can see the entire journey in one place.
 const LM_SELECT = `
-  SELECT m.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile,
+  SELECT m.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
+    -- Agreement status (Executed / Registered / etc.)
+    ag.Status AS AgreementStatus, ag.AgreementNo,
+    -- Allotment Letter (issued right after booking, before agreement signing)
+    al.Id AS AllotmentLetterId, al.AlNo, al.Status AS AllotmentLetterStatus,
+    -- Sub-Registrar Visit 1: Agreement for Sale registration
+    aqp.Id AS AfsQPId, aqp.AfsQPNo, aqp.Status AS AfsQPStatus,
+    areg.Id AS AfsRegistryId, areg.AfsRegNo, areg.Status AS AfsRegistryStatus,
+    -- Sale Deed
     sd.Id AS SalesDeedId, sd.DeedNo, sd.ExecutedBy AS DeedExecutedBy, sd.RegistrationNo AS DeedRegistrationNo,
+    -- Sub-Registrar Visit 2: Sale Deed registration
     qp.Id AS QueryPaymentId, qp.QPNo, qp.Status AS QueryPaymentStatus,
     reg.Id AS RegistryId, reg.RegNo, reg.Status AS RegistryStatus,
+    -- Post-registration formalities
+    mut.Id AS MutationId, mut.MutationNo, mut.Status AS MutationStatus,
     bankNoc.Id AS BankNocId, bankNoc.NocNo AS BankNocNo, bankNoc.Status AS BankNocStatus,
-    orgNoc.Id AS OrgNocId, orgNoc.NocNo AS OrgNocNo, orgNoc.Status AS OrgNocStatus
+    orgNoc.Id AS OrgNocId, orgNoc.NocNo AS OrgNocNo, orgNoc.Status AS OrgNocStatus,
+    -- Possession Notice (key handover)
+    pn.Id AS PossessionNoticeId, pn.Status AS PossessionNoticeStatus
   FROM dbo.CrmLegalMilestone m
   JOIN dbo.CrmBooking b ON b.Id = m.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = m.BookingId
+  LEFT JOIN dbo.CrmAllotmentLetter al ON al.BookingId = m.BookingId
+  LEFT JOIN dbo.CrmAfsQueryPayment aqp ON aqp.BookingId = m.BookingId
+  LEFT JOIN dbo.CrmAfsRegistry areg ON areg.BookingId = m.BookingId
   LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = m.BookingId
   LEFT JOIN dbo.CrmQueryPayment qp ON qp.BookingId = m.BookingId
   LEFT JOIN dbo.CrmRegistry reg ON reg.BookingId = m.BookingId
+  LEFT JOIN dbo.CrmMutation mut ON mut.BookingId = m.BookingId
+  OUTER APPLY (
+    SELECT TOP 1 Id, Status FROM dbo.CrmPossessionNotice
+    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+  ) pn
   OUTER APPLY (
     SELECT TOP 1 Id, NocNo, Status FROM dbo.CrmNoc
     WHERE BookingId = m.BookingId AND NocType = 'Bank' ORDER BY CreatedAt DESC
@@ -92,7 +112,7 @@ router.post("/", requirePageRight("crm-legal-milestones", "create"), async (req,
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
 
-    const activeErr = await requireActiveBooking(pool, bookingId);
+    const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const agr = await pool.request().input("bid", sql.Int, bookingId)

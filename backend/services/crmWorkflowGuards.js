@@ -31,12 +31,52 @@ function hasValue(value) {
 // below if it fails. Returns null when the booking is fine to act on.
 async function requireActiveBooking(pool, bookingId) {
   const row = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Status, IsActive FROM dbo.CrmBooking WHERE Id = @bid");
+    .query("SELECT Status, IsActive, IsFrozen, FreezeReason, FreezeExpiresAt FROM dbo.CrmBooking WHERE Id = @bid");
   if (!row.recordset.length) return "Booking not found";
   const b = row.recordset[0];
   if (!b.IsActive) return "This booking is no longer active";
   if (["Cancelled", "Rejected"].includes(b.Status)) {
     return `This booking has been ${b.Status} — no further workflow actions are allowed on it`;
+  }
+  if (b.IsFrozen) {
+    // Auto-lift the freeze if its expiry has passed — fire-and-forget, don't
+    // block the request on the UPDATE completing.
+    if (b.FreezeExpiresAt && new Date(b.FreezeExpiresAt) < new Date()) {
+      pool.request().input("bid", sql.Int, bookingId).query(
+        "UPDATE dbo.CrmBooking SET IsFrozen=0, FrozenAt=NULL, FrozenBy=NULL, FreezeReason=NULL, FreezeExpiresAt=NULL, UpdatedAt=SYSDATETIME() WHERE Id=@bid"
+      ).catch(() => {});
+      return null;
+    }
+    return `Booking is currently frozen${b.FreezeReason ? ": " + b.FreezeReason : ""}. Contact an admin to unfreeze before making changes.`;
+  }
+  return null;
+}
+
+// Stricter variant of requireActiveBooking — also asserts Status = 'Approved'.
+// Used for workflow actions that only make sense after admin has fully approved
+// the booking (Welcome Call, Legal Milestone creation, etc.). A booking that is
+// still Pending has not been signed off yet and should not progress into post-
+// booking workflows.
+async function requireApprovedBooking(pool, bookingId) {
+  const row = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Status, IsActive, IsFrozen, FreezeReason, FreezeExpiresAt FROM dbo.CrmBooking WHERE Id = @bid");
+  if (!row.recordset.length) return "Booking not found";
+  const b = row.recordset[0];
+  if (!b.IsActive) return "This booking is no longer active";
+  if (["Cancelled", "Rejected"].includes(b.Status)) {
+    return `This booking has been ${b.Status} — no further workflow actions are allowed on it`;
+  }
+  if (b.Status !== "Approved") {
+    return `Booking must be fully approved before this action (current status: ${b.Status})`;
+  }
+  if (b.IsFrozen) {
+    if (b.FreezeExpiresAt && new Date(b.FreezeExpiresAt) < new Date()) {
+      pool.request().input("bid", sql.Int, bookingId).query(
+        "UPDATE dbo.CrmBooking SET IsFrozen=0, FrozenAt=NULL, FrozenBy=NULL, FreezeReason=NULL, FreezeExpiresAt=NULL, UpdatedAt=SYSDATETIME() WHERE Id=@bid"
+      ).catch(() => {});
+      return null;
+    }
+    return `Booking is currently frozen${b.FreezeReason ? ": " + b.FreezeReason : ""}. Contact an admin to unfreeze before making changes.`;
   }
   return null;
 }
@@ -180,6 +220,11 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
   `);
   const legalName = applicant.recordset[0]?.ApplicantName || null;
 
+  const wc = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 PreferredAgreementDate FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CreatedAt DESC
+  `);
+  const preferredDate = wc.recordset[0]?.PreferredAgreementDate || null;
+
   const agNo = await getNextDocNumber(pool, "AGR", "AGR");
   let result;
   try {
@@ -189,13 +234,25 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
       .input("lname",sql.NVarChar(200), legalName)
       .input("pan",  sql.NVarChar(20), customerDetails.PanNo || null)
       .input("aadh", sql.NVarChar(20), customerDetails.AadhaarNo || null)
+      .input("pd",   sql.Date,         preferredDate)
       .input("cb",   sql.Int, actorUserId || null)
       .query(`
         INSERT INTO dbo.CrmAgreement
-          (AgreementNo, BookingId, LegalName, PanNo, AadhaarNo, Status, Notes, CreatedBy, CreatedAt)
+          (AgreementNo, BookingId, LegalName, PanNo, AadhaarNo, Status, Notes, ProposedDate, ProposedDateStatus, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@agno, @bid, @lname, @pan, @aadh, 'Draft', 'Auto-created — all agreement-prep prerequisites met', @cb, SYSDATETIME())
+        VALUES (@agno, @bid, @lname, @pan, @aadh, 'Draft', 'Auto-created — all agreement-prep prerequisites met', @pd, CASE WHEN @pd IS NOT NULL THEN 'PendingCustomerReview' ELSE NULL END, @cb, SYSDATETIME())
       `);
+    
+    if (preferredDate) {
+      await pool.request()
+        .input("agid", sql.Int, result.recordset[0].Id)
+        .input("pd",   sql.Date, preferredDate)
+        .input("cb",   sql.Int, actorUserId || null)
+        .query(`
+          INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
+          VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
+        `);
+    }
   } catch (e) {
     // Race: welcome-call logging and bank-detail saving can both complete
     // the last prerequisite at nearly the same time and both reach here.
@@ -318,15 +375,17 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
     .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
   if (existing.recordset.length) return null;
 
+  // Sale Deed is prepared after possession handover in the under-construction
+  // workflow — agreement alone is not sufficient. Handover must be Completed
+  // before the Sale Deed shell is created.
+  const handover = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+  if (!handover.recordset.length || handover.recordset[0].Status !== "Completed") return null;
+
   const agreement = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT TOP 1 Id, Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC
   `);
-  if (!agreement.recordset.length || agreement.recordset[0].Status !== "Executed") return null;
-
-  const pendingMilestones = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND Status NOT IN ('Paid', 'Waived')
-  `);
-  if (pendingMilestones.recordset[0]?.Cnt > 0) return null;
+  if (!agreement.recordset.length || agreement.recordset[0].Status !== "Registered") return null;
 
   // Do not auto-create a Sales Deed if the loan financing is unresolved —
   // the deed would precede loan confirmation, creating a legal/accounting conflict.
@@ -346,7 +405,7 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
     .input("no",   sql.NVarChar(30), deedNo)
     .input("bid",  sql.Int, bookingId)
     .input("agid", sql.Int, agreement.recordset[0].Id)
-    .input("note", sql.NVarChar(sql.MAX), "Auto-created — agreement executed and all milestones settled")
+    .input("note", sql.NVarChar(sql.MAX), "Auto-created — handover completed and AFS registered")
     .input("cb",   sql.Int, actorUserId || null)
     .query(`
       INSERT INTO dbo.CrmSalesDeed (DeedNo, BookingId, AgreementId, Status, Notes, CreatedBy, CreatedAt)
@@ -358,7 +417,7 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   if (bookingRow.AssignedTo) {
     await emitNotification(pool, bookingRow.AssignedTo, "crm_sales_deed_ready",
       "Sales Deed Ready",
-      `${deedNo} auto-created for booking ${bookingRow.BookingNo} — agreement is executed and all milestones are settled. Fill in deed/registration details to proceed.`,
+      `${deedNo} auto-created for booking ${bookingRow.BookingNo} — handover is complete. Fill in deed value, stamp duty, and registration details to proceed.`,
       deedId, "crm_sales_deed");
   }
 
@@ -1023,6 +1082,7 @@ module.exports = {
   recomputeLegalMilestoneCurrentStep,
   checkLoanProcessingCleared,
   requireActiveBooking,
+  requireApprovedBooking,
   recalculateRemainingMilestones,
   isLegalWorkStarted,
   isBookingFullySettled,

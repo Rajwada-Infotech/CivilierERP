@@ -1,4 +1,4 @@
-const express = require("express");
+﻿const express = require("express");
 const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
@@ -19,7 +19,7 @@ const { generateInvoicePdf, getInvoicePdfBuffer } = require("../services/invoice
 const { normalizeRole } = require("../middleware/role");
 const { recalculateBookingGst } = require("../services/crmGst");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
-// through this shared engine — gated to admin/super_admin/marketing_head via
+// through this shared engine â€” gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
 const { transition: approvalTransition } = require("../services/approvalService");
 const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
@@ -32,7 +32,7 @@ const {
   stageLabel,
 } = require("../services/crmBookingStageService");
 // The merged Data Review checklist (formerly the Application's own Level-1
-// gate) — see the "Data Review checklist" comment block below for why this
+// gate) â€” see the "Data Review checklist" comment block below for why this
 // now lives here instead.
 const { ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem, CHECKLIST_ITEMS } = require("../services/crmApplicationChecklist");
 const { createMoneyReceiptAfterDataReview } = require("../services/crmMoneyReceiptWorkflow");
@@ -81,8 +81,28 @@ const bookingDownstreamSql = `
     (SELECT COUNT(*) FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid AND Status = 'Pending') AS PendingAmendments
 `;
 
+// Returns true (and sends a 409) when the booking is frozen, so callers can
+// do: if (await assertNotFrozen(pool, id, res)) return;
+async function assertNotFrozen(pool, id, res) {
+  const r = await pool.request().input("id", sql.Int, id)
+    .query("SELECT IsFrozen, FreezeReason, FreezeExpiresAt FROM dbo.CrmBooking WHERE Id = @id");
+  const b = r.recordset[0];
+  if (!b?.IsFrozen) return false;
+  // Auto-lift if the freeze expiry has passed â€” same logic as requireActiveBooking.
+  if (b.FreezeExpiresAt && new Date(b.FreezeExpiresAt) < new Date()) {
+    pool.request().input("id", sql.Int, id).query(
+      "UPDATE dbo.CrmBooking SET IsFrozen=0, FrozenAt=NULL, FrozenBy=NULL, FreezeReason=NULL, FreezeExpiresAt=NULL, UpdatedAt=SYSDATETIME() WHERE Id=@id"
+    ).catch(() => {});
+    return false;
+  }
+  res.status(409).json({
+    error: `Booking is currently frozen${b.FreezeReason ? ": " + b.FreezeReason : ""}. Contact an admin to unfreeze before making changes.`,
+  });
+  return true;
+}
+
 // Flow-progress flags (HasWelcomeCall / BankDetailsComplete / Agreement*)
-// drive the list page's single "next step" action — the UI is never allowed
+// drive the list page's single "next step" action â€” the UI is never allowed
 // to jump ahead to a later step than the record has actually reached.
 const BOOKING_SELECT = `
   SELECT
@@ -108,6 +128,7 @@ const BOOKING_SELECT = `
     b.RejectedBy, b.RejectedAt, b.MarketingHeadApprovedAt, b.MarketingHeadApprovedBy,
     b.DirectorApprovedAt, b.DirectorApprovedBy, b.ConfirmedAt, b.ConfirmedBy,
     b.CreatedAt, b.UpdatedAt,
+    b.IsFrozen, b.FrozenAt, b.FrozenBy, b.FreezeReason, b.FreezeExpiresAt,
     a.ApplicationNo, a.ApplicantName, a.Mobile, a.Email, a.LeadId,
     u.name  AS AssigneeName,
     cu.name AS CreatedByName,
@@ -135,6 +156,7 @@ const BOOKING_SELECT = `
     ) THEN 1 ELSE 0 END AS BIT) AS BankDetailsComplete,
     ag.Id AS AgreementId, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus,
     ag.AgreementDate, ag.DateApprovalStatus, ag.Status AS AgreementStatus,
+    ag.AfsStampDuty, ag.AfsRegistrationFee,
     (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.Status = '${CrmStatus.PENDING}') AS PendingMilestoneCount,
     (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalCleared,
     (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS ApprovedOnAccount,
@@ -151,8 +173,8 @@ const BOOKING_SELECT = `
   LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
 `;
 
-// GET / — all bookings. By default, Cancelled/Rejected bookings are
-// excluded — every "select a booking" dropdown across the CRM (Legal
+// GET / â€” all bookings. By default, Cancelled/Rejected bookings are
+// excluded â€” every "select a booking" dropdown across the CRM (Legal
 // Milestones, NOC, Sales Deed, Pre-Possession, Possession Notice, Payments,
 // Service Tickets, Brokerage, Communication Log, Handover) calls this with
 // no params and previously kept offering cancelled bookings as if they were
@@ -183,8 +205,8 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
   }
 });
 
-// GET /:id — single booking with milestones, welcome calls, agreement,
-// full customer record (Details tab needs "all means all" — every KYC/
+// GET /:id â€” single booking with milestones, welcome calls, agreement,
+// full customer record (Details tab needs "all means all" â€” every KYC/
 // contact/co-applicant field, not just the denormalized name/mobile on the
 // booking itself), and a payment summary.
 router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) => {
@@ -212,7 +234,7 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
       `),
       // The per-booking CrmCoApplicant table (not CrmCustomer's inline
       // CoApplicant* fields) is the authoritative source once a booking
-      // exists — createCrmBookingRecord() seeds a row here from the
+      // exists â€” createCrmBookingRecord() seeds a row here from the
       // customer's intake-time co-applicant data, and Welcome Call's
       // checklist already counts against this table. Booking Details
       // should show the same list, not the intake-time snapshot.
@@ -240,14 +262,14 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
   }
 });
 
-// POST / — create booking from an application. Unit selection is mandatory —
+// POST / â€” create booking from an application. Unit selection is mandatory â€”
 // the customer's chosen unit must exist in dbo.UnitMaster and must not
 // already be attached to another active CRM booking. Delegates to the
-// shared creation service (backend/services/crmEntityCreation.js) — the
+// shared creation service (backend/services/crmEntityCreation.js) â€” the
 // exact same function backend/services/saHandoff.js calls for the Sales
 // Automation -> CRM handoff, so a booking created either way goes through
 // identical Unit Master validation, milestone generation, and hold
-// conversion — no second, drifting copy of this logic.
+// conversion â€” no second, drifting copy of this logic.
 router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) => {
   try {
     const pool = getPool();
@@ -261,7 +283,7 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
       const appStatus = appRow.recordset[0].Status;
       if (appStatus !== "Pending") {
         return res.status(400).json({
-          error: `Cannot create a booking for a ${appStatus} application — the application must be submitted first`,
+          error: `Cannot create a booking for a ${appStatus} application â€” the application must be submitted first`,
         });
       }
     }
@@ -274,10 +296,10 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
   }
 });
 
-// PUT /:id — update booking. Status is never accepted here — it starts
+// PUT /:id â€” update booking. Status is never accepted here â€” it starts
 // 'Pending' at creation and only moves via /submit, /approve, /reject above,
 // or becomes 'Cancelled' via the CrmCancellation approval cascade in
-// crmCancellations.js. UnitType and AreaSqFt are also never accepted here —
+// crmCancellations.js. UnitType and AreaSqFt are also never accepted here â€”
 // both are inherited once from Unit Master at creation and the unit itself
 // never changes on an existing booking.
 router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) => {
@@ -285,6 +307,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const pool = getPool();
     const b = req.body;
     const id = parseInt(req.params.id);
+    if (await assertNotFrozen(pool, id, res)) return;
     const rate  = b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null;
     const actor = actorId(req);
 
@@ -294,7 +317,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const oldRow = old.recordset[0];
 
     // Block financial field edits once the booking has entered the approval pipeline.
-    // The approver must see exactly the figures they approved — silent mid-approval changes
+    // The approver must see exactly the figures they approved â€” silent mid-approval changes
     // would mean the approval is for different numbers than what was submitted.
     const APPROVAL_STAGES = ["MarketingHeadApproval", "DirectorApproval", "Confirmed"];
     const inApproval = APPROVAL_STAGES.includes(oldRow.WorkflowStage) || oldRow.ReadyForApprovalAt != null;
@@ -309,18 +332,18 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
                 : (existingArea && rate ? Math.round(existingArea * rate) : null);
 
     // Changing the payment plan on a booking that already has milestone
-    // history is NOT a cosmetic FK swap — the actual payment schedule
+    // history is NOT a cosmetic FK swap â€” the actual payment schedule
     // (amounts, due dates) was generated from the OLD plan and, unless
     // regenerated, silently keeps running on it while the record now claims
     // to be on the new one. Blocked once any real payment exists (nothing
     // to safely regenerate against); regenerated from scratch otherwise so
-    // the schedule actually matches what's now selected — matching what
+    // the schedule actually matches what's now selected â€” matching what
     // booking creation itself would have produced.
     const newPlanId = b.PaymentPlanId !== undefined ? (b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null) : undefined;
     const planIsChanging = newPlanId !== undefined && newPlanId !== oldRow.PaymentPlanId;
     if (planIsChanging) {
       if (newPlanId) {
-        // Same tag-based resolver Application/Booking creation use — the new
+        // Same tag-based resolver Application/Booking creation use â€” the new
         // plan must be one of the unit's CrmUnitPaymentPlan tags (or the
         // unit has no tags, in which case any active plan is acceptable).
         try {
@@ -334,7 +357,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('${CrmStatus.PAID}', 'Waived'))
       `);
       if (paid.recordset[0]?.Cnt > 0) {
-        return res.status(400).json({ error: "Cannot change payment plan — payments have already been recorded against the existing schedule" });
+        return res.status(400).json({ error: "Cannot change payment plan â€” payments have already been recorded against the existing schedule" });
       }
     }
 
@@ -364,7 +387,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
           BookingDate = ISNULL(@bdate, BookingDate), PaymentMode = ISNULL(@pmode, PaymentMode),
           AssignedTo = ISNULL(@asgn, AssignedTo),
           PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
-          -- HsnCode is no longer settable here — it's fully auto-resolved by
+          -- HsnCode is no longer settable here â€” it's fully auto-resolved by
           -- recalculateBookingGst below (Unit+Parking value decides 1% vs
           -- 5%), never a manual per-booking input. See migration 283.
           -- GrandTotal tracks TotalValue changes without disturbing the
@@ -374,7 +397,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         WHERE Id = @id AND IsActive = 1
       `);
 
-    // TotalValue may have just moved — Unit+Parking could have crossed the
+    // TotalValue may have just moved â€” Unit+Parking could have crossed the
     // Rs. 45L GST bracket.
     await recalculateBookingGst(pool, id);
 
@@ -388,8 +411,8 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       const effectiveBookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : oldRow.BookingAmount;
       await generateMilestonesForBooking(pool, id, effectiveTotal, newPlanId, b.BookingDate || null, actor, effectiveBookingAmount);
     } else if (total != null && total !== oldRow.TotalValue) {
-      // TotalValue moved (rate correction) without a plan switch — the
-      // existing schedule's ₹/% no longer add up to what's actually owed.
+      // TotalValue moved (rate correction) without a plan switch â€” the
+      // existing schedule's â‚¹/% no longer add up to what's actually owed.
       // A plan switch already regenerates the whole schedule from scratch
       // above, so this only fires on the "same plan, new total" path.
       await recalculateRemainingMilestones(pool, id);
@@ -402,22 +425,23 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
   }
 });
 
-// PUT /:id/change-unit — the only way UnitId can ever change on an existing
+// PUT /:id/change-unit â€” the only way UnitId can ever change on an existing
 // booking. Restricted to admin/super_admin/dba/marketing_head (this
 // re-points a real legal transaction to a different physical unit) and
 // requires a mandatory reason. Every change is permanently logged to
-// CrmUnitChangeLog — nothing here is ever silently overwritten.
+// CrmUnitChangeLog â€” nothing here is ever silently overwritten.
 router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   try {
     if (!isSaAdmin(req)) return res.status(403).json({ error: "Only admin/super_admin/marketing_head can change a booking's unit" });
     const pool = getPool();
     const id = parseInt(req.params.id);
+    if (await assertNotFrozen(pool, id, res)) return;
     const b = req.body || {};
     if (!b.NewUnitId) return res.status(400).json({ error: "NewUnitId is required" });
     if (!b.Reason?.trim()) return res.status(400).json({ error: "Reason is required to change a booking's unit" });
 
     // Same active-booking gate every other lifecycle-mutating route uses
-    // (blocks both Cancelled and Rejected, not just Cancelled) — re-pointing
+    // (blocks both Cancelled and Rejected, not just Cancelled) â€” re-pointing
     // a real legal transaction to a different physical unit is exactly the
     // kind of action that gate exists for, and there's no reason a Rejected
     // booking should be exempt from it when nothing else is.
@@ -432,7 +456,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     const newUnitId = parseInt(b.NewUnitId);
     if (newUnitId === oldUnitId) return res.status(400).json({ error: "New unit is the same as the current unit" });
 
-    // Same lookup + availability checks as booking creation — the new unit
+    // Same lookup + availability checks as booking creation â€” the new unit
     // must be real, active, and not already locked by another booking.
     const unit = await pool.request().input("uid", sql.Int, newUnitId).query(`
       SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
@@ -466,7 +490,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
         // No explicit plan pick on this endpoint yet, so this only resolves
         // automatically when the new unit has exactly one tagged plan (see
         // resolveApplicationPaymentPlan). A unit with 0 or 2+ tags leaves
-        // the plan unresolved here rather than guessing — staff can set it
+        // the plan unresolved here rather than guessing â€” staff can set it
         // explicitly via the booking's own PUT /:id payment-plan change.
         newPlanId = await resolveApplicationPaymentPlan(pool, { preferredUnitId: unitRow.Id, paymentPlanId: null });
       } catch (e) {
@@ -509,12 +533,12 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
         WHERE Id = @id
       `);
 
-    // New unit means a new TotalValue — Unit+Parking could have crossed the
+    // New unit means a new TotalValue â€” Unit+Parking could have crossed the
     // Rs. 45L GST bracket.
     await recalculateBookingGst(pool, id);
 
     if (newPlanId) {
-      // Only the %-based schedule steps get wiped and regenerated — a
+      // Only the %-based schedule steps get wiped and regenerated â€” a
       // Parking/Extra-Charge milestone is a fixed line item tied to a real
       // allotment/charge row elsewhere (see the same exclusion in
       // recalculateRemainingMilestones), not part of the plan schedule, and
@@ -549,7 +573,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
   }
 });
 
-// GET /:id/unit-change-log — history of unit changes for a booking
+// GET /:id/unit-change-log â€” history of unit changes for a booking
 router.get("/:id/unit-change-log", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -570,7 +594,7 @@ router.get("/:id/unit-change-log", requirePageRight("crm-bookings", "view"), asy
   }
 });
 
-// PUT /:id/submit — re-submit a Rejected booking for approval. New bookings
+// PUT /:id/submit â€” re-submit a Rejected booking for approval. New bookings
 // already land in Pending on creation, so this only matters for the
 // Rejected -> Pending resubmit path (ApprovalActions renders Submit there).
 router.put("/:id/submit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
@@ -578,6 +602,8 @@ router.put("/:id/submit", requirePageRight("crm-bookings", "edit"), async (req, 
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
+    const pool = getPool();
+    if (await assertNotFrozen(pool, id, res)) return;
     const result = await approvalTransition("crm-bookings", id, CrmStatus.PENDING, userEmail, req.user?.role);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
@@ -590,13 +616,13 @@ router.put("/:id/submit", requirePageRight("crm-bookings", "edit"), async (req, 
 // submitForApproval() (crmBookingStageService.js, the actual authoritative
 // gate that performs the transition) must agree on what "ready" means.
 //
-// Previously this checked booking.UnitReviewConfirmed/PlanReviewConfirmed —
+// Previously this checked booking.UnitReviewConfirmed/PlanReviewConfirmed â€”
 // two standalone self-confirm fields with their own confirm-unit/confirm-plan
-// routes — SEPARATELY from the Data Review checklist's own ProjectUnitRate/
+// routes â€” SEPARATELY from the Data Review checklist's own ProjectUnitRate/
 // PaymentPlanAmounts items, even though both were asserting the same two
 // facts. submitForApproval() already hard-requires the entire 7-item
 // checklist checked before it will do anything, which already guarantees
-// ProjectUnitRate and PaymentPlanAmounts are Checked — so the separate
+// ProjectUnitRate and PaymentPlanAmounts are Checked â€” so the separate
 // Unit/Plan booleans were pure redundant bookkeeping being kept in sync by
 // firing two API calls per click on the frontend. Checking the checklist
 // directly here removes the second, parallel system entirely: one source of
@@ -623,30 +649,31 @@ async function checkBookingApprovalReadiness(pool, id) {
 // Those two facts are now asserted exactly once, by the Data Review
 // checklist's own ProjectUnitRate/PaymentPlanAmounts items (see
 // checkBookingApprovalReadiness above and renderChecklistItem in
-// CrmBookingDetail.tsx) — not by a second, parallel set of booking columns
+// CrmBookingDetail.tsx) â€” not by a second, parallel set of booking columns
 // kept in sync from the frontend. UnitReviewConfirmed/PlanReviewConfirmed
 // columns are left in place on dbo.CrmBooking (no migration, no data loss)
 // but nothing reads or writes them anymore.
 
 
-// PUT /:id/ready-for-approval — staff-facing "Book" action. Re-runs the
+// PUT /:id/ready-for-approval â€” staff-facing "Book" action. Re-runs the
 // exact same readiness gate PUT /:id/approve enforces, so a booking can
 // never be marked "ready" and then be surprised by a rejection for the same
 // missing item. Stamps ReadyForApprovalAt (which the Admin Approval Inbox
-// now requires before it will even list a Pending booking — see
+// now requires before it will even list a Pending booking â€” see
 // approvalInbox.js), and notifies every
 // admin/super_admin/marketing_head that a booking is waiting on them.
 router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const pool = getPool();
+    if (await assertNotFrozen(pool, id, res)) return;
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const readiness = await checkBookingApprovalReadiness(pool, id);
     if (readiness.notFound) return res.status(404).json({ error: "Booking not found" });
     if (readiness.missing.length) {
-      return res.status(400).json({ error: `Cannot submit for approval — confirm ${readiness.missing.join(" and ")} first` });
+      return res.status(400).json({ error: `Cannot submit for approval â€” confirm ${readiness.missing.join(" and ")} first` });
     }
 
     const actor = actorId(req);
@@ -655,20 +682,22 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
     const stageResult = await submitForApproval(pool, id, userEmail, req.user?.role, actor);
 
     // Money Receipt only ever becomes real once the booking has actually
-    // been submitted for approval here — not the instant the Data Review
+    // been submitted for approval here â€” not the instant the Data Review
     // checklist happens to be fully ticked, which can sit there for a
     // while before staff actually hit Confirm & Book. submitForApproval
     // above already hard-requires the checklist complete, so this is
     // strictly the later of the two gates.
+    let mrWarning = null;
     try {
       await createMoneyReceiptAfterDataReview(pool, id, actor);
     } catch (mrErr) {
       console.error("[crm-bookings] auto money receipt creation on submit-for-approval failed:", mrErr.message);
+      mrWarning = mrErr.message;
     }
 
     const booking = await pool.request().input("id", sql.Int, id).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @id");
     const bookingNo = booking.recordset[0]?.BookingNo;
-    // dbo.Users has no plain-text "role" column — role is a RoleId FK into
+    // dbo.Users has no plain-text "role" column â€” role is a RoleId FK into
     // dbo.Role (RId / RName / RCode). RName is the machine-readable value
     // ('admin', 'super_admin', 'marketing_head', ...) that matches every
     // other role check in this codebase (e.g. CRM_APPROVER_ROLES in
@@ -689,10 +718,28 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
         id, "crm_booking");
     }
 
-    res.json({ success: true, ...stageResult });
+    res.json({ success: true, ...stageResult, mrWarning });
   } catch (e) {
     console.error("[crm-bookings] ready-for-approval error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/trigger-money-receipt â€” recovery action for bookings where the
+// auto-created Money Receipt was silently dropped (PDF error, missing amount,
+// etc.) on Confirm & Book, and the booking has since moved past Review.
+// Only usable when no non-Bounced MR exists (skipIfExists handles duplicates).
+router.post("/:id/trigger-money-receipt", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const activeErr = await requireActiveBooking(pool, id);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+    const result = await createMoneyReceiptAfterDataReview(pool, id, actorId(req));
+    res.status(result.existing ? 200 : 201).json({ success: true, ...result });
+  } catch (e) {
+    console.error("[crm-bookings] trigger-money-receipt error:", e.message);
+    res.status(e.status || 400).json({ error: e.message });
   }
 });
 
@@ -702,21 +749,21 @@ async function getBookingApplicationId(pool, bookingId) {
   return r.recordset[0] || null;
 }
 
-// ── Data Review checklist (the merged, former Level-1 Application check) ──
+// â”€â”€ Data Review checklist (the merged, former Level-1 Application check) â”€â”€
 // The same 7 items that used to gate the Application's own separate
 // Approve now live here instead, on the Booking, as the actual content of
-// the "Review" workflow stage — a different-department reviewer confirms
+// the "Review" workflow stage â€” a different-department reviewer confirms
 // KYC/Project-Unit-Rate/Payment-Plan/Bank-Deposit/Broker/Source/Documents
 // against the real data, item by item, before the booking can be Submitted
 // for Approval (see submitForApproval in crmBookingStageService.js, which
 // also requires this checklist fully checked). Stored at Level=1 in the
 // shared table (dbo.CrmApplicationVerificationChecklist), keyed by the
 // booking's own ApplicationId. Gated on WorkflowStage='Review' rather than
-// Status='Pending' — Status stays 'Pending' for the entire Review ->
+// Status='Pending' â€” Status stays 'Pending' for the entire Review ->
 // MarketingHeadApproval -> DirectorApproval pipeline now, only WorkflowStage
 // actually tracks where a booking is.
 
-// GET /:id/checklist — current Data Review checklist state for this booking.
+// GET /:id/checklist â€” current Data Review checklist state for this booking.
 router.get("/:id/checklist", requirePageRight("crm-bookings", "view"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
@@ -734,19 +781,20 @@ router.get("/:id/checklist", requirePageRight("crm-bookings", "view"), async (re
   }
 });
 
-// PUT /:id/checklist/:itemKey/check — reviewer ticks one item. Only valid
+// PUT /:id/checklist/:itemKey/check â€” reviewer ticks one item. Only valid
 // while the Booking is at the Review stage. remarks optional (confirming note).
 router.put("/:id/checklist/:itemKey/check", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { itemKey } = req.params;
   try {
     const pool = getPool();
+    if (await assertNotFrozen(pool, id, res)) return;
     const actor = actorId(req);
     const bk = await getBookingApplicationId(pool, id);
     if (!bk) return res.status(404).json({ error: "Booking not found" });
     const stage = await getStageState(pool, id);
     if (stage?.WorkflowStage !== "Review") {
-      return res.status(400).json({ error: `Checklist can only be verified while the booking is at the Review stage — current stage: ${stageLabel(stage?.WorkflowStage)}` });
+      return res.status(400).json({ error: `Checklist can only be verified while the booking is at the Review stage â€” current stage: ${stageLabel(stage?.WorkflowStage)}` });
     }
 
     await ensureChecklistRows(pool, bk.ApplicationId, 1);
@@ -754,7 +802,7 @@ router.put("/:id/checklist/:itemKey/check", requirePageRight("crm-bookings", "ed
 
     const items = await ensureChecklistRows(pool, bk.ApplicationId, 1);
     const allChecked = items.every((it) => it.CheckStatus === "Checked");
-    // Money Receipt is NOT created here anymore — the checklist being fully
+    // Money Receipt is NOT created here anymore â€” the checklist being fully
     // checked is only half the gate. It's created once the booking is
     // actually submitted for approval (PUT /:id/ready-for-approval, "Confirm
     // & Book"), which itself requires this same checklist complete first.
@@ -767,18 +815,19 @@ router.put("/:id/checklist/:itemKey/check", requirePageRight("crm-bookings", "ed
   }
 });
 
-// PUT /:id/checklist/:itemKey/uncheck — reviewer retracts their own check.
+// PUT /:id/checklist/:itemKey/uncheck â€” reviewer retracts their own check.
 router.put("/:id/checklist/:itemKey/uncheck", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { itemKey } = req.params;
   try {
     const pool = getPool();
+    if (await assertNotFrozen(pool, id, res)) return;
     const actor = actorId(req);
     const bk = await getBookingApplicationId(pool, id);
     if (!bk) return res.status(404).json({ error: "Booking not found" });
     const stage = await getStageState(pool, id);
     if (stage?.WorkflowStage !== "Review") {
-      return res.status(400).json({ error: `Checklist can only be verified while the booking is at the Review stage — current stage: ${stageLabel(stage?.WorkflowStage)}` });
+      return res.status(400).json({ error: `Checklist can only be verified while the booking is at the Review stage â€” current stage: ${stageLabel(stage?.WorkflowStage)}` });
     }
 
     await ensureChecklistRows(pool, bk.ApplicationId, 1);
@@ -790,7 +839,7 @@ router.put("/:id/checklist/:itemKey/uncheck", requirePageRight("crm-bookings", "
   }
 });
 
-// PUT /:id/checklist/:itemKey/flag — reviewer flags one item as wrong.
+// PUT /:id/checklist/:itemKey/flag â€” reviewer flags one item as wrong.
 // Remark mandatory. Logged to CrmApplicationStatusLog (against the
 // booking's own ApplicationId) so it's visible in the same Status History
 // panel other flags already show up in.
@@ -802,12 +851,13 @@ router.put("/:id/checklist/:itemKey/flag", requirePageRight("crm-bookings", "edi
       return res.status(400).json({ error: "A remark is required so the preparer knows what to fix on this item" });
     }
     const pool = getPool();
+    if (await assertNotFrozen(pool, id, res)) return;
     const actor = actorId(req);
     const bk = await getBookingApplicationId(pool, id);
     if (!bk) return res.status(404).json({ error: "Booking not found" });
     const stage = await getStageState(pool, id);
     if (stage?.WorkflowStage !== "Review") {
-      return res.status(400).json({ error: `Checklist can only be verified while the booking is at the Review stage — current stage: ${stageLabel(stage?.WorkflowStage)}` });
+      return res.status(400).json({ error: `Checklist can only be verified while the booking is at the Review stage â€” current stage: ${stageLabel(stage?.WorkflowStage)}` });
     }
 
     await ensureChecklistRows(pool, bk.ApplicationId, 1);
@@ -824,7 +874,7 @@ router.put("/:id/checklist/:itemKey/flag", requirePageRight("crm-bookings", "edi
   }
 });
 
-// PUT /:id/checklist/:itemKey/resubmit — preparer-side: "I've fixed what
+// PUT /:id/checklist/:itemKey/resubmit â€” preparer-side: "I've fixed what
 // was flagged." Only valid on an item currently NeedsRecheck, only while
 // the Booking is still at the Review stage.
 router.put("/:id/checklist/:itemKey/resubmit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
@@ -832,12 +882,13 @@ router.put("/:id/checklist/:itemKey/resubmit", requirePageRight("crm-bookings", 
   const { itemKey } = req.params;
   try {
     const pool = getPool();
+    if (await assertNotFrozen(pool, id, res)) return;
     const actor = actorId(req);
     const bk = await getBookingApplicationId(pool, id);
     if (!bk) return res.status(404).json({ error: "Booking not found" });
     const stage = await getStageState(pool, id);
     if (stage?.WorkflowStage !== "Review") {
-      return res.status(400).json({ error: `Checklist can only be revised while the booking is at the Review stage — current stage: ${stageLabel(stage?.WorkflowStage)}` });
+      return res.status(400).json({ error: `Checklist can only be revised while the booking is at the Review stage â€” current stage: ${stageLabel(stage?.WorkflowStage)}` });
     }
 
     const item = await resubmitItem(pool, bk.ApplicationId, itemKey, { actor, level: 1 });
@@ -852,7 +903,7 @@ router.put("/:id/checklist/:itemKey/resubmit", requirePageRight("crm-bookings", 
   }
 });
 
-// PUT /:id/approve — staged Booking approval. Review -> Marketing Head ->
+// PUT /:id/approve â€” staged Booking approval. Review -> Marketing Head ->
 // Director -> Confirmed. The old separate Level-2 checklist approval is no
 // longer a gate; its review logic now lives in the booking page checklist.
 router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req, res) => {
@@ -862,11 +913,12 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
     if (!userEmail) return;
 
     const pool0 = getPool();
+    if (await assertNotFrozen(pool0, id, res)) return;
     const stageRow = await getStageState(pool0, id);
     const stage = stageRow?.WorkflowStage;
     const result = await approveStageRequest(pool0, id, stage, userEmail, req.user?.role, actorId(req));
 
-    // Auto-flow: an approved booking's very next step is the welcome call —
+    // Auto-flow: an approved booking's very next step is the welcome call â€”
     // push that to the assigned salesperson instead of waiting for them to
     // notice the booking list changed.
     if (result.confirmed) {
@@ -877,7 +929,7 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
       if (booking?.AssignedTo) {
         await emitNotification(pool, booking.AssignedTo, "crm_welcome_call_due",
           "Welcome Call Due",
-          `Booking ${booking.BookingNo} is approved — make the welcome call to proceed.`,
+          `Booking ${booking.BookingNo} is approved â€” make the welcome call to proceed.`,
           id, "crm_booking");
 
         // A12: Trigger automated communication (SMS/WhatsApp/Email)
@@ -892,19 +944,86 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
   }
 });
 
-// PUT /:id/reject — mandatory remarks; bounces back one stage, never cancels.
+// PUT /:id/reject â€” mandatory remarks; bounces back one stage, never cancels.
 router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const pool = getPool();
+    if (await assertNotFrozen(pool, id, res)) return;
     const stageRow = await getStageState(pool, id);
     const result = await rejectStageRequest(pool, id, stageRow?.WorkflowStage, userEmail, req.user?.role, actorId(req), req.body?.note || req.body?.remarks);
     res.json({ success: true, status: CrmStatus.PENDING, ...result });
   } catch (e) {
     console.error("[crm-bookings] reject error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// POST /:id/freeze â€” admin-only. Puts a hard lock on the booking preventing any
+// staff-driven status change (submit for approval, document generation, etc.).
+// Used for: legal disputes, court injunctions, developer-initiated project holds.
+// FreezeExpiresAt is required â€” freezes must not be open-ended.
+router.post("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { reason, expiresAt } = req.body || {};
+  if (!reason || !reason.trim()) return res.status(400).json({ error: "reason is required to freeze a booking" });
+  if (!expiresAt) return res.status(400).json({ error: "expiresAt is required â€” freezes must have an expiry date" });
+  try {
+    const pool = getPool();
+    const check = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Id, BookingNo, IsFrozen FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
+    if (!check.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    if (check.recordset[0].IsFrozen) return res.status(409).json({ error: "Booking is already frozen" });
+
+    await pool.request()
+      .input("id",  sql.Int,       id)
+      .input("by",  sql.Int,       actorId(req))
+      .input("rsn", sql.NVarChar(500), reason.trim())
+      .input("exp", sql.DateTime2, new Date(expiresAt))
+      .query(`
+        UPDATE dbo.CrmBooking SET
+          IsFrozen = 1, FrozenAt = SYSDATETIME(),
+          FrozenBy = @by, FreezeReason = @rsn, FreezeExpiresAt = @exp,
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    await logCrmAudit(pool, "Booking", id, actorId(req), [
+      { field: "IsFrozen", oldVal: 0, newVal: 1 },
+      { field: "FreezeReason", oldVal: null, newVal: reason.trim() },
+    ]);
+    res.json({ success: true, message: `Booking ${check.recordset[0].BookingNo} frozen until ${expiresAt}` });
+  } catch (e) {
+    console.error("[crm-bookings] freeze error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /:id/freeze (unfreeze) â€” admin-only. Clears the freeze lock.
+router.delete("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool = getPool();
+    const check = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Id, BookingNo, IsFrozen FROM dbo.CrmBooking WHERE Id = @id");
+    if (!check.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    if (!check.recordset[0].IsFrozen) return res.status(409).json({ error: "Booking is not frozen" });
+
+    await pool.request().input("id", sql.Int, id).query(`
+      UPDATE dbo.CrmBooking SET
+        IsFrozen = 0, FrozenAt = NULL,
+        FrozenBy = NULL, FreezeReason = NULL, FreezeExpiresAt = NULL,
+        UpdatedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+    await logCrmAudit(pool, "Booking", id, actorId(req), [
+      { field: "IsFrozen", oldVal: 1, newVal: 0 },
+    ]);
+    res.json({ success: true, message: `Booking ${check.recordset[0].BookingNo} unfrozen` });
+  } catch (e) {
+    console.error("[crm-bookings] unfreeze error:", e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -925,20 +1044,47 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     const booking = rowRes.recordset[0];
     if (!booking) return res.status(404).json({ error: "Booking not found" });
 
+    const isCancelled = booking.Status === "Cancelled";
     const progressedReasons = [];
-    if (booking.Status === CrmStatus.APPROVED) progressedReasons.push("booking is fully approved");
-    if (booking.WorkflowStage && booking.WorkflowStage !== "Review") progressedReasons.push(`workflow is at ${booking.WorkflowStage}`);
-    if (booking.ReadyForApprovalAt) progressedReasons.push("booking has been submitted for approval");
-    if (booking.MarketingHeadApprovedAt || booking.DirectorApprovedAt || booking.ConfirmedAt) progressedReasons.push("approval stamps already exist");
 
-    const downstream = await pool.request().input("bid", sql.Int, id).query(bookingDownstreamSql);
+    if (!isCancelled) {
+      // For active bookings, redirect to the cancellation workflow if already progressed.
+      if (booking.Status === CrmStatus.APPROVED) progressedReasons.push("booking is fully approved");
+      if (booking.WorkflowStage && booking.WorkflowStage !== "Review") progressedReasons.push(`workflow is at ${booking.WorkflowStage}`);
+      if (booking.ReadyForApprovalAt) progressedReasons.push("booking has been submitted for approval");
+      if (booking.MarketingHeadApprovedAt || booking.DirectorApprovedAt || booking.ConfirmedAt) progressedReasons.push("approval stamps already exist");
+    }
+
+    // Cancelled bookings: only legal/financial records are permanent â€” operational
+    // records (handover, NOC, welcome call, etc.) are cleaned up on permanent delete.
+    // Active bookings: the full downstream check applies to redirect to cancellation.
+    const downstreamSql = isCancelled ? `
+      SELECT
+        (SELECT COUNT(*) FROM dbo.CrmAgreement WHERE BookingId = @bid) AS Agreements,
+        (SELECT COUNT(*) FROM dbo.CrmSalesDeed WHERE BookingId = @bid) AS SalesDeeds,
+        (SELECT COUNT(*) FROM dbo.CrmInvoice WHERE BookingId = @bid AND Status NOT IN ('Void','Rejected')) AS Invoices,
+        (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Rejected') AS MoneyReceipts,
+        (SELECT COUNT(*) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS OnAccountPayments,
+        (SELECT COUNT(*) FROM dbo.CrmPaymentReceipt r
+          JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid) AS PaymentReceipts,
+        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid
+          AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))) AS PaidMilestones,
+        (SELECT COUNT(*) FROM dbo.ReceivedPayment rp
+          WHERE (rp.CrmBookingId = @bid OR rp.CrmMilestoneId IN
+            (SELECT Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid))
+            AND ISNULL(rp.RPStatus,'') <> 'Rejected') AS ReceivedPayments
+    ` : bookingDownstreamSql;
+
+    const downstream = await pool.request().input("bid", sql.Int, id).query(downstreamSql);
     const d = downstream.recordset[0] || {};
     for (const [label, count] of Object.entries(d)) {
       if (Number(count) > 0) progressedReasons.push(label);
     }
     if (progressedReasons.length) {
       return res.status(400).json({
-        error: `Cannot delete booking ${booking.BookingNo} because it has progressed: ${progressedReasons.join(", ")}. Use Cancellation Request instead.`,
+        error: isCancelled
+          ? `Cannot remove booking ${booking.BookingNo} â€” it has legal or financial records (${progressedReasons.join(", ")}) that form a permanent audit trail and cannot be deleted.`
+          : `Cannot delete booking ${booking.BookingNo} because it has progressed: ${progressedReasons.join(", ")}. Use Cancellation Request instead.`,
       });
     }
 
@@ -958,7 +1104,7 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     // Revert Application-stage rows so the application can be corrected and
     // re-booked without stale child rows remaining pinned to the deleted booking.
     // Parking allotments are fully deactivated (IsActive = 0) rather than just
-    // orphaned (BookingId = NULL) — a NULL-BookingId row with IsActive = 1
+    // orphaned (BookingId = NULL) â€” a NULL-BookingId row with IsActive = 1
     // permanently blocks the slot in the availability matrix for everyone.
       await tx.request().input("bid", sql.Int, id).input("aid", sql.Int, booking.ApplicationId).query(`
       UPDATE dbo.CrmCustomerBankDetail SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
@@ -980,13 +1126,13 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid;
     `);
 
-    // Void any pending brokerage tranches — orphaned Pending tranches would
+    // Void any pending brokerage tranches â€” orphaned Pending tranches would
     // inflate the brokerage liability reports and confuse clawback tracking
     // if the application is later re-booked with fresh brokerage.
       await tx.request().input("bid", sql.Int, id).query(`
       UPDATE dbo.CrmBrokerageMaster
       SET Status = 'Voided', UpdatedAt = SYSDATETIME(),
-          Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided — booking deleted by admin.'
+          Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided â€” booking deleted by admin.'
       WHERE BookingId = @bid AND Status = 'Pending'
     `);
 
@@ -996,27 +1142,31 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       throw txErr;
     }
 
-    // Revert the Application from Approved → back to a cancellable/re-bookable
+    // Revert the Application from Approved â†’ back to a cancellable/re-bookable
     // state. createCrmBookingRecord force-advanced Application to Approved when
     // the booking was created; without this call the Application stays at
-    // Approved forever with no live booking behind it — it can't be cancelled
+    // Approved forever with no live booking behind it â€” it can't be cancelled
     // through the normal UI (APPLICATION_TRANSITIONS['Approved'] = []) and
     // can't be re-booked, leaving the Application orphaned with no recovery path.
-    await syncApplicationOnBookingTerminal(pool, id, CrmStatus.CANCELLED,
-      "BookingAdminDelete", "Booking deleted by admin", actor);
+    // For cancelled bookings these steps were already executed when the
+    // cancellation was approved â€” skip to avoid double-sync and ghost holds.
+    if (!isCancelled) {
+      await syncApplicationOnBookingTerminal(pool, id, CrmStatus.CANCELLED,
+        "BookingAdminDelete", "Booking deleted by admin", actor);
 
-    if (booking.UnitId) {
-      try {
-        await placeHoldIfNeeded(pool, {
-          entityType: "Unit",
-          entityId: booking.UnitId,
-          applicationId: booking.ApplicationId,
-          holdDays: 3,
-          reason: "Booking deleted by admin - application reverted to pre-booking hold",
-          userId: actor,
-        });
-      } catch (holdErr) {
-        console.error("[crm-bookings] unit hold restore after delete failed:", holdErr.message);
+      if (booking.UnitId) {
+        try {
+          await placeHoldIfNeeded(pool, {
+            entityType: "Unit",
+            entityId: booking.UnitId,
+            applicationId: booking.ApplicationId,
+            holdDays: 3,
+            reason: "Booking deleted by admin - application reverted to pre-booking hold",
+            userId: actor,
+          });
+        } catch (holdErr) {
+          console.error("[crm-bookings] unit hold restore after delete failed:", holdErr.message);
+        }
       }
     }
 
@@ -1031,9 +1181,12 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
   }
 });
 
-// DELETE /:id/permanent - hard delete, only from the soft-deleted booking
-// section. Still refuses approved/progressed records so this cannot become a
-// back door around the cancellation/refund/legal workflow.
+// DELETE /:id/permanent - hard delete from the soft-deleted (cancelled pool)
+// booking section. Only Agreements, Sale Deeds, and actual monetary records
+// are protected â€” if those exist the delete is permanently blocked because
+// they are the legal/financial audit trail. Operational lifecycle records
+// (welcome calls, handovers, NOC, service tickets, etc.) are deleted with the
+// booking row since they have no standalone legal standing.
 router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
@@ -1048,26 +1201,54 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
     if (!booking) return res.status(404).json({ error: "Booking not found" });
     if (booking.IsActive) return res.status(400).json({ error: "Only soft-deleted bookings can be permanently deleted" });
 
+    const isCancelled = booking.Status === "Cancelled";
     const progressedReasons = [];
-    if (booking.Status === CrmStatus.APPROVED) progressedReasons.push("booking is fully approved");
-    if (booking.WorkflowStage && booking.WorkflowStage !== "Review") progressedReasons.push(`workflow is at ${booking.WorkflowStage}`);
-    if (booking.ReadyForApprovalAt) progressedReasons.push("booking has been submitted for approval");
-    if (booking.MarketingHeadApprovedAt || booking.DirectorApprovedAt || booking.ConfirmedAt) progressedReasons.push("approval stamps already exist");
+    if (!isCancelled) {
+      // For non-cancelled bookings, workflow progress guards still apply.
+      if (booking.Status === CrmStatus.APPROVED) progressedReasons.push("booking is fully approved");
+      if (booking.WorkflowStage && booking.WorkflowStage !== "Review") progressedReasons.push(`workflow is at ${booking.WorkflowStage}`);
+      if (booking.ReadyForApprovalAt) progressedReasons.push("booking has been submitted for approval");
+      if (booking.MarketingHeadApprovedAt || booking.DirectorApprovedAt || booking.ConfirmedAt) progressedReasons.push("approval stamps already exist");
+    }
 
-    const downstream = await pool.request().input("bid", sql.Int, id).query(bookingDownstreamSql);
-    const d = downstream.recordset[0] || {};
-    for (const [label, count] of Object.entries(d)) {
+    // Only Agreements, Sale Deeds, and monetary footprints block permanent
+    // deletion â€” they are the legal/financial audit trail and can never be
+    // removed. Operational records (handover, NOC, welcome calls, etc.) are
+    // deleted below as part of the transaction.
+    const protectedRes = await pool.request().input("bid", sql.Int, id).query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.CrmAgreement WHERE BookingId = @bid) AS Agreements,
+        (SELECT COUNT(*) FROM dbo.CrmSalesDeed WHERE BookingId = @bid) AS SalesDeeds,
+        (SELECT COUNT(*) FROM dbo.CrmInvoice WHERE BookingId = @bid AND Status NOT IN ('Void','Rejected')) AS Invoices,
+        (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Rejected') AS MoneyReceipts,
+        (SELECT COUNT(*) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS OnAccountPayments,
+        (SELECT COUNT(*) FROM dbo.CrmPaymentReceipt r
+          JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid) AS PaymentReceipts,
+        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid
+          AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))) AS PaidMilestones,
+        (SELECT COUNT(*) FROM dbo.ReceivedPayment rp
+          WHERE (rp.CrmBookingId = @bid OR rp.CrmMilestoneId IN
+            (SELECT Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid))
+            AND ISNULL(rp.RPStatus,'') <> 'Rejected') AS ReceivedPayments,
+        (SELECT COUNT(*) FROM dbo.CrmLoanDetail WHERE BookingId = @bid
+          AND SanctionStatus NOT IN ('NotApplied','Rejected')) AS ActiveLoans
+    `);
+    const p = protectedRes.recordset[0] || {};
+    for (const [label, count] of Object.entries(p)) {
       if (Number(count) > 0) progressedReasons.push(label);
     }
     if (progressedReasons.length) {
       return res.status(400).json({
-        error: `Cannot permanently delete booking ${booking.BookingNo} because it has progressed: ${progressedReasons.join(", ")}.`,
+        error: `Cannot permanently delete booking ${booking.BookingNo} â€” it has protected records that cannot be removed: ${progressedReasons.join(", ")}. Agreements, Sale Deeds, and monetary records are permanent audit trail.`,
       });
     }
 
     const tx = pool.transaction();
     await tx.begin();
     try {
+      // Detach shared application-level records (bank details, docs, parking,
+      // co-applicants, extra charges) back to the application rather than
+      // deleting them â€” they belong to the application, not the booking.
       await tx.request().input("bid", sql.Int, id).input("aid", sql.Int, booking.ApplicationId).query(`
         UPDATE dbo.CrmCustomerBankDetail SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
         UPDATE dbo.CrmBookingDocument SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
@@ -1076,10 +1257,26 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
         UPDATE dbo.CrmExtraCharge SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
       `);
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingAttachment WHERE BookingId = @bid");
+
+      // Operational lifecycle records â€” no legal standing; deleted with the booking.
+      // Snag items must precede handover rows (FK dependency).
+      await tx.request().input("bid", sql.Int, id).query(
+        "DELETE FROM dbo.CrmSnagItem WHERE HandoverId IN (SELECT Id FROM dbo.CrmHandover WHERE BookingId = @bid)"
+      );
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmHandover WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmNoc WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPrePossession WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPossessionNotice WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmServiceTicket WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmQueryPayment WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmRegistry WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmLegalMilestone WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeCallBankPreference WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeChecklistItem WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeCall WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmCancellation WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("UPDATE dbo.CrmCommunicationLog SET BookingId = NULL WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("UPDATE dbo.SaLead SET CrmBookingId = NULL WHERE CrmBookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query(`
@@ -1087,14 +1284,20 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
         WHERE CrmBookingId = @bid OR CrmMilestoneId IN (SELECT Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid)
       `);
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingStageLog WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmUnitChangeLog WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.ApprovalAuditLog WHERE TableName = 'CrmBooking' AND RecordId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmAuditLog WHERE EntityType = 'Booking' AND EntityId = @bid");
+      // MCA FY2024 mandate: audit trail rows must be tamper-proof and cannot be
+      // deleted even by admins. Orphaned rows (BookingId â†’ deleted booking) are
+      // intentional â€” they are the evidence that the booking once existed.
+      await tx.request().input("bid", sql.Int, id).query(
+        // CrmUnitChangeLog has a FK; NULL-out instead of delete so the history
+        // survives (migration 367 made BookingId nullable for this purpose).
+        "UPDATE dbo.CrmUnitChangeLog SET BookingId = NULL WHERE BookingId = @bid"
+      );
+      // CrmBookingStageLog, ApprovalAuditLog, and CrmAuditLog have no FK
+      // constraints â€” leave them entirely; they become orphaned audit records.
       // CrmBrokerageMaster rows must be removed before the parent CrmBooking
       // row to avoid FK constraint violations. At this point the booking is
       // already soft-deleted and its Pending tranches were voided at that
-      // time — any remaining rows here are Voided/Clawback records.
+      // time â€” any remaining rows here are Voided/Clawback records.
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBooking WHERE Id = @bid");
       await tx.commit();
@@ -1110,8 +1313,8 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
   }
 });
 
-// GET /:id/loan — home loan / bank coordination detail for a booking.
-// DisbursedAmount is no longer a manually-typed column — it's computed live
+// GET /:id/loan â€” home loan / bank coordination detail for a booking.
+// DisbursedAmount is no longer a manually-typed column â€” it's computed live
 // from real money: CrmPaymentReceipt rows (via CrmPaymentMilestone.BookingId)
 // plus CrmOnAccountPayment rows (BookingId direct), both filtered to
 // PaymentMode = 'Home Loan' (the real mode value used by CrmPaymentMilestones.tsx's
@@ -1147,14 +1350,16 @@ router.get("/:id/loan", requirePageRight("crm-loan-details", "view"), async (req
   }
 });
 
-// PUT /:id/loan — upsert loan detail for a booking. DisbursedAmount is
-// intentionally not accepted here — it's computed on GET, never stored.
+// PUT /:id/loan â€” upsert loan detail for a booking. DisbursedAmount is
+// intentionally not accepted here â€” it's computed on GET, never stored.
 router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
     const b = req.body;
     const actor = actorId(req);
+
+    if (await assertNotFrozen(pool, id, res)) return;
 
     const existing = await pool.request().input("bid", sql.Int, id)
       .query("SELECT Id FROM dbo.CrmLoanDetail WHERE BookingId = @bid");
@@ -1207,9 +1412,9 @@ router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req
   }
 });
 
-// ── Invoice tab ──────────────────────────────────────────────────────────────
+// â”€â”€ Invoice tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// GET /:id/invoices — every invoice generated for this booking
+// GET /:id/invoices â€” every invoice generated for this booking
 router.get("/:id/invoices", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -1228,9 +1433,9 @@ router.get("/:id/invoices", requirePageRight("crm-bookings", "view"), async (req
   }
 });
 
-// POST /:id/invoices — generate a real, permanently-numbered invoice.
+// POST /:id/invoices â€” generate a real, permanently-numbered invoice.
 // Visible to the customer in their portal immediately (no separate "send"
-// step — an invoice is a record of a real transaction, not a draft that
+// step â€” an invoice is a record of a real transaction, not a draft that
 // needs sign-off like the Agreement/Sales Deed documents).
 router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   try {
@@ -1248,21 +1453,21 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     }
 
     // "Milestone" invoices (Foundation, Superstructure, Slab Casting,
-    // Plastering, On Possession, parking/extra-charge line items — every
+    // Plastering, On Possession, parking/extra-charge line items â€” every
     // real payment after Booking) stay manual-trigger by design, but the
     // amount/date are always pulled from the milestone's own real payment
-    // data, never typed freehand — that's what keeps them "synced" instead
+    // data, never typed freehand â€” that's what keeps them "synced" instead
     // of just another disconnected ad-hoc entry. MilestoneId's unique index
     // (migration 268) guarantees a milestone can never be invoiced twice.
     let milestoneId = null;
     let onAccountPaymentId = null;
     let amount, invoiceDate, description;
     if (type === "OnAccount") {
-      // On-account deposits (dbo.CrmOnAccountPayment — money received in
+      // On-account deposits (dbo.CrmOnAccountPayment â€” money received in
       // excess of what's currently due, auto-parked and later auto-applied
       // to future milestones) are real cash received and must not go
       // un-invoiced. Amount is the deposit's own full Amount (what was
-      // actually received), not AppliedAmount — an invoice documents money
+      // actually received), not AppliedAmount â€” an invoice documents money
       // received, independent of how it's later allocated across
       // milestones. OnAccountPaymentId's unique index (migration 288)
       // guarantees a deposit can never be invoiced twice.
@@ -1277,27 +1482,26 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       if (already.recordset.length) return res.status(400).json({ error: `On-account payment "${oaRow.ReceiptNo}" already has an invoice` });
       amount = Number(oaRow.Amount);
       invoiceDate = oaRow.ReceivedDate;
-      description = b.Description || `On-account payment received — ${oaRow.ReceiptNo}`;
+      description = b.Description || `On-account payment received â€” ${oaRow.ReceiptNo}`;
     } else if (type === "Milestone" || type === "Booking") {
       milestoneId = parseInt(b.MilestoneId);
       if (!milestoneId) return res.status(400).json({ error: "MilestoneId is required for a Milestone/Booking invoice" });
       const m = await pool.request().input("mid", sql.Int, milestoneId).input("bid", sql.Int, id).query(`
-        SELECT Id, MilestoneNo, MilestoneName, AmountPaid, Status, PaidDate, DemandStatus FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
+        SELECT Id, MilestoneNo, MilestoneName, AmountDue, AmountPaid, Status, PaidDate, DemandStatus, DemandRaisedOn FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
       `);
       const mRow = m.recordset[0];
       if (!mRow) return res.status(404).json({ error: "Milestone not found on this booking" });
-      if (mRow.Status !== CrmStatus.PAID) return res.status(400).json({ error: `"${mRow.MilestoneName}" is not fully paid yet — an invoice can only be generated once it is` });
-      // No auto-generation anywhere now — every invoice is manual, gated on
-      // the milestone's Demand actually having been raised first (not just
-      // "Pending"), per "proper gate, after completion of the steps".
+      // Invoice is a billing document â€” generated after Demand is raised, BEFORE
+      // On Account Adjustment settles the milestone. Flow: Demand â†’ Invoice â†’ On Account
+      // Adjustment â†’ Milestone Settlement. Do NOT gate on Status = Paid.
       if (mRow.DemandStatus === CrmStatus.PENDING) {
         return res.status(400).json({ error: `A demand must be raised for "${mRow.MilestoneName}" (from the Demands page) before its invoice can be generated` });
       }
       const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid AND Status <> 'Void'");
       if (already.recordset.length) return res.status(400).json({ error: `"${mRow.MilestoneName}" already has an invoice` });
-      amount = Number(mRow.AmountPaid);
-      invoiceDate = mRow.PaidDate;
-      description = b.Description || `${mRow.MilestoneName} — payment received`;
+      amount = Number(mRow.AmountDue);
+      invoiceDate = mRow.DemandRaisedOn || null;
+      description = b.Description || `${mRow.MilestoneName} â€” invoice`;
     } else {
       amount = parseFloat(b.Amount);
       if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
@@ -1307,7 +1511,7 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       // Maintenance/Other invoices aren't tied to a milestone, so there's no
       // MilestoneId to anchor a uniqueness check on the way "Milestone" does
       // above. The billing period (calendar month of InvoiceDate) is the
-      // next best anchor — one Maintenance/Other invoice per booking per
+      // next best anchor â€” one Maintenance/Other invoice per booking per
       // month, blocking accidental double-generation while still allowing
       // legitimate repeat billing (e.g. next quarter's maintenance) once the
       // period rolls over. Checked here for a fast, clear error message, and
@@ -1330,24 +1534,24 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       if (dup.recordset.length) {
         const monthLabel = effectiveDate.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
         return res.status(400).json({
-          error: `A ${type} invoice (${dup.recordset[0].InvoiceNo}) already exists for ${monthLabel} on this booking — only one ${type} invoice is allowed per billing period`,
+          error: `A ${type} invoice (${dup.recordset[0].InvoiceNo}) already exists for ${monthLabel} on this booking â€” only one ${type} invoice is allowed per billing period`,
         });
       }
     }
 
-    // Customisable numbering — three ways to land on an InvoiceNo, in order
+    // Customisable numbering â€” three ways to land on an InvoiceNo, in order
     // of precedence:
-    //  1. CustomInvoiceNo — the exact, full number typed by staff (a
+    //  1. CustomInvoiceNo â€” the exact, full number typed by staff (a
     //     migrated legacy number, a one-off promised reference). Bypasses
-    //     CrmDocNumberSequence entirely — never consumes a counter slot, so
+    //     CrmDocNumberSequence entirely â€” never consumes a counter slot, so
     //     it can't desync auto-numbering for any other invoice.
-    //  2. InvoicePrefix — staff supply only the prefix (a project's own
+    //  2. InvoicePrefix â€” staff supply only the prefix (a project's own
     //     pre-printed stationery series, e.g. "TSTRSD" instead of "INV");
     //     the number after it still auto-increments, through the exact same
     //     race-safe getNextDocNumber() sequence every other doc type in this
-    //     app already uses — just keyed to this prefix's own row instead of
+    //     app already uses â€” just keyed to this prefix's own row instead of
     //     "INV". Sanitized to A-Z0-9 only so it stays a safe DocType key.
-    //  3. Neither — the standard INV-YYYY-NNNNN series (unchanged default).
+    //  3. Neither â€” the standard INV-YYYY-NNNNN series (unchanged default).
     // InvoiceNo's own UNIQUE constraint (migration 185) is still the real,
     // race-safe guard against a collision in every case.
     const customNo = String(b.CustomInvoiceNo || "").trim();
@@ -1380,7 +1584,7 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
         VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME(), @mid, @oaid)
       `);
     const invoiceId = result.recordset[0].Id;
-    // Best-effort, same request — the invoice record itself is the source of
+    // Best-effort, same request â€” the invoice record itself is the source of
     // truth and must not fail to create just because PDF rendering hit a
     // problem; generateInvoicePdf writes the base64 straight onto the row,
     // and the download route regenerates + re-persists on demand if it's
@@ -1393,20 +1597,20 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     res.status(201).json({ success: true, id: invoiceId, InvoiceNo: invoiceNo });
   } catch (e) {
     // Two near-simultaneous requests can both pass the app-level duplicate
-    // check above and then race into the INSERT — the unique indexes
+    // check above and then race into the INSERT â€” the unique indexes
     // (migration 268 for MilestoneId, 270 for BookingId/InvoiceType/
     // BillingPeriod, 288 for OnAccountPaymentId) are the real backstop and
     // will reject the second one. Surface that as the same clear 400
     // instead of a raw SQL 500.
     if (e.number === 2601 || e.number === 2627) {
-      return res.status(400).json({ error: "An invoice already exists for this milestone, on-account payment, or billing period — it can't be generated twice" });
+      return res.status(400).json({ error: "An invoice already exists for this milestone, on-account payment, or billing period â€” it can't be generated twice" });
     }
     console.error("[crm-bookings] POST /:id/invoices error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// GET /:id/invoices/:invoiceId/pdf — stream the invoice PDF straight from
+// GET /:id/invoices/:invoiceId/pdf â€” stream the invoice PDF straight from
 // the CrmInvoice row's stored base64. Regenerates + re-persists it on the
 // fly if the row predates the PdfBase64 column (getInvoicePdfBuffer handles
 // that) instead of 404ing on a real, existing invoice.
@@ -1429,13 +1633,13 @@ router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "vie
   }
 });
 
-// Invoices are otherwise write-once (no UPDATE/DELETE route exists) — Void
+// Invoices are otherwise write-once (no UPDATE/DELETE route exists) â€” Void
 // is the one, audited correction path: it never deletes the row (InvoiceNo
 // stays on record for audit trail, matching this app's no-hard-delete
 // convention elsewhere in CRM), but it does free the invoice's MilestoneId /
 // OnAccountPaymentId / BillingPeriod slot (migration 325's re-scoped unique
 // indexes + the Status <> 'Void' guards above) so a corrected invoice can be
-// generated in its place. Gated tighter than plain "crm-bookings edit" —
+// generated in its place. Gated tighter than plain "crm-bookings edit" â€”
 // same approver set as Money Receipt approval (crmMoneyReceiptWorkflow.js's
 // APPROVER_ROLES) since this is a financial-document correction, not routine
 // booking editing.
@@ -1479,14 +1683,14 @@ router.put("/:id/invoices/:invoiceId/void", requirePageRight("crm-bookings", "ed
   }
 });
 
-// POST /:id/resync-schedule — retroactive fix for bookings whose payment
+// POST /:id/resync-schedule â€” retroactive fix for bookings whose payment
 // schedule was generated before Milestone #1 tracked the booking's real
 // BookingAmount (it used to be sized off the payment plan's own fixed %,
-// which could badly mismatch what the customer actually booked with — see
+// which could badly mismatch what the customer actually booked with â€” see
 // generateMilestonesForBooking). Pulls Milestone #1's AmountDue/Percent into
 // line with the booking's real BookingAmount, then redistributes every other
 // still-open milestone across (GrandTotal - BookingAmount), preserving their
-// relative weighting to each other — the exact same math new bookings get at
+// relative weighting to each other â€” the exact same math new bookings get at
 // creation time, just re-run on demand for one already created. Safe/
 // idempotent: a no-op if Milestone #1 already matches, and never touches a
 // Waived milestone or reduces AmountDue below what's already been collected.
@@ -1503,7 +1707,7 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
     if (!bk.recordset.length) return res.status(404).json({ error: "Booking not found" });
     const booking = bk.recordset[0];
     const bookingAmount = Number(booking.BookingAmount || 0);
-    if (!bookingAmount) return res.status(400).json({ error: "This booking has no BookingAmount recorded — nothing to resync against" });
+    if (!bookingAmount) return res.status(400).json({ error: "This booking has no BookingAmount recorded â€” nothing to resync against" });
     const grandTotal = Number(booking.GrandTotal || booking.TotalValue || 0);
     if (!grandTotal) return res.status(400).json({ error: "This booking has no total value set" });
 
@@ -1511,10 +1715,10 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
       .query("SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
     if (!m1Res.recordset.length) return res.status(400).json({ error: "No milestones found on this booking" });
     const m1 = m1Res.recordset[0];
-    if (m1.Status === "Waived") return res.status(400).json({ error: "Milestone 1 has been waived — nothing to resync" });
+    if (m1.Status === "Waived") return res.status(400).json({ error: "Milestone 1 has been waived â€” nothing to resync" });
 
     if (Math.abs(Number(m1.AmountDue) - bookingAmount) < 1) {
-      return res.json({ success: true, changed: false, message: "Milestone 1 already matches the booking amount — nothing to do" });
+      return res.json({ success: true, changed: false, message: "Milestone 1 already matches the booking amount â€” nothing to do" });
     }
 
     const newAmountDue = Math.max(bookingAmount, Number(m1.AmountPaid || 0));
@@ -1533,7 +1737,7 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
           -- actually collected (e.g. a stale schedule undercounted the real
           -- Booking Amount by a few hundred rupees, so "fully paid against
           -- the wrong number" no longer means fully paid). Re-evaluate
-          -- honestly against the just-updated amount every time instead —
+          -- honestly against the just-updated amount every time instead â€”
           -- never silently mask a real shortfall.
           Status = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
           UpdatedAt = SYSDATETIME()
@@ -1549,9 +1753,9 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
   }
 });
 
-// ── Attachments tab ──────────────────────────────────────────────────────────
+// â”€â”€ Attachments tab â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// GET /:id/attachments — every file attached to this booking
+// GET /:id/attachments â€” every file attached to this booking
 router.get("/:id/attachments", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -1588,7 +1792,7 @@ router.get("/:id/attachments", requirePageRight("crm-bookings", "view"), async (
   }
 });
 
-// POST /:id/attachments — upload one or more files
+// POST /:id/attachments â€” upload one or more files
 router.post("/:id/attachments", requirePageRight("crm-bookings", "edit"), upload.array("files", 10), async (req, res) => {
   try {
     const pool = getPool();
@@ -1623,7 +1827,7 @@ router.post("/:id/attachments", requirePageRight("crm-bookings", "edit"), upload
   }
 });
 
-// GET /:id/attachments/file/:attId — download/preview a stored file
+// GET /:id/attachments/file/:attId â€” download/preview a stored file
 router.get("/:id/attachments/file/:attId", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -1662,7 +1866,7 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
   }
 });
 
-// GET /:id/portal-status — staff-facing: shows whether the customer portal
+// GET /:id/portal-status â€” staff-facing: shows whether the customer portal
 // account has been provisioned for this booking's customer. Includes masked
 // mobile (initial password hint) so support staff can help a customer who
 // forgot their first-login credential. Only meaningful once the booking is
@@ -1672,7 +1876,7 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
   try {
     const pool = getPool();
 
-    // Query 1: booking + customer — always safe (no portal table join)
+    // Query 1: booking + customer â€” always safe (no portal table join)
     const bkgResult = await pool.request().input("bid", sql.Int, id).query(`
       SELECT
         b.Status        AS BookingStatus,
@@ -1691,7 +1895,7 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
     if (!bkgResult.recordset.length) return res.status(404).json({ error: "Booking not found" });
     const bkgRow = bkgResult.recordset[0];
 
-    // Query 2: portal user lookup — may fail if migration 254 not yet applied;
+    // Query 2: portal user lookup â€” may fail if migration 254 not yet applied;
     // degrade gracefully so the frontend still gets the booking stage.
     let portalRow = null;
     try {
@@ -1714,7 +1918,7 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
       }
       if (pResult && pResult.recordset.length) portalRow = pResult.recordset[0];
     } catch (pe) {
-      // Column missing (migration not run) or other transient issue — log and continue
+      // Column missing (migration not run) or other transient issue â€” log and continue
       console.warn("[crm-bookings] portal user lookup failed (non-fatal):", pe.message);
     }
 
@@ -1738,7 +1942,7 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
   }
 });
 
-// POST /:id/provision-portal — idempotent recovery route. The portal is
+// POST /:id/provision-portal â€” idempotent recovery route. The portal is
 // normally auto-provisioned at booking confirmation, but if that failed
 // (e.g. customer had no email on file at that moment and it was added later),
 // staff can trigger it here without re-running the full approval flow.
@@ -1764,7 +1968,7 @@ router.post("/:id/provision-portal", requirePageRight("crm-bookings", "edit"), a
 
 // Helper shared by deactivate + reactivate below
 async function setBookingPortalActive(pool, bookingId, isActive) {
-  // Look up portal user via booking → application → customer (CustomerId-keyed first, then ApplicationId fallback)
+  // Look up portal user via booking â†’ application â†’ customer (CustomerId-keyed first, then ApplicationId fallback)
   const bkg = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT b.ApplicationId, a.CustomerId FROM dbo.CrmBooking b
     JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -1818,70 +2022,93 @@ router.put("/:id/portal/reactivate", requirePageRight("crm-bookings", "edit"), a
   }
 });
 
-// GET /:id/lifecycle — structured step-by-step lifecycle state for one booking.
+// GET /:id/lifecycle â€” structured step-by-step lifecycle state for one booking.
 // Powers the BookingLifecycleBar component in CrmBookingDetail.
+// Step order and gates here MUST match what each feature route's POST / actually
+// requires â€” verified against crmPrePossession.js, crmHandover.js, crmSalesDeed.js,
+// crmQueryPayment.js, crmRegistry.js, crmMutation.js, crmNoc.js.
 router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: "Invalid booking id" });
   try {
     const pool = getPool();
 
-    const [bkRes, wcRes, agRes, lmRes, sdRes, qpRes, regRes, nocRes, ppRes, pnRes, hoRes] = await Promise.all([
+    const [bkRes, wcRes, agRes, lmRes, ppRes, pnRes, hoRes, sdRes, orgNocRes, bankNocRes, qpRes, regRes, mutRes] = await Promise.all([
       // booking itself
       pool.request().input("id", sql.Int, id)
         .query("SELECT Id, BookingNo, Status, BookingDate, ApplicationId FROM dbo.CrmBooking WHERE Id = @id"),
-      // welcome call — any 'Welcomed' outcome
+      // welcome call â€” any 'Welcomed' outcome
       pool.request().input("id", sql.Int, id)
         .query("SELECT TOP 1 CallDate, Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = @id AND Outcome = 'Welcomed' ORDER BY CallDate DESC"),
       // agreement
       pool.request().input("id", sql.Int, id)
         .query("SELECT TOP 1 Id, Status, AgreementDate, CreatedAt FROM dbo.CrmAgreement WHERE BookingId = @id ORDER BY CreatedAt DESC"),
-      // legal milestones
+      // legal milestones â€” parallel bookkeeping, no strict status gate
       pool.request().input("id", sql.Int, id)
         .query("SELECT TOP 1 Id, CurrentStep, OverallStatus, CreatedAt FROM dbo.CrmLegalMilestone WHERE BookingId = @id ORDER BY CreatedAt DESC"),
-      // sales deed
-      pool.request().input("id", sql.Int, id)
-        .query("SELECT TOP 1 Id, CustomerApprovalStatus, DirectorApprovalStatus, RegistrationNo, CreatedAt FROM dbo.CrmSalesDeed WHERE BookingId = @id ORDER BY CreatedAt DESC"),
-      // query payment
-      pool.request().input("id", sql.Int, id)
-        .query("SELECT TOP 1 Id, Status, CreatedAt FROM dbo.CrmQueryPayment WHERE BookingId = @id ORDER BY CreatedAt DESC"),
-      // registry
-      pool.request().input("id", sql.Int, id)
-        .query("SELECT TOP 1 Id, Status, ScheduledDate, CompletedDate, CreatedAt FROM dbo.CrmRegistry WHERE BookingId = @id ORDER BY CreatedAt DESC"),
-      // NOC
-      pool.request().input("id", sql.Int, id)
-        .query("SELECT TOP 1 Id, Status, NocType, CreatedAt FROM dbo.CrmNoc WHERE BookingId = @id ORDER BY CreatedAt DESC"),
-      // pre-possession
+      // pre-possession â€” real gate: Agreement.Status = 'Registered' (crmPrePossession.js POST /)
       pool.request().input("id", sql.Int, id)
         .query("SELECT TOP 1 Id, Status, CreatedAt FROM dbo.CrmPrePossession WHERE BookingId = @id ORDER BY CreatedAt DESC"),
-      // possession notice
+      // possession notice â€” real gate: PrePossession.Status = 'Ready'
       pool.request().input("id", sql.Int, id)
         .query("SELECT TOP 1 Id, Status, OfferedDate, CreatedAt FROM dbo.CrmPossessionNotice WHERE BookingId = @id ORDER BY CreatedAt DESC"),
-      // handover
+      // handover â€” real gate: Agreement Registered AND Possession Notice Acknowledged (crmHandover.js POST /)
       pool.request().input("id", sql.Int, id)
         .query("SELECT TOP 1 Id, Status, ActualHandoverDate, CreatedAt FROM dbo.CrmHandover WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // sales deed â€” real gate: Handover Completed + Agreement Registered + Loan Processing
+      // cleared (crmSalesDeed.js POST /). Its own comment: "AFS registered â†’ possession
+      // â†’ handover â†’ Sale Deed drafted â†’ registered."
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, CustomerApprovalStatus, DirectorApprovalStatus, RegistrationNo, CreatedAt FROM dbo.CrmSalesDeed WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // Org NOC â€” real gate: Agreement exists (any status). Separated from Bank NOC
+      // because their gates and timing in the real workflow are completely different:
+      // Org NOC can be requested as soon as an agreement exists (well before handover);
+      // Bank NOC requires a Sale Deed. A single combined lookup can't represent both
+      // without misleading one of them.
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, CreatedAt FROM dbo.CrmNoc WHERE BookingId = @id AND NocType = 'Organisation' ORDER BY CreatedAt DESC"),
+      // Bank NOC â€” real gate: Sale Deed exists (crmNoc.js POST / Bank branch)
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, CreatedAt FROM dbo.CrmNoc WHERE BookingId = @id AND NocType = 'Bank' ORDER BY CreatedAt DESC"),
+      // query payment â€” real gate: Sale Deed exists (crmQueryPayment.js POST /)
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, CreatedAt FROM dbo.CrmQueryPayment WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // registry â€” real gate: QueryPayment.Status = 'Confirmed' (crmRegistry.js POST /)
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, ScheduledDate, CompletedDate, CreatedAt FROM dbo.CrmRegistry WHERE BookingId = @id ORDER BY CreatedAt DESC"),
+      // mutation â€” real gate: Registry.Status = 'Completed' (crmMutation.js POST /).
+      // Was missing entirely from the old lifecycle â€” chain silently ended at Registry.
+      pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status, CreatedAt FROM dbo.CrmMutation WHERE BookingId = @id ORDER BY CreatedAt DESC"),
     ]);
 
     if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
 
-    const bk  = bkRes.recordset[0];
-    const wc  = wcRes.recordset[0];
-    const ag  = agRes.recordset[0];
-    const lm  = lmRes.recordset[0];
-    const sd  = sdRes.recordset[0];
-    const qp  = qpRes.recordset[0];
-    const reg = regRes.recordset[0];
-    const noc = nocRes.recordset[0];
-    const pp  = ppRes.recordset[0];
-    const pn  = pnRes.recordset[0];
-    const ho  = hoRes.recordset[0];
+    const bk      = bkRes.recordset[0];
+    const wc      = wcRes.recordset[0];
+    const ag      = agRes.recordset[0];
+    const lm      = lmRes.recordset[0];
+    const pp      = ppRes.recordset[0];
+    const pn      = pnRes.recordset[0];
+    const ho      = hoRes.recordset[0];
+    const sd      = sdRes.recordset[0];
+    const orgNoc  = orgNocRes.recordset[0];
+    const bankNoc = bankNocRes.recordset[0];
+    const qp      = qpRes.recordset[0];
+    const reg     = regRes.recordset[0];
+    const mut     = mutRes.recordset[0];
 
-    const agDone  = ag  && [CrmStatus.EXECUTED,CrmStatus.REGISTERED].includes(ag.Status);
+    // agDone (Executed-or-Registered) â€” used for Legal Milestones gate only.
+    // agRegistered is the strict gate Pre-Possession and Handover actually require.
+    const agDone       = ag  && [CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(ag.Status);
+    const agRegistered = ag  && ag.Status === CrmStatus.REGISTERED;
     const sdDone  = sd  && sd.CustomerApprovalStatus === CrmStatus.APPROVED;
     const qpDone  = qp  && qp.Status === "Confirmed";
     const ppDone  = pp  && pp.Status === "Ready";
     const pnDone  = pn  && pn.Status === "Acknowledged";
     const hoDone  = ho  && ho.Status === "Completed";
+    const regDone = reg && reg.Status === "Completed";
+    const mutDone = mut && mut.Status === "Approved";
 
     const d = (v) => v ? String(v).slice(0, 10) : null;
 
@@ -1891,9 +2118,6 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Application",
         status: "done",
         date: d(bk.BookingDate),
-        // ?id= opens CrmApplication.tsx's detail dialog directly for this
-        // application (see its openApplication/?id= deep link) — was a bare
-        // `/crm/applications` with no id at all before.
         link: bk.ApplicationId ? `/crm/applications?id=${bk.ApplicationId}` : null,
         blockedBy: null,
       },
@@ -1902,10 +2126,6 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Booking",
         status: "done",
         date: d(bk.BookingDate),
-        // Was "/crm/booking" (singular) — not a real route (the actual
-        // route is "/crm/bookings"), so this 404'd. Now also opens this
-        // exact booking directly via CrmBooking.tsx's ?view= deep link
-        // instead of landing on the bare, unfiltered list.
         link: `/crm/bookings?view=${id}`,
         blockedBy: null,
       },
@@ -1914,20 +2134,12 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         label: "Welcome Call",
         status: wc ? "done" : "active",
         date: wc ? d(wc.CallDate) : null,
-        // Was "/crm/welcome-call" (singular) — not a real route (the actual
-        // route is "/crm/welcome-calls"), so this 404'd too.
         link: `/crm/welcome-calls?bookingId=${id}`,
         blockedBy: null,
       },
       {
         key: "agreement",
         label: "Agreement",
-        // Was `ag ? "active" : "active"` — both branches identical, so this
-        // step showed as the current one from the moment the Booking was
-        // created, regardless of Welcome Call state. Every other step here
-        // gates on its real predecessor; this one didn't, which is why it
-        // and Welcome Call both rendered as "active" (pulsing/highlighted)
-        // at once — looked like two simultaneous "current" steps.
         status: agDone ? "done" : ag ? "active" : wc ? "active" : "locked",
         date: agDone ? d(ag.AgreementDate || ag.CreatedAt) : ag ? d(ag.CreatedAt) : null,
         link: `/crm/agreements?bookingId=${id}`,
@@ -1936,59 +2148,45 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
       {
         key: "legal_milestones",
         label: "Legal Milestones",
+        // Real gate (crmLegalMilestones.js POST /): agreement must exist (no status
+        // check), so gate on `ag` not `agDone`.
         status: lm && lm.OverallStatus === "Cleared" ? "done"
                : lm ? "active"
-               : agDone ? "active"
+               : ag ? "active"
                : "locked",
         date: lm ? d(lm.CreatedAt) : null,
         link: "/crm/legal-milestones",
-        blockedBy: agDone ? null : "Agreement must be Executed first",
+        blockedBy: ag ? null : "Agreement must exist first",
       },
       {
-        key: "sales_deed",
-        label: "Sales Deed",
-        status: sdDone ? "done" : sd ? "active" : agDone ? "active" : "locked",
-        date: sd ? d(sd.CreatedAt) : null,
-        link: `/crm/sales-deed?bookingId=${id}`,
-        blockedBy: agDone ? null : "Agreement must be Executed first",
-      },
-      {
-        key: "noc",
-        label: "NOC",
-        status: noc && noc.Status === "Issued" ? "done"
-               : noc ? "active"
-               : agDone ? "active"
+        key: "org_noc",
+        label: "Org NOC",
+        // Real gate (crmNoc.js POST / Organisation): agreement must exist.
+        // Org NOC sits here â€” early in the chain, parallel to Legal Milestones â€”
+        // because it can legitimately be requested as soon as the agreement exists,
+        // months before the Site Visit / Handover / Sale Deed sequence starts.
+        status: orgNoc && orgNoc.Status === "Issued" ? "done"
+               : orgNoc ? "active"
+               : ag ? "active"
                : "locked",
-        date: noc ? d(noc.CreatedAt) : null,
+        date: orgNoc ? d(orgNoc.CreatedAt) : null,
         link: `/crm/noc?bookingId=${id}`,
-        blockedBy: agDone ? null : "Agreement must be Executed first",
+        blockedBy: ag ? null : "Agreement must exist first",
       },
-      {
-        key: "query_payment",
-        label: "Query Payment",
-        status: qpDone ? "done" : qp ? "active" : sd ? "active" : "locked",
-        date: qp ? d(qp.CreatedAt) : null,
-        link: `/crm/query-payment?bookingId=${id}`,
-        blockedBy: sd ? null : "Sales Deed must be created first",
-      },
-      {
-        key: "registry",
-        label: "Registry",
-        status: reg && reg.Status === "Completed" ? "done"
-               : reg ? "active"
-               : qpDone ? "active"
-               : "locked",
-        date: reg ? d(reg.CompletedDate || reg.ScheduledDate || reg.CreatedAt) : null,
-        link: `/crm/registry?bookingId=${id}`,
-        blockedBy: qpDone ? null : "Query Payment must be Confirmed first",
-      },
+      // â”€â”€â”€ Physical possession sequence: real gate is Agreement Registered, not
+      // anything to do with Sale Deed (which comes AFTER handover in this chain).
+      // The old lifecycle placed Sales Deed before these three steps â€” exactly
+      // backwards from every real gate in crmPrePossession.js, crmHandover.js,
+      // and crmSalesDeed.js's own comment ("AFS registered â†’ possession â†’ handover
+      // â†’ Sale Deed drafted â†’ registered.").
       {
         key: "pre_possession",
         label: "Pre-Possession",
-        status: ppDone ? "done" : pp ? "active" : sdDone ? "active" : "locked",
+        // Real gate (crmPrePossession.js POST /): Agreement.Status = 'Registered'.
+        status: ppDone ? "done" : pp ? "active" : agRegistered ? "active" : "locked",
         date: pp ? d(pp.CreatedAt) : null,
         link: "/crm/pre-possession",
-        blockedBy: sdDone ? null : "Customer must approve the Sales Deed first",
+        blockedBy: agRegistered ? null : "Agreement must be Registered first",
       },
       {
         key: "possession_notice",
@@ -2001,10 +2199,68 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
       {
         key: "handover",
         label: "Handover",
+        // Real gate (crmHandover.js POST /): Agreement Registered AND Possession
+        // Notice Acknowledged AND no open NOC.
         status: hoDone ? "done" : ho ? "active" : pnDone ? "active" : "locked",
         date: ho ? d(ho.ActualHandoverDate || ho.CreatedAt) : null,
         link: "/crm/handover",
         blockedBy: pnDone ? null : "Possession Notice must be Acknowledged first",
+      },
+      // â”€â”€â”€ Post-handover legal/financial sequence.
+      {
+        key: "sales_deed",
+        label: "Sales Deed",
+        // Real gate (crmSalesDeed.js POST /): Handover Completed (+ Agreement
+        // Registered + Loan Processing cleared â€” Loan Processing isn't yet a
+        // separate tracked step here, so sales_deed can show active once hoDone
+        // even if Loan Processing is still outstanding; acceptable known gap).
+        status: sdDone ? "done" : sd ? "active" : hoDone ? "active" : "locked",
+        date: sd ? d(sd.CreatedAt) : null,
+        link: `/crm/sales-deed?bookingId=${id}`,
+        blockedBy: hoDone ? null : "Handover must be Completed first",
+      },
+      {
+        key: "bank_noc",
+        label: "Bank NOC",
+        // Real gate (crmNoc.js POST / Bank): Sale Deed must exist. Bank NOC
+        // releases the lending bank's charge on the unit â€” only meaningful once
+        // the deed itself exists, after handover.
+        status: bankNoc && bankNoc.Status === "Issued" ? "done"
+               : bankNoc ? "active"
+               : sd ? "active"
+               : "locked",
+        date: bankNoc ? d(bankNoc.CreatedAt) : null,
+        link: `/crm/noc?bookingId=${id}`,
+        blockedBy: sd ? null : "Sales Deed must be created first",
+      },
+      {
+        key: "query_payment",
+        label: "Query Payment",
+        // Real gate (crmQueryPayment.js POST /): Sale Deed must exist.
+        status: qpDone ? "done" : qp ? "active" : sd ? "active" : "locked",
+        date: qp ? d(qp.CreatedAt) : null,
+        link: `/crm/query-payment?bookingId=${id}`,
+        blockedBy: sd ? null : "Sales Deed must be created first",
+      },
+      {
+        key: "registry",
+        label: "Registry",
+        // Real gate (crmRegistry.js POST /): QueryPayment.Status = 'Confirmed'.
+        status: regDone ? "done" : reg ? "active" : qpDone ? "active" : "locked",
+        date: reg ? d(reg.CompletedDate || reg.ScheduledDate || reg.CreatedAt) : null,
+        link: `/crm/registry?bookingId=${id}`,
+        blockedBy: qpDone ? null : "Query Payment must be Confirmed first",
+      },
+      {
+        key: "mutation",
+        label: "Mutation",
+        // Real gate (crmMutation.js POST /): Registry.Status = 'Completed'.
+        // Was not tracked at all in the old lifecycle â€” chain silently ended at
+        // Registry. Mutation is the final ownership-transfer step.
+        status: mutDone ? "done" : mut ? "active" : regDone ? "active" : "locked",
+        date: mut ? d(mut.CreatedAt) : null,
+        link: `/crm/mutation?bookingId=${id}`,
+        blockedBy: regDone ? null : "Registry must be Completed first",
       },
     ];
 

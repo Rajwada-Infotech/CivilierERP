@@ -475,10 +475,11 @@ async function postCrmParkingPaymentToGL(pool, allotmentId, userEmail) {
 
   const r = await pool.request().input("id", sql.Int, allotmentId).query(`
     SELECT pa.Id, pa.TotalAmount, pa.ReceiptNo, pa.PaymentMode, pa.PaymentReceivedDate,
-           a.CustomerId, p.ProjectId
+           a.CustomerId, COALESCE(p.ProjectId, s.ProjectId) AS ProjectId
     FROM dbo.CrmParkingAllotment pa
     JOIN dbo.CrmApplication a ON a.Id = pa.ApplicationId
-    JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
+    LEFT JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
+    LEFT JOIN dbo.ParkingSlot s ON s.Id = pa.ParkingSlotId
     WHERE pa.Id = @id
   `);
   const row = r.recordset[0];

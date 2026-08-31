@@ -13,10 +13,11 @@ router.use(authMiddleware);
 router.use(apiRateLimit);
 
 const PN_SELECT = `
-  SELECT n.*, b.BookingNo, b.UnitNo, a.ApplicantName, a.Mobile
+  SELECT n.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile
   FROM dbo.CrmPossessionNotice n
   JOIN dbo.CrmBooking b ON b.Id = n.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
 `;
 
 router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
@@ -30,11 +31,12 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
   }
 });
 
-// Workflow guard: a possession notice is an offer to hand over — it can't
-// legitimately go out before the deed is legally executed, and shouldn't go
-// out before the unit itself has passed its pre-possession inspection
-// (mirrors crmHandover.js's own Sales-Deed guard, extended one step earlier
-// in the same Closure sequence).
+// Workflow guard: a possession notice is a formal offer to hand over the
+// unit. It requires the pre-possession inspection to be Ready — the unit
+// must physically pass before the offer goes out. The Sale Deed is prepared
+// and registered separately, usually at or after possession for under-
+// construction projects; gating this notice on Sale Deed execution was
+// sequentially inverted.
 router.post("/", requirePageRight("crm-possession-notice", "create"), async (req, res) => {
   try {
     const pool = getPool();
@@ -45,11 +47,6 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    const deed = await pool.request().input("bid", sql.Int, bookingId)
-      .query(`SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
-    if (!deed.recordset.length || ![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(deed.recordset[0].Status)) {
-      return res.status(400).json({ error: "Possession notice requires an Executed or Registered sales deed first" });
-    }
     const pp = await pool.request().input("bid", sql.Int, bookingId)
       .query(`SELECT TOP 1 Status FROM dbo.CrmPrePossession WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
     if (!pp.recordset.length || pp.recordset[0].Status !== "Ready") {
@@ -87,6 +84,13 @@ router.put("/:id", requirePageRight("crm-possession-notice", "edit"), async (req
     const pool = getPool();
     const b = req.body;
     const id = parseInt(req.params.id);
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId FROM dbo.CrmPossessionNotice WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
     await pool.request()
       .input("id", sql.Int, id)
       .input("odt", sql.Date, b.OfferedDate || null)
@@ -239,6 +243,83 @@ router.put("/:id/retract-dispute", requirePageRight("crm-possession-notice", "ed
     res.json({ success: true, status: CrmStatus.DRAFT });
   } catch (e) {
     console.error("[crm-possession-notice] retract-dispute error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Staff proxy actions for non-portal customers ───────────────────────────
+const PROXY_METHODS_PN = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
+
+// PUT /:id/proxy-acknowledge — record that the customer acknowledged the
+// possession notice without using the portal.
+router.put("/:id/proxy-acknowledge", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS_PN.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_PN.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks are required" });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, NoticeNo FROM dbo.CrmPossessionNotice WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
+    if (cur.recordset[0].Status !== "Sent") {
+      return res.status(400).json({ error: `Can only record acknowledgement for a Sent notice (current: '${cur.recordset[0].Status}')` });
+    }
+
+    await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).query(`
+      UPDATE dbo.CrmPossessionNotice SET
+        Status = 'Acknowledged', AcknowledgedAt = SYSDATETIME(),
+        Notes = ISNULL(Notes + CHAR(10), '') + '[Acknowledged via ${ProxyMethod} — recorded by staff]',
+        UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+
+    res.json({ success: true, status: "Acknowledged" });
+  } catch (e) {
+    console.error("[crm-possession-notice] proxy-acknowledge error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/proxy-dispute — record that the customer disputed the possession
+// notice without using the portal.
+router.put("/:id/proxy-dispute", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS_PN.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_PN.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks (customer's dispute reason) are required" });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, NoticeNo FROM dbo.CrmPossessionNotice WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
+    if (cur.recordset[0].Status !== "Sent") {
+      return res.status(400).json({ error: `Can only record a dispute for a Sent notice (current: '${cur.recordset[0].Status}')` });
+    }
+
+    await pool.request()
+      .input("id",     sql.Int, id)
+      .input("reason", sql.NVarChar(sql.MAX), `[via ${ProxyMethod}] ${ProxyRemarks.trim()}`)
+      .input("ub",     sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmPossessionNotice SET
+          Status = 'Disputed', DisputedAt = SYSDATETIME(),
+          DisputeReason = @reason,
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    res.json({ success: true, status: "Disputed" });
+  } catch (e) {
+    console.error("[crm-possession-notice] proxy-dispute error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

@@ -1048,11 +1048,16 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
         ORDER BY m.MilestoneNo
       `),
       pool.request().input("bid", sql.Int, bid).query(`
-        SELECT b.BookingNo, b.Status AS BookingStatus, b.TotalValue, b.UnitNo, b.ProjectId, b.ProjectName, b.BookingAmount,
+        SELECT b.BookingNo, b.Status AS BookingStatus, b.TotalValue,
+               COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+               b.ProjectId,
+               COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+               b.BookingAmount,
                b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal, b.UnitParkingGstRate,
                a.ApplicantName, a.Mobile
         FROM dbo.CrmBooking b
         JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
         WHERE b.Id = @bid
       `),
     ]);

@@ -171,7 +171,11 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     `);
 
     // Collection efficiency per project
-    const collectionPerProjectQ = pool.request().query(`
+    // NOTE: must respect the same ?projectId scope as every other section on this
+    // dashboard — previously used a bare pool.request() with no @pid binding at all,
+    // so selecting a project in the dropdown left this one chart showing every
+    // project regardless, contradicting the route's own "scope all KPIs" contract.
+    const collectionPerProjectQ = addPid(pool.request()).query(`
       SELECT
         COALESCE(proj.name, b.ProjectName) AS ProjectName,
         ISNULL(SUM(m.AmountDue), 0)  AS TotalDue,
@@ -180,7 +184,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME())
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
       GROUP BY COALESCE(proj.name, b.ProjectName)
       ORDER BY COALESCE(proj.name, b.ProjectName)
     `);
