@@ -14,21 +14,36 @@
         <link rel="icon" type="image/png" href="/Civilier.png" />
         <link rel="apple-touch-icon" href="/Civilier.png" />
 
-        <!-- Google Fonts — moved out of index.css's @import, which is
-             render-blocking and serializes the fetch (CSS must download and
-             parse before the browser even discovers the font stylesheet URL,
-             which then has to download and parse before it discovers the
-             actual font file URLs — three sequential round-trips). A direct
-             <link> here lets the browser discover and start these fetches
-             immediately, in parallel with everything else. preconnect warms
-             the two Google Fonts origins (the CSS host and the font-file
-             host) before either request is even issued. -->
+        <!-- Google Fonts — moved out of index.css's @import (which serialized
+             the fetch: CSS had to download and parse before the browser even
+             discovered the font stylesheet URL). preconnect warms both
+             Google Fonts origins immediately. The stylesheet itself is
+             loaded non-render-blocking via the preload+swap trick: it starts
+             downloading in parallel with everything else, but a plain
+             <link rel="stylesheet"> would still hold up first paint until it
+             finishes — media="print" makes the browser fetch it at high
+             priority without treating it as a render blocker, then the
+             onload flips it to "all" once it's actually ready to apply.
+             <noscript> covers browsers/crawlers with JS disabled. -->
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            rel="stylesheet"
+            rel="preload"
+            as="style"
             href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Noto+Sans:wght@400;500&family=Sora:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=JetBrains+Mono:wght@400;500;600&display=swap"
         />
+        <link
+            rel="stylesheet"
+            href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Noto+Sans:wght@400;500&family=Sora:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+            media="print"
+            onload="this.media='all'"
+        />
+        <noscript>
+            <link
+                rel="stylesheet"
+                href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Noto+Sans:wght@400;500&family=Sora:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+            />
+        </noscript>
 
         <meta property="og:title" content="CivilierERP" />
         <meta
