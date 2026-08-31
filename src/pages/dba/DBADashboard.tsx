@@ -136,7 +136,7 @@ function QueryCellValue({ value }: { value: unknown }) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function DBADashboard() {
-  usePageRights("dba-dashboard");
+  const rights = usePageRights("dba-dashboard");
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<
     "overview" | "tables" | "query" | "history"
@@ -799,12 +799,14 @@ export default function DBADashboard() {
                   onClick={() => { setQueryText(""); setQueryResult(null); setQueryError(null); setLastRunMs(null); }}>
                   <Trash2 size={9} /> Clear
                 </Button>
-                <Button size="sm" className="h-7 text-xs gap-1.5 bg-primary hover:bg-primary/90"
-                  onClick={runQuery} disabled={queryMutation.isPending || !queryText.trim()}>
-                  {queryMutation.isPending
-                    ? <><Loader2 size={11} className="animate-spin" /> Running…</>
-                    : <><Play size={11} /> Run Query</>}
-                </Button>
+                {rights.canEdit && (
+                  <Button size="sm" className="h-7 text-xs gap-1.5 bg-primary hover:bg-primary/90"
+                    onClick={runQuery} disabled={queryMutation.isPending || !queryText.trim()}>
+                    {queryMutation.isPending
+                      ? <><Loader2 size={11} className="animate-spin" /> Running…</>
+                      : <><Play size={11} /> Run Query</>}
+                  </Button>
+                )}
               </div>
             </div>
           </Card>
