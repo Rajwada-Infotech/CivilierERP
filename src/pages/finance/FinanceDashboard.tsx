@@ -788,51 +788,6 @@ const FinanceDashboard = () => {
           </div>
         </GlassSection>
 
-        {/* ── Cheque Summary ───────────────────────────────────────────── */}
-        <GlassSection
-          title="Cheque Summary"
-          icon={BookOpen}
-          accentColor="#f59e0b"
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {isLoading ? (
-              Array.from({ length: 4 }).map((_, i) => (
-                <StatCardSkeleton key={i} />
-              ))
-            ) : (
-              <>
-                <FinanceGlassCard
-                  label="Total Cheque Lots"
-                  value={(data?.cheques.totalCount ?? 0).toString()}
-                  sub="All cheque lots registered"
-                  icon={BookOpen}
-                  accentColor="#6366f1"
-                  onClick={() => navigate("/masters/cheque")}
-                />
-                <FinanceGlassCard
-                  label="Active Lots"
-                  value={(data?.cheques.activeCount ?? 0).toString()}
-                  sub={`${data?.cheques.totalCount ?? 0} total registered`}
-                  icon={Clock}
-                  accentColor="#f59e0b"
-                  trend={
-                    (data?.cheques.activeCount ?? 0) > 0 ? "up" : "neutral"
-                  }
-                  onClick={() => navigate("/masters/cheque")}
-                />
-                <FinanceGlassCard
-                  label="Inactive Lots"
-                  value={(data?.cheques.inactiveCount ?? 0).toString()}
-                  sub="Deactivated cheque lots"
-                  icon={CheckCircle2}
-                  accentColor="#10b981"
-                  onClick={() => navigate("/masters/cheque")}
-                />
-              </>
-            )}
-          </div>
-        </GlassSection>
-
         {/* ── Quick Actions ─────────────────────────────────────────────────── */}
         <GlassSection
           title="Quick Actions"
