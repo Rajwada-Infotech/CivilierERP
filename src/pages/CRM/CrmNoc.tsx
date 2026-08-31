@@ -79,6 +79,7 @@ async function fetchBookingContext(bookingId: string): Promise<any> {
 }
 
 const CrmNoc: React.FC = () => {
+  const rights = usePageRights("crm-noc");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp] = useSearchParams();
@@ -110,7 +111,7 @@ const CrmNoc: React.FC = () => {
   // Deep-link from Legal Milestones: pre-fill Request NOC with this booking
   // if it doesn't have a Bank NOC yet.
   useEffect(() => {
-    if (!deepLinkBookingId || dialogOpen) return;
+    if (!rights.canCreate || !deepLinkBookingId || dialogOpen) return;
     const hasBankNoc = (nocs as any[]).some((n: any) => String(n.BookingId) === deepLinkBookingId && n.NocType === "Bank");
     if (hasBankNoc) return;
     if ((bookings as any[]).some((b: any) => String(b.Id) === deepLinkBookingId)) {
@@ -218,8 +219,6 @@ const CrmNoc: React.FC = () => {
       ) },
   ];
 
-  usePageRights("crm-noc");
-
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "No Objection Certificates"]} />
@@ -229,10 +228,12 @@ const CrmNoc: React.FC = () => {
       action={
           <div className="flex items-center gap-3">
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          {rights.canCreate && (
           <button onClick={() => setDialogOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
           <Plus size={14} /> Request NOC
         </button>
+          )}
         </div>
       }
     >
@@ -319,7 +320,7 @@ const CrmNoc: React.FC = () => {
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleCreate} disabled={saving || !canRequest}
+            <button onClick={handleCreate} disabled={saving || !canRequest || !rights.canCreate}
               title={!canRequest && form.BookingId ? "This booking has no agreement yet" : undefined}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Requesting..." : "Request"}
@@ -378,7 +379,7 @@ const CrmNoc: React.FC = () => {
                     </div>
                   ) : detail.Status === CrmStatus.PENDING ? (
                     <div className="text-xs text-muted-foreground">Pending admin approval</div>
-                  ) : detail.Status === CrmStatus.APPROVED ? (
+                  ) : detail.Status === CrmStatus.APPROVED && rights.canEdit ? (
                     <button onClick={handleMarkIssued} disabled={markingIssued}
                       className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 transition-colors">
                       {markingIssued ? "Marking..." : "Mark Issued"}
