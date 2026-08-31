@@ -112,7 +112,7 @@ const SectionHeader: React.FC<{ icon: React.ElementType; colorClass: string; tit
 
 const CrmProjectAutoSetup: React.FC = () => {
   const qc = useQueryClient();
-  usePageRights("crm-auto-project-setup");
+  const rights = usePageRights("crm-auto-project-setup");
   // Top-level toggle between this page's Block/Floor/Unit wizard and the
   // fully separate Parking Setup component (CrmProjectAutoSetupParking.tsx).
   // Plain in-memory state, not a route — switching tabs never reloads or
@@ -850,7 +850,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                   </span>
                 ))}
 
-                {step1Done && (
+                {rights.canEdit && step1Done && (
                   <button onClick={() => { setBlocksEditMode((v) => !v); setEditingBlockId(null); }}
                     className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${blocksEditMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground border border-border"}`}>
                     {blocksEditMode ? "Done" : "Edit"}
@@ -937,7 +937,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                       );
                     })}
                   </div>
-                  <button onClick={handleSaveBlocks} disabled={savingBlocks || blockNames.some((n, i) => isDuplicateBlockName(n, i, blockNames, existingBlockNamesLower))}
+                  <button onClick={handleSaveBlocks} disabled={savingBlocks || !rights.canCreate || blockNames.some((n, i) => isDuplicateBlockName(n, i, blockNames, existingBlockNamesLower))}
                     className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
                     {step1Done ? "Add Blocks" : "OK — Create Blocks"}
                   </button>
@@ -954,7 +954,7 @@ const CrmProjectAutoSetup: React.FC = () => {
             {step1Done && (
               <div className={`${cardCls} border-l-2 border-l-cyan-500`}>
                 <SectionHeader icon={Layers} colorClass="bg-cyan-500/10 text-cyan-600" title="Floor Plan" done={step2Done} right={
-                  step2Done && (
+                  rights.canEdit && step2Done && (
                     <button onClick={() => setFloorsEditMode((v) => !v)}
                       className={`ml-auto text-[11px] px-2 py-0.5 rounded-full font-medium ${floorsEditMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground border border-border"}`}>
                       {floorsEditMode ? "Done" : "Edit"}
@@ -1239,14 +1239,18 @@ const CrmProjectAutoSetup: React.FC = () => {
                           <div className="flex items-center gap-2">
                             <button onClick={() => addTemplateRow(b.Id)} className="text-xs text-primary hover:underline">+ Add Type</button>
                             <span className="text-[11px] text-muted-foreground ml-auto">Total: {templateTotal(b.Id)} unit(s)/floor</span>
-                            <button onClick={() => handleSaveTemplate(b.Id)} disabled={savingTemplateBlockId === b.Id}
-                              className="px-2.5 py-1 text-[11px] bg-muted rounded-lg font-medium hover:bg-muted/70 disabled:opacity-40">
-                              Save Template
-                            </button>
-                            <button onClick={() => handleApplyTemplate(b.Id)} disabled={applyingTemplateBlockId === b.Id || !templateTotal(b.Id)}
-                              className="px-2.5 py-1 text-[11px] bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                              Apply to Floors
-                            </button>
+                            {rights.canEdit && (
+                              <button onClick={() => handleSaveTemplate(b.Id)} disabled={savingTemplateBlockId === b.Id}
+                                className="px-2.5 py-1 text-[11px] bg-muted rounded-lg font-medium hover:bg-muted/70 disabled:opacity-40">
+                                Save Template
+                              </button>
+                            )}
+                            {rights.canEdit && (
+                              <button onClick={() => handleApplyTemplate(b.Id)} disabled={applyingTemplateBlockId === b.Id || !templateTotal(b.Id)}
+                                className="px-2.5 py-1 text-[11px] bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                                Apply to Floors
+                              </button>
+                            )}
                           </div>
                         </div>
 
