@@ -16,6 +16,8 @@ import {
   History,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ListChecks,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -30,9 +32,11 @@ import {
   addToRoster,
   removeFromRoster,
   getWorkerCalendar,
+  getAttendanceReport,
   type AttendanceStatus,
   type ActivityOption,
   type WorkerSearchResult,
+  type AttendanceReportRow,
 } from "@/api/workerAttendanceApi";
 import {
   Dialog,
@@ -363,6 +367,8 @@ const WorkerAttendance: React.FC = () => {
   const [historyTarget, setHistoryTarget] = useState<{ id: number; name: string } | null>(null);
   const [statusByWorker, setStatusByWorker] = useState<Record<number, AttendanceStatus>>({});
   const [saving, setSaving] = useState(false);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [collapsedLogGroups, setCollapsedLogGroups] = useState<Record<string, boolean>>({});
 
   const { data: companyOptions = [] } = useQuery({
     queryKey: ["workerAttendanceCompanies"],
@@ -398,6 +404,57 @@ const WorkerAttendance: React.FC = () => {
     enabled: !!rungId && !!date,
     staleTime: 10 * 1000,
   });
+
+  // Recent Attendance Log — while no Activity is picked yet there's nothing
+  // to mark, but there's no reason the main screen should sit empty either.
+  // Same idea as GRN's list view: a chronological, collapsible-by-date log
+  // of what's already been recorded, scoped to whatever Company/Project is
+  // picked so far (or everything, if neither is). A 60-day window keeps this
+  // from ever pulling the entire history at once.
+  const logWindowFrom = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 60);
+    return d.toISOString().slice(0, 10);
+  }, []);
+
+  const { data: recentLogs = [], isFetching: loadingLogs } = useQuery({
+    queryKey: ["workerAttendanceRecentLogs", companyId, projectId, logWindowFrom],
+    queryFn: () =>
+      getAttendanceReport({
+        companyId: companyId || undefined,
+        projectId: projectId || undefined,
+        dateFrom: logWindowFrom,
+      }),
+    enabled: !rungId,
+    staleTime: 30 * 1000,
+  });
+
+  const [logGroupBy, setLogGroupBy] = useState<"date" | "activity">("date");
+
+  const logGroups = useMemo(() => {
+    const byKey = new Map<string, { label: string; sublabel: string | null; rows: AttendanceReportRow[] }>();
+    for (const row of recentLogs) {
+      const key = logGroupBy === "date" ? row.date : String(row.activityId);
+      const existing = byKey.get(key);
+      if (existing) {
+        existing.rows.push(row);
+      } else {
+        byKey.set(key, {
+          label: logGroupBy === "date"
+            ? new Date(row.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", weekday: "short" })
+            : row.activityLabel,
+          sublabel: logGroupBy === "date" ? null : row.projectName,
+          rows: [row],
+        });
+      }
+    }
+    return Array.from(byKey.entries())
+      .sort(([a], [b]) => (a < b ? 1 : -1))
+      .map(([key, group]) => ({ key, ...group }));
+  }, [recentLogs, logGroupBy]);
+
+  const toggleLogGroup = (key: string) =>
+    setCollapsedLogGroups((prev) => ({ ...prev, [key]: !prev[key] }));
 
   // Sync local editable status map whenever fresh attendance data loads —
   // roster members with no saved row yet default to "Present" (typical
@@ -541,24 +598,124 @@ const WorkerAttendance: React.FC = () => {
 
         {/* ── Selected activity attendance ── */}
         {!rungId ? (
-          <div className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">
-            <ClipboardList size={28} className="mx-auto opacity-30 mb-2" />
-            <p className="text-sm">Select a Company, Project and Activity to mark attendance.</p>
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 border-b border-border bg-muted/20 flex-wrap">
+              <div className="flex items-center gap-2 min-w-0">
+                <ListChecks size={15} className="text-muted-foreground shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-heading font-semibold text-foreground">Recent Attendance Log</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Select a Company, Project and Activity above to mark attendance — meanwhile, here's what's already been recorded.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted border border-border shrink-0">
+                {(["date", "activity"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setLogGroupBy(mode)}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                      logGroupBy === mode ? "bg-cyan-600 text-white" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {mode === "date" ? "Date-wise" : "Work-wise"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {loadingLogs ? (
+              <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+                <Loader2 size={16} className="animate-spin" /> Loading log…
+              </div>
+            ) : logGroups.length === 0 ? (
+              <div className="p-10 text-center text-muted-foreground">
+                <ClipboardList size={24} className="mx-auto opacity-30 mb-2" />
+                <p className="text-sm">No attendance recorded in the last 60 days.</p>
+              </div>
+            ) : (
+              <div>
+                {logGroups.map((group) => {
+                  const collapsed = !!collapsedLogGroups[group.key];
+                  return (
+                    <div key={group.key} className="border-b border-border/60 last:border-0">
+                      <button
+                        type="button"
+                        onClick={() => toggleLogGroup(group.key)}
+                        className="w-full flex items-center gap-2.5 px-4 sm:px-5 py-3 hover:bg-muted/20 transition-colors text-left"
+                      >
+                        {collapsed ? (
+                          <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                        ) : (
+                          <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                        )}
+                        {logGroupBy === "date" ? (
+                          <CalendarDays size={13} className="text-primary shrink-0" />
+                        ) : (
+                          <ClipboardList size={13} className="text-primary shrink-0" />
+                        )}
+                        <span className="text-sm font-medium text-foreground truncate">{group.label}</span>
+                        {group.sublabel && (
+                          <span className="text-xs text-muted-foreground truncate">· {group.sublabel}</span>
+                        )}
+                        <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+                          {group.rows.length} entr{group.rows.length === 1 ? "y" : "ies"}
+                        </span>
+                      </button>
+
+                      {!collapsed && (
+                        <div className="divide-y divide-border/40 bg-muted/5">
+                          {group.rows.map((row) => (
+                            <div key={row.id} className="flex items-center justify-between gap-3 pl-11 pr-4 sm:pr-5 py-2">
+                              <div className="min-w-0">
+                                <p className="text-xs text-foreground truncate">{row.workerName}</p>
+                                <p className="text-[10px] text-muted-foreground truncate">
+                                  {logGroupBy === "date"
+                                    ? `${row.activityLabel}${row.projectName ? ` · ${row.projectName}` : ""}`
+                                    : new Date(row.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                                </p>
+                              </div>
+                              <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 ${STATUS_CLS[row.status]}`}>
+                                {STATUS_LABEL[row.status]}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 border-b border-border bg-muted/20">
-              <div className="min-w-0">
-                <p className="text-sm font-heading font-semibold text-foreground truncate">{selectedActivity?.label ?? "—"}</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  {attendanceRows.length} Worker{attendanceRows.length === 1 ? "" : "s"} Allocated
-                </p>
+            <button
+              type="button"
+              onClick={() => setPanelCollapsed((v) => !v)}
+              className="w-full flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 border-b border-border bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {panelCollapsed ? (
+                  <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                ) : (
+                  <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <p className="text-sm font-heading font-semibold text-foreground truncate">{selectedActivity?.label ?? "—"}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {attendanceRows.length} Worker{attendanceRows.length === 1 ? "" : "s"} Allocated
+                  </p>
+                </div>
               </div>
               <span className="text-xs font-mono text-muted-foreground shrink-0">
                 {new Date(date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
               </span>
-            </div>
+            </button>
 
+            {!panelCollapsed && (
+              <>
             {loadingAttendance ? (
               <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
                 <Loader2 size={16} className="animate-spin" /> Loading attendance…
@@ -627,6 +784,8 @@ const WorkerAttendance: React.FC = () => {
                 {isDirty ? "Save Attendance" : "Saved"}
               </button>
             </div>
+              </>
+            )}
           </div>
         )}
       </CivilWorkDprShell>
