@@ -279,10 +279,12 @@ function ReminderRow({
   reminder,
   onSend,
   isSending,
+  canSend,
 }: {
   reminder: ReminderRecord;
   onSend: (id: number) => void;
   isSending: boolean;
+  canSend: boolean;
 }) {
   const modColor = getModuleColor(reminder.module);
   return (
@@ -340,7 +342,7 @@ function ReminderRow({
         ) : (
           <button
             onClick={() => onSend(reminder.id)}
-            disabled={isSending}
+            disabled={isSending || !canSend}
             className="flex items-center gap-1.5 text-sm font-medium text-primary px-3 py-1.5 rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Send className="w-3.5 h-3.5" />
@@ -355,7 +357,7 @@ function ReminderRow({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function FollowupReminders() {
-  usePageRights("followup-reminders");
+  const rights = usePageRights("followup-reminders");
   const queryClient = useQueryClient();
   const { currentUser } = useAuth();
 
@@ -443,14 +445,16 @@ export default function FollowupReminders() {
               <RefreshCw className="w-3.5 h-3.5" />
               Refresh
             </button>
-            <Button
-              size="sm"
-              onClick={() => setIsDialogOpen(true)}
-              className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
-            >
-              <Plus size={14} />
-              New Reminder
-            </Button>
+            {rights.canCreate && (
+              <Button
+                size="sm"
+                onClick={() => setIsDialogOpen(true)}
+                className="gradient-accent gap-1.5 shrink-0 font-semibold text-white text-sm px-5 py-2 h-auto"
+              >
+                <Plus size={14} />
+                New Reminder
+              </Button>
+            )}
           </div>
         }
       >
@@ -604,6 +608,7 @@ export default function FollowupReminders() {
                 reminder={reminder}
                 onSend={(id) => sendMutation.mutate(id)}
                 isSending={sendMutation.isPending}
+                canSend={rights.canEdit}
               />
             ))}
 
