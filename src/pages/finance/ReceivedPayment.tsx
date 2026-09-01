@@ -261,6 +261,9 @@ const modeColor: Record<string, string> = {
   EMI: "bg-primary/10 text-primary",
 };
 
+// Short label for compact single-line badges (list rows); full name is used elsewhere.
+const modeShortLabel = (mode: string) => (mode === "Demand Draft" ? "DD" : mode);
+
 const EMPTY_FORM = {
   companyId: "" as string,
   companyName: "",
@@ -1241,10 +1244,10 @@ export default function ReceivedPaymentPage() {
                         </td>
                         <td className="px-4 py-3">
                           <span
-                            className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit ${modeColor[p.mode]}`}
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit whitespace-nowrap ${modeColor[p.mode]}`}
                           >
                             {modeIcon(p.mode)}
-                            {p.mode}
+                            {modeShortLabel(p.mode)}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
@@ -1319,10 +1322,10 @@ export default function ReceivedPaymentPage() {
                     </div>
                     <div className="flex items-center justify-between">
                       <span
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit ${modeColor[p.mode]}`}
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit whitespace-nowrap ${modeColor[p.mode]}`}
                       >
                         {modeIcon(p.mode)}
-                        {p.mode}
+                        {modeShortLabel(p.mode)}
                       </span>
                       <div className="flex items-center gap-1">
                         <button

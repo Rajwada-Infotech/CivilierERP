@@ -82,6 +82,23 @@ function currentFinYear(date) {
   return `${String(startYear).slice(-2)}-${String(endYear).slice(-2)}`;
 }
 
+/**
+ * Extract the 4-digit start-calendar-year from a finYear string, for
+ * Tier-2 ("new-dash") doc numbers that embed a plain calendar year.
+ * Accepts "FY 2025-26", "2025-26", or "25-26" style strings.
+ * @param {string|null|undefined} finYear
+ * @returns {number|null}
+ */
+function finYearToCalendarYear(finYear) {
+  if (!finYear) return null;
+  const s = String(finYear);
+  const full = s.match(/(\d{4})/);
+  if (full) return parseInt(full[1], 10);
+  const short = s.match(/(\d{2})-(\d{2})/);
+  if (short) return 2000 + parseInt(short[1], 10);
+  return null;
+}
+
 // ── Tier detection ────────────────────────────────────────────────────────────
 
 /**
@@ -131,7 +148,8 @@ function buildDocNo({
 
   if (tier === "new-dash") {
     // ExB-PO-GRN-2026-00008
-    return `${docNoPrefix}-${currentYear()}-${padded}`;
+    const y = finYearToCalendarYear(finYear) ?? currentYear();
+    return `${docNoPrefix}-${y}-${padded}`;
   }
 
   // legacy: CI/WO/000042/2024-25
@@ -411,7 +429,10 @@ async function lockNextDocNumber(
   const startFrom = typeRow.StartingDocNo ?? 1;
   const padding = typeRow.DocNoPadding ?? 5;
   const col = docNoColumn || "DocNo";
-  const year = currentYear();
+  // For Tier 2 ("new-dash"), derive the embedded calendar year from the
+  // caller-supplied finYear (e.g. "FY 2025-26" -> 2025) so doc numbers
+  // match the fin year the user selected, not just today's date.
+  const year = finYearToCalendarYear(finYear) ?? currentYear();
 
   // For Tier 1, derive finYear from today if not supplied
   const resolvedFinYear =
@@ -572,8 +593,10 @@ async function previewNextDocNumber(pool, sql, docTypeId, finYear) {
   // The real win: run the TypeOfDoc fetch and a combined single-query approach
   // that joins TypeOfDoc + DocNumberSequence in one round-trip.
 
-  const year = currentYear();
   const clientFinYear = finYear || null;
+  // Mirror lockNextDocNumber: Tier 2 embeds the calendar year derived from
+  // the caller-supplied finYear, not always today's year.
+  const year = finYearToCalendarYear(clientFinYear) ?? currentYear();
 
   // Single query: join TypeOfDoc with an aggregated DocNumberSequence max.
   // The CROSS APPLY computes the effective prefix and filters DocNumberSequence
