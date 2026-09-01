@@ -1,11 +1,11 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { FileText, Sparkles, Upload } from "lucide-react";
+import { FileText, Sparkles, Upload, DoorOpen } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { safeHtml } from "@/utils/escapeHtml";
-import { FollowupShell } from "@/components/followup/FollowupShell";
+import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -328,7 +328,7 @@ const exportColumns: ExportColumn[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 const RoomMaster: React.FC = () => {
-  const rights = usePageRights("followup-room-master");
+  const rights = usePageRights("civilworkdpr-room-master");
   const queryClient = useQueryClient();
 
   const {
@@ -460,8 +460,8 @@ const RoomMaster: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Follow-Up", "Setup", "Room Master"]} />
-      <FollowupShell title="Room Master">
+      <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Setup", "Room Master"]} />
+      <CivilWorkDprShell title="Room Master" icon={DoorOpen}>
       <GenerateFromLayoutPanel
         units={allUnits}
         onGenerated={() => queryClient.invalidateQueries({ queryKey: ["room-master"] })}
@@ -536,7 +536,7 @@ const RoomMaster: React.FC = () => {
           win.print();
         }}
       />
-      </FollowupShell>
+      </CivilWorkDprShell>
     </>
   );
 };

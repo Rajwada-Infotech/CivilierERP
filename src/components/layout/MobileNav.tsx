@@ -498,13 +498,6 @@ const crmSetupItems: SetupItem[] = [
     pageKey: "followup-block-master",
   },
   {
-    icon: DoorOpen,
-    label: "Room Master",
-    path: "/crm/setup/room-master",
-    color: "text-teal-500",
-    pageKey: "followup-room-master",
-  },
-  {
     icon: HardHat,
     label: "Broker Master",
     path: "/masters/brokers",
@@ -589,6 +582,12 @@ const civilWorkDprSetupItems: SetupItem[] = [
     icon: ClipboardList,
     label: "Activity",
     path: "/masters/activity",
+    color: "text-cyan-500",
+  },
+  {
+    icon: DoorOpen,
+    label: "Room Master",
+    path: "/civilworkdpr/room-master",
     color: "text-cyan-500",
   },
 ];

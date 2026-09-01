@@ -137,6 +137,7 @@ const RoomCategoryMaster = lazy(
 const RoomCompositionBuilder = lazy(
   () => import("./pages/civilworkdpr/RoomCompositionBuilder"),
 );
+const RoomMaster = lazy(() => import("./pages/civilworkdpr/RoomMaster"));
 const WorkCheckpointMaster = lazy(
   () => import("./pages/civilworkdpr/WorkCheckpointMaster"),
 );
@@ -169,7 +170,6 @@ const CustomerMaster = lazy(() => import("./pages/masters/CustomerMaster"));
 const DependencyMaster = lazy(() => import("./pages/masters/DependencyMaster/DependencyMasterPage"));
 const DependencyMasterFormPage = lazy(() => import("./pages/masters/DependencyMaster/DependencyMasterFormPage"));
 const UnitMaster = lazy(() => import("./pages/admin/masters/UnitMaster"));
-const RoomMaster = lazy(() => import("./pages/admin/masters/RoomMaster"));
 const BlockMaster = lazy(() => import("./pages/admin/masters/BlockMaster"));
 const PaymentPlanMaster = lazy(
   () => import("./pages/admin/masters/PaymentPlanMaster"),
@@ -925,6 +925,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="room-composition-builder">
             <RoomCompositionBuilder />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/room-master"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-room-master">
+            <RoomMaster />
           </ProtectedRoute>
         }
       />
@@ -2176,7 +2184,6 @@ function AppRoutes() {
           project's history for the original version of this bug). */}
       <Route path="/crm/setup/unit-master"         element={<ProtectedRoute pageKey="followup-unit-master"><UnitMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/block-master"        element={<ProtectedRoute pageKey="followup-block-master"><BlockMaster /></ProtectedRoute>} />
-      <Route path="/crm/setup/room-master"         element={<ProtectedRoute pageKey="followup-room-master"><RoomMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/payment-plan-master" element={<ProtectedRoute pageKey="payment-plan-master"><PaymentPlanMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/parking-master"      element={<ProtectedRoute pageKey="followup-parking-master"><ParkingMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/parking-slot-master" element={<ProtectedRoute pageKey="followup-parking-slot-master"><ParkingSlotMaster /></ProtectedRoute>} />
