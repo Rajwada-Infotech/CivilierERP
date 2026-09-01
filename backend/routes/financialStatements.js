@@ -401,24 +401,62 @@ router.get("/balance-sheet", async (req, res) => {
 // actively wrong, not just cosmetically different.
 const SCHEDULE_III_TYPES = new Set(["Private Limited", "Public Limited", "OPC", "Section 8", "LLP"]);
 
-// dbo.AccountGroup ids directly under EXPENSES (root 4) / REVENUE (root 3) —
-// this chart of accounts was already seeded along Schedule III lines, so
-// classification is a direct id lookup, not a name-keyword guess.
-const SCH3_REVENUE_OPS = 15;
-const SCH3_OTHER_INCOME = new Set([16, 17]); // 17 = system-generated income
-const SCH3_EXPENSE_SECTIONS = [
-  { key: "projectExpenses", label: "Project & Construction Expenses", groupIds: [18, 19] },
-  { key: "costOfMaterials", label: "Cost of Materials Consumed", groupIds: [21] },
-  { key: "purchaseStockInTrade", label: "Purchase of Stock-in-Trade", groupIds: [22] },
-  { key: "stockChanges", label: "Changes in Inventories of Stock-in-Trade", groupIds: [23] },
-  { key: "employeeBenefits", label: "Employee Benefits Expense", groupIds: [24] },
-  { key: "financeCosts", label: "Finance Costs", groupIds: [25] },
-  { key: "depreciation", label: "Depreciation and Amortization Expense", groupIds: [26] },
-  { key: "otherExpenses", label: "Other Expenses", groupIds: [27, 42, 20] },
-  { key: "exceptionalItems", label: "Exceptional Items", groupIds: [28] },
-  { key: "extraordinaryItems", label: "Extraordinary Items", groupIds: [29] },
-];
-const SCH3_TAX_GROUP = 30; // Tax Expense (Current Tax 43 / Deferred Tax 44 underneath)
+// Originally a direct dbo.AccountGroup id lookup (groups directly under
+// EXPENSES/REVENUE), on the assumption "this chart of accounts was already
+// seeded along Schedule III lines, so classification is a direct id lookup."
+// That assumption failed twice over: the ids themselves aren't stable across
+// environments (same story as ROOT_IDS above), AND — worse — the exact
+// group *names* aren't consistent either. Production's "Changes in
+// Inventories of Stock-in-Trade" is literally named "INCREASE AND DECREASE
+// IN STOCK" — same concept, different words. Exact-name matching would have
+// repeated the same class of bug just one layer down.
+//
+// Classified by keyword pattern instead, the same convention this file
+// already uses for the Balance Sheet's Current/Non-Current split just below
+// (isCurrentAsset/isEquity/isCurrentLiability) — tolerant of wording
+// differences between independently-set-up charts of accounts, not tied to
+// any one environment's exact ids or labels.
+const SCH3_EXPENSE_LABELS = {
+  projectExpenses: "Project & Construction Expenses",
+  costOfMaterials: "Cost of Materials Consumed",
+  purchaseStockInTrade: "Purchase of Stock-in-Trade",
+  stockChanges: "Changes in Inventories of Stock-in-Trade",
+  employeeBenefits: "Employee Benefits Expense",
+  financeCosts: "Finance Costs",
+  depreciation: "Depreciation and Amortization Expense",
+  otherExpenses: "Other Expenses",
+  exceptionalItems: "Exceptional Items",
+  extraordinaryItems: "Extraordinary Items",
+};
+const SCH3_EXPENSE_ORDER = Object.keys(SCH3_EXPENSE_LABELS);
+
+// Order matters — first match wins, most specific patterns first (e.g. tax
+// checked before the generic fallback; "exceptional" before "extraordinary"
+// since one doesn't substring-match the other, but both need to be checked
+// before otherExpenses swallows everything else).
+function classifyExpenseBucketName(name) {
+  const n = (name || "").toLowerCase();
+  if (/\btax\b/.test(n)) return "tax";
+  if (/project|construction/.test(n)) return "projectExpenses";
+  if (/cost.*material/.test(n)) return "costOfMaterials";
+  if (/purchase.*stock/.test(n)) return "purchaseStockInTrade";
+  if (/inventor|stock.*(chang|increase|decrease)|increase.*decrease.*stock/.test(n)) return "stockChanges";
+  if (/employee.*benefit/.test(n)) return "employeeBenefits";
+  if (/financ(e|ial).*cost|finance cost/.test(n)) return "financeCosts";
+  if (/depreciation|amortization/.test(n)) return "depreciation";
+  if (/exceptional/.test(n)) return "exceptionalItems";
+  if (/extraordinary/.test(n)) return "extraordinaryItems";
+  return "otherExpenses";
+}
+
+// Revenue side only has two real buckets — Revenue from Operations (the
+// entity's core business income) vs everything else (Other Income, plus any
+// system-generated income head).
+function classifyRevenueBucketName(name) {
+  const n = (name || "").toLowerCase();
+  if (/revenue.*operation|from operations|sales/.test(n)) return "revenueOps";
+  return "otherIncome";
+}
 
 async function resolveCompanyType(pool, companyId) {
   if (!companyId) return { companyName: null, entityType: null };
@@ -481,15 +519,17 @@ router.get("/profit-loss", async (req, res) => {
       g.total = Math.round((g.total + head.amount) * 100) / 100;
     };
 
-    // Walk a group's ancestor chain and return the nearest ancestor id that
-    // is itself a direct child of the EXPENSES/REVENUE root — i.e. the
-    // Schedule-III bucket id (18–30) a leaf group like "Indirect Expenses"
-    // (42, parented under 27 Other Expenses) rolls up into.
+    // Walk a group's ancestor chain and return the nearest ancestor group
+    // that is itself a direct child of the EXPENSES/REVENUE root — i.e. the
+    // Schedule-III bucket (e.g. "Employee Benefit Expense", or "Indirect
+    // Expenses" for a leaf nested further down) a leaf group rolls up into.
+    // Returns the group object (not just an id) so the caller can classify
+    // it by name.
     function scheduleBucketOf(groupId) {
       let cur = groupMap.get(Number(groupId));
       let hops = 0;
       while (cur && hops < 20) {
-        if (cur.parentId === rootIds.REVENUE || cur.parentId === rootIds.EXPENSES) return cur.id;
+        if (cur.parentId === rootIds.REVENUE || cur.parentId === rootIds.EXPENSES) return cur;
         if (cur.parentId == null) return null;
         cur = groupMap.get(cur.parentId);
         hops++;
@@ -499,7 +539,9 @@ router.get("/profit-loss", async (req, res) => {
 
     const revenueOps = { heads: [], total: 0 };
     const otherIncome = { heads: [], total: 0 };
-    const expenseSections = SCH3_EXPENSE_SECTIONS.map((s) => ({ ...s, heads: [], total: 0 }));
+    const expenseSectionsByKey = new Map(
+      SCH3_EXPENSE_ORDER.map((key) => [key, { key, label: SCH3_EXPENSE_LABELS[key], heads: [], total: 0 }]),
+    );
     const taxExpense = { heads: [], total: 0 };
 
     for (const h of headsRes.recordset) {
@@ -517,7 +559,7 @@ router.get("/profit-loss", async (req, res) => {
 
         if (presentation === "structured") {
           const bucket = scheduleBucketOf(gid);
-          const target = bucket === SCH3_REVENUE_OPS ? revenueOps : otherIncome;
+          const target = bucket && classifyRevenueBucketName(bucket.name) === "revenueOps" ? revenueOps : otherIncome;
           target.heads.push({ id: h.id, name: h.name, amount: net });
           target.total = Math.round((target.total + net) * 100) / 100;
         }
@@ -528,20 +570,19 @@ router.get("/profit-loss", async (req, res) => {
 
         if (presentation === "structured") {
           const bucket = scheduleBucketOf(gid);
-          if (bucket === SCH3_TAX_GROUP) {
+          const classification = bucket ? classifyExpenseBucketName(bucket.name) : "otherExpenses";
+          if (classification === "tax") {
             taxExpense.heads.push({ id: h.id, name: h.name, amount: net });
             taxExpense.total = Math.round((taxExpense.total + net) * 100) / 100;
           } else {
-            const section = expenseSections.find((s) => s.groupIds.includes(bucket));
-            // Unmatched groups fall to "Other Expenses" (not "Extraordinary Items")
-            const fallback = expenseSections.find((s) => s.key === "otherExpenses");
-            const target = section || fallback || expenseSections[expenseSections.length - 1];
+            const target = expenseSectionsByKey.get(classification) || expenseSectionsByKey.get("otherExpenses");
             target.heads.push({ id: h.id, name: h.name, amount: net });
             target.total = Math.round((target.total + net) * 100) / 100;
           }
         }
       }
     }
+    const expenseSections = Array.from(expenseSectionsByKey.values());
 
     const toRows = (m) =>
       Array.from(m.values())
