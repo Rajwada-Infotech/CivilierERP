@@ -95,9 +95,8 @@ async function fetchCustomerBank(bookingId: string): Promise<any> {
 const CrmPaymentMilestones: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [sp] = useSearchParams();
-  const bkgParam = sp.get("bookingId") || "";
-  const [selectedBookingId, setSelectedBookingId] = useState(bkgParam);
+  const [sp, setSp] = useSearchParams();
+  const selectedBookingId = sp.get("bookingId") || "";
   const [editingId, setEditingId] = useState<number | null>(null);
   const [payForm, setPayForm] = useState({ AmountPaid: "", PaidDate: "", PaymentMode: "", TransactionRef: "", Remarks: "", DepositBankId: "" });
   const [saving, setSaving] = useState(false);
@@ -534,7 +533,7 @@ const CrmPaymentMilestones: React.FC = () => {
         <div className="flex gap-3 items-end flex-wrap">
           <div className="flex-1 min-w-64">
             <label className="text-xs text-muted-foreground block mb-1">Select Booking</label>
-            <select value={selectedBookingId} onChange={(e) => setSelectedBookingId(e.target.value)}
+            <select value={selectedBookingId} onChange={(e) => setSp(e.target.value ? { bookingId: e.target.value } : {}, { replace: true })}
               className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
               <option value="">— Choose a booking —</option>
               {(bookings as any[]).map((b: any) => (

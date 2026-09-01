@@ -5,7 +5,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Plus, CheckSquare, Square, ClipboardCheck, ArrowRight,
-  CalendarDays, Pencil, AlertCircle, CheckCircle2, Loader2,
+  AlertCircle, CheckCircle2, Loader2,
   Lock, ShieldCheck, ShieldAlert, FileWarning, Building2,
   ChevronRight, Circle, CreditCard, Camera,
 } from "lucide-react";
@@ -32,10 +32,6 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; b
   Blocked:    { label: "Blocked",     bg: "bg-red-50",     text: "text-red-700",    border: "border-red-200",    strip: "bg-red-500"    },
 };
 
-function fmt(d: string | null | undefined): string {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-}
 
 async function fetchAll(): Promise<any[]> {
   const r = await fetchWithAuth(API);
@@ -43,7 +39,9 @@ async function fetchAll(): Promise<any[]> {
   return r.json();
 }
 async function fetchGatewayStatus(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${API}/gateway-status`); return r.ok ? r.json() : []; } catch { return []; }
+  const r = await fetchWithAuth(`${API}/gateway-status`);
+  if (!r.ok) { const d = await r.json().catch(() => null); throw new Error(d?.error || `HTTP ${r.status}`); }
+  return r.json();
 }
 async function fetchEligibleBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/eligible-bookings`); return r.ok ? r.json() : []; } catch { return []; }
@@ -61,67 +59,160 @@ function SubStepPill({ pass, label }: { pass: boolean; label: string }) {
   );
 }
 
-// ── Details / edit dialog ─────────────────────────────────────────────────────
-interface DetailsDialogProps { record: any; onClose: () => void; onSaved: () => void; }
-function DetailsDialog({ record, onClose, onSaved }: DetailsDialogProps) {
-  const [sdt,   setSdt]   = useState<string>(record.ScheduledInspectionDate?.slice(0, 10) ?? "");
-  const [icd,   setIcd]   = useState<string>(record.InspectionCompletedDate?.slice(0, 10) ?? "");
-  const [notes, setNotes] = useState<string>(record.Notes ?? "");
+// ── Inline-editable check card ────────────────────────────────────────────────
+interface CheckCardProps {
+  c: any;
+  checkLoading: Record<string, boolean>;
+  onToggle: (record: any, field: string, current: boolean) => void;
+  onSaved: () => void;
+  navigate: ReturnType<typeof useNavigate>;
+}
+function CheckCard({ c, checkLoading, onToggle, onSaved, navigate }: CheckCardProps) {
+  const [sdt,    setSdt]    = useState<string>(c.ScheduledInspectionDate?.slice(0, 10) ?? "");
+  const [icd,    setIcd]    = useState<string>(c.InspectionCompletedDate?.slice(0, 10) ?? "");
+  const [notes,  setNotes]  = useState<string>(c.Notes ?? "");
   const [saving, setSaving] = useState(false);
 
-  const save = async () => {
+  // Patch a single field on blur so the user doesn't have to click Save
+  const patch = async (patch: Record<string, string | null>) => {
     setSaving(true);
     try {
-      const res = await fetchWithAuth(`${API}/${record.Id}`, {
+      const res = await fetchWithAuth(`${API}/${c.Id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ScheduledInspectionDate: sdt || null, InspectionCompletedDate: icd || null, Notes: notes || null }),
+        body: JSON.stringify(patch),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success("Details saved");
-      onSaved(); onClose();
+      onSaved();
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally { setSaving(false); }
   };
 
+  const duesCleared = c.DuesClearedCheck === 1;
+  const outstanding = c.OutstandingDemandCount ?? 0;
+  const st = STATUS_CONFIG[c.Status] ?? STATUS_CONFIG.Pending;
+  const doneCount = (duesCleared ? 1 : 0) + MANUAL_CHECKS.filter((ch) => !!c[ch.key]).length;
+  const pct = Math.round((doneCount / 4) * 100);
+
   return (
-    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="font-heading">Inspection Details — {record.BookingNo}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Scheduled Inspection Date</label>
-            <input type="date" value={sdt} onChange={(e) => setSdt(e.target.value)}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className={`h-1 w-full ${st.strip}`} />
+      <div className="p-4 space-y-3">
+
+        {/* Header */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="font-semibold truncate">{c.ApplicantName}</div>
+            <div className="text-xs text-muted-foreground">{c.BookingNo} · {c.UnitNo}</div>
           </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Inspection Completed Date</label>
-            <input type="date" value={icd} onChange={(e) => setIcd(e.target.value)}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
-              placeholder="Remarks about the inspection…"
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+          <div className="flex items-center gap-2 shrink-0">
+            {saving && <Loader2 size={12} className="animate-spin text-muted-foreground" />}
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${st.bg} ${st.text} ${st.border}`}>
+              {st.label}
+            </span>
           </div>
         </div>
-        <div className="flex justify-end gap-2 pt-3 border-t border-border">
-          <button onClick={onClose}
-            className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-            Cancel
-          </button>
-          <button onClick={save} disabled={saving}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-            {saving ? "Saving…" : "Save"}
-          </button>
+
+        {/* Progress */}
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>{doneCount} of 4 checks complete</span>
+            <span className={pct === 100 ? "text-green-600 font-semibold" : ""}>{pct}%</span>
+          </div>
+          <div className="h-2 bg-muted rounded-full overflow-hidden">
+            <div className={`h-full rounded-full transition-all duration-500 ${pct === 100 ? "bg-green-500" : "bg-primary"}`}
+              style={{ width: `${pct}%` }} />
+          </div>
         </div>
-      </DialogContent>
-    </Dialog>
+
+        {/* Inline dates */}
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wide block mb-0.5">Inspection Scheduled</label>
+            <input type="date" value={sdt}
+              onChange={(e) => setSdt(e.target.value)}
+              onBlur={(e) => patch({ ScheduledInspectionDate: e.target.value || null })}
+              className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wide block mb-0.5">Inspection Completed</label>
+            <input type="date" value={icd}
+              onChange={(e) => setIcd(e.target.value)}
+              onBlur={(e) => patch({ InspectionCompletedDate: e.target.value || null })}
+              className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+          </div>
+        </div>
+
+        {/* Checklist */}
+        <div className="space-y-1 pt-2 border-t border-border">
+          {/* Dues — auto-derived */}
+          <div className={`flex items-center gap-2 text-sm px-2 py-1.5 rounded-lg ${duesCleared ? "bg-green-50" : "bg-red-50"}`}>
+            {duesCleared
+              ? <CheckCircle2 size={15} className="text-green-600 shrink-0" />
+              : <AlertCircle  size={15} className="text-red-500  shrink-0" />}
+            <CreditCard size={12} className={`shrink-0 ${duesCleared ? "text-green-600" : "text-red-500"}`} />
+            <span className={`flex-1 text-sm font-medium ${duesCleared ? "text-green-700" : "text-red-700"}`}>Dues Cleared</span>
+            <span className="text-xs text-muted-foreground italic flex items-center gap-1.5">
+              {duesCleared
+                ? "Auto · all clear"
+                : <>
+                    {outstanding} outstanding
+                    <button onClick={() => navigate(`/crm/payments?bookingId=${c.BookingId}`)}
+                      className="text-blue-600 hover:underline font-medium not-italic">View →</button>
+                  </>}
+            </span>
+          </div>
+
+          {MANUAL_CHECKS.map(({ key, label, Icon }) => {
+            const loadKey = `${c.Id}:${key}`;
+            const isLoadingThis = !!checkLoading[loadKey];
+            const isChecked = !!c[key];
+            return (
+              <button key={key}
+                onClick={() => onToggle(c, key, isChecked)}
+                disabled={isLoadingThis}
+                className={`flex items-center gap-2 text-sm w-full text-left rounded-lg px-2 py-1.5 transition-all disabled:opacity-60 disabled:cursor-wait ${
+                  isChecked ? "bg-green-50 hover:bg-green-100" : "hover:bg-muted/60"
+                }`}>
+                {isLoadingThis
+                  ? <Loader2    size={15} className="animate-spin text-muted-foreground shrink-0" />
+                  : isChecked
+                    ? <CheckSquare size={15} className="text-green-600 shrink-0" />
+                    : <Square      size={15} className="text-muted-foreground shrink-0" />}
+                <Icon size={12} className={`shrink-0 ${isChecked ? "text-green-600" : "text-muted-foreground"}`} />
+                <span className={`font-medium ${isChecked ? "text-green-700" : "text-foreground"}`}>{label}</span>
+                {isChecked && <CheckCircle2 size={12} className="ml-auto text-green-500" />}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Inline notes */}
+        <div>
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wide block mb-0.5">Notes</label>
+          <textarea value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            onBlur={(e) => { if (e.target.value !== (c.Notes ?? "")) patch({ Notes: e.target.value || null }); }}
+            rows={2} placeholder="Add inspection remarks…"
+            className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background resize-none focus:outline-none focus:ring-1 focus:ring-primary text-muted-foreground placeholder:text-muted-foreground/50" />
+        </div>
+
+        {/* CTA when Ready */}
+        {c.Status === "Ready" && (
+          <button onClick={() => navigate(`/crm/possession-notice?bookingId=${c.BookingId}&open=1`)}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm shadow-green-600/20">
+            <Camera size={14} /> Send Possession Notice →
+          </button>
+        )}
+        {doneCount === 3 && c.Status !== "Ready" && (
+          <div className="text-xs text-center text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 font-medium">
+            1 check remaining — almost ready!
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -319,14 +410,13 @@ const CrmPrePossession: React.FC = () => {
 
   const [createOpen,      setCreateOpen]      = useState(false);
   const [createPrefillId, setCreatePrefillId] = useState<string | undefined>(undefined);
-  const [detailsRecord,   setDetailsRecord]   = useState<any>(null);
   const [checkLoading,    setCheckLoading]    = useState<Record<string, boolean>>({});
   const [activeTab,       setActiveTab]       = useState<"checks" | "gateway">("checks");
 
   const { data: records = [], isLoading, isError, error, dataUpdatedAt, isFetching, refetch } =
     useQuery({ queryKey: ["crm-pre-possession"], queryFn: fetchAll, staleTime: 30_000 });
 
-  const { data: gateway = [], isLoading: gwLoading, refetch: gwRefetch } =
+  const { data: gateway = [], isLoading: gwLoading, isError: gwError, error: gwErrorMsg, refetch: gwRefetch } =
     useQuery({ queryKey: ["crm-pre-possession-gateway"], queryFn: fetchGatewayStatus, staleTime: 30_000 });
 
   const invalidate = () => {
@@ -349,10 +439,10 @@ const CrmPrePossession: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+      invalidate();
       if (data?.status === "Ready") {
         promptNextStep(navigate, "All checks cleared — ready to send the Possession Notice.", "/crm/possession-notice", "Go to Possession Notice");
       }
-      invalidate();
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -453,118 +543,16 @@ const CrmPrePossession: React.FC = () => {
                   </button>
                 </div>
               </div>
-            ) : (records as any[]).map((c: any) => {
-              const duesCleared = c.DuesClearedCheck === 1;
-              const outstanding = c.OutstandingDemandCount ?? 0;
-              const st = STATUS_CONFIG[c.Status] ?? STATUS_CONFIG.Pending;
-              const doneCount = (duesCleared ? 1 : 0) + MANUAL_CHECKS.filter((ch) => !!c[ch.key]).length;
-              const pct = Math.round((doneCount / 4) * 100);
-
-              return (
-                <div key={c.Id} className="rounded-xl border border-border bg-card overflow-hidden">
-                  <div className={`h-1 w-full ${st.strip}`} />
-                  <div className="p-4 space-y-3">
-                    {/* Header */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="font-medium truncate">{c.ApplicantName}</div>
-                        <div className="text-xs text-muted-foreground">{c.BookingNo} · {c.UnitNo}</div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${st.bg} ${st.text} ${st.border}`}>
-                          {st.label}
-                        </span>
-                        <button onClick={() => setDetailsRecord(c)} title="Edit inspection details"
-                          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
-                          <Pencil size={13} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Progress bar */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>{doneCount} of 4 checks complete</span>
-                        <span>{pct}%</span>
-                      </div>
-                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full transition-all duration-300 ${pct === 100 ? "bg-green-500" : "bg-primary"}`}
-                          style={{ width: `${pct}%` }} />
-                      </div>
-                    </div>
-
-                    {/* Dates */}
-                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <CalendarDays size={11} />
-                        Scheduled: <span className="text-foreground ml-0.5">{fmt(c.ScheduledInspectionDate)}</span>
-                      </span>
-                      {c.InspectionCompletedDate && (
-                        <span className="flex items-center gap-1">
-                          <CalendarDays size={11} />
-                          Completed: <span className="text-foreground ml-0.5">{fmt(c.InspectionCompletedDate)}</span>
-                        </span>
-                      )}
-                    </div>
-
-                    {c.Notes && (
-                      <p className="text-xs text-muted-foreground bg-muted/40 rounded px-2 py-1 leading-relaxed">{c.Notes}</p>
-                    )}
-
-                    {/* Checklist */}
-                    <div className="space-y-0.5 pt-2 border-t border-border">
-                      {/* Dues — auto-derived read-only */}
-                      <div className="flex items-center gap-2 text-sm px-1 py-1 rounded">
-                        {duesCleared
-                          ? <CheckCircle2 size={16} className="text-green-600 shrink-0" />
-                          : <AlertCircle  size={16} className="text-red-500  shrink-0" />}
-                        <CreditCard size={13} className={`shrink-0 ${duesCleared ? "text-green-600" : "text-muted-foreground"}`} />
-                        <span className={duesCleared ? "text-green-700" : "text-red-600"}>Dues Cleared</span>
-                        <span className="ml-auto text-xs text-muted-foreground italic flex items-center gap-1.5">
-                          {duesCleared
-                            ? "Auto · no outstanding demands"
-                            : <>
-                                {`${outstanding} demand${outstanding !== 1 ? "s" : ""} outstanding`}
-                                <button onClick={() => navigate(`/crm/payments?bookingId=${c.BookingId}`)}
-                                  className="text-blue-600 hover:underline font-medium not-italic">
-                                  View →
-                                </button>
-                              </>}
-                        </span>
-                      </div>
-
-                      {MANUAL_CHECKS.map(({ key, label, Icon }) => {
-                        const loadKey = `${c.Id}:${key}`;
-                        const isLoadingThis = !!checkLoading[loadKey];
-                        const isChecked = !!c[key];
-                        return (
-                          <button key={key}
-                            onClick={() => toggleCheck(c, key, isChecked)}
-                            disabled={isLoadingThis}
-                            className="flex items-center gap-2 text-sm w-full text-left hover:bg-muted/40 rounded px-1 py-1 disabled:opacity-60 disabled:cursor-wait transition-colors">
-                            {isLoadingThis
-                              ? <Loader2   size={16} className="animate-spin text-muted-foreground shrink-0" />
-                              : isChecked
-                                ? <CheckSquare size={16} className="text-green-600 shrink-0" />
-                                : <Square      size={16} className="text-muted-foreground shrink-0" />}
-                            <Icon size={13} className={`shrink-0 ${isChecked ? "text-green-600" : "text-muted-foreground"}`} />
-                            <span className={isChecked ? "text-green-700" : ""}>{label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Ready action */}
-                    {c.Status === "Ready" && (
-                      <button onClick={() => navigate("/crm/possession-notice")}
-                        className="w-full flex items-center justify-center gap-2 mt-1 px-3 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                        <Camera size={14} /> Send Possession Notice
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+            ) : (records as any[]).map((c: any) => (
+              <CheckCard
+                key={c.Id}
+                c={c}
+                checkLoading={checkLoading}
+                onToggle={toggleCheck}
+                onSaved={invalidate}
+                navigate={navigate}
+              />
+            ))}
           </div>
         )}
 
@@ -574,6 +562,11 @@ const CrmPrePossession: React.FC = () => {
             {gwLoading ? (
               <div className="py-10 text-center text-muted-foreground text-sm flex items-center justify-center gap-2">
                 <Loader2 size={16} className="animate-spin" /> Loading gateway status…
+              </div>
+            ) : gwError ? (
+              <div className="flex items-center justify-between gap-3 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3">
+                <span>Failed to load gateway status: {(gwErrorMsg as Error)?.message}</span>
+                <button onClick={() => gwRefetch()} className="text-xs font-medium underline hover:no-underline shrink-0">Retry</button>
               </div>
             ) : (gateway as any[]).length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-14 text-center">
@@ -645,9 +638,6 @@ const CrmPrePossession: React.FC = () => {
           onCreated={invalidate}
           onViewGateway={() => setActiveTab("gateway")}
         />
-      )}
-      {detailsRecord && (
-        <DetailsDialog record={detailsRecord} onClose={() => setDetailsRecord(null)} onSaved={invalidate} />
       )}
     </>
   );

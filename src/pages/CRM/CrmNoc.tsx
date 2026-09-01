@@ -199,8 +199,9 @@ const EMPTY_FORM = {
 const CrmNoc: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
+  const deepLinkNocType   = sp.get("nocType"); // "Bank" | "Organisation"
 
   // Filter tabs
   const [typeFilter, setTypeFilter]     = useState("All");
@@ -241,18 +242,31 @@ const CrmNoc: React.FC = () => {
 
   const detail = detailId != null ? (nocs as any[]).find((n: any) => n.Id === detailId) : null;
 
-  // Gate: AFS must be Registered (eligible-bookings already enforces this, but
-  // guard again here for deep-link cases where context is fetched separately)
+  // Gate: AFS must be Registered — mandatory for every booking, no
+  // project-type exception (eligible-bookings already enforces this; this
+  // guards deep-link cases where context is fetched separately — must
+  // mirror the backend gate in crmNoc.js POST / exactly).
   const agreementRegistered = context?.agreement?.Status === CrmStatus.REGISTERED;
   const canRequest = !!form.BookingId && agreementRegistered && !contextLoading && !saving;
 
-  // Deep-link: open create dialog pre-filled with a bookingId
+  // Deep-link: ?bookingId=X&nocType=Bank|Organisation
+  // If booking already has a NOC of the requested type → open its detail.
+  // If not → open create dialog pre-filled with the requested type.
   useEffect(() => {
-    if (!deepLinkBookingId || dialogOpen) return;
-    setForm((f) => ({ ...f, BookingId: deepLinkBookingId }));
-    setDialogOpen(true);
+    if (!deepLinkBookingId || !(nocs as any[]).length) return;
+    setSp({}, { replace: true }); // clear params so this only fires once
+    const type = deepLinkNocType || "Organisation";
+    const existing = (nocs as any[]).find(
+      (n: any) => String(n.BookingId) === deepLinkBookingId && n.NocType === type,
+    );
+    if (existing) {
+      setDetailId(existing.Id);
+    } else {
+      setForm((f) => ({ ...f, BookingId: deepLinkBookingId, NocType: type }));
+      setDialogOpen(true);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkBookingId]);
+  }, [deepLinkBookingId, nocs]);
 
   // Auto-fill Bank NOC from loan tracking record
   useEffect(() => {
@@ -266,16 +280,25 @@ const CrmNoc: React.FC = () => {
     setBankFieldsLocked(true);
   }, [form.NocType, context]);
 
-  // Reset booking when type changes — a booking eligible for Org NOC might
-  // already have a Bank NOC (so eligible list changes).
   const handleTypeChange = (t: string) => {
-    setForm((f) => ({ ...f, NocType: t, BookingId: "" }));
+    setForm((f) => ({ ...f, NocType: t }));
+    setBankFieldsLocked(true);
+  };
+
+  // When booking changes, auto-suggest NOC type based on HasLoan flag
+  const handleBookingChange = (bookingId: string) => {
+    setForm((f) => {
+      const bk = (eligibleBookings as any[]).find((b: any) => String(b.Id) === bookingId);
+      const suggestedType = bk?.HasLoan ? "Bank" : "Organisation";
+      return { ...f, BookingId: bookingId, NocType: suggestedType };
+    });
     setBankFieldsLocked(true);
   };
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["crm-noc"] });
-    qc.invalidateQueries({ queryKey: ["crm-noc-eligible"] });
+    qc.invalidateQueries({ queryKey: ["crm-noc-eligible"] }); // prefix match — clears both Bank and Organisation entries
+    qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
     qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
     qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
   };
@@ -312,16 +335,20 @@ const CrmNoc: React.FC = () => {
       toast.success("NOC marked as Issued");
 
       const current = (nocs as any[]).find((n) => n.Id === detailId);
-      const siblingsIssued = current && (nocs as any[])
-        .filter((n) => n.BookingId === current.BookingId && n.Id !== detailId)
-        .every((n) => n.Status === "Issued");
-      if (current && siblingsIssued) {
-        promptNextStep(
-          navigate,
-          "All NOCs for this booking are issued — the pre-possession check can now proceed.",
-          "/crm/pre-possession",
-          "Go to Pre-Possession Check",
+      if (current) {
+        // Check if both Bank + Org NOCs for this booking are now Issued
+        const bookingNocs = (nocs as any[]).filter((n) => n.BookingId === current.BookingId);
+        const allIssued = bookingNocs.length > 0 && bookingNocs.every(
+          (n) => n.Id === detailId ? true : n.Status === "Issued",
         );
+        if (allIssued) {
+          promptNextStep(
+            navigate,
+            "All NOCs for this booking are issued — the pre-possession check can now proceed.",
+            "/crm/pre-possession",
+            "Go to Pre-Possession Check",
+          );
+        }
       }
       setDetailId(null);
       invalidate();
@@ -427,85 +454,88 @@ const CrmNoc: React.FC = () => {
 
         {/* ── Request dialog ────────────────────────────────────────────── */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle className="font-heading">Request NOC</DialogTitle>
+              <DialogTitle className="font-heading text-base">Request NOC</DialogTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">One NOC per type — Bank (lender's charge released) + Organisation (developer no-dues)</p>
             </DialogHeader>
-            <div className="space-y-2.5">
-              {/* NOC type first — changing type resets the booking selector */}
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">NOC Type</label>
-                <div className="flex rounded-lg border border-border overflow-hidden text-sm">
-                  {NOC_TYPES.map((t) => (
-                    <button key={t} type="button" onClick={() => handleTypeChange(t)}
-                      className={cn("flex-1 py-1.5 transition-colors", form.NocType === t ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground")}>
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              </div>
 
-              {/* Booking — shows only eligible bookings for the selected type */}
+            <div className="space-y-4">
+              {/* Step 1 — Booking */}
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Booking *</label>
                 {bkgFetching ? (
-                  <p className="text-xs text-muted-foreground px-1">Loading eligible bookings…</p>
-                ) : eligibleBookings.length === 0 ? (
-                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 leading-relaxed">
-                    No eligible bookings for a {form.NocType} NOC. Requires: AFS Registered + no existing {form.NocType} NOC.
-                  </p>
+                  <p className="text-xs text-muted-foreground px-1 py-2">Loading eligible bookings…</p>
+                ) : (eligibleBookings as any[]).length === 0 ? (
+                  <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+                    <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                    <span>No eligible bookings. Requires: AFS Registered at Sub-Registrar + no existing {form.NocType} NOC for the booking.</span>
+                  </div>
                 ) : (
                   <select value={form.BookingId}
-                    onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                    <option value="">Select booking</option>
+                    onChange={(e) => handleBookingChange(e.target.value)}
+                    className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
+                    <option value="">Select booking…</option>
                     {(eligibleBookings as any[]).map((b: any) => (
                       <option key={b.Id} value={String(b.Id)}>
-                        {b.BookingNo} — {b.ApplicantName} ({b.UnitNo})
+                        {b.BookingNo} — {b.ApplicantName} · {b.UnitNo}{b.HasLoan ? " (Home Loan)" : ""}
                       </option>
                     ))}
                   </select>
                 )}
               </div>
 
-              {/* Booking context preview */}
+              {/* Step 2 — NOC type (shown once booking selected) */}
+              {form.BookingId && (
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">NOC Issued By *</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {NOC_TYPES.map((t) => (
+                      <button key={t} type="button" onClick={() => handleTypeChange(t)}
+                        className={cn(
+                          "flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors text-left",
+                          form.NocType === t
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border hover:bg-muted text-muted-foreground",
+                        )}>
+                        {t === "Bank" ? <Landmark size={14} /> : <Building2 size={14} />}
+                        <span>{t === "Bank" ? "Bank (Lender)" : "Organisation (Developer)"}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Booking context strip */}
               {form.BookingId && !contextLoading && context && (
-                <div className="rounded-lg border border-border bg-muted/20 px-2.5 py-2 text-[11px] leading-relaxed space-y-0.5">
-                  <div className="font-medium text-foreground">
+                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-[11px] space-y-1">
+                  <div className="font-semibold text-foreground text-xs">
                     {context.booking.ApplicantName}
-                    <span className="text-muted-foreground font-normal"> · {context.booking.Mobile} · {context.booking.UnitNo}</span>
+                    <span className="text-muted-foreground font-normal"> · {context.booking.UnitNo}</span>
                   </div>
                   {context.agreement ? (
-                    <div className={cn("flex items-center gap-1", agreementRegistered ? "text-green-700" : "text-amber-700")}>
-                      {agreementRegistered
-                        ? <CheckCircle2 size={11} />
-                        : <AlertTriangle size={11} />}
+                    <div className={cn("flex items-center gap-1.5", agreementRegistered ? "text-green-700" : "text-amber-700")}>
+                      {agreementRegistered ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />}
                       {context.agreement.AgreementNo} — {context.agreement.Status}
-                      {!agreementRegistered && <span className="font-medium"> (Registered required)</span>}
+                      {!agreementRegistered && <span className="font-medium ml-1">(Registered required)</span>}
                     </div>
                   ) : (
-                    <div className="flex items-center gap-1 text-red-600 font-medium">
-                      <AlertTriangle size={11} /> No agreement yet
-                    </div>
-                  )}
-                  {context.existingNocs?.length > 0 && (
-                    <div className="text-muted-foreground">
-                      Existing NOCs: {context.existingNocs.map((n: any) => `${n.NocType}: ${n.Status}`).join(" · ")}
+                    <div className="flex items-center gap-1.5 text-red-600 font-medium">
+                      <AlertTriangle size={11} /> No agreement on file
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Bank NOC fields */}
-              {form.NocType === "Bank" && (
+              {/* Bank loan fields — only for Bank NOC */}
+              {form.NocType === "Bank" && form.BookingId && (
                 <div>
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
-                    <span className="flex items-center gap-1">
-                      <Landmark size={11} />
-                      {bankFieldsLocked ? "Auto-filled from Home Loan Tracking" : "Editing lender details"}
-                    </span>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+                      <Landmark size={11} /> Lender Details
+                    </label>
                     <button type="button" onClick={() => setBankFieldsLocked((l) => !l)}
-                      className="flex items-center gap-1 text-primary hover:underline shrink-0">
+                      className="flex items-center gap-1 text-xs text-primary hover:underline">
                       {bankFieldsLocked ? <><Pencil size={10} /> Edit</> : <><Lock size={10} /> Lock</>}
                     </button>
                   </div>
@@ -518,7 +548,7 @@ const CrmNoc: React.FC = () => {
                       <input key={key} type={num ? "number" : "text"} placeholder={ph} value={val}
                         readOnly={bankFieldsLocked}
                         onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                        className={cn("text-sm border border-border rounded px-2 py-1.5",
+                        className={cn("text-sm border border-border rounded-lg px-2.5 py-1.5",
                           bankFieldsLocked ? "bg-muted/40 text-muted-foreground cursor-default" : "bg-background")} />
                     ))}
                   </div>
@@ -526,17 +556,17 @@ const CrmNoc: React.FC = () => {
               )}
 
               <textarea value={form.Reason} onChange={(e) => setForm((f) => ({ ...f, Reason: e.target.value }))}
-                placeholder="Reason / purpose (optional)" rows={1}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+                placeholder="Reason / purpose (optional)" rows={2}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background resize-none" />
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <div className="flex justify-end gap-2 pt-4 border-t border-border mt-2">
               <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleCreate} disabled={!canRequest}
                 title={!agreementRegistered && form.BookingId ? "AFS must be Registered first" : undefined}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                {saving ? "Requesting…" : "Request"}
+                className="px-5 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                {saving ? "Requesting…" : "Request NOC"}
               </button>
             </div>
           </DialogContent>

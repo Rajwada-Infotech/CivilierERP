@@ -27,7 +27,6 @@ import {
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/query-payment";
-const BKG_API = "/api/crm/bookings";
 
 const STATUS_CFG: Record<string, { text: string; bar: string }> = {
   Pending:   { text: "text-amber-700",    bar: "bg-amber-500" },
@@ -122,9 +121,9 @@ async function fetchAll(): Promise<any[]> {
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load Query Payments");
   return r.json();
 }
-async function fetchBookings(): Promise<any[]> {
-  const r = await fetchWithAuth(BKG_API);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load bookings");
+async function fetchEligible(): Promise<any[]> {
+  const r = await fetchWithAuth(`${API}/eligible-bookings`);
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load eligible bookings");
   return r.json();
 }
 async function fetchDetail(id: number | null): Promise<any> {
@@ -163,15 +162,12 @@ const CrmQueryPayment: React.FC = () => {
   const proofInputRef = useRef<HTMLInputElement>(null);
 
   const { data: rows = [], isLoading, dataUpdatedAt: listUpdatedAt, isFetching: listFetching, refetch: refetchList } = useQuery({ queryKey: ["crm-query-payment"], queryFn: fetchAll, staleTime: 30_000 });
-  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  const { data: startableBookings = [] } = useQuery({ queryKey: ["crm-query-payment-eligible"], queryFn: fetchEligible, staleTime: 60_000 });
   const { data: detail, refetch: refetchDetail } = useQuery({
     queryKey: ["crm-query-payment-detail", selectedId],
     queryFn: () => fetchDetail(selectedId),
     enabled: !!selectedId,
   });
-
-  const trackedBookingIds = new Set((rows as any[]).map((r: any) => r.BookingId));
-  const startableBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
 
   // Land on whichever step matches where this tracker actually is � Pending
   // starts at Send Paperwork, InfoSent jumps straight to Confirm Payment
@@ -195,7 +191,7 @@ const CrmQueryPayment: React.FC = () => {
       setDialogOpen(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkBookingId, rows.length]);
+  }, [deepLinkBookingId, rows.length, startableBookings.length]);
 
   const handleStart = async () => {
     if (!bookingId) { toast.error("Booking is required"); return; }
@@ -212,7 +208,9 @@ const CrmQueryPayment: React.FC = () => {
       setDialogOpen(false);
       setBookingId("");
       qc.invalidateQueries({ queryKey: ["crm-query-payment"] });
+      qc.invalidateQueries({ queryKey: ["crm-query-payment-eligible"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -289,6 +287,7 @@ const CrmQueryPayment: React.FC = () => {
       refetchDetail();
       qc.invalidateQueries({ queryKey: ["crm-query-payment"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -341,6 +340,7 @@ const CrmQueryPayment: React.FC = () => {
       refetchDetail();
       qc.invalidateQueries({ queryKey: ["crm-query-payment"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -376,7 +376,7 @@ const CrmQueryPayment: React.FC = () => {
   return (
     <CrmShell
       title="Sale Deed Registration Fees"
-      subtitle="Stamp duty & registration fee the buyer pays before the Sale Deed is registered at the Sub-Registrar Office (Visit 2)"
+      subtitle="Stamp duty & registration fee the buyer pays before the Sale Deed is registered at the Sub-Registrar Office (Visit 2 for under-construction; the only visit for Ready-to-Move)"
       action={
         <div className="flex items-center gap-3">
           {listUpdatedAt > 0 && (
@@ -414,7 +414,10 @@ const CrmQueryPayment: React.FC = () => {
                 <option key={b.Id} value={String(b.Id)}>{b.BookingNo} � {b.ApplicantName}</option>
               ))}
             </select>
-            <p className="text-[11px] text-muted-foreground mt-1">Requires a Sales Deed to already exist for this booking.</p>
+            <p className="text-[11px] text-muted-foreground mt-1">Requires a Director-Approved Sale Deed for this booking.</p>
+            {!startableBookings.length && (
+              <p className="text-[11px] text-amber-600 mt-1">No bookings are eligible yet — the Sale Deed must be Director Approved first.</p>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setDialogOpen(false); setBookingId(""); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>

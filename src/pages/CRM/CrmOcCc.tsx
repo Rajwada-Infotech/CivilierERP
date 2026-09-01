@@ -56,8 +56,9 @@ function OcccStepper({ status }: { status: string }) {
   return (
     <div className="flex items-center gap-0">
       {steps.map((step, i) => {
-        const done = idx >= i;
-        const curr = idx === i;
+        // "Applied" = in-progress; "Received" = terminal (all steps done)
+        const done = idx > i || (status === "Received");
+        const curr = idx === i && status !== "Received";
         const Icon = done ? CheckCircle2 : curr ? CircleDot : Circle;
         return (
           <React.Fragment key={step}>
@@ -365,6 +366,9 @@ const CrmOcCc: React.FC = () => {
       setCreateOpen(false);
       setCreateForm({ ...EMPTY_FORM });
       qc.invalidateQueries({ queryKey: ["crm-oc-cc"] });
+      qc.invalidateQueries({ queryKey: ["crm-pre-possession-gateway"] });
+      qc.invalidateQueries({ queryKey: ["crm-pre-possession-eligible"] });
+      qc.invalidateQueries({ queryKey: ["crm-possession-notice-eligible"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -394,6 +398,10 @@ const CrmOcCc: React.FC = () => {
       toast.success("OC/CC record updated");
       closeDetail();
       qc.invalidateQueries({ queryKey: ["crm-oc-cc"] });
+      qc.invalidateQueries({ queryKey: ["crm-pre-possession-gateway"] });
+      qc.invalidateQueries({ queryKey: ["crm-pre-possession-eligible"] });
+      qc.invalidateQueries({ queryKey: ["crm-possession-notice-eligible"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {

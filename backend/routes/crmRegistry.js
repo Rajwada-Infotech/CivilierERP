@@ -55,6 +55,30 @@ router.get("/booking/:bookingId", requirePageRight("crm-registry", "view"), asyn
   }
 });
 
+// GET /eligible-bookings — bookings whose Query Payment is Confirmed and
+// don't have a Registry tracker yet.
+router.get("/eligible-bookings", requirePageRight("crm-registry", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
+             qp.QPNo, sd.DeedNo
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      JOIN dbo.CrmQueryPayment qp ON qp.BookingId = b.Id AND qp.Status = 'Confirmed'
+      LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
+      WHERE b.Status <> 'Cancelled'
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmRegistry WHERE BookingId = b.Id)
+      ORDER BY b.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-registry] eligible-bookings error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST / — start Registry tracking for a booking. Gated on Query Payment
 // being Confirmed — the customer must have actually paid the government
 // before the deed can go to the Sub-Registrar Office for registration.

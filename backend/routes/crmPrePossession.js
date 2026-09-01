@@ -40,7 +40,7 @@ const PP_SELECT = `
 router.get("/", requirePageRight("crm-pre-possession", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`${PP_SELECT} ORDER BY p.CreatedAt DESC`);
+    const result = await pool.request().query(`${PP_SELECT} WHERE b.Status NOT IN ('Cancelled','Rejected') ORDER BY p.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-pre-possession] GET error:", e.message);
@@ -116,6 +116,8 @@ router.get("/eligible-bookings", requirePageRight("crm-pre-possession", "create"
       "WHERE b.IsActive = 1",
       "  AND b.Status NOT IN ('" + cancelled + "', '" + rejected + "')",
       "  AND NOT EXISTS (SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id)",
+      // Agreement for Sale, registered at the Sub-Registrar, is mandatory
+      // for every booking regardless of project type — no exception.
       "  AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = 'Registered')",
       "  AND (b.ProjectId IS NULL OR EXISTS (",
       "    SELECT 1 FROM dbo.CrmOccupancyCertificate oc",
@@ -143,6 +145,8 @@ router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, r
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    // Agreement for Sale must be Registered — mandatory for every booking,
+    // regardless of project type.
     const agr = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
     if (!agr.recordset.length)
@@ -213,9 +217,12 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
       .input("doc",  sql.Bit,  b.DocumentationCheck     !== undefined ? (b.DocumentationCheck     ? 1 : 0) : null)
       .input("qc",   sql.Bit,  b.QualityInspectionCheck !== undefined ? (b.QualityInspectionCheck ? 1 : 0) : null)
       .input("util", sql.Bit,  b.UtilityReadinessCheck  !== undefined ? (b.UtilityReadinessCheck  ? 1 : 0) : null)
-      .input("sdt",  sql.Date, b.ScheduledInspectionDate || null)
-      .input("icd",  sql.Date, b.InspectionCompletedDate || null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes !== undefined ? b.Notes : null)
+      .input("sdt",       sql.Date,              b.ScheduledInspectionDate || null)
+      .input("sdt_set",   sql.Bit,               "ScheduledInspectionDate" in b ? 1 : 0)
+      .input("icd",       sql.Date,              b.InspectionCompletedDate || null)
+      .input("icd_set",   sql.Bit,               "InspectionCompletedDate" in b ? 1 : 0)
+      .input("note",      sql.NVarChar(sql.MAX), b.Notes ?? null)
+      .input("note_set",  sql.Bit,               "Notes" in b ? 1 : 0)
       .input("ub",   sql.Int,  actorId(req))
       .query(`
         DECLARE @doc_eff  BIT = ISNULL(@doc,  (SELECT DocumentationCheck     FROM dbo.CrmPrePossession WHERE Id = @id));
@@ -244,9 +251,9 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
           DocumentationCheck      = ISNULL(@doc,  DocumentationCheck),
           QualityInspectionCheck  = ISNULL(@qc,   QualityInspectionCheck),
           UtilityReadinessCheck   = ISNULL(@util, UtilityReadinessCheck),
-          ScheduledInspectionDate = ISNULL(@sdt,  ScheduledInspectionDate),
-          InspectionCompletedDate = ISNULL(@icd,  InspectionCompletedDate),
-          Notes                   = ISNULL(@note, Notes),
+          ScheduledInspectionDate = CASE WHEN @sdt_set  = 1 THEN @sdt  ELSE ScheduledInspectionDate END,
+          InspectionCompletedDate = CASE WHEN @icd_set  = 1 THEN @icd  ELSE InspectionCompletedDate END,
+          Notes                   = CASE WHEN @note_set = 1 THEN @note ELSE Notes END,
           Status                  = @new_status,
           UpdatedBy               = @ub,
           UpdatedAt               = SYSDATETIME()

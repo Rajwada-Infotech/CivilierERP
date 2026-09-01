@@ -1,7 +1,7 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -69,6 +69,8 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 const CrmHandover: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [sp, setSp] = useSearchParams();
+  const deepLinkBookingId = sp.get("bookingId");
 
   const [selectedId, setSelectedId]     = useState<number | null>(null);
   const [newDialog, setNewDialog]       = useState(false);
@@ -108,6 +110,22 @@ const CrmHandover: React.FC = () => {
     queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000,
   });
 
+  // Deep-link: ?bookingId=X — pre-select existing handover or open schedule dialog
+  useEffect(() => {
+    if (!deepLinkBookingId || !(handovers as any[]).length) return;
+    setSp({}, { replace: true });
+    const existing = (handovers as any[]).find(
+      (h: any) => String(h.BookingId) === deepLinkBookingId,
+    );
+    if (existing) {
+      setSelectedId(existing.Id);
+    } else {
+      setNewForm((f) => ({ ...f, BookingId: deepLinkBookingId }));
+      setNewDialog(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkBookingId, handovers]);
+
   // ── Schedule handover ──────────────────────────────────────────────────────
   const handleSchedule = async () => {
     if (!newForm.BookingId) { toast.error("Booking is required"); return; }
@@ -130,6 +148,7 @@ const CrmHandover: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-handovers"] });
       qc.invalidateQueries({ queryKey: ["crm-handover-eligible"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -155,6 +174,7 @@ const CrmHandover: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-handover-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-handovers"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -176,6 +196,7 @@ const CrmHandover: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-handover-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-handovers"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     }
@@ -202,6 +223,7 @@ const CrmHandover: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-handover-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-handovers"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -235,6 +257,7 @@ const CrmHandover: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-handover-detail", selectedId] });
       qc.invalidateQueries({ queryKey: ["crm-handovers"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
       // Completed handover changes dashboard KPIs immediately
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
       promptNextStep(
@@ -412,7 +435,7 @@ const CrmHandover: React.FC = () => {
             <div>
               <label className="text-xs text-muted-foreground block mb-1">
                 Booking *{" "}
-                <span className="text-[10px] text-primary">(only eligible bookings shown — agreement executed, deed approved by both sides, all NOCs issued)</span>
+                <span className="text-[10px] text-primary">(only eligible bookings shown — AFS Registered, Possession Notice Acknowledged, no NOC left Pending/Approved, no overdue dues)</span>
               </label>
               <select value={newForm.BookingId} onChange={(e) => setNewForm((f) => ({ ...f, BookingId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">

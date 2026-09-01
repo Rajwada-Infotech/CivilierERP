@@ -39,6 +39,7 @@ const LM_SELECT = `
     areg.Id AS AfsRegistryId, areg.AfsRegNo, areg.Status AS AfsRegistryStatus,
     -- Sale Deed
     sd.Id AS SalesDeedId, sd.DeedNo, sd.ExecutedBy AS DeedExecutedBy, sd.RegistrationNo AS DeedRegistrationNo,
+    sd.DirectorApprovalStatus AS DeedDirectorApprovalStatus,
     -- Sub-Registrar Visit 2: Sale Deed registration
     qp.Id AS QueryPaymentId, qp.QPNo, qp.Status AS QueryPaymentStatus,
     reg.Id AS RegistryId, reg.RegNo, reg.Status AS RegistryStatus,
@@ -50,19 +51,59 @@ const LM_SELECT = `
     occc.HasReceived AS OcCcReceived,
     pp.Status AS PrePossessionStatus,
     pn.Id AS PossessionNoticeId, pn.Status AS PossessionNoticeStatus,
-    hov.Status AS HandoverStatus
+    hov.Status AS HandoverStatus,
+    -- Real-estate category + lifecycle status from Project Master (General
+    -- tab Type + Timeline tab Status). Governs only the Handover-timing note
+    -- shown in the Sale Deed/Handover stage text — see buildWorkflowModel in
+    -- CrmLegalMilestones.tsx and getProjectSaleGate in crmWorkflowGuards.js.
+    -- Never waives Agreement/AFS — that stays mandatory for every booking.
+    proj.entity_type AS ProjectType, proj.status AS ProjectStatus,
+    -- Mirrors crmHandover.js POST /'s exact dues gate (same columns, same
+    -- condition) so the Handover stage here can't show "unlocked" for a
+    -- booking the real Handover page would reject for an outstanding balance.
+    CASE WHEN EXISTS (
+      SELECT 1 FROM dbo.CrmPaymentMilestone pm
+      WHERE pm.BookingId = m.BookingId
+        AND pm.Status NOT IN ('Paid', 'Waived')
+        AND pm.AmountDue > ISNULL(pm.AmountPaid, 0)
+    ) THEN 1 ELSE 0 END AS HasOutstandingDues
   FROM dbo.CrmLegalMilestone m
   JOIN dbo.CrmBooking b ON b.Id = m.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-  LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = m.BookingId
-  LEFT JOIN dbo.CrmAllotmentLetter al ON al.BookingId = m.BookingId
-  LEFT JOIN dbo.CrmAfsQueryPayment aqp ON aqp.BookingId = m.BookingId
-  LEFT JOIN dbo.CrmAfsRegistry areg ON areg.BookingId = m.BookingId
-  LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = m.BookingId
-  LEFT JOIN dbo.CrmQueryPayment qp ON qp.BookingId = m.BookingId
-  LEFT JOIN dbo.CrmRegistry reg ON reg.BookingId = m.BookingId
-  LEFT JOIN dbo.CrmMutation mut ON mut.BookingId = m.BookingId
+  LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
+  OUTER APPLY (
+    SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement
+    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+  ) ag
+  OUTER APPLY (
+    SELECT TOP 1 Id, AlNo, Status FROM dbo.CrmAllotmentLetter
+    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+  ) al
+  OUTER APPLY (
+    SELECT TOP 1 Id, AfsQPNo, Status FROM dbo.CrmAfsQueryPayment
+    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+  ) aqp
+  OUTER APPLY (
+    SELECT TOP 1 Id, AfsRegNo, Status FROM dbo.CrmAfsRegistry
+    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+  ) areg
+  OUTER APPLY (
+    SELECT TOP 1 Id, DeedNo, ExecutedBy, RegistrationNo, DirectorApprovalStatus FROM dbo.CrmSalesDeed
+    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+  ) sd
+  OUTER APPLY (
+    SELECT TOP 1 Id, QPNo, Status FROM dbo.CrmQueryPayment
+    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+  ) qp
+  OUTER APPLY (
+    SELECT TOP 1 Id, RegNo, Status FROM dbo.CrmRegistry
+    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+  ) reg
+  OUTER APPLY (
+    SELECT TOP 1 Id, MutationNo, Status FROM dbo.CrmMutation
+    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
+  ) mut
   OUTER APPLY (
     SELECT CASE WHEN EXISTS (
       SELECT 1 FROM dbo.CrmOccupancyCertificate

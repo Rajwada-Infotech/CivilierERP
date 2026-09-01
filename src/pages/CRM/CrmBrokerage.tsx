@@ -37,15 +37,30 @@ async function fetchBrokers(): Promise<any[]> {
   try { const r = await fetchWithAuth(BROKER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 
+// Read role from JWT to decide whether to show the Approve button in the
+// Customize dialog. The backend re-checks independently — this only affects rendering.
+function getUserRole(): string | null {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) return null;
+    return JSON.parse(atob(token.split(".")[1])).role ?? null;
+  } catch { return null; }
+}
+const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
+
 const CrmBrokerage: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { canEdit: hasApprovalInboxEdit } = usePageRights("approval-inbox");
   usePageRights("crm-brokerage");
   const [searchParams, setSearchParams] = useSearchParams();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingStatus, setEditingStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const isApprover = CRM_APPROVER_ROLES.includes(getUserRole() ?? "") || hasApprovalInboxEdit;
 
   const { data: records = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-brokerage"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
@@ -64,6 +79,7 @@ const CrmBrokerage: React.FC = () => {
 
   const openEdit = (r: any) => {
     setEditingId(r.Id);
+    setEditingStatus(r.Status ?? null);
     setForm({
       BookingId: String(r.BookingId || ""),
       BrokerId: String(r.BrokerId || ""),
@@ -91,6 +107,34 @@ const CrmBrokerage: React.FC = () => {
     setSearchParams((sp) => { sp.delete("view"); return sp; }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, records]);
+
+  const handleApprove = async () => {
+    if (!editingId) return;
+    setApproving(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API}/${editingId}/approve`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && res.status !== 207) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.financeHandoffError) {
+        toast.warning(data.financeHandoffError);
+      } else {
+        toast.success("Brokerage approved and sent to Finance");
+      }
+      setDialogOpen(false);
+      setForm({ ...EMPTY_FORM });
+      setEditingId(null);
+      setEditingStatus(null);
+      qc.invalidateQueries({ queryKey: ["crm-brokerage"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setApproving(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!editingId && (!form.BookingId || !form.BrokerId || !form.RateValue)) { toast.error("Booking, broker and rate are required"); return; }
@@ -244,7 +288,7 @@ const CrmBrokerage: React.FC = () => {
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
 
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); } }}>
+      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle className="font-heading">{editingId ? "Customize Brokerage" : "Add Broker Involvement"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -343,11 +387,17 @@ const CrmBrokerage: React.FC = () => {
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving}
+            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={handleSave} disabled={saving || approving}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
               {saving ? "Saving..." : editingId ? "Save Changes" : "Add"}
             </button>
+            {editingId && editingStatus === CrmStatus.PENDING && isApprover && (
+              <button onClick={handleApprove} disabled={saving || approving}
+                className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40">
+                {approving ? "Approving..." : "Approve & Send to Finance"}
+              </button>
+            )}
           </div>
         </DialogContent>
       </Dialog>

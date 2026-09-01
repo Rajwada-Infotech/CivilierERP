@@ -72,7 +72,9 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
     const eligible = [];
     for (const c of candidates.recordset) {
       const bid = c.Id;
-      // 1. Agreement must be Registered (AFS physically registered at Sub-Registrar)
+      // 1. Agreement must be Registered (AFS physically registered at
+      // Sub-Registrar) — mandatory for every booking, regardless of
+      // project type.
       const agr = await pool.request().input("bid", sql.Int, bid)
         .query("SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
       if (!agr.recordset.length || agr.recordset[0].Status !== CrmStatus.REGISTERED) continue;
@@ -87,14 +89,21 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
         .query("SELECT TOP 1 Id FROM dbo.CrmNoc WHERE BookingId = @bid AND Status IN ('Pending','Approved')");
       if (openNoc.recordset.length) continue;
 
-      // 4. No outstanding payment dues (mirrors the POST / dues check)
+      // 4. No outstanding payment dues — mirrors the POST / dues check
+      // EXACTLY (same columns: AmountDue/AmountPaid — CrmPaymentMilestone
+      // has no Amount or WaivedAmount column, those never existed; querying
+      // them threw "Invalid column name" on every call, so this endpoint
+      // 500'd for every single booking regardless of project type. Also
+      // aligned to POST's real rule — ANY outstanding balance blocks
+      // Handover, not just an overdue one — so this list can't offer a
+      // booking that then fails on submit.)
       const dues = await pool.request().input("bid", sql.Int, bid)
         .query(`
-          SELECT SUM(m.Amount - ISNULL(m.PaidAmount,0) - ISNULL(m.WaivedAmount,0)) AS Bal
+          SELECT SUM(m.AmountDue - ISNULL(m.AmountPaid,0)) AS Bal
           FROM dbo.CrmPaymentMilestone m
           WHERE m.BookingId = @bid
-            AND m.Status NOT IN ('Paid','Waived')
-            AND m.DueDate < GETDATE()
+            AND m.Status NOT IN ('${CrmStatus.PAID}', 'Waived')
+            AND m.AmountDue > ISNULL(m.AmountPaid, 0)
         `);
       const bal = dues.recordset[0]?.Bal ?? 0;
       if (bal > 0) continue;
@@ -145,6 +154,7 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     // Workflow guard: Agreement for Sale must be Registered (physically
     // registered at Sub-Registrar, own Doc No recorded). Executed alone is
     // not sufficient — the AFS registration is the binding legal anchor.
+    // Mandatory for every booking, regardless of project type.
     const agr = await pool.request()
       .input("bid", sql.Int, parseInt(b.BookingId))
       .query(`SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid`);

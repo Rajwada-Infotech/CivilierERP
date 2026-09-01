@@ -17,7 +17,6 @@ import {
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/mutation";
-const BKG_API = "/api/crm/bookings";
 
 const STATUS_CFG: Record<string, { text: string; bg: string; border: string }> = {
   Applied:  { text: "text-amber-700",   bg: "bg-amber-50",   border: "border-amber-200"   },
@@ -41,9 +40,9 @@ async function fetchAll(): Promise<any[]> {
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load Mutation records");
   return r.json();
 }
-async function fetchBookings(): Promise<any[]> {
-  const r = await fetchWithAuth(BKG_API);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load bookings");
+async function fetchEligible(): Promise<any[]> {
+  const r = await fetchWithAuth(`${API}/eligible-bookings`);
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load eligible bookings");
   return r.json();
 }
 
@@ -62,10 +61,7 @@ const CrmMutation: React.FC = () => {
   const [updating, setUpdating] = useState(false);
 
   const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-mutation"], queryFn: fetchAll, staleTime: 30_000 });
-  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
-
-  const trackedBookingIds = new Set((rows as any[]).map((r: any) => r.BookingId));
-  const startableBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
+  const { data: startableBookings = [] } = useQuery({ queryKey: ["crm-mutation-eligible"], queryFn: fetchEligible, staleTime: 60_000 });
 
   const patch = (key: string, val: string) => setCreateForm((f) => ({ ...f, [key]: val }));
   const ePatch = (key: string, val: string) => setEditForm((f) => ({ ...f, [key]: val }));
@@ -93,7 +89,7 @@ const CrmMutation: React.FC = () => {
       setCreateOpen(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkBookingId, rows.length]);
+  }, [deepLinkBookingId, rows.length, startableBookings.length]);
 
   const handleCreate = async () => {
     if (!createForm.BookingId) { toast.error("Booking is required"); return; }
@@ -116,7 +112,9 @@ const CrmMutation: React.FC = () => {
       setCreateOpen(false);
       setCreateForm({ ...EMPTY_CREATE });
       qc.invalidateQueries({ queryKey: ["crm-mutation"] });
+      qc.invalidateQueries({ queryKey: ["crm-mutation-eligible"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -164,6 +162,7 @@ const CrmMutation: React.FC = () => {
       setEditId(null);
       qc.invalidateQueries({ queryKey: ["crm-mutation"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -250,6 +249,9 @@ const CrmMutation: React.FC = () => {
                 ))}
               </select>
               <p className="text-[11px] text-muted-foreground mt-1">Requires Sale Deed Registry to be Completed.</p>
+              {!startableBookings.length && (
+                <p className="text-[11px] text-amber-600 mt-1">No bookings are eligible yet — Sale Deed Registry must be Completed first.</p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>

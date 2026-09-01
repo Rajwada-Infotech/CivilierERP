@@ -1342,6 +1342,10 @@ const CrmAgreement: React.FC = () => {
                         <span title="Booking is cancelled — cannot mark registered" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
                           Mark Registered
                         </span>
+                      ) : detail.agreement?.AfsRegistryStatus !== "Completed" ? (
+                        <span title="AFS Registry (the Sub-Registrar Visit 1 tracker) must be marked Completed first" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
+                          Mark Registered
+                        </span>
                       ) : (
                         <button onClick={() => {
                             const ag = detail.agreement;

@@ -1,11 +1,13 @@
 import { ClipboardList, FileText, IndianRupee, Wrench, Scale, HardHat, LayoutDashboard, Grid3x3, Users, Key, Building2 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
-// Sidebar groups follow the real workflow sequence:
+// Sidebar groups follow the real legal workflow sequence per Transfer of
+// Property Act 1882 (s.54) and Indian Sub-Registrar practice:
 //
-//   Pipeline (pre-sale) → Pre-Sale Docs → Sub-Registrar Visit 1 (AFS) →
-//   NOC → Possession (OC/CC → Pre-Possession → Notice → Handover) →
+//   Pipeline → Pre-Sale Docs → Sub-Registrar Visit 1 (AFS Reg) →
 //   Sub-Registrar Visit 2 (Sale Deed → QP → Registry → Mutation) →
+//   NOC (bank lien released after deed; org no-dues confirmed) →
+//   Possession (OC/CC → Pre-Possession → Notice → Handover) →
 //   Finance → After-Sales
 //
 export const crmNavItems: NavItem[] = [
@@ -45,7 +47,7 @@ export const crmNavItems: NavItem[] = [
   },
 
   // ── Pre-Sale Documents ───────────────────────────────────────────────────────
-  // Steps 1–4: Allotment Letter → Agreement (Executed)
+  // Allotment Letter → Agreement (internal legal steps) → Executed
   {
     label: "Pre-Sale",
     icon: FileText,
@@ -57,9 +59,8 @@ export const crmNavItems: NavItem[] = [
     ],
   },
 
-  // ── Sub-Registrar Visit 1 — AFS ──────────────────────────────────────────────
-  // Steps 3–4: AFS Query Payment → AFS Registry → Agreement becomes Registered
-  // Gate: Agreement Executed
+  // ── Sub-Registrar Visit 1 — AFS Registration ─────────────────────────────────
+  // Gate: Agreement Executed. Outcome: Agreement status → Registered
   {
     label: "AFS Registration",
     icon: Scale,
@@ -69,9 +70,24 @@ export const crmNavItems: NavItem[] = [
     ],
   },
 
+  // ── Sub-Registrar Visit 2 — Sale Deed ────────────────────────────────────────
+  // Legal ownership vests on execution of the Sale Deed (s.54 TPA 1882).
+  // Gate: AFS Registered. Sale Deed → Query Payment (stamp duty) → Registry →
+  // Mutation (revenue records updated to new owner name).
+  {
+    label: "Sale Deed",
+    icon: Key,
+    children: [
+      { label: "Sale Deed",     path: "/crm/sales-deed",    pageKey: "crm-sales-deed"    },
+      { label: "Query Payment", path: "/crm/query-payment", pageKey: "crm-query-payment" },
+      { label: "Registry",      path: "/crm/registry",      pageKey: "crm-registry"      },
+      { label: "Mutation",      path: "/crm/mutation",      pageKey: "crm-mutation"      },
+    ],
+  },
+
   // ── NOC ──────────────────────────────────────────────────────────────────────
-  // Step 5: Bank NOC + Organisation NOC
-  // Gate: Agreement Registered (AFS physically registered at Sub-Registrar)
+  // Gate: Sale Deed registered. Bank NOC: lender releases charge on unit after
+  // loan is cleared post-deed. Organisation NOC: developer confirms no dues.
   {
     label: "NOC",
     icon: Building2,
@@ -81,8 +97,8 @@ export const crmNavItems: NavItem[] = [
   },
 
   // ── Possession ───────────────────────────────────────────────────────────────
-  // Steps 6–9: OC/CC → Pre-Possession → Possession Notice → Handover
-  // Gate: Agreement Registered (+ OC/CC for Pre-Possession onward)
+  // Gate: Sale Deed executed (ownership secured before handing keys).
+  // OC/CC → Pre-Possession inspection → Possession Notice → Handover.
   {
     label: "Possession",
     icon: HardHat,
@@ -91,20 +107,6 @@ export const crmNavItems: NavItem[] = [
       { label: "Pre-Possession Check", path: "/crm/pre-possession",     pageKey: "crm-pre-possession"     },
       { label: "Possession Notice",    path: "/crm/possession-notice",  pageKey: "crm-possession-notice"  },
       { label: "Handover",             path: "/crm/handover",           pageKey: "crm-handover"           },
-    ],
-  },
-
-  // ── Sub-Registrar Visit 2 — Sale Deed ────────────────────────────────────────
-  // Steps 10–13: Sale Deed → Query Payment → Registry → Mutation
-  // Gate: Handover Completed + Agreement Registered
-  {
-    label: "Sale Deed",
-    icon: Key,
-    children: [
-      { label: "Sale Deed",     path: "/crm/sales-deed",   pageKey: "crm-sales-deed"   },
-      { label: "Query Payment", path: "/crm/query-payment", pageKey: "crm-query-payment" },
-      { label: "Registry",      path: "/crm/registry",      pageKey: "crm-registry"      },
-      { label: "Mutation",      path: "/crm/mutation",      pageKey: "crm-mutation"      },
     ],
   },
 

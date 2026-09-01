@@ -8,7 +8,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
-const { requireActiveBooking, checkLoanProcessingCleared } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, checkLoanProcessingCleared, maybeAutoCreateLegalMilestone, getProjectSaleGate } = require("../services/crmWorkflowGuards");
 const { transition: approvalTransition, recordGLPosting } = require("../services/approvalService");
 const { emitNotification } = require("../services/notify");
 const { postCrmSalesDeedStatutoryToGL } = require("../services/crmLedger");
@@ -41,6 +41,45 @@ function deriveDeedStatus({ bookingStatus, registrationNo, executedBy, deedDate,
   if (deedDate && new Date(deedDate) < today) return "Overdue";
   return CrmStatus.DRAFT;
 }
+
+// GET /eligible-bookings — bookings that clear the gates for Sale Deed
+// creation (must stay in lockstep with POST / or the dialog will offer
+// bookings that then fail to save, or hide ones that would actually
+// succeed). Agreement Registered is ALWAYS required, for every project type
+// — see getProjectSaleGate's doc comment for why an earlier version's
+// Ready-to-Move exception here was wrong. The only thing that varies by
+// project state is whether Handover must also be Completed first (only for
+// a project still explicitly Under-Construction and not yet Completed).
+router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
+             ag.Status AS AgreementStatus, ag.AgreementNo,
+             proj.entity_type AS ProjectType, proj.status AS ProjectStatus, hov.Status AS HandoverStatus
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
+      OUTER APPLY (
+        SELECT TOP 1 Status, AgreementNo
+        FROM dbo.CrmAgreement WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+      ) ag
+      OUTER APPLY (
+        SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+      ) hov
+      WHERE b.Status <> 'Cancelled'
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmSalesDeed WHERE BookingId = b.Id)
+        AND ag.Status = 'Registered'
+        AND (proj.entity_type <> 'UnderConstruction' OR proj.status = 'Completed' OR hov.Status = 'Completed')
+      ORDER BY b.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-sales-deed] eligible-bookings error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
   try {
@@ -97,16 +136,48 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-sales-deed", "vi
     const existingDeed = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Id, DeedNo FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
 
+    // Query Payment status — drives the stepper's stamp duty step (Step 6),
+    // a read-only cross-link (the amount/confirmation itself is handled
+    // entirely on the Query Payment page, not here).
+    const queryPayment = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id AS QPId, QPNo, Status AS QPStatus, ConfirmedAmount FROM dbo.CrmQueryPayment WHERE BookingId = @bid");
+
+    // Registry status — drives the stepper's SRO Appointment step (Step 7),
+    // also a read-only cross-link. The actual appointment date lives only on
+    // CrmRegistry.ScheduledDate, never duplicated onto the deed.
+    const registry = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id AS RegistryId, RegNo, Status AS RegistryStatus, ScheduledDate FROM dbo.CrmRegistry WHERE BookingId = @bid");
+
+    // Only used to decide whether Handover must complete before the deed
+    // can be created (see the matching gate in POST /) — never waives the
+    // Agreement-Registered requirement, which is mandatory for every
+    // project type. See getProjectSaleGate's doc comment.
+    const gate = await getProjectSaleGate(pool, bookingId);
+
+    // Handover status — only meaningful/gating when requiresHandoverBeforeDeed
+    // is true (see the matching gate in POST /), but returned regardless so
+    // the New Deed dialog can show it as context either way.
     const handover = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CreatedAt DESC");
 
+    const qp = queryPayment.recordset[0] || null;
+    const reg = registry.recordset[0] || null;
     res.json({
       booking: booking.recordset[0],
       agreement: agreement.recordset[0] || null,
       loanDetail: loanDetail.recordset[0] || null,
       loanBlockReason,
       existingDeed: existingDeed.recordset[0] || null,
-      handoverCompleted: handover.recordset[0]?.Status === "Completed",
+      registryStatus: reg?.RegistryStatus || null,
+      registryNo: reg?.RegNo || null,
+      registryScheduledDate: reg?.ScheduledDate || null,
+      queryPaymentStatus: qp?.QPStatus || null,
+      queryPaymentNo: qp?.QPNo || null,
+      queryPaymentConfirmedAmount: qp?.ConfirmedAmount || null,
+      handoverStatus: handover.recordset[0]?.Status || null,
+      projectType: gate.projectType,
+      projectStatus: gate.projectStatus,
+      requiresHandoverBeforeDeed: gate.requiresHandoverBeforeDeed,
     });
   } catch (e) {
     console.error("[crm-sales-deed] context error:", e.message);
@@ -124,15 +195,11 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), async (req, res) 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    // Sale Deed (Conveyance Deed) is prepared after key handover — not before.
-    // The correct sequence for under-construction: AFS registered → possession
-    // → handover → Sale Deed drafted → registered.
-    const handover = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CreatedAt DESC");
-    if (!handover.recordset.length || handover.recordset[0].Status !== "Completed") {
-      return res.status(400).json({ error: "Sale Deed can only be prepared after Handover is Completed" });
-    }
-
+    // Agreement for Sale, registered at the Sub-Registrar (AFS), is
+    // MANDATORY for every Sale Deed — no project-type exception. (An earlier
+    // version of this gate let Ready-to-Move/Completed projects skip this
+    // entirely; that was wrong for how this business actually runs a sale —
+    // see getProjectSaleGate's doc comment.)
     const agreement = await pool.request().input("bid", sql.Int, bookingId).query(`
       SELECT TOP 1 Id, Status
       FROM dbo.CrmAgreement
@@ -147,12 +214,27 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), async (req, res) 
     const loanErr = await checkLoanProcessingCleared(pool, bookingId);
     if (loanErr) return res.status(400).json({ error: loanErr });
 
+    // The ONLY thing that legitimately varies by project state: whether
+    // physical possession (Handover) must finish before the deed is
+    // drafted. A project still under construction needs Handover first; a
+    // project already complete (Ready-to-Move, or Timeline Status reached
+    // Completed) can hand over keys same-day as registration, so it isn't
+    // gated here.
+    const gate = await getProjectSaleGate(pool, bookingId);
+    if (gate.requiresHandoverBeforeDeed) {
+      const handover = await pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+      if (!handover.recordset.length || handover.recordset[0].Status !== "Completed") {
+        return res.status(400).json({ error: "For under-construction properties, physical possession (Handover) must be completed before the Sale Deed is prepared" });
+      }
+    }
+
     const deedNo = await getNextDocNumber(pool, "DEED", "DEED");
 
     const result = await pool.request()
       .input("no",      sql.NVarChar(30),      deedNo)
       .input("bid",     sql.Int,               bookingId)
-      .input("agid",    sql.Int,               b.AgreementId ? parseInt(b.AgreementId) : agreement.recordset[0].Id)
+      .input("agid",    sql.Int,               b.AgreementId ? parseInt(b.AgreementId) : (agreement.recordset[0]?.Id || null))
       .input("val",     sql.Decimal(18,2),     b.DeedValue != null ? parseFloat(b.DeedValue) : null)
       .input("stamp",   sql.Decimal(18,2),     b.StampDuty != null ? parseFloat(b.StampDuty) : null)
       .input("regfee",  sql.Decimal(18,2),     b.RegistrationFee != null ? parseFloat(b.RegistrationFee) : null)
@@ -171,6 +253,16 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), async (req, res) 
         OUTPUT INSERTED.Id
         VALUES (@no, @bid, @agid, @val, @stamp, @regfee, @credit, @sro, @dt, @regdl, @exby, @wit, @st, @note, @cb, SYSDATETIME())
       `);
+
+    // No-op for the normal path — the Legal Milestone tracker is already
+    // auto-started off the Agreement (see crmAgreements.js). Kept as a
+    // defensive fallback only, in case an older tracker somehow never fired.
+    try {
+      await maybeAutoCreateLegalMilestone(pool, bookingId, actorId(req));
+    } catch (e) {
+      console.error("[crm-sales-deed] legal milestone auto-start failed:", e.message);
+    }
+
     res.status(201).json({ success: true, id: result.recordset[0].Id, DeedNo: deedNo });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
@@ -335,7 +427,9 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
     const id = parseInt(req.params.id);
 
     const cur = await pool.request().input("id", sql.Int, id).query(`
-      SELECT d.RegistrationNo, d.ExecutedBy, d.DeedDate, d.RegistrationDeadline, d.BookingId, d.DeedNo, d.SentToCustomerAt, b.Status AS BookingStatus
+      SELECT d.RegistrationNo, d.ExecutedBy, d.DeedDate, d.RegistrationDeadline, d.BookingId, d.DeedNo, d.SentToCustomerAt,
+             d.DocCollectionDone, d.DeedDraftingDone, d.InternalApprovalDone,
+             b.Status AS BookingStatus
       FROM dbo.CrmSalesDeed d JOIN dbo.CrmBooking b ON b.Id = d.BookingId
       WHERE d.Id = @id
     `);
@@ -396,13 +490,23 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
       .input("exby",  sql.NVarChar(200), b.ExecutedBy || null)
       .input("st",    sql.NVarChar(30), newStatus)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("dval",   sql.Decimal(18,2), b.DeedValue != null && b.DeedValue !== "" ? parseFloat(b.DeedValue) : null)
-      .input("stamp",  sql.Decimal(18,2), b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : null)
-      .input("regfee", sql.Decimal(18,2), b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : null)
-      .input("credit", sql.Decimal(18,2), b.StampDutyCredit != null && b.StampDutyCredit !== "" ? parseFloat(b.StampDutyCredit) : null)
-      .input("sro",    sql.NVarChar(255), b.SubRegistrarOffice || null)
-      .input("ddt",    sql.Date, b.DeedDate || null)
-      .input("ub",     sql.Int,  actorId(req))
+      .input("dval",    sql.Decimal(18,2), b.DeedValue != null && b.DeedValue !== "" ? parseFloat(b.DeedValue) : null)
+      .input("stamp",   sql.Decimal(18,2), b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : null)
+      .input("regfee",  sql.Decimal(18,2), b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : null)
+      .input("credit",  sql.Decimal(18,2), b.StampDutyCredit != null && b.StampDutyCredit !== "" ? parseFloat(b.StampDutyCredit) : null)
+      .input("sro",     sql.NVarChar(255), b.SubRegistrarOffice || null)
+      .input("ddt",     sql.Date, b.DeedDate || null)
+      .input("dcdone",  sql.Bit, b.DocCollectionDone !== undefined ? (b.DocCollectionDone ? 1 : 0) : null)
+      .input("dcdate",  sql.Date, b.DocCollectionDate !== undefined ? (b.DocCollectionDate || null) : null)
+      .input("dcnotes", sql.NVarChar(sql.MAX), b.DocCollectionNotes !== undefined ? (b.DocCollectionNotes || null) : null)
+      .input("dddone",  sql.Bit, b.DeedDraftingDone !== undefined ? (b.DeedDraftingDone ? 1 : 0) : null)
+      .input("dddate",  sql.Date, b.DeedDraftingDate !== undefined ? (b.DeedDraftingDate || null) : null)
+      .input("ddnotes", sql.NVarChar(sql.MAX), b.DeedDraftingNotes !== undefined ? (b.DeedDraftingNotes || null) : null)
+      .input("iadone",  sql.Bit, b.InternalApprovalDone !== undefined ? (b.InternalApprovalDone ? 1 : 0) : null)
+      .input("iadate",  sql.Date, b.InternalApprovalDate !== undefined ? (b.InternalApprovalDate || null) : null)
+      .input("ianotes", sql.NVarChar(sql.MAX), b.InternalApprovalNotes !== undefined ? (b.InternalApprovalNotes || null) : null)
+      .input("idx2dt",  sql.Date, b.Index2ReceivedDate !== undefined ? (b.Index2ReceivedDate || null) : null)
+      .input("ub",      sql.Int,  actorId(req))
       .query(`
         UPDATE dbo.CrmSalesDeed SET
           RegistrationNo = ISNULL(@regno, RegistrationNo), BookNo = ISNULL(@bookno, BookNo),
@@ -414,6 +518,16 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
           StampDutyCredit = ISNULL(@credit, StampDutyCredit),
           SubRegistrarOffice = ISNULL(@sro, SubRegistrarOffice),
           DeedDate = ISNULL(@ddt, DeedDate),
+          DocCollectionDone  = CASE WHEN @dcdone  IS NOT NULL THEN @dcdone  ELSE DocCollectionDone  END,
+          DocCollectionDate  = CASE WHEN @dcdone  IS NOT NULL THEN @dcdate  ELSE DocCollectionDate  END,
+          DocCollectionNotes = CASE WHEN @dcdone  IS NOT NULL THEN @dcnotes ELSE DocCollectionNotes END,
+          DeedDraftingDone   = CASE WHEN @dddone  IS NOT NULL THEN @dddone  ELSE DeedDraftingDone   END,
+          DeedDraftingDate   = CASE WHEN @dddone  IS NOT NULL THEN @dddate  ELSE DeedDraftingDate   END,
+          DeedDraftingNotes  = CASE WHEN @dddone  IS NOT NULL THEN @ddnotes ELSE DeedDraftingNotes  END,
+          InternalApprovalDone  = CASE WHEN @iadone IS NOT NULL THEN @iadone  ELSE InternalApprovalDone  END,
+          InternalApprovalDate  = CASE WHEN @iadone IS NOT NULL THEN @iadate  ELSE InternalApprovalDate  END,
+          InternalApprovalNotes = CASE WHEN @iadone IS NOT NULL THEN @ianotes ELSE InternalApprovalNotes END,
+          Index2ReceivedDate = CASE WHEN @idx2dt IS NOT NULL THEN @idx2dt ELSE Index2ReceivedDate END,
           Status = @st, Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);

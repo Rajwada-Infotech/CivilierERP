@@ -100,40 +100,44 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-noc", "view"), a
   }
 });
 
-// GET /eligible-bookings?type=Bank|Organisation — bookings eligible for a new
-// NOC of the requested type. Gates: active booking, AFS Registered, no
-// existing non-Rejected NOC of that type. Must be registered before POST / so
-// Express doesn't try to parse "eligible-bookings" as an :id param later.
+// GET /eligible-bookings — bookings eligible for a new NOC of the given type.
+// Rule: one NOC per type per booking (a booking can have one Bank NOC + one
+// Organisation NOC, but never two of the same type). Gates: active booking,
+// AFS Registered, no existing non-Rejected NOC of the SAME type.
 router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (req, res) => {
-  const type = NOC_TYPES.includes(req.query.type) ? req.query.type : "Organisation";
   try {
     const pool = getPool();
-    const candidates = await pool.request()
-      .input("type", sql.NVarChar(30), type)
-      .query(`
-        SELECT b.Id, b.BookingNo,
-               COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
-               a.ApplicantName
-        FROM dbo.CrmBooking b
-        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-        WHERE b.IsActive = 1
-          AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
-          AND NOT EXISTS (
-            SELECT 1 FROM dbo.CrmNoc n
-            WHERE n.BookingId = b.Id AND n.NocType = @type AND n.Status <> '${CrmStatus.REJECTED}'
-          )
-        ORDER BY b.BookingNo
-      `);
-
-    const eligible = [];
-    for (const c of candidates.recordset) {
-      const agr = await pool.request().input("bid", sql.Int, c.Id)
-        .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
-      if (!agr.recordset.length || agr.recordset[0].Status !== CrmStatus.REGISTERED) continue;
-      eligible.push({ Id: c.Id, BookingNo: c.BookingNo, UnitNo: c.UnitNo, ApplicantName: c.ApplicantName });
-    }
-    res.json(eligible);
+    const { type } = req.query; // "Bank" | "Organisation" | "" (= show all eligible)
+    const nocType  = NOC_TYPES.includes(type) ? type : null;
+    const req0 = pool.request();
+    if (nocType) req0.input("t", sql.NVarChar(30), nocType);
+    const candidates = await req0.query(`
+      SELECT b.Id, b.BookingNo,
+             COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+             a.ApplicantName,
+             -- Detect loan so frontend can default NOC type to Bank when relevant
+             CASE WHEN EXISTS (
+               SELECT 1 FROM dbo.CrmLoanDetail hl WHERE hl.BookingId = b.Id
+             ) THEN 1 ELSE 0 END AS HasLoan
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      WHERE b.IsActive = 1
+        AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+        -- Agreement for Sale, registered at the Sub-Registrar, is mandatory
+        -- for every booking regardless of project type — no exception.
+        AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = '${CrmStatus.REGISTERED}')
+        ${nocType ? `AND NOT EXISTS (
+          SELECT 1 FROM dbo.CrmNoc n
+          WHERE n.BookingId = b.Id AND n.NocType = @t AND n.Status <> '${CrmStatus.REJECTED}'
+        )` : `AND (
+          NOT EXISTS (SELECT 1 FROM dbo.CrmNoc n WHERE n.BookingId = b.Id AND n.NocType = 'Bank'         AND n.Status <> '${CrmStatus.REJECTED}')
+          OR
+          NOT EXISTS (SELECT 1 FROM dbo.CrmNoc n WHERE n.BookingId = b.Id AND n.NocType = 'Organisation' AND n.Status <> '${CrmStatus.REJECTED}')
+        )`}
+      ORDER BY b.BookingNo
+    `);
+    res.json(candidates.recordset);
   } catch (e) {
     console.error("[crm-noc] GET /eligible-bookings error:", e.message);
     res.status(500).json({ error: e.message });
@@ -158,7 +162,8 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     // Both NOC types require the Agreement for Sale to be physically registered
-    // at the Sub-Registrar's Office (AgreementStatus = 'Registered').
+    // at the Sub-Registrar's Office (AgreementStatus = 'Registered') — for
+    // every project type, no exception.
     // Bank NOC: releases the lender's charge on the unit.
     // Org NOC: confirms builder has no objection — only meaningful once AFS is
     // legally registered, not just drafted or executed.
@@ -174,21 +179,15 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
 
     const nocType = NOC_TYPES.includes(b.NocType) ? b.NocType : "Organisation";
 
-    // Duplicate guard: a non-Rejected NOC of the same type already means one
-    // is either in progress or already issued — a second row for the same type
-    // would split the status across two rows, breaking Legal Milestones' TOP 1
-    // scoped display and letting a fast double-submit generate two NOC numbers
-    // for the same clearance request. Rejected NOCs are excluded because the
-    // resubmit path uses PUT /:id/submit on the existing row (not a new INSERT).
-    // Migration 379 adds a filtered UNIQUE INDEX as a DB-level backstop for the
-    // same rule.
+    // One NOC per type per booking. A booking can have a Bank NOC + an
+    // Organisation NOC, but never two of the same type.
     const existingOpen = await pool.request()
-      .input("bid",  sql.Int,          bookingId)
-      .input("type", sql.NVarChar(30), nocType)
-      .query("SELECT TOP 1 NocNo FROM dbo.CrmNoc WHERE BookingId = @bid AND NocType = @type AND Status <> 'Rejected'");
+      .input("bid", sql.Int, bookingId)
+      .input("t",   sql.NVarChar(30), nocType)
+      .query("SELECT TOP 1 NocNo FROM dbo.CrmNoc WHERE BookingId = @bid AND NocType = @t AND Status <> 'Rejected'");
     if (existingOpen.recordset.length) {
       return res.status(409).json({
-        error: `A ${nocType} NOC (${existingOpen.recordset[0].NocNo}) already exists for this booking — use the existing NOC or resubmit it if it was rejected`,
+        error: `A ${nocType} NOC (${existingOpen.recordset[0].NocNo}) already exists for this booking.`,
       });
     }
 
