@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Flag, Trash2, Check, Timer } from "lucide-react";
@@ -376,7 +377,13 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
 
   const candidateItems = detail?.candidateItems ?? [];
 
-  return (
+  // Portaled straight to <body> — a plain inline `fixed` div gets trapped
+  // inside whatever ancestor stacking context the caller happens to render
+  // it under (e.g. EngineeringShell's page header is a z-30 sibling of a
+  // z-10 content wrapper; a modal rendered inside that content wrapper can
+  // never paint above the header no matter how high its own z-index is).
+  // Same fix ActivityDetailModal.tsx already uses.
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-4xl bg-card border border-border rounded-xl shadow-2xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150">
@@ -683,6 +690,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

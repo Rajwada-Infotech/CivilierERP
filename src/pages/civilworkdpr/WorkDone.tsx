@@ -471,8 +471,11 @@ export default function WorkDone() {
           {/* Dependency Chains browser — every chain grouped by the room
               it's allocated to, each activity showing a Pending/Done read,
               with no Project/Tower/Floor/Unit selection needed. Click an
-              activity to open the same assign/edit popup used below. */}
-          {allChains.length > 0 && (
+              activity to open the same assign/edit popup used below. Hidden
+              once the user starts picking a location above — at that point
+              they're narrowing in on one specific room via the dropdowns,
+              and this whole-portfolio browser is just noise underneath it. */}
+          {allChains.length > 0 && !form.ProjectId && (
             <div className="rounded-xl border border-border bg-card overflow-hidden">
               <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
                 <GitBranch size={14} className="text-cyan-600 dark:text-cyan-400" />
