@@ -12,6 +12,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
 const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
+const { downstreamOfPO } = require("../utils/materialChainGuard");
 const { getDocumentChainForPO } = require("../services/poVehicleGrnChain");
 const { getServicePurchaseOrders } = require("../services/invoiceLinking");
 const {
@@ -1015,6 +1016,15 @@ router.put(
       const wasApproved = currentStatus === "Approved";
 
       const pool = getPool();
+
+      // Chain guard: nothing downstream (Vehicle In/Out, GRN, or a direct
+      // Expense Booking) may exist yet — those already locked in quantities
+      // derived from this PO, so it must stay frozen until they're deleted.
+      const blockedBy = await downstreamOfPO(pool, id);
+      if (blockedBy)
+        return res.status(409).json({
+          error: `Cannot edit: this Purchase Order has ${blockedBy}. Delete them first, then edit the PO.`,
+        });
       const beforeSnapshot = wasApproved
         ? await snapshotRow(pool, "dbo.PurchaseOrders", "PurchaseOrderID", id)
         : null;
