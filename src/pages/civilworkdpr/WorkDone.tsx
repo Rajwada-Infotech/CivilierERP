@@ -160,12 +160,23 @@ export default function WorkDone() {
       { key: string; scopePath: string; projectName: string | null; chains: { chain: DependencyMasterListRow; index: number }[] }
     >();
     (allChains as DependencyMasterListRow[]).forEach((chain, index) => {
+      // Hide chains that are already fully allocated — this browser exists
+      // to pick a chain and allocate work against it, so once every one of
+      // its activities already has an assignment there's nothing left to do
+      // here. A chain whose detail hasn't loaded yet (rungs still empty)
+      // stays visible rather than being hidden before its status is known.
+      const rungs = chainDetailQueries[index]?.data?.activities ?? [];
+      const fullyAllocated =
+        rungs.length > 0 &&
+        rungs.every((rung) => rung.rungId != null && allAssignmentByRungId.has(rung.rungId));
+      if (fullyAllocated) return;
+
       const key = chain.scopePath;
       if (!groups.has(key)) groups.set(key, { key, scopePath: key, projectName: chain.projectName, chains: [] });
       groups.get(key)!.chains.push({ chain, index });
     });
     return Array.from(groups.values());
-  }, [allChains]);
+  }, [allChains, chainDetailQueries, allAssignmentByRungId]);
   const [collapsedChainGroups, setCollapsedChainGroups] = useState<Record<string, boolean>>({});
   const toggleChainGroup = (key: string) =>
     setCollapsedChainGroups((prev) => ({ ...prev, [key]: !prev[key] }));
