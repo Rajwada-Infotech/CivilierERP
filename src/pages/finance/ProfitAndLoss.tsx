@@ -531,12 +531,17 @@ function StructuredStatement({
             priorAmount={prior?.grossProfit}
             variant="subtotal"
           />
-          {/* EBITDA */}
+          {/* Net Profit — was labeled EBITDA, but that formula (PBT + Finance
+              Costs + D&A) collapses to plain PBT whenever there's no finance
+              cost/depreciation data, landing on a bigger loss than Gross
+              Profit and reading as broken rather than a meaningful
+              intermediate figure. Shows the actual Net Profit here instead,
+              matching the simple Gross Profit -> Net Profit flow of a
+              classic Trading & P&L Account. */}
           <TotalRow
-            label="EBITDA"
-            formula="(PBT + Finance Costs + D&A)"
-            amount={statement.ebitda}
-            priorAmount={prior?.ebitda}
+            label="Net Profit / (Loss)"
+            amount={statement.profitAfterTax}
+            priorAmount={prior?.profitAfterTax}
             variant="subtotal"
           />
 
@@ -1060,10 +1065,10 @@ export default function ProfitAndLoss() {
                       subtitle={`Margin: ${pct(st.grossProfit, st.revenueFromOperations.total)}`}
                     />
                     <KpiCard
-                      label="EBITDA"
-                      amount={st.ebitda}
+                      label="Net Profit / (Loss)"
+                      amount={st.profitAfterTax}
                       icon={Activity}
-                      subtitle={`Margin: ${pct(st.ebitda, st.totalRevenue)}`}
+                      subtitle={`Margin: ${pct(st.profitAfterTax, st.totalRevenue)}`}
                     />
                     <KpiCard
                       label="Profit Before Tax"
