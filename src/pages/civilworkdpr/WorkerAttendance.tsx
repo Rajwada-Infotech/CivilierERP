@@ -18,6 +18,7 @@ import {
   ChevronRight,
   ChevronDown,
   ListChecks,
+  Layers,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -485,6 +486,7 @@ const WorkerAttendance: React.FC = () => {
 
   const [companyId, setCompanyId] = useState<number | "">("");
   const [projectId, setProjectId] = useState<number | "">("");
+  const [floor, setFloor] = useState<string>("");
   const [rungId, setRungId] = useState<number | "">("");
   const [date, setDate] = useState(todayIso());
   const [search, setSearch] = useState("");
@@ -517,6 +519,18 @@ const WorkerAttendance: React.FC = () => {
     enabled: !!projectId,
     staleTime: 30 * 1000,
   });
+  // Floors present among the current project's activities, so the Floor
+  // filter only ever offers choices that actually break the Activity list
+  // down further — never an option that would empty it out.
+  const floorOptions = useMemo(
+    () =>
+      Array.from(new Set(activities.map((a: ActivityOption) => a.floor).filter((f): f is string => !!f))).sort(),
+    [activities],
+  );
+  const activitiesForFloor = useMemo(
+    () => (floor ? activities.filter((a: ActivityOption) => a.floor === floor) : activities),
+    [activities, floor],
+  );
   const selectedActivity = activities.find((a: ActivityOption) => a.rungId === rungId) ?? null;
 
   const {
@@ -580,10 +594,16 @@ const WorkerAttendance: React.FC = () => {
   const handleCompanyChange = (val: string) => {
     setCompanyId(val ? Number(val) : "");
     setProjectId("");
+    setFloor("");
     setRungId("");
   };
   const handleProjectChange = (val: string) => {
     setProjectId(val ? Number(val) : "");
+    setFloor("");
+    setRungId("");
+  };
+  const handleFloorChange = (val: string) => {
+    setFloor(val);
     setRungId("");
   };
 
@@ -629,7 +649,7 @@ const WorkerAttendance: React.FC = () => {
       >
         {/* ── Filters ── */}
         <div className="rounded-xl border border-border bg-muted/30 p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div>
               <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
                 <HardHat size={11} /> Company
@@ -659,6 +679,22 @@ const WorkerAttendance: React.FC = () => {
             </div>
             <div>
               <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
+                <Layers size={11} /> Floor
+              </label>
+              <select
+                value={floor}
+                onChange={(e) => handleFloorChange(e.target.value)}
+                className={filterInputCls}
+                disabled={!projectId || floorOptions.length === 0}
+              >
+                <option value="">All Floors</option>
+                {floorOptions.map((f) => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
                 <ClipboardList size={11} /> Activity
               </label>
               <select
@@ -668,7 +704,7 @@ const WorkerAttendance: React.FC = () => {
                 disabled={!projectId}
               >
                 <option value="">{loadingActivities ? "Loading…" : "All Activities"}</option>
-                {activities.map((a: ActivityOption) => (
+                {activitiesForFloor.map((a: ActivityOption) => (
                   <option key={a.rungId} value={a.rungId}>{a.label}</option>
                 ))}
               </select>

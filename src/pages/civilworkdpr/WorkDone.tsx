@@ -35,6 +35,14 @@ const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
 const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1.5";
 
+// Leaner variant for the Location row's Project/Tower/Floor/Unit/Room
+// selects — same look as WorkerAttendance.tsx's filterInputCls, so a chain
+// of five fields doesn't feel oversized next to the compact chips they
+// collapse into once picked.
+const leanInputCls =
+  "w-full px-2.5 py-1.5 rounded-lg text-xs bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
+const leanLabelCls = "text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5";
+
 // unit-master already carries Project/Block/Floor for every unit — reusing
 // that one flat list (same source CrmApplication.tsx's own Project -> Block
 // -> Floor -> Unit tree picker derives from) instead of standing up a
@@ -330,7 +338,7 @@ export default function WorkDone() {
               <div className="flex flex-wrap items-end gap-2.5">
                 {/* 1. Project */}
                 {loadingMasters ? (
-                  <div className="w-56 h-[38px] rounded-lg border border-border bg-muted/30 animate-pulse" />
+                  <div className="w-56 h-[30px] rounded-lg border border-border bg-muted/30 animate-pulse" />
                 ) : form.ProjectId && selectedProject ? (
                   <LocationChip
                     icon={Building2}
@@ -340,10 +348,10 @@ export default function WorkDone() {
                   />
                 ) : (
                   <div className="w-full sm:w-56">
-                    <label className={labelCls}>
+                    <label className={leanLabelCls}>
                       <Building2 size={11} /> Project
                     </label>
-                    <select value={form.ProjectId} onChange={(e) => handleProjectChange(e.target.value)} className={inputCls}>
+                    <select value={form.ProjectId} onChange={(e) => handleProjectChange(e.target.value)} className={leanInputCls}>
                       <option value="">Select project…</option>
                       {(projects as any[]).map((p: any) => (
                         <option key={p.Id} value={String(p.Id)}>
@@ -365,10 +373,10 @@ export default function WorkDone() {
                     />
                   ) : (
                     <div className="w-full sm:w-48">
-                      <label className={labelCls}>
+                      <label className={leanLabelCls}>
                         <Layers size={11} /> Tower
                       </label>
-                      <select value={form.BlockId} onChange={(e) => handleTowerChange(e.target.value)} className={inputCls}>
+                      <select value={form.BlockId} onChange={(e) => handleTowerChange(e.target.value)} className={leanInputCls}>
                         <option value="">Select tower…</option>
                         {towersForProject.map((t) => (
                           <option key={t.Id} value={t.Id}>
@@ -385,10 +393,10 @@ export default function WorkDone() {
                     <LocationChip icon={LayoutGrid} label="Floor" value={form.FloorNo} onClear={() => handleFloorChange("")} />
                   ) : (
                     <div className="w-full sm:w-36">
-                      <label className={labelCls}>
+                      <label className={leanLabelCls}>
                         <LayoutGrid size={11} /> Floor
                       </label>
-                      <select value={form.FloorNo} onChange={(e) => handleFloorChange(e.target.value)} className={inputCls}>
+                      <select value={form.FloorNo} onChange={(e) => handleFloorChange(e.target.value)} className={leanInputCls}>
                         <option value="">Select floor…</option>
                         {floorsForTower.map((fl) => (
                           <option key={fl} value={fl}>
@@ -405,10 +413,10 @@ export default function WorkDone() {
                     <LocationChip icon={DoorOpen} label="Unit" value={selectedUnit.UnitName} onClear={() => handleUnitChange("")} />
                   ) : (
                     <div className="w-full sm:w-48">
-                      <label className={labelCls}>
+                      <label className={leanLabelCls}>
                         <DoorOpen size={11} /> Unit
                       </label>
-                      <select value={form.UnitId} onChange={(e) => handleUnitChange(e.target.value)} className={inputCls}>
+                      <select value={form.UnitId} onChange={(e) => handleUnitChange(e.target.value)} className={leanInputCls}>
                         <option value="">Select unit…</option>
                         {unitsForFloor.map((u: any) => (
                           <option key={u.Id} value={String(u.Id)}>
@@ -432,14 +440,14 @@ export default function WorkDone() {
                     />
                   ) : (
                     <div className="w-full sm:w-48">
-                      <label className={labelCls}>
+                      <label className={leanLabelCls}>
                         <DoorOpen size={11} /> Room
                       </label>
                       <select
                         value={form.RoomId}
                         onChange={(e) => handleRoomChange(e.target.value)}
                         disabled={loadingRooms || roomInstances.length === 0}
-                        className={inputCls}
+                        className={leanInputCls}
                       >
                         <option value="">
                           {loadingRooms
