@@ -13,6 +13,12 @@ import {
   Plus,
   Save,
   UserX,
+  History,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  ListChecks,
+  Layers,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -26,9 +32,12 @@ import {
   createWorker,
   addToRoster,
   removeFromRoster,
+  getWorkerCalendar,
+  getAttendanceReport,
   type AttendanceStatus,
   type ActivityOption,
   type WorkerSearchResult,
+  type AttendanceReportRow,
 } from "@/api/workerAttendanceApi";
 import {
   Dialog,
@@ -39,6 +48,12 @@ import {
 
 export const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30";
+
+// Leaner variant for the filter bar — same look, smaller footprint so
+// Company/Project/Activity/Date fit comfortably in a row without feeling
+// oversized relative to how little text most of them hold.
+const filterInputCls =
+  "w-full px-2.5 py-1.5 rounded-lg text-xs bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30";
 
 export const STATUS_LABEL: Record<AttendanceStatus, string> = { P: "Present", A: "Absent", H: "Half Day" };
 export const STATUS_CLS: Record<AttendanceStatus, string> = {
@@ -72,10 +87,13 @@ export function AddWorkerDialog({
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [newName, setNewName] = useState("");
   const [newContractorId, setNewContractorId] = useState<number | "">("");
+  const [newAadhaar, setNewAadhaar] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const aadhaarValid = /^\d{12}$/.test(newAadhaar);
+
   useEffect(() => {
-    if (!open) { setQuery(""); setSelected(new Set()); setNewName(""); setNewContractorId(""); }
+    if (!open) { setQuery(""); setSelected(new Set()); setNewName(""); setNewContractorId(""); setNewAadhaar(""); }
   }, [open]);
 
   const { data: results = [], isFetching } = useQuery({
@@ -116,12 +134,12 @@ export function AddWorkerDialog({
   };
 
   const handleCreateAndAdd = async () => {
-    if (!rungId || !newName.trim() || !newContractorId) return;
+    if (!rungId || !newName.trim() || !newContractorId || !aadhaarValid) return;
     setBusy(true);
     try {
-      const { id } = await createWorker({ name: newName.trim(), contractorId: newContractorId });
+      const { id, existed } = await createWorker({ name: newName.trim(), contractorId: newContractorId, aadhaarNo: newAadhaar });
       await addToRoster(rungId, [id]);
-      toast.success(`${newName.trim()} added to this activity`);
+      toast.success(existed ? `${newName.trim()} is already registered — added to this activity` : `${newName.trim()} added to this activity`);
       onAdded();
       onOpenChange(false);
     } catch (err: any) {
@@ -206,9 +224,21 @@ export function AddWorkerDialog({
                 <option key={c.id} value={c.id}>{c.label}</option>
               ))}
             </select>
+            <div>
+              <input
+                value={newAadhaar}
+                onChange={(e) => setNewAadhaar(e.target.value.replace(/\D/g, "").slice(0, 12))}
+                placeholder="Aadhaar number (12 digits)"
+                inputMode="numeric"
+                className={inputCls}
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Used to recognize this worker if they're re-added later — the record itself is auto-removed after 4 months with no attendance.
+              </p>
+            </div>
             <button
               onClick={handleCreateAndAdd}
-              disabled={busy || !newName.trim() || !newContractorId}
+              disabled={busy || !newName.trim() || !newContractorId || !aadhaarValid}
               className="w-full py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-40 flex items-center justify-center gap-2"
             >
               {busy && <Loader2 size={14} className="animate-spin" />}
@@ -221,6 +251,234 @@ export function AddWorkerDialog({
   );
 }
 
+// ─── Attendance Record — a worker's full history across activities/projects,
+//     one month at a time (backed by GET /workers/:id/calendar, previously
+//     unused by any page). ───────────────────────────────────────────────────
+function WorkerHistoryDialog({
+  workerId,
+  workerName,
+  open,
+  onOpenChange,
+}: {
+  workerId: number | null;
+  workerName: string;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const [month, setMonth] = useState(() => todayIso().slice(0, 7));
+
+  useEffect(() => {
+    if (open) setMonth(todayIso().slice(0, 7));
+  }, [open]);
+
+  const { data, isFetching } = useQuery({
+    queryKey: ["workerAttendanceCalendar", workerId, month],
+    queryFn: () => getWorkerCalendar(workerId as number, month),
+    enabled: open && !!workerId,
+  });
+
+  const days = data?.days ?? [];
+  const counts = useMemo(() => {
+    const c: Record<AttendanceStatus, number> = { P: 0, A: 0, H: 0 };
+    for (const d of days) c[d.status]++;
+    return c;
+  }, [days]);
+
+  const shiftMonth = (delta: number) => {
+    const [y, m] = month.split("-").map(Number);
+    const dt = new Date(y, m - 1 + delta, 1);
+    setMonth(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-heading text-base truncate">{workerName} — Attendance Record</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <button onClick={() => shiftMonth(-1)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-sm font-medium">
+              {new Date(`${month}-01`).toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
+            </span>
+            <button onClick={() => shiftMonth(1)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
+              <ChevronRight size={16} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 py-2">
+              <p className="text-lg font-semibold text-emerald-700 dark:text-emerald-400">{counts.P}</p>
+              <p className="text-[10px] text-muted-foreground">Present</p>
+            </div>
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 py-2">
+              <p className="text-lg font-semibold text-red-700 dark:text-red-400">{counts.A}</p>
+              <p className="text-[10px] text-muted-foreground">Absent</p>
+            </div>
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 py-2">
+              <p className="text-lg font-semibold text-amber-700 dark:text-amber-400">{counts.H}</p>
+              <p className="text-[10px] text-muted-foreground">Half Day</p>
+            </div>
+          </div>
+
+          <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border/60">
+            {isFetching ? (
+              <div className="p-6 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+                <Loader2 size={14} className="animate-spin" /> Loading…
+              </div>
+            ) : days.length === 0 ? (
+              <div className="p-6 text-center text-xs text-muted-foreground">No attendance recorded this month.</div>
+            ) : (
+              days.map((d) => (
+                <div key={d.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-foreground">
+                      {new Date(d.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", weekday: "short" })}
+                    </p>
+                    {d.activityLabel && <p className="text-[10px] text-muted-foreground truncate">{d.activityLabel}</p>}
+                    {d.remarks && <p className="text-[10px] text-muted-foreground truncate italic">— {d.remarks}</p>}
+                  </div>
+                  <span className={`text-[10px] font-medium px-2 py-1 rounded-full border shrink-0 ${STATUS_CLS[d.status]}`}>
+                    {STATUS_LABEL[d.status]}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Attendance log, grouped + collapsible either Date-wise (one group per
+//     day) or Work-wise (one group per activity) — GRN's grouped-list
+//     pattern applied to attendance rows. Self-contained (owns its own
+//     grouping-mode + collapsed-group state) so it drops into both the
+//     Worker Attendance page's "nothing selected yet" state and the
+//     Reports page's Worker Attendance report unchanged. ────────────────────
+export const WorkerAttendanceLogGroups: React.FC<{
+  rows: AttendanceReportRow[];
+  loading?: boolean;
+  emptyMessage?: string;
+}> = ({ rows, loading, emptyMessage = "No attendance recorded." }) => {
+  const [groupBy, setGroupBy] = useState<"date" | "activity">("date");
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+
+  const groups = useMemo(() => {
+    const byKey = new Map<string, { label: string; sublabel: string | null; rows: AttendanceReportRow[] }>();
+    for (const row of rows) {
+      const key = groupBy === "date" ? row.date : String(row.activityId);
+      const existing = byKey.get(key);
+      if (existing) {
+        existing.rows.push(row);
+      } else {
+        byKey.set(key, {
+          label: groupBy === "date"
+            ? new Date(row.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", weekday: "short" })
+            : row.activityLabel,
+          sublabel: groupBy === "date" ? null : row.projectName,
+          rows: [row],
+        });
+      }
+    }
+    return Array.from(byKey.entries())
+      .sort(([a], [b]) => (a < b ? 1 : -1))
+      .map(([key, group]) => ({ key, ...group }));
+  }, [rows, groupBy]);
+
+  const toggleGroup = (key: string) =>
+    setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  return (
+    <div>
+      <div className="flex items-center justify-end px-4 sm:px-5 py-2.5 border-b border-border bg-muted/10">
+        <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted border border-border shrink-0">
+          {(["date", "activity"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setGroupBy(mode)}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                groupBy === mode ? "bg-cyan-600 text-white" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {mode === "date" ? "Date-wise" : "Work-wise"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+          <Loader2 size={16} className="animate-spin" /> Loading log…
+        </div>
+      ) : groups.length === 0 ? (
+        <div className="p-10 text-center text-muted-foreground">
+          <ClipboardList size={24} className="mx-auto opacity-30 mb-2" />
+          <p className="text-sm">{emptyMessage}</p>
+        </div>
+      ) : (
+        <div>
+          {groups.map((group) => {
+            const collapsed = !!collapsedGroups[group.key];
+            return (
+              <div key={group.key} className="border-b border-border/60 last:border-0">
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.key)}
+                  className="w-full flex items-center gap-2.5 px-4 sm:px-5 py-3 hover:bg-muted/20 transition-colors text-left"
+                >
+                  {collapsed ? (
+                    <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                  ) : (
+                    <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                  )}
+                  {groupBy === "date" ? (
+                    <CalendarDays size={13} className="text-primary shrink-0" />
+                  ) : (
+                    <ClipboardList size={13} className="text-primary shrink-0" />
+                  )}
+                  <span className="text-sm font-medium text-foreground truncate">{group.label}</span>
+                  {group.sublabel && (
+                    <span className="text-xs text-muted-foreground truncate">· {group.sublabel}</span>
+                  )}
+                  <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+                    {group.rows.length} entr{group.rows.length === 1 ? "y" : "ies"}
+                  </span>
+                </button>
+
+                {!collapsed && (
+                  <div className="divide-y divide-border/40 bg-muted/5">
+                    {group.rows.map((row) => (
+                      <div key={row.id} className="flex items-center justify-between gap-3 pl-11 pr-4 sm:pr-5 py-2">
+                        <div className="min-w-0">
+                          <p className="text-xs text-foreground truncate">{row.workerName}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">
+                            {groupBy === "date"
+                              ? `${row.activityLabel}${row.projectName ? ` · ${row.projectName}` : ""}`
+                              : new Date(row.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                          </p>
+                        </div>
+                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 ${STATUS_CLS[row.status]}`}>
+                          {STATUS_LABEL[row.status]}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 const WorkerAttendance: React.FC = () => {
   const rights = usePageRights("civilworkdpr-worker-attendance");
@@ -228,12 +486,15 @@ const WorkerAttendance: React.FC = () => {
 
   const [companyId, setCompanyId] = useState<number | "">("");
   const [projectId, setProjectId] = useState<number | "">("");
+  const [floor, setFloor] = useState<string>("");
   const [rungId, setRungId] = useState<number | "">("");
   const [date, setDate] = useState(todayIso());
   const [search, setSearch] = useState("");
   const [addWorkerOpen, setAddWorkerOpen] = useState(false);
+  const [historyTarget, setHistoryTarget] = useState<{ id: number; name: string } | null>(null);
   const [statusByWorker, setStatusByWorker] = useState<Record<number, AttendanceStatus>>({});
   const [saving, setSaving] = useState(false);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
 
   const { data: companyOptions = [] } = useQuery({
     queryKey: ["workerAttendanceCompanies"],
@@ -258,6 +519,18 @@ const WorkerAttendance: React.FC = () => {
     enabled: !!projectId,
     staleTime: 30 * 1000,
   });
+  // Floors present among the current project's activities, so the Floor
+  // filter only ever offers choices that actually break the Activity list
+  // down further — never an option that would empty it out.
+  const floorOptions = useMemo(
+    () =>
+      Array.from(new Set(activities.map((a: ActivityOption) => a.floor).filter((f): f is string => !!f))).sort(),
+    [activities],
+  );
+  const activitiesForFloor = useMemo(
+    () => (floor ? activities.filter((a: ActivityOption) => a.floor === floor) : activities),
+    [activities, floor],
+  );
   const selectedActivity = activities.find((a: ActivityOption) => a.rungId === rungId) ?? null;
 
   const {
@@ -270,6 +543,30 @@ const WorkerAttendance: React.FC = () => {
     staleTime: 10 * 1000,
   });
 
+  // Recent Attendance Log — while no Activity is picked yet there's nothing
+  // to mark, but there's no reason the main screen should sit empty either.
+  // Same idea as GRN's list view: a chronological, collapsible-by-date log
+  // of what's already been recorded, scoped to whatever Company/Project is
+  // picked so far (or everything, if neither is). A 60-day window keeps this
+  // from ever pulling the entire history at once.
+  const logWindowFrom = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 60);
+    return d.toISOString().slice(0, 10);
+  }, []);
+
+  const { data: recentLogs = [], isFetching: loadingLogs } = useQuery({
+    queryKey: ["workerAttendanceRecentLogs", companyId, projectId, logWindowFrom],
+    queryFn: () =>
+      getAttendanceReport({
+        companyId: companyId || undefined,
+        projectId: projectId || undefined,
+        dateFrom: logWindowFrom,
+      }),
+    enabled: !rungId,
+    staleTime: 30 * 1000,
+  });
+
   // Sync local editable status map whenever fresh attendance data loads —
   // roster members with no saved row yet default to "Present" (typical
   // attendance UX: mark exceptions, not every single present worker).
@@ -278,6 +575,15 @@ const WorkerAttendance: React.FC = () => {
     for (const row of attendanceRows) next[row.workerId] = row.status ?? "P";
     setStatusByWorker(next);
   }, [attendanceRows]);
+
+  // Dirty when a row has never been saved at all (attendanceId still null —
+  // the "default everyone to Present" sync above doesn't count as saved) or
+  // its status was edited since the last load/save. Drives disabling Save
+  // Attendance once there's genuinely nothing new to persist, instead of it
+  // staying clickable (and re-toasting "saved") forever after a real save.
+  const isDirty = attendanceRows.some(
+    (row) => row.attendanceId == null || statusByWorker[row.workerId] !== row.status,
+  );
 
   const visibleRows = search
     ? attendanceRows.filter((r) => r.workerName.toLowerCase().includes(search.toLowerCase()))
@@ -288,10 +594,16 @@ const WorkerAttendance: React.FC = () => {
   const handleCompanyChange = (val: string) => {
     setCompanyId(val ? Number(val) : "");
     setProjectId("");
+    setFloor("");
     setRungId("");
   };
   const handleProjectChange = (val: string) => {
     setProjectId(val ? Number(val) : "");
+    setFloor("");
+    setRungId("");
+  };
+  const handleFloorChange = (val: string) => {
+    setFloor(val);
     setRungId("");
   };
 
@@ -337,12 +649,12 @@ const WorkerAttendance: React.FC = () => {
       >
         {/* ── Filters ── */}
         <div className="rounded-xl border border-border bg-muted/30 p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div>
               <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
                 <HardHat size={11} /> Company
               </label>
-              <select value={companyId} onChange={(e) => handleCompanyChange(e.target.value)} className={inputCls}>
+              <select value={companyId} onChange={(e) => handleCompanyChange(e.target.value)} className={filterInputCls}>
                 <option value="">All Companies</option>
                 {companies.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
@@ -356,7 +668,7 @@ const WorkerAttendance: React.FC = () => {
               <select
                 value={projectId}
                 onChange={(e) => handleProjectChange(e.target.value)}
-                className={inputCls}
+                className={filterInputCls}
                 disabled={projectsForCompany.length === 0}
               >
                 <option value="">All Projects</option>
@@ -367,16 +679,32 @@ const WorkerAttendance: React.FC = () => {
             </div>
             <div>
               <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
+                <Layers size={11} /> Floor
+              </label>
+              <select
+                value={floor}
+                onChange={(e) => handleFloorChange(e.target.value)}
+                className={filterInputCls}
+                disabled={!projectId || floorOptions.length === 0}
+              >
+                <option value="">All Floors</option>
+                {floorOptions.map((f) => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
                 <ClipboardList size={11} /> Activity
               </label>
               <select
                 value={rungId}
                 onChange={(e) => setRungId(e.target.value ? Number(e.target.value) : "")}
-                className={inputCls}
+                className={filterInputCls}
                 disabled={!projectId}
               >
                 <option value="">{loadingActivities ? "Loading…" : "All Activities"}</option>
-                {activities.map((a: ActivityOption) => (
+                {activitiesForFloor.map((a: ActivityOption) => (
                   <option key={a.rungId} value={a.rungId}>{a.label}</option>
                 ))}
               </select>
@@ -385,7 +713,7 @@ const WorkerAttendance: React.FC = () => {
               <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
                 <CalendarDays size={11} /> Date
               </label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={filterInputCls} />
             </div>
           </div>
 
@@ -396,31 +724,56 @@ const WorkerAttendance: React.FC = () => {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search worker…"
-              className={`${inputCls} pl-9`}
+              className={`${filterInputCls} pl-9`}
             />
           </div>
         </div>
 
         {/* ── Selected activity attendance ── */}
         {!rungId ? (
-          <div className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">
-            <ClipboardList size={28} className="mx-auto opacity-30 mb-2" />
-            <p className="text-sm">Select a Company, Project and Activity to mark attendance.</p>
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="flex items-center gap-2 px-4 sm:px-5 py-3.5 border-b border-border bg-muted/20">
+              <ListChecks size={15} className="text-muted-foreground shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-heading font-semibold text-foreground">Recent Attendance Log</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Select a Company, Project and Activity above to mark attendance — meanwhile, here's what's already been recorded.
+                </p>
+              </div>
+            </div>
+            <WorkerAttendanceLogGroups
+              rows={recentLogs}
+              loading={loadingLogs}
+              emptyMessage="No attendance recorded in the last 60 days."
+            />
           </div>
         ) : (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 border-b border-border bg-muted/20">
-              <div className="min-w-0">
-                <p className="text-sm font-heading font-semibold text-foreground truncate">{selectedActivity?.label ?? "—"}</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  {attendanceRows.length} Worker{attendanceRows.length === 1 ? "" : "s"} Allocated
-                </p>
+            <button
+              type="button"
+              onClick={() => setPanelCollapsed((v) => !v)}
+              className="w-full flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 border-b border-border bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {panelCollapsed ? (
+                  <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                ) : (
+                  <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <p className="text-sm font-heading font-semibold text-foreground truncate">{selectedActivity?.label ?? "—"}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {attendanceRows.length} Worker{attendanceRows.length === 1 ? "" : "s"} Allocated
+                  </p>
+                </div>
               </div>
               <span className="text-xs font-mono text-muted-foreground shrink-0">
                 {new Date(date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
               </span>
-            </div>
+            </button>
 
+            {!panelCollapsed && (
+              <>
             {loadingAttendance ? (
               <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
                 <Loader2 size={16} className="animate-spin" /> Loading attendance…
@@ -453,6 +806,13 @@ const WorkerAttendance: React.FC = () => {
                           ))}
                         </select>
                         <button
+                          onClick={() => setHistoryTarget({ id: row.workerId, name: row.workerName })}
+                          title="Attendance record"
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-cyan-600 hover:bg-cyan-500/10"
+                        >
+                          <History size={13} />
+                        </button>
+                        <button
                           onClick={() => handleRemoveWorker(row.workerId)}
                           title="Remove from activity"
                           className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
@@ -475,13 +835,15 @@ const WorkerAttendance: React.FC = () => {
               </button>
               <button
                 onClick={handleSave}
-                disabled={saving || attendanceRows.length === 0 || !rights.canCreate}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-40"
+                disabled={saving || attendanceRows.length === 0 || !rights.canCreate || !isDirty}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium disabled:opacity-40"
               >
-                {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                Save Attendance
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                {isDirty ? "Save Attendance" : "Saved"}
               </button>
             </div>
+              </>
+            )}
           </div>
         )}
       </CivilWorkDprShell>
@@ -492,6 +854,13 @@ const WorkerAttendance: React.FC = () => {
         rungId={rungId || null}
         existingWorkerIds={existingWorkerIds}
         onAdded={refreshRoster}
+      />
+
+      <WorkerHistoryDialog
+        workerId={historyTarget?.id ?? null}
+        workerName={historyTarget?.name ?? ""}
+        open={!!historyTarget}
+        onOpenChange={(v) => !v && setHistoryTarget(null)}
       />
     </>
   );

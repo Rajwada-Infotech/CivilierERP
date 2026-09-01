@@ -31,6 +31,7 @@ const {
 const { transition } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { poExistsForMR } = require("../utils/materialChainGuard");
 const {
   getMRItemFulfillment,
   summarize,
@@ -849,6 +850,15 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.MaterialRequests", "MRId", id)
       : null;
+
+    // Chain guard: a Purchase Order already raised against this MR must be
+    // deleted first — editing quantities/items here after a PO exists would
+    // silently drift the MR out of sync with what the PO already locked in.
+    const blockingPO = await poExistsForMR(pool, id);
+    if (blockingPO)
+      return res.status(409).json({
+        error: `Cannot edit: ${blockingPO} is linked to this Material Request. Delete it first, then edit the request.`,
+      });
 
     // Header update + item replacement must be one atomic unit — previously
     // each ran on the plain pool (auto-committing individually). The item

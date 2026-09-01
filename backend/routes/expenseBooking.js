@@ -29,6 +29,7 @@ const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier")
 const { buildDirectExpenseBooking } = require("../services/directExpenseBooking");
 const { computeMultiGRNInvoice } = require("../services/invoiceLinking");
 const { syncBillStatus } = require("../utils/syncBillStatus");
+const { downstreamOfExpenseBooking } = require("../utils/materialChainGuard");
 
 // Defends against a corrupted EEmiData blob perpetuating itself. A legit EMI
 // config's own keys are always named fields (enabled, installmentCount, ...)
@@ -3246,6 +3247,16 @@ router.put(
       wasApproved = currentStatus === "Approved";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.ExpenseBooking", "Eid", numericId);
+      }
+
+      // Chain guard: a Payment already recorded against this invoice must
+      // be deleted first — editing amounts after payment would silently
+      // drift the invoice out of sync with what was already paid.
+      const blockedBy = await downstreamOfExpenseBooking(getPool(), numericId);
+      if (blockedBy) {
+        return res.status(409).json({
+          error: `Cannot edit: this expense booking has ${blockedBy}. Delete them first, then edit the invoice.`,
+        });
       }
     } catch (err) {
       return res.status(400).json({ error: err.message });

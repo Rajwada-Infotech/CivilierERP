@@ -415,6 +415,13 @@ const civilWorkDprSetupItems = [
     pageKey: "room-category-master",
   },
   {
+    icon: DoorOpen,
+    label: "Room Master",
+    path: "/civilworkdpr/room-master",
+    color: "text-cyan-500",
+    pageKey: "civilworkdpr-room-master",
+  },
+  {
     icon: ClipboardCheck,
     label: "Work Checkpoints",
     path: "/civilworkdpr/work-checkpoint-master",
@@ -483,13 +490,6 @@ const crmSetupItems = [
     path: "/crm/setup/block-master",
     color: "text-cyan-500",
     pageKey: "followup-block-master",
-  },
-  {
-    icon: DoorOpen,
-    label: "Room Master",
-    path: "/crm/setup/room-master",
-    color: "text-teal-500",
-    pageKey: "followup-room-master",
   },
   {
     icon: HardHat,

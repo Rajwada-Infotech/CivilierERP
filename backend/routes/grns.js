@@ -32,6 +32,7 @@ const {
   resolveGRNPrefix,
   previewNextDocNumber,
 } = require("../utils/docNumberLock");
+const { downstreamOfGRN } = require("../utils/materialChainGuard");
 const {
   assertVehicleInOutHasNoGRN,
   assertGRNQuantitiesWithinVehicleInOut,
@@ -1079,6 +1080,18 @@ router.put(
         "grn-master",
       );
       await guardEdit("goods-receipt", req.params.id, { allowPostApproval });
+
+      // Chain guard: an Expense Booking already raised against this GRN
+      // (directly, or as one of a multi-GRN combined invoice) must be
+      // deleted first — editing received quantities after invoicing would
+      // silently drift the GRN out of sync with what was already billed.
+      const blockedBy = await downstreamOfGRN(getPool(), req.params.id);
+      if (blockedBy) {
+        return res.status(409).json({
+          error: `Cannot edit: this GRN has ${blockedBy}. Delete them first, then edit the GRN.`,
+        });
+      }
+
       wasApproved = currentStatus === "Approved";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.GoodsReceiptNotes", "GRNID", req.params.id);
