@@ -641,11 +641,28 @@ router.get("/profit-loss", async (req, res) => {
       const exceptionalTotal = secTotal("exceptionalItems", "extraordinaryItems");
       const profitBeforeExceptional = Math.round((profitBeforeTax + exceptionalTotal) * 100) / 100;
 
+      // Display collapses the ten fine-grained Schedule III sections into
+      // the two buckets this company's own chart of accounts actually uses
+      // (Direct Expenses / Indirect Expenses) — same totals `directCosts`
+      // above already computes, just relabeled and regrouped for the
+      // statement's line items instead of the finer Schedule III split.
+      const DIRECT_SECTION_KEYS = ["projectExpenses", "costOfMaterials", "purchaseStockInTrade", "stockChanges"];
+      const directHeads = nonZeroSections.filter((s) => DIRECT_SECTION_KEYS.includes(s.key)).flatMap((s) => s.heads);
+      const indirectHeads = nonZeroSections.filter((s) => !DIRECT_SECTION_KEYS.includes(s.key)).flatMap((s) => s.heads);
+      const indirectTotal = Math.round((totalExpensesExclTax - directCosts) * 100) / 100;
+      const displaySections = [];
+      if (Math.abs(directCosts) > 0.005) {
+        displaySections.push({ key: "directExpenses", label: "Direct Expenses", heads: directHeads, total: directCosts });
+      }
+      if (Math.abs(indirectTotal) > 0.005) {
+        displaySections.push({ key: "indirectExpenses", label: "Indirect Expenses", heads: indirectHeads, total: indirectTotal });
+      }
+
       statement = {
         revenueFromOperations: revenueOps,
         otherIncome,
         totalRevenue,
-        expenseSections: nonZeroSections,
+        expenseSections: displaySections,
         totalExpensesExclTax,
         grossProfit,
         ebitda,
