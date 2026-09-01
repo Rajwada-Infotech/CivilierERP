@@ -353,19 +353,6 @@ router.get("/balance-sheet", async (req, res) => {
   }
 });
 
-// Company types that are body-corporates governed by Schedule III of the
-// Companies Act, 2013 (Division II format: Revenue from Operations / Other
-// Income → Total Income; a fixed set of expense lines → Total Expenses;
-// Profit Before Tax; Tax Expense; Profit After Tax). LLPs voluntarily follow
-// the same structured presentation in practice even though they're taxed
-// like a partnership. Everything else (Partnership, Proprietorship, or no
-// company selected/unknown type) gets the classic Trading & Profit and Loss
-// Account format instead — a partnership firm's P&L never carries a "Tax
-// Expense" line inside the account itself (provision for tax and partner
-// appropriation happen in a separate P&L Appropriation Account this ledger
-// has no data model for), so forcing Schedule III labels on it would be
-// actively wrong, not just cosmetically different.
-const SCHEDULE_III_TYPES = new Set(["Private Limited", "Public Limited", "OPC", "Section 8", "LLP"]);
 
 // dbo.AccountGroup ids directly under EXPENSES (root 4) / REVENUE (root 3) —
 // this chart of accounts was already seeded along Schedule III lines, so
@@ -410,9 +397,6 @@ router.get("/profit-loss", async (req, res) => {
 
     const groupMap = await loadGroups(pool);
     const { companyName, entityType } = await resolveCompanyType(pool, companyId);
-    // No single company selected → default to the structured Schedule III
-    // view, the more broadly useful default across a multi-company org.
-    const presentation = !entityType || SCHEDULE_III_TYPES.has(entityType) ? "structured" : "classic";
 
     const headsRes = await pool
       .request()
@@ -480,30 +464,26 @@ router.get("/profit-loss", async (req, res) => {
         if (Math.abs(net) < 0.005) continue;
         pushHead(incomeGroups, gid, groupName, { id: h.id, name: h.name, amount: net });
 
-        if (presentation === "structured") {
-          const bucket = scheduleBucketOf(gid);
-          const target = bucket === SCH3_REVENUE_OPS ? revenueOps : otherIncome;
-          target.heads.push({ id: h.id, name: h.name, amount: net });
-          target.total = Math.round((target.total + net) * 100) / 100;
-        }
+        const bucket = scheduleBucketOf(gid);
+        const target = bucket === SCH3_REVENUE_OPS ? revenueOps : otherIncome;
+        target.heads.push({ id: h.id, name: h.name, amount: net });
+        target.total = Math.round((target.total + net) * 100) / 100;
       } else if (root === ROOT_IDS.EXPENSES) {
         const net = Math.round((debit - credit) * 100) / 100;
         if (Math.abs(net) < 0.005) continue;
         pushHead(expenseGroups, gid, groupName, { id: h.id, name: h.name, amount: net });
 
-        if (presentation === "structured") {
-          const bucket = scheduleBucketOf(gid);
-          if (bucket === SCH3_TAX_GROUP) {
-            taxExpense.heads.push({ id: h.id, name: h.name, amount: net });
-            taxExpense.total = Math.round((taxExpense.total + net) * 100) / 100;
-          } else {
-            const section = expenseSections.find((s) => s.groupIds.includes(bucket));
-            // Unmatched groups fall to "Other Expenses" (not "Extraordinary Items")
-            const fallback = expenseSections.find((s) => s.key === "otherExpenses");
-            const target = section || fallback || expenseSections[expenseSections.length - 1];
-            target.heads.push({ id: h.id, name: h.name, amount: net });
-            target.total = Math.round((target.total + net) * 100) / 100;
-          }
+        const bucket = scheduleBucketOf(gid);
+        if (bucket === SCH3_TAX_GROUP) {
+          taxExpense.heads.push({ id: h.id, name: h.name, amount: net });
+          taxExpense.total = Math.round((taxExpense.total + net) * 100) / 100;
+        } else {
+          const section = expenseSections.find((s) => s.groupIds.includes(bucket));
+          // Unmatched groups fall to "Other Expenses" (not "Extraordinary Items")
+          const fallback = expenseSections.find((s) => s.key === "otherExpenses");
+          const target = section || fallback || expenseSections[expenseSections.length - 1];
+          target.heads.push({ id: h.id, name: h.name, amount: net });
+          target.total = Math.round((target.total + net) * 100) / 100;
         }
       }
     }
@@ -519,73 +499,61 @@ router.get("/profit-loss", async (req, res) => {
     const totalExpenses = Math.round(expenses.reduce((s, g) => s + g.total, 0) * 100) / 100;
     const netProfit = Math.round((totalIncome - totalExpenses) * 100) / 100;
 
-    let statement = null;
-    if (presentation === "structured") {
-      const nonZeroSections = expenseSections.filter((s) => Math.abs(s.total) > 0.005);
-      const totalRevenue = Math.round((revenueOps.total + otherIncome.total) * 100) / 100;
-      const totalExpensesExclTax = Math.round(
-        nonZeroSections.reduce((s, sec) => s + sec.total, 0) * 100,
+    // ── Classic Trading & Profit and Loss Account ─────────────────────────
+    // Two T-accounts, same convention as a textbook Trading and P&L
+    // Account: the Trading Account isolates direct/production costs against
+    // Revenue from Operations to find Gross Profit, which is carried down
+    // (b/d) into the P&L Account alongside Other Income, against indirect
+    // expenses and tax, to find Net Profit. Every "section" here is one of
+    // the same Schedule-III-seeded expense groups computed above — this is
+    // just a different arrangement of the same numbers, not a separate
+    // classification pass.
+    const nonZeroSections = expenseSections.filter((s) => Math.abs(s.total) > 0.005);
+    const secTotal = (...keys) =>
+      Math.round(
+        nonZeroSections
+          .filter((s) => keys.includes(s.key))
+          .reduce((sum, s) => sum + s.total, 0) * 100,
       ) / 100;
-      const profitBeforeTax = Math.round((totalRevenue - totalExpensesExclTax) * 100) / 100;
-      const profitAfterTax = Math.round((profitBeforeTax - taxExpense.total) * 100) / 100;
 
-      // Helper: sum section totals by key
-      const secTotal = (...keys) =>
-        Math.round(
-          nonZeroSections
-            .filter((s) => keys.includes(s.key))
-            .reduce((sum, s) => sum + s.total, 0) * 100,
-        ) / 100;
+    const DIRECT_KEYS = ["projectExpenses", "costOfMaterials", "purchaseStockInTrade", "stockChanges"];
+    const INDIRECT_KEYS = ["employeeBenefits", "financeCosts", "depreciation", "otherExpenses", "exceptionalItems", "extraordinaryItems"];
 
-      // Gross Profit: Revenue from Ops minus direct production/project costs.
-      // For construction/real-estate: projectExpenses + costOfMaterials + stockChanges + purchaseStockInTrade
-      const directCosts = secTotal(
-        "projectExpenses",
-        "costOfMaterials",
-        "purchaseStockInTrade",
-        "stockChanges",
-      );
-      const grossProfit = Math.round((revenueOps.total - directCosts) * 100) / 100;
+    const directExpenseSections = nonZeroSections.filter((s) => DIRECT_KEYS.includes(s.key));
+    const indirectExpenseSections = nonZeroSections.filter((s) => INDIRECT_KEYS.includes(s.key));
+    const directExpensesTotal = secTotal(...DIRECT_KEYS);
+    const indirectExpensesTotal = secTotal(...INDIRECT_KEYS);
 
-      // EBITDA: PBT + Finance Costs + Depreciation & Amortisation
-      const financeCostsTotal = secTotal("financeCosts");
-      const depreciationTotal = secTotal("depreciation");
-      const ebitda = Math.round((profitBeforeTax + financeCostsTotal + depreciationTotal) * 100) / 100;
+    const grossProfit = Math.round((revenueOps.total - directExpensesTotal) * 100) / 100;
+    // Profit before tax — a meaningful intermediate the frontend shows as its
+    // own line above Net Profit. Mathematically the same `netProfit` figure
+    // above (totalIncome - totalExpenses) once tax is subtracted, just
+    // arrived at via the Trading/P&L Account route instead of a flat
+    // income-minus-expenses subtraction — `netProfit` stays the single
+    // source of truth for `totals.netProfit`.
+    const profitBeforeTax = Math.round((grossProfit + otherIncome.total - indirectExpensesTotal) * 100) / 100;
 
-      // Profit Before Exceptional Items: PBT + Exceptional Items (add back the exceptional/extraordinary)
-      const exceptionalTotal = secTotal("exceptionalItems", "extraordinaryItems");
-      const profitBeforeExceptional = Math.round((profitBeforeTax + exceptionalTotal) * 100) / 100;
-
-      statement = {
-        revenueFromOperations: revenueOps,
-        otherIncome,
-        totalRevenue,
-        expenseSections: nonZeroSections,
-        totalExpensesExclTax,
-        grossProfit,
-        ebitda,
-        profitBeforeExceptional,
-        profitBeforeTax,
-        taxExpense,
-        profitAfterTax,
-        // Breakdown helpers for the frontend KPI bar
-        directCosts,
-        financeCostsTotal,
-        depreciationTotal,
-        exceptionalTotal,
-      };
-    }
+    const tradingAccount = {
+      dr: { expenseSections: directExpenseSections, total: directExpensesTotal, grossProfit },
+      cr: { revenueFromOperations: revenueOps },
+      total: Math.round((directExpensesTotal + Math.max(grossProfit, 0)) * 100) / 100,
+    };
+    const profitAndLossAccount = {
+      dr: { expenseSections: indirectExpenseSections, total: indirectExpensesTotal, taxExpense, profitBeforeTax, netProfit },
+      cr: { grossProfitBroughtDown: grossProfit, otherIncome },
+      total: Math.round((indirectExpensesTotal + taxExpense.total + Math.max(netProfit, 0)) * 100) / 100,
+    };
 
     res.json({
       from,
       to,
       companyName,
       entityType,
-      presentation,
       income,
       expenses,
       totals: { income: totalIncome, expenses: totalExpenses, netProfit },
-      statement,
+      tradingAccount,
+      profitAndLossAccount,
     });
   } catch (err) {
     console.error("[GET /financial-statements/profit-loss]", err);

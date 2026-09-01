@@ -32,9 +32,16 @@ async function ensureLoanLedgerHead(pool, keyPrefix, counterpartyId, counterpart
     .query("SELECT LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = @code");
   if (existing.recordset.length) return existing.recordset[0].LHeadId;
 
+  // Matched by name alone, NOT "AND ParentGroupId IS NULL" — that guard used
+  // to double as an identity check back when this group was deliberately
+  // parentless, but migration 383 gave it a real parent (nested it under
+  // Current Liabilities for Trial Balance's benefit) while keeping the same
+  // Name/Code. The old guard would silently stop matching after that, and
+  // every loan sanctioned from then on would insert with LBelongsTo = NULL —
+  // invisible in every financial report, not just misclassified.
   const group = await pool
     .request()
-    .query("SELECT AGId FROM dbo.AccountGroup WHERE Name = 'LOANS AND ADVANCES' AND ParentGroupId IS NULL");
+    .query("SELECT AGId FROM dbo.AccountGroup WHERE Name = 'LOANS AND ADVANCES'");
   const groupId = group.recordset[0]?.AGId ?? null;
 
   const inserted = await pool

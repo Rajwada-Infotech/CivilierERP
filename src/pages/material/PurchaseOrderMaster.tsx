@@ -2523,7 +2523,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "poNumber",
                     accessorFn: (row: any) => row.poNumber || row.docNo,
                     header: "PO No",
-                    size: 150,
+                    size: 130,
                     cell: ({ row }: any) => {
                       const item = row.original;
                       return (
@@ -2549,7 +2549,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "poDate",
                     accessorKey: "poDate",
                     header: "Date",
-                    size: 110,
+                    size: 90,
                     meta: { className: "hidden sm:table-cell" },
                     cell: ({ getValue }: any) => (
                       <span className="text-sm text-muted-foreground">{fmtDate(getValue() as string)}</span>
@@ -2559,7 +2559,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "supplierName",
                     accessorKey: "supplierName",
                     header: "Supplier",
-                    size: 160,
+                    size: 130,
                     meta: { className: "hidden sm:table-cell" },
                     cell: ({ getValue }: any) => (
                       <span className="text-sm font-medium">{String(getValue() || "—")}</span>
@@ -2569,7 +2569,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "companyName",
                     accessorKey: "companyName",
                     header: "Company",
-                    size: 150,
+                    size: 120,
                     meta: { className: "hidden md:table-cell" },
                     cell: ({ getValue }: any) => (
                       <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
@@ -2579,7 +2579,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "projectName",
                     accessorKey: "projectName",
                     header: "Project / Site",
-                    size: 150,
+                    size: 130,
                     meta: { className: "hidden lg:table-cell" },
                     cell: ({ getValue }: any) => (
                       <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
@@ -2589,7 +2589,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "effectiveMRDocNo",
                     accessorKey: "effectiveMRDocNo",
                     header: "MR Ref",
-                    size: 130,
+                    size: 100,
                     meta: { className: "hidden lg:table-cell" },
                     cell: ({ getValue }: any) => {
                       const v = getValue() as string | null;
@@ -2606,7 +2606,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "totalAmount",
                     accessorKey: "totalAmount",
                     header: "Amount",
-                    size: 110,
+                    size: 100,
                     meta: { className: "hidden sm:table-cell" },
                     cell: ({ getValue }: any) => (
                       <span className="text-sm font-semibold">{fmt(getValue() as number)}</span>
@@ -2616,7 +2616,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "status",
                     accessorKey: "status",
                     header: "Status",
-                    size: 180,
+                    size: 140,
                     meta: { className: "hidden sm:table-cell" },
                     cell: ({ row }: any) => (
                       <div className="flex flex-col items-start gap-1">
