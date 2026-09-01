@@ -28,6 +28,10 @@ const GL_ACCOUNTS = {
   // Singleton counter-account for Debit Note value adjustments (migration
   // 359) — see postDebitNoteAdjustment below.
   DEBIT_NOTE_ADJUSTMENT: "Debit Note Adjustment A/c",
+  // Capitalization account for GRN lines whose Item Master item is tagged
+  // M_Type='Fixed Asset' (migration 385) — see postGRNApproval below. Falls
+  // back to per-item Item Master GL tag (M_GLHeadId) when one is set.
+  FIXED_ASSET: "Fixed Assets A/c",
 };
 
 /** Same "advance / on account" Payment Reason match used by newPayment.js's
@@ -172,7 +176,16 @@ async function postVoucher(pool, {
  * Also the single point where a GRN's items are credited to StockLedger —
  * see the inline comment below for why that's gated on approval rather
  * than GRN creation.
- *   Dr Purchase A/c ................. taxable/base amount
+ *   Dr Purchase A/c ................. taxable/base amount of non-fixed-asset lines
+ *   Dr Fixed Assets A/c (or item's own GL tag) . taxable/base amount of
+ *                                     lines whose Item Master item is tagged
+ *                                     M_Type='Fixed Asset' — capitalized
+ *                                     straight onto the balance sheet instead
+ *                                     of falling into Purchase A/c (an
+ *                                     expense-side head), which is why fixed
+ *                                     asset purchases never used to show up
+ *                                     under the FIXED ASSETS group in Trial
+ *                                     Balance/the Balance Sheet.
  *   Dr Provisional Credit Available .. GST amount (input tax credit, pending)
  *   Cr PROVISION FOR PENDING GRN A/C . total incl. GST
  */
@@ -251,6 +264,47 @@ async function postGRNApproval(pool, grnId, userEmail) {
   if (totalInclGst <= 0)
     return { posted: false, stockPosted: true, reason: `GRN ${grnId} total is ${totalInclGst} (<= 0)` };
 
+  // Split the base amount between ordinary Purchase A/c lines and lines
+  // whose Item Master item is tagged M_Type='Fixed Asset' — those get
+  // capitalized onto a dedicated GL head (or the item's own GL tag, if
+  // set) instead of falling into Purchase A/c, so a fixed-asset purchase
+  // actually shows up under the FIXED ASSETS group in Trial Balance/the
+  // Balance Sheet rather than as an ordinary expense.
+  const itemIds = items.map((it) => it.itemId).filter((id) => id != null).map(String);
+  const fixedAssetGlHeadByItemId = new Map();
+  if (itemIds.length) {
+    const req = pool.request();
+    const placeholders = itemIds
+      .map((id, i) => {
+        req.input(`iid${i}`, sql.NVarChar(100), id);
+        return `@iid${i}`;
+      })
+      .join(",");
+    const faRes = await req.query(`
+      SELECT CONVERT(NVARCHAR(100), M_Id) AS M_Id, M_GLHeadId
+      FROM dbo.Item_Master_Group
+      WHERE CONVERT(NVARCHAR(100), M_Id) IN (${placeholders}) AND M_Type = 'Fixed Asset'
+    `);
+    for (const r of faRes.recordset) fixedAssetGlHeadByItemId.set(r.M_Id, r.M_GLHeadId ?? null);
+  }
+
+  const defaultFixedAssetHeadId = fixedAssetGlHeadByItemId.size
+    ? await getGLHeadId(pool, GL_ACCOUNTS.FIXED_ASSET)
+    : null;
+
+  let purchaseAmount = 0;
+  const fixedAssetAmountByHead = new Map(); // lHeadId -> amount
+  for (const it of items) {
+    const amt = Number(it.totalAmount) || 0;
+    const itemId = it.itemId != null ? String(it.itemId) : null;
+    if (itemId && fixedAssetGlHeadByItemId.has(itemId)) {
+      const headId = fixedAssetGlHeadByItemId.get(itemId) || defaultFixedAssetHeadId;
+      fixedAssetAmountByHead.set(headId, (fixedAssetAmountByHead.get(headId) || 0) + amt);
+    } else {
+      purchaseAmount += amt;
+    }
+  }
+
   const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
   const provisionalCreditHeadId = await getGLHeadId(
     pool,
@@ -260,6 +314,12 @@ async function postGRNApproval(pool, grnId, userEmail) {
     pool,
     GL_ACCOUNTS.PENDING_GRN_PROVISION,
   );
+
+  const fixedAssetLegs = Array.from(fixedAssetAmountByHead.entries()).map(([lHeadId, amt]) => ({
+    lHeadId,
+    debit: amt,
+    narration: `GRN ${docNo} — fixed asset received (capitalized)`,
+  }));
 
   await postVoucher(pool, {
     voucherNo: docNo,
@@ -272,9 +332,10 @@ async function postGRNApproval(pool, grnId, userEmail) {
     legs: [
       {
         lHeadId: purchaseHeadId,
-        debit: baseAmount,
+        debit: purchaseAmount,
         narration: `GRN ${docNo} — goods received (base)`,
       },
+      ...fixedAssetLegs,
       {
         lHeadId: provisionalCreditHeadId,
         debit: gstAmount,
