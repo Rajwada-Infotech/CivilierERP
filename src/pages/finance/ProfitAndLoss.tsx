@@ -508,7 +508,7 @@ function StructuredStatement({
             <SubRow
               key={s.key}
               letter={alpha(i + 1)}
-              label={sectionLabel(s.key, entityClass)}
+              label={s.label ?? sectionLabel(s.key, entityClass)}
               amount={s.total}
               priorAmount={getPriorSection(s.key)?.total}
               rowKey={`exp-${s.key}`}
@@ -531,19 +531,13 @@ function StructuredStatement({
             priorAmount={prior?.grossProfit}
             variant="subtotal"
           />
-          {/* Net Profit — was labeled EBITDA, but that formula (PBT + Finance
-              Costs + D&A) collapses to plain PBT whenever there's no finance
-              cost/depreciation data, landing on a bigger loss than Gross
-              Profit and reading as broken rather than a meaningful
-              intermediate figure. Shows the actual Net Profit here instead,
-              matching the simple Gross Profit -> Net Profit flow of a
-              classic Trading & P&L Account. */}
-          <TotalRow
-            label="Net Profit / (Loss)"
-            amount={statement.profitAfterTax}
-            priorAmount={prior?.profitAfterTax}
-            variant="subtotal"
-          />
+          {/* No intermediate EBITDA/Net-Profit row here — the statement
+              already reaches the true final Net Profit through the existing
+              IV -> V -> VI -> "Loss for the Period" cascade below. An extra
+              row here (previously mislabeled EBITDA, briefly relabeled Net
+              Profit) just duplicated that final figure one place too early,
+              landing before "Profit Before Tax" — the wrong order for a
+              figure that's only meaningful after tax. */}
 
           <DividerRow />
 
