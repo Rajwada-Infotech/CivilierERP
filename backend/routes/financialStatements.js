@@ -26,8 +26,40 @@ const { getPool, sql } = require("../db");
 // netting/umbrella loan group.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ROOT_IDS = { LIABILITIES: 1, ASSETS: 2, REVENUE: 3, EXPENSES: 4 };
-const LOANS_GROUP_ID = 79;
+// AGId is an auto-increment value, not stable across environments — dev and
+// production have completely different numbers for the same-named groups
+// (confirmed repeatedly: BANKS is AGId 66 in dev vs 1173 in prod; the
+// LIABILITIES root itself is AGId 1 in dev but AGId 4 in prod, with AGId 1
+// not existing there at all). Hardcoding these broke Trial Balance grouping
+// for months before it was caught (migrations 387-390). Resolved by Name at
+// the start of each request instead — Code turned out NOT to be a safe
+// substitute either (dev's LIABILITIES is Code='L', production's is
+// Code='LTY' for the very same group), so Name is the only field confirmed
+// consistent across both environments for these four root rows.
+const ROOT_NAMES = { LIABILITIES: "LIABILITIES", ASSETS: "ASSETS", REVENUE: "REVENUE", EXPENSES: "EXPENSES" };
+const LOANS_GROUP_NAME = "LOANS AND ADVANCES";
+
+async function resolveRootIds(pool) {
+  const res = await pool.request().query(`
+    SELECT AGId, Name FROM dbo.AccountGroup
+    WHERE Name IN ('LIABILITIES', 'ASSETS', 'REVENUE', 'EXPENSES') AND ParentGroupId IS NULL
+  `);
+  const byName = new Map(res.recordset.map((r) => [r.Name, Number(r.AGId)]));
+  return {
+    LIABILITIES: byName.get(ROOT_NAMES.LIABILITIES) ?? null,
+    ASSETS: byName.get(ROOT_NAMES.ASSETS) ?? null,
+    REVENUE: byName.get(ROOT_NAMES.REVENUE) ?? null,
+    EXPENSES: byName.get(ROOT_NAMES.EXPENSES) ?? null,
+  };
+}
+
+async function resolveLoansGroupId(pool) {
+  const res = await pool
+    .request()
+    .input("name", sql.NVarChar(200), LOANS_GROUP_NAME)
+    .query(`SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Name = @name`);
+  return res.recordset[0]?.AGId ?? null;
+}
 
 async function loadGroups(pool) {
   const res = await pool.request().query(`
@@ -55,13 +87,13 @@ async function loadGroups(pool) {
 }
 
 // Walk a group's ancestor chain to find which of the four Schedule-III roots
-// it falls under. Returns null for the orphan LOANS_GROUP_ID (or an
+// it falls under. Returns null for the orphan LOANS AND ADVANCES group (or an
 // unresolvable/dangling chain) — callers handle that case per-head.
-function rootOf(groupMap, groupId) {
+function rootOf(groupMap, groupId, rootIds) {
   let cur = groupMap.get(Number(groupId));
   let hops = 0;
   while (cur && hops < 20) {
-    if (Object.values(ROOT_IDS).includes(cur.id)) return cur.id;
+    if (Object.values(rootIds).includes(cur.id)) return cur.id;
     if (cur.parentId == null) return null;
     cur = groupMap.get(cur.parentId);
     hops++;
@@ -79,6 +111,8 @@ router.get("/balance-sheet", async (req, res) => {
     const costCenterId = req.query.costCenterId ? parseInt(req.query.costCenterId, 10) : null;
 
     const groupMap = await loadGroups(pool);
+    const rootIds = await resolveRootIds(pool);
+    const loansGroupId = await resolveLoansGroupId(pool);
 
     const headsRes = await pool
       .request()
@@ -169,9 +203,9 @@ router.get("/balance-sheet", async (req, res) => {
       let income = 0;
       let expense = 0;
       for (const r of recordset) {
-        const root = rootOf(groupMap, r.groupId);
-        if (root === ROOT_IDS.REVENUE) income += Number(r.credit) - Number(r.debit);
-        if (root === ROOT_IDS.EXPENSES) expense += Number(r.debit) - Number(r.credit);
+        const root = rootOf(groupMap, r.groupId, rootIds);
+        if (root === rootIds.REVENUE) income += Number(r.credit) - Number(r.debit);
+        if (root === rootIds.EXPENSES) expense += Number(r.debit) - Number(r.credit);
       }
       return Math.round((income - expense) * 100) / 100;
     };
@@ -201,7 +235,7 @@ router.get("/balance-sheet", async (req, res) => {
       const gid = Number(h.groupId);
       const grp = groupMap.get(gid);
       let groupName = grp ? grp.name : `Group-${gid}`;
-      let root = rootOf(groupMap, gid);
+      let root = rootOf(groupMap, gid, rootIds);
 
       // If it's the Income Summary system head used for Year-End Close, capture
       // its balance to offset the synthetic P&L prior years calculation, and skip rendering.
@@ -212,8 +246,8 @@ router.get("/balance-sheet", async (req, res) => {
         continue;
       }
 
-      if (root == null && gid !== LOANS_GROUP_ID) continue; // orphan/unmapped, skip
-      if (gid === LOANS_GROUP_ID) {
+      if (root == null && gid !== loansGroupId) continue; // orphan/unmapped, skip
+      if (gid === loansGroupId) {
         // Per-head sign classification (see file header comment). Relabel
         // the group name too — "LOANS AND ADVANCES" alone doesn't match
         // isCurrentAsset/isCurrentLiability below, so these heads used to
@@ -222,16 +256,16 @@ router.get("/balance-sheet", async (req, res) => {
         // long-term investment/borrowing, so it belongs in Current — and
         // "Receivable"/"Payable" are exactly the keywords those regexes
         // already look for, so relabeling is enough without touching them.
-        root = net > 0 ? ROOT_IDS.ASSETS : ROOT_IDS.LIABILITIES;
+        root = net > 0 ? rootIds.ASSETS : rootIds.LIABILITIES;
         groupName = net > 0 ? "Loan Receivable" : "Loan Payable";
       }
 
-      if (root === ROOT_IDS.ASSETS) {
+      if (root === rootIds.ASSETS) {
         // Asset head: positive (debit) balance is normal. A credit balance
         // on an asset head still reports under Assets, shown as a negative
         // figure, rather than silently flipping sides.
         pushHead(assetGroups, gid, groupName, { id: h.id, name: h.name, amount: net });
-      } else if (root === ROOT_IDS.LIABILITIES) {
+      } else if (root === rootIds.LIABILITIES) {
         pushHead(liabilityGroups, gid, groupName, { id: h.id, name: h.name, amount: -net });
       }
       // REVENUE/EXPENSES heads never carry a Balance Sheet closing balance in
@@ -409,6 +443,7 @@ router.get("/profit-loss", async (req, res) => {
     const costCenterId = req.query.costCenterId ? parseInt(req.query.costCenterId, 10) : null;
 
     const groupMap = await loadGroups(pool);
+    const rootIds = await resolveRootIds(pool);
     const { companyName, entityType } = await resolveCompanyType(pool, companyId);
     // No single company selected → default to the structured Schedule III
     // view, the more broadly useful default across a multi-company org.
@@ -454,7 +489,7 @@ router.get("/profit-loss", async (req, res) => {
       let cur = groupMap.get(Number(groupId));
       let hops = 0;
       while (cur && hops < 20) {
-        if (cur.parentId === ROOT_IDS.REVENUE || cur.parentId === ROOT_IDS.EXPENSES) return cur.id;
+        if (cur.parentId === rootIds.REVENUE || cur.parentId === rootIds.EXPENSES) return cur.id;
         if (cur.parentId == null) return null;
         cur = groupMap.get(cur.parentId);
         hops++;
@@ -473,9 +508,9 @@ router.get("/profit-loss", async (req, res) => {
       const gid = Number(h.groupId);
       const grp = groupMap.get(gid);
       const groupName = grp ? grp.name : `Group-${gid}`;
-      const root = rootOf(groupMap, gid);
+      const root = rootOf(groupMap, gid, rootIds);
 
-      if (root === ROOT_IDS.REVENUE) {
+      if (root === rootIds.REVENUE) {
         const net = Math.round((credit - debit) * 100) / 100;
         if (Math.abs(net) < 0.005) continue;
         pushHead(incomeGroups, gid, groupName, { id: h.id, name: h.name, amount: net });
@@ -486,7 +521,7 @@ router.get("/profit-loss", async (req, res) => {
           target.heads.push({ id: h.id, name: h.name, amount: net });
           target.total = Math.round((target.total + net) * 100) / 100;
         }
-      } else if (root === ROOT_IDS.EXPENSES) {
+      } else if (root === rootIds.EXPENSES) {
         const net = Math.round((debit - credit) * 100) / 100;
         if (Math.abs(net) < 0.005) continue;
         pushHead(expenseGroups, gid, groupName, { id: h.id, name: h.name, amount: net });
