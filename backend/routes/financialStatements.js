@@ -437,6 +437,15 @@ const SCH3_EXPENSE_ORDER = Object.keys(SCH3_EXPENSE_LABELS);
 function classifyExpenseBucketName(name) {
   const n = (name || "").toLowerCase();
   if (/\btax\b/.test(n)) return "tax";
+  // Some charts of accounts group their real cost categories (Sanction
+  // Cost, Land Acquisition, Construction Cost - Labour/Materials, ...) one
+  // level under a literal "Direct Expenses" umbrella instead of using the
+  // Schedule III-style category names directly under EXPENSES —
+  // scheduleBucketOf() only walks up to that umbrella (the direct child of
+  // the root), so its own name needs a pattern too, or every real direct/
+  // project cost silently falls into the generic Other Expenses catch-all
+  // and understates Gross Profit.
+  if (/\bdirect expense/.test(n)) return "projectExpenses";
   if (/project|construction/.test(n)) return "projectExpenses";
   if (/cost.*material/.test(n)) return "costOfMaterials";
   if (/purchase.*stock/.test(n)) return "purchaseStockInTrade";
