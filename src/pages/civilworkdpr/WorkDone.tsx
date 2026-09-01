@@ -160,23 +160,12 @@ export default function WorkDone() {
       { key: string; scopePath: string; projectName: string | null; chains: { chain: DependencyMasterListRow; index: number }[] }
     >();
     (allChains as DependencyMasterListRow[]).forEach((chain, index) => {
-      // Hide chains that are already fully allocated — this browser exists
-      // to pick a chain and allocate work against it, so once every one of
-      // its activities already has an assignment there's nothing left to do
-      // here. A chain whose detail hasn't loaded yet (rungs still empty)
-      // stays visible rather than being hidden before its status is known.
-      const rungs = chainDetailQueries[index]?.data?.activities ?? [];
-      const fullyAllocated =
-        rungs.length > 0 &&
-        rungs.every((rung) => rung.rungId != null && allAssignmentByRungId.has(rung.rungId));
-      if (fullyAllocated) return;
-
       const key = chain.scopePath;
       if (!groups.has(key)) groups.set(key, { key, scopePath: key, projectName: chain.projectName, chains: [] });
       groups.get(key)!.chains.push({ chain, index });
     });
     return Array.from(groups.values());
-  }, [allChains, chainDetailQueries, allAssignmentByRungId]);
+  }, [allChains]);
   const [collapsedChainGroups, setCollapsedChainGroups] = useState<Record<string, boolean>>({});
   const toggleChainGroup = (key: string) =>
     setCollapsedChainGroups((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -482,8 +471,11 @@ export default function WorkDone() {
           {/* Dependency Chains browser — every chain grouped by the room
               it's allocated to, each activity showing a Pending/Done read,
               with no Project/Tower/Floor/Unit selection needed. Click an
-              activity to open the same assign/edit popup used below. */}
-          {allChains.length > 0 && (
+              activity to open the same assign/edit popup used below. Hidden
+              once the user starts picking a location above — at that point
+              they're narrowing in on one specific room via the dropdowns,
+              and this whole-portfolio browser is just noise underneath it. */}
+          {allChains.length > 0 && !form.ProjectId && (
             <div className="rounded-xl border border-border bg-card overflow-hidden">
               <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
                 <GitBranch size={14} className="text-cyan-600 dark:text-cyan-400" />
