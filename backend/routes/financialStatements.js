@@ -437,6 +437,15 @@ const SCH3_EXPENSE_ORDER = Object.keys(SCH3_EXPENSE_LABELS);
 function classifyExpenseBucketName(name) {
   const n = (name || "").toLowerCase();
   if (/\btax\b/.test(n)) return "tax";
+  // Some charts of accounts group their real cost categories (Sanction
+  // Cost, Land Acquisition, Construction Cost - Labour/Materials, ...) one
+  // level under a literal "Direct Expenses" umbrella instead of using the
+  // Schedule III-style category names directly under EXPENSES —
+  // scheduleBucketOf() only walks up to that umbrella (the direct child of
+  // the root), so its own name needs a pattern too, or every real direct/
+  // project cost silently falls into the generic Other Expenses catch-all
+  // and understates Gross Profit.
+  if (/\bdirect expense/.test(n)) return "projectExpenses";
   if (/project|construction/.test(n)) return "projectExpenses";
   if (/cost.*material/.test(n)) return "costOfMaterials";
   if (/purchase.*stock/.test(n)) return "purchaseStockInTrade";
@@ -598,12 +607,8 @@ router.get("/profit-loss", async (req, res) => {
     let statement = null;
     if (presentation === "structured") {
       const nonZeroSections = expenseSections.filter((s) => Math.abs(s.total) > 0.005);
+      // I + II
       const totalRevenue = Math.round((revenueOps.total + otherIncome.total) * 100) / 100;
-      const totalExpensesExclTax = Math.round(
-        nonZeroSections.reduce((s, sec) => s + sec.total, 0) * 100,
-      ) / 100;
-      const profitBeforeTax = Math.round((totalRevenue - totalExpensesExclTax) * 100) / 100;
-      const profitAfterTax = Math.round((profitBeforeTax - taxExpense.total) * 100) / 100;
 
       // Helper: sum section totals by key
       const secTotal = (...keys) =>
@@ -613,42 +618,54 @@ router.get("/profit-loss", async (req, res) => {
             .reduce((sum, s) => sum + s.total, 0) * 100,
         ) / 100;
 
-      // Gross Profit: Revenue from Ops minus direct production/project costs.
-      // For construction/real-estate: projectExpenses + costOfMaterials + stockChanges + purchaseStockInTrade
-      const directCosts = secTotal(
-        "projectExpenses",
-        "costOfMaterials",
-        "purchaseStockInTrade",
-        "stockChanges",
-      );
-      const grossProfit = Math.round((revenueOps.total - directCosts) * 100) / 100;
+      // Direct Expenses — production/project costs.
+      const DIRECT_SECTION_KEYS = ["projectExpenses", "costOfMaterials", "purchaseStockInTrade", "stockChanges"];
+      const directCosts = secTotal(...DIRECT_SECTION_KEYS);
+      const directHeads = nonZeroSections.filter((s) => DIRECT_SECTION_KEYS.includes(s.key)).flatMap((s) => s.heads);
 
-      // EBITDA: PBT + Finance Costs + Depreciation & Amortisation
-      const financeCostsTotal = secTotal("financeCosts");
-      const depreciationTotal = secTotal("depreciation");
-      const ebitda = Math.round((profitBeforeTax + financeCostsTotal + depreciationTotal) * 100) / 100;
+      // Indirect Expenses — everything else, Tax Expense folded in as one
+      // more line rather than its own statutory VI section: this statement
+      // follows a simple Gross Profit -> Net Profit flow (per user spec),
+      // not the Schedule III Profit-Before-Tax/Exceptional-Items cascade.
+      const otherIndirectTotal = Math.round(
+        (nonZeroSections.reduce((s, sec) => s + sec.total, 0) - directCosts) * 100,
+      ) / 100;
+      const indirectTotal = Math.round((otherIndirectTotal + taxExpense.total) * 100) / 100;
+      const indirectHeads = [
+        ...nonZeroSections.filter((s) => !DIRECT_SECTION_KEYS.includes(s.key)).flatMap((s) => s.heads),
+        ...taxExpense.heads,
+      ];
 
-      // Profit Before Exceptional Items: PBT + Exceptional Items (add back the exceptional/extraordinary)
-      const exceptionalTotal = secTotal("exceptionalItems", "extraordinaryItems");
-      const profitBeforeExceptional = Math.round((profitBeforeTax + exceptionalTotal) * 100) / 100;
+      const totalExpenses = Math.round((directCosts + indirectTotal) * 100) / 100;
+
+      // Total Revenue - Direct Expenses
+      const grossProfit = Math.round((totalRevenue - directCosts) * 100) / 100;
+      // Gross Profit - Indirect Expenses (Tax included)
+      const netProfit = Math.round((grossProfit - indirectTotal) * 100) / 100;
+
+      // Display collapses the ten fine-grained Schedule III sections into
+      // the two buckets this company's own chart of accounts actually uses
+      // (Direct Expenses / Indirect Expenses).
+      const displaySections = [];
+      if (Math.abs(directCosts) > 0.005) {
+        displaySections.push({ key: "directExpenses", label: "Direct Expenses", heads: directHeads, total: directCosts });
+      }
+      if (Math.abs(indirectTotal) > 0.005) {
+        displaySections.push({ key: "indirectExpenses", label: "Indirect Expenses", heads: indirectHeads, total: indirectTotal });
+      }
 
       statement = {
         revenueFromOperations: revenueOps,
         otherIncome,
         totalRevenue,
-        expenseSections: nonZeroSections,
-        totalExpensesExclTax,
+        expenseSections: displaySections,
+        totalExpenses,
         grossProfit,
-        ebitda,
-        profitBeforeExceptional,
-        profitBeforeTax,
-        taxExpense,
-        profitAfterTax,
-        // Breakdown helpers for the frontend KPI bar
+        netProfit,
+        // Breakdown helpers
         directCosts,
-        financeCostsTotal,
-        depreciationTotal,
-        exceptionalTotal,
+        indirectTotal,
+        taxExpense,
       };
     }
 

@@ -198,6 +198,7 @@ const ALL_ROUTES = [
   { path: "/api/financial-statements", file: "./routes/financialStatements" },
   { path: "/api/year-end-close", file: "./routes/yearEndClose" },
   { path: "/api/balance-enquiry", file: "./routes/balanceEnquiry" },
+  { path: "/api/vendor-ledger", file: "./routes/vendorLedger" },
   { path: "/api/grns", file: "./routes/grns" },
   { path: "/api/vehicle-in-out", file: "./routes/vehicleInOut" },
   { path: "/api/quality-debit-note", file: "./routes/qualityRejectionDebitNote" },
