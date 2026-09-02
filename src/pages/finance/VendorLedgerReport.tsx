@@ -117,6 +117,10 @@ const SOURCE_META: Record<string, { label: string; icon: React.ElementType; colo
   DebitNoteAdjustment: { label: "Debit Note", icon: FileText, color: "text-red-500", bg: "bg-red-500/10" },
   QualityRejectionDebitNote: { label: "Debit Note", icon: FileText, color: "text-red-500", bg: "bg-red-500/10" },
   OnAccountAdjustment: { label: "On A/C Adjustment", icon: FileText, color: "text-teal-500", bg: "bg-teal-500/10" },
+  // Standalone advance / excess payment sitting in the pooled Company On
+  // Account A/c until applied — dbo.OnAccountLedger, not a GeneralLedgerEntry.
+  OnAccountAdvance: { label: "Advance / On A/C", icon: TrendingUp, color: "text-teal-500", bg: "bg-teal-500/10" },
+  OnAccountApplied: { label: "On A/C Applied to Invoice", icon: TrendingDown, color: "text-teal-500", bg: "bg-teal-500/10" },
 };
 function sourceMeta(sourceType: string) {
   return SOURCE_META[sourceType] || { label: sourceType, icon: Receipt, color: "text-muted-foreground", bg: "bg-muted" };
@@ -241,8 +245,15 @@ export function VendorLedgerReportBody() {
 
   return (
     <div className="space-y-4">
-      {/* ── Search ── */}
-      <div className="glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60">
+      {/* ── Search ──
+          relative z-30: .glass uses backdrop-blur, which creates a new
+          stacking context per card — without an explicit z-index here, this
+          card and the Range card below it are sibling stacking contexts
+          with no elevation, so DOM order alone decides paint order and the
+          later Range card would render on top of this card's absolutely-
+          positioned search-results dropdown regardless of the dropdown's
+          own z-20. */}
+      <div className="relative z-30 glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60">
         <div className="flex items-center justify-between gap-2">
           <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
             Search Party / General Ledger

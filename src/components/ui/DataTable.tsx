@@ -55,6 +55,8 @@ interface DataTableProps<TData extends RowData> {
    * Use this for highlight-on-edit patterns: (row) => isEditing(row.original.id) ? "bg-primary/5 border-l-2 border-l-primary" : ""
    */
   rowClassName?: (row: Row<TData>) => string;
+  /** Called when anywhere on a data row is clicked. Makes rows look interactive (cursor-pointer). */
+  onRowClick?: (row: Row<TData>) => void;
   /** Stable row id for React/TanStack when data has a database primary key */
   getRowId?: (originalRow: TData, index: number, parent?: Row<TData>) => string;
   /** Show loading skeleton instead of rows */
@@ -96,6 +98,7 @@ export function DataTable<TData extends RowData>({
   emptyMessage = "No records found.",
   className,
   rowClassName,
+  onRowClick,
   getRowId,
   loading = false,
   skeletonRows = 5,
@@ -291,7 +294,8 @@ export function DataTable<TData extends RowData>({
               rows.map((row) => (
                 <tr
                   key={row.id ? `row-${row.id}` : `row-${row.index}`}
-                  className={`hover:bg-muted/20 transition-colors ${
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  className={`hover:bg-muted/20 transition-colors ${onRowClick ? "cursor-pointer" : ""} ${
                     rowClassName ? rowClassName(row) : ""
                   }`}
                 >

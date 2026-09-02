@@ -134,10 +134,65 @@ router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async 
   }
 });
 
+// A Supplier/Contractor "standalone advance" or "excess payment beyond the
+// invoice" (see generalLedger.js's postPaymentApproval isStandaloneAdvance
+// branch, and newPayment.js's excess/auto-apply hooks) is deliberately
+// posted against the pooled "Company On Account A/c" head, not the party's
+// own — dbo.OnAccountLedger is the only per-party record of it existing at
+// all until/unless it's later applied to an invoice via the manual On A/C
+// Adjustment page (the ONE path that does post a real GL entry against the
+// party's own head, via postOnAccountAdjustment). CRM's own on-account flow
+// is different — crmLedger.js posts CrmOnAccountPayment/CrmPaymentReceipt
+// straight against the customer's own head, so those already show up via
+// GeneralLedgerEntry and don't need this merge. Scoped to Supplier/
+// Contractor only for that reason.
+const ON_ACCOUNT_PARTY_TYPES = ["Supplier", "Contractor"];
+
+async function fetchOnAccountRows(pool, headId) {
+  const result = await pool.request().input("Id", sql.Int, headId).query(`
+    SELECT OAId, PartyId, TxnDate, TxnType, Amount, RefType, RefDocNo, Notes, CompanyId, ProjectId
+    FROM dbo.OnAccountLedger
+    WHERE PartyId = @Id AND PartyType IN ('${ON_ACCOUNT_PARTY_TYPES.join("','")}')
+  `);
+  return result.recordset;
+}
+
+// Same sign convention dbo.AccountHeadMaster.OnAccountBalance already uses
+// (CREDIT adds to it, DEBIT subtracts) — and OPENING_ADJ_SQL adds that
+// balance the same direction a Debit contributes to the running balance, so
+// a CREDIT row here becomes a Debit-side amount and a DEBIT row a Credit-
+// side amount, to keep the merged running balance consistent with the
+// head's own maintained OnAccountBalance total.
+function mapOnAccountRow(r) {
+  const amount = Number(r.Amount) || 0;
+  const isCredit = r.TxnType === "CREDIT";
+  return {
+    EntryId: `OA-${r.OAId}`,
+    VoucherNo: r.RefDocNo || `OA-${r.OAId}`,
+    VoucherDate: r.TxnDate,
+    DebitAmount: isCredit ? amount : 0,
+    CreditAmount: isCredit ? 0 : amount,
+    Narration: r.Notes || (isCredit ? "Advance / excess payment (on account)" : "On-account balance applied"),
+    SourceType: isCredit ? "OnAccountAdvance" : "OnAccountApplied",
+    SourceId: r.OAId,
+    CompanyId: r.CompanyId,
+    ProjectId: r.ProjectId,
+    CostCenterCode: null,
+    CostCenterName: null,
+    NewPaymentDocNo: null,
+    ReceivedPaymentDocNo: null,
+    JournalVoucherNo: null,
+    FundTransferDocNo: null,
+    ExpenseBookingDocNo: null,
+    LoanDocNo: null,
+  };
+}
+
 // ── GET /:headId/transactions — the ledger itself ───────────────────────────
 // Every invoice (ExpenseBooking), loan (LoanPosting/LoanRepayment), payment
-// (NewPayment/ReceivedPayment) and journal voucher (JournalVoucher) made
-// against this party, in one running-balance list.
+// (NewPayment/ReceivedPayment), journal voucher (JournalVoucher), and
+// pooled on-account advance/application (dbo.OnAccountLedger) made against
+// this party, in one running-balance list.
 router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), async (req, res) => {
   const headId = parseInt(req.params.headId, 10);
   if (!headId) return res.status(400).json({ error: "Invalid head id" });
@@ -165,55 +220,81 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
       FROM dbo.AccountHeadMaster ahm
       WHERE ahm.LHeadId = @Id
     `);
-    const windowOpening = Number(openingResult.recordset[0]?.WindowOpening || 0);
+    let windowOpening = Number(openingResult.recordset[0]?.WindowOpening || 0);
 
-    const result = await pool
+    const glResult = await pool
       .request()
       .input("Id", sql.Int, headId)
-      .input("Limit", sql.Int, limit)
-      .input("Opening", sql.Decimal(18, 2), windowOpening)
       .input("From", sql.Date, from || null)
       .input("To", sql.Date, to || null).query(`
-      SELECT TOP (@Limit) *
-      FROM (
-        SELECT
-          gle.EntryId, gle.VoucherNo, gle.VoucherDate, gle.DebitAmount, gle.CreditAmount,
-          gle.Narration, gle.SourceType, gle.SourceId, gle.CompanyId, gle.ProjectId, gle.CostCenterId,
-          cc.Code AS CostCenterCode, cc.Name AS CostCenterName,
-          np.DocNo   AS NewPaymentDocNo,
-          rp.RPDocNo AS ReceivedPaymentDocNo,
-          jv.JVNo    AS JournalVoucherNo,
-          ft.DocNo   AS FundTransferDocNo,
-          eb.EDocNo  AS ExpenseBookingDocNo,
-          ls.LoanNo  AS LoanDocNo,
-          @Opening + SUM(gle.DebitAmount - gle.CreditAmount)
-            OVER (ORDER BY gle.VoucherDate, gle.EntryId ROWS UNBOUNDED PRECEDING) AS RunningBalance
-        FROM dbo.GeneralLedgerEntry gle
-        LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = gle.CostCenterId
-        LEFT JOIN dbo.NewPayment np
-          ON gle.SourceType IN ('NewPayment', 'PaymentPosting', 'BounceChargePosting', 'LoanRepayment')
-         AND np.PPaymentID = gle.SourceId
-        LEFT JOIN dbo.ReceivedPayment rp
-          ON gle.SourceType = 'ReceivedPayment' AND rp.RPPaymentID = gle.SourceId
-        LEFT JOIN dbo.JournalVoucher jv
-          ON gle.SourceType = 'JournalVoucher' AND jv.JVID = gle.SourceId
-        LEFT JOIN dbo.FundTransfer ft
-          ON gle.SourceType = 'FundTransfer' AND ft.FTId = gle.SourceId
-        LEFT JOIN dbo.ExpenseBooking eb
-          ON gle.SourceType = 'ExpenseBooking' AND eb.Eid = gle.SourceId
-        LEFT JOIN dbo.LoanSanction ls
-          ON gle.SourceType = 'LoanPosting' AND ls.LoanId = gle.SourceId
-        WHERE gle.LHeadId = @Id AND gle.IsReversed = 0
-          AND (@From IS NULL OR gle.VoucherDate >= @From)
-          AND (@To IS NULL OR gle.VoucherDate <= @To)
-      ) t
-      ORDER BY t.VoucherDate DESC, t.EntryId DESC
+      SELECT
+        gle.EntryId, gle.VoucherNo, gle.VoucherDate, gle.DebitAmount, gle.CreditAmount,
+        gle.Narration, gle.SourceType, gle.SourceId, gle.CompanyId, gle.ProjectId, gle.CostCenterId,
+        cc.Code AS CostCenterCode, cc.Name AS CostCenterName,
+        np.DocNo   AS NewPaymentDocNo,
+        rp.RPDocNo AS ReceivedPaymentDocNo,
+        jv.JVNo    AS JournalVoucherNo,
+        ft.DocNo   AS FundTransferDocNo,
+        eb.EDocNo  AS ExpenseBookingDocNo,
+        ls.LoanNo  AS LoanDocNo
+      FROM dbo.GeneralLedgerEntry gle
+      LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = gle.CostCenterId
+      LEFT JOIN dbo.NewPayment np
+        ON gle.SourceType IN ('NewPayment', 'PaymentPosting', 'BounceChargePosting', 'LoanRepayment')
+       AND np.PPaymentID = gle.SourceId
+      LEFT JOIN dbo.ReceivedPayment rp
+        ON gle.SourceType = 'ReceivedPayment' AND rp.RPPaymentID = gle.SourceId
+      LEFT JOIN dbo.JournalVoucher jv
+        ON gle.SourceType = 'JournalVoucher' AND jv.JVID = gle.SourceId
+      LEFT JOIN dbo.FundTransfer ft
+        ON gle.SourceType = 'FundTransfer' AND ft.FTId = gle.SourceId
+      LEFT JOIN dbo.ExpenseBooking eb
+        ON gle.SourceType = 'ExpenseBooking' AND eb.Eid = gle.SourceId
+      LEFT JOIN dbo.LoanSanction ls
+        ON gle.SourceType = 'LoanPosting' AND ls.LoanId = gle.SourceId
+      WHERE gle.LHeadId = @Id AND gle.IsReversed = 0
+        AND (@From IS NULL OR gle.VoucherDate >= @From)
+        AND (@To IS NULL OR gle.VoucherDate <= @To)
     `);
+
+    // dbo.OnAccountLedger has no IsReversed/window-scoped balance column —
+    // pulled whole per party (a handful of rows at most) and split in JS
+    // instead of a second parameterized date-range query.
+    const allOaRows = await fetchOnAccountRows(pool, headId);
+    if (from) {
+      const preWindowNet = allOaRows
+        .filter((r) => new Date(r.TxnDate) < new Date(from))
+        .reduce((s, r) => s + (r.TxnType === "CREDIT" ? Number(r.Amount) : -Number(r.Amount)), 0);
+      windowOpening = Math.round((windowOpening + preWindowNet) * 100) / 100;
+    }
+    const oaRowsInWindow = allOaRows.filter((r) => {
+      const d = new Date(r.TxnDate);
+      if (from && d < new Date(from)) return false;
+      if (to && d > new Date(to)) return false;
+      return true;
+    });
+
+    const merged = [...glResult.recordset, ...oaRowsInWindow.map(mapOnAccountRow)];
+    merged.sort((a, b) => {
+      const dt = new Date(a.VoucherDate).getTime() - new Date(b.VoucherDate).getTime();
+      if (dt !== 0) return dt;
+      // Stable tiebreak — GL EntryId is numeric, OnAccountLedger's synthetic
+      // id is a string; a plain string compare keeps ties deterministic.
+      return String(a.EntryId).localeCompare(String(b.EntryId));
+    });
+
+    let running = windowOpening;
+    for (const row of merged) {
+      running = Math.round((running + Number(row.DebitAmount) - Number(row.CreditAmount)) * 100) / 100;
+      row.RunningBalance = running;
+    }
+    merged.reverse(); // newest first, matching the original ORDER BY ... DESC
+    const transactions = merged.slice(0, limit);
 
     res.json({
       head,
       windowOpeningBalance: windowOpening,
-      transactions: result.recordset,
+      transactions,
     });
   } catch (err) {
     console.error("VENDOR LEDGER TRANSACTIONS ERROR:", err.message);
@@ -269,10 +350,41 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
       WHERE gle.IsReversed = 0
         AND (@From IS NULL OR gle.VoucherDate >= @From)
         AND (@To IS NULL OR gle.VoucherDate <= @To)
-      ORDER BY gle.VoucherDate DESC, gle.EntryId DESC
     `);
 
-    res.json({ transactions: result.recordset });
+    // Same OnAccountLedger merge as /:headId/transactions, just across every
+    // Supplier/Contractor at once (no running balance here, so no per-party
+    // "pre-window" split needed — just filter to the display window).
+    const oaResult = await pool
+      .request()
+      .input("From", sql.Date, from || null)
+      .input("To", sql.Date, to || null).query(`
+      SELECT oal.OAId, oal.PartyId, oal.TxnDate, oal.TxnType, oal.Amount, oal.RefType, oal.RefDocNo, oal.Notes,
+             oal.CompanyId, oal.ProjectId,
+             ISNULL(ahm.DisplayName, ahm.LHeadName) AS PartyName, ahm.LHeadType AS PartyType
+      FROM dbo.OnAccountLedger oal
+      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oal.PartyId
+      WHERE oal.PartyType IN ('${ON_ACCOUNT_PARTY_TYPES.join("','")}')
+        AND (@From IS NULL OR oal.TxnDate >= @From)
+        AND (@To IS NULL OR oal.TxnDate <= @To)
+    `);
+
+    const merged = [
+      ...result.recordset,
+      ...oaResult.recordset.map((r) => ({
+        ...mapOnAccountRow(r),
+        LHeadId: r.PartyId,
+        PartyName: r.PartyName,
+        PartyType: r.PartyType,
+      })),
+    ];
+    merged.sort((a, b) => {
+      const dt = new Date(b.VoucherDate).getTime() - new Date(a.VoucherDate).getTime();
+      if (dt !== 0) return dt;
+      return String(b.EntryId).localeCompare(String(a.EntryId));
+    });
+
+    res.json({ transactions: merged.slice(0, limit) });
   } catch (err) {
     console.error("VENDOR LEDGER ALL-TRANSACTIONS ERROR:", err.message);
     res.status(500).json({ error: err.message });

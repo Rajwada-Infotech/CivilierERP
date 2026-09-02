@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
@@ -8,7 +8,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, CheckCircle2, Circle, ArrowRight, ExternalLink, Lock, FileCheck, ChevronRight, Info } from "lucide-react";
+import { Plus, CheckCircle2, Circle, ExternalLink, Lock, FileCheck, ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/legal-milestones";
@@ -16,7 +16,7 @@ const BKG_API = "/api/crm/bookings";
 
 // Agreement workflow — 8 steps, most auto-synced from Agreement page actions.
 // DirectorMeeting is the only manual step (an in-person meeting with no digital trace).
-const STEPS = [
+const AGREEMENT_STEPS = [
   { key: "DocCollection",    label: "Document Collection",      hint: "Verify the customer's Identity Proof on the Agreement page" },
   { key: "LegalReview",      label: "Legal Executive Assigned", hint: "Assign a Legal Executive to the agreement" },
   { key: "Drafting",         label: "Drafting",                 hint: "Upload the Sale Agreement document" },
@@ -25,7 +25,7 @@ const STEPS = [
   { key: "MutualAgreement",  label: "Customer Approval",        hint: "Customer approves the agreement in their portal" },
   { key: "DirectorMeeting",  label: "Director Meeting",         hint: "" },
   { key: "FinalExecution",   label: "Final Execution",          hint: "Mark the agreement Executed" },
-];
+] as const;
 const MANUAL_STEPS = new Set(["DirectorMeeting"]);
 
 async function fetchAll(): Promise<any[]> {
@@ -41,7 +41,7 @@ async function fetchBookings(): Promise<any[]> {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-interface PostStage {
+interface Stage {
   key: string;
   label: string;
   sublabel: string;
@@ -53,27 +53,67 @@ interface PostStage {
   unlockedHint: string;
 }
 
-interface JourneySection {
+interface Phase {
+  key: string;
   title: string;
   description: string;
-  stages: PostStage[];
+  isApplicable: boolean;      // false → phase renders as a "Not applicable" placeholder
+  notApplicableReason?: string;
+  stages: Stage[];
 }
 
-// ─── Journey builder ─────────────────────────────────────────────────────────
+interface WorkflowModel {
+  // Physical completion state — informational only (see buildWorkflowModel's
+  // doc comment). Never gates Agreement, AFS, NOC, or Pre-Possession.
+  isPhysicallyComplete: boolean;
+  agreementDone: boolean;
+  phases: Phase[];                 // Phase 2 onward — everything after Agreement signing
+  progressChecks: { label: string; done: boolean }[];
+  journeyLabel: { text: string; done: boolean };
+}
 
-// Builds the full post-agreement journey as clearly-labeled sections so
-// any team member — not just legal staff — can follow what happens and why.
-function buildJourneySections(t: any, agrDone: boolean): JourneySection[] {
+// ─── The single source of truth ──────────────────────────────────────────────
+//
+// Every other part of this page (left-panel card, progress dots, Phase 1
+// card, Phase 2+ sections) reads from ONE WorkflowModel built here — one
+// computation, consumed everywhere, instead of each place re-deriving its
+// own slightly-different copy of the same logic.
+//
+// The Agreement for Sale, registered at the Sub-Registrar (AFS), is
+// MANDATORY for every booking — no project-type exception. (An earlier
+// version of this model let a "Ready-to-Move" project skip that step
+// entirely, on the theory that ownership legally vests on the Sale Deed
+// rather than the Agreement. That was wrong for this business: every sale
+// goes through Agreement → AFS Registration → Sale Deed, full stop. Do not
+// resurrect a bypass here.)
+//
+// The only thing that legitimately varies by a project's physical
+// completion state (Project Master → General → Type = "ReadyToMove", or
+// Timeline → Status = "Completed") is whether Handover must finish before
+// the Sale Deed is drafted — see isPhysicallyComplete below, used only for
+// that one informational note. It never gates Agreement, AFS, NOC, or
+// Pre-Possession.
+function buildWorkflowModel(t: any): WorkflowModel {
+  const isPhysicallyComplete = t.ProjectType === "ReadyToMove" || t.ProjectStatus === "Completed";
+
+  const agreementDone = t.FinalExecutionStatus === "Completed";
+
+  // The AFS-registration gate that everything downstream keys off.
+  const afsRegistered = t.AgreementStatus === "Registered";
+  const afsGate = afsRegistered;
+
   const deedStatus = t.DeedRegistrationNo ? "Registered"
     : t.DeedExecutedBy ? "Executed"
     : t.SalesDeedId ? "Drafted"
     : null;
 
-  return [
+  const phases: Phase[] = [
+    // ── Allotment Letter ──────────────────────────────────────────────────
     {
+      key: "allotment",
       title: "Allotment Letter",
-      description:
-        "Issued to the buyer after at least 10% of the total consideration has been received. The buyer signs and returns it; this acknowledgement starts the 30-day Agreement for Sale clock under RERA.",
+      isApplicable: true,
+      description: "Issued to the buyer after at least 10% of the total consideration has been received. The buyer signs and returns it; this acknowledgement starts the 30-day Agreement for Sale clock under RERA.",
       stages: [
         {
           key: "allotmentLetter",
@@ -88,10 +128,13 @@ function buildJourneySections(t: any, agrDone: boolean): JourneySection[] {
         },
       ],
     },
+
+    // ── Sub-Registrar Visit 1 — AFS Registration ─────────────────────────
     {
+      key: "afsVisit1",
       title: "Sub-Registrar Visit 1 — Registering the Agreement for Sale",
-      description:
-        "Before the property deal is legally recognised, the Agreement for Sale must be registered at the Sub-Registrar's Office. First the buyer confirms the stamp duty & registration fees, then both parties attend in person to register the document.",
+      isApplicable: true,
+      description: "The Agreement for Sale must be registered at the Sub-Registrar's Office before the deal is legally recognised. First the buyer confirms the stamp duty & registration fees (via the AFS Query Payment), then both parties attend in person to register the document.",
       stages: [
         {
           key: "afsQP",
@@ -100,61 +143,172 @@ function buildJourneySections(t: any, agrDone: boolean): JourneySection[] {
           path: "/crm/afs-query-payment",
           no: t.AfsQPNo || null,
           status: t.AfsQPStatus || null,
-          isDone: t.AfsQPStatus === "Confirmed" || t.AgreementStatus === "Registered",
-          isLocked: !agrDone,
-          unlockedHint: "Unlocks once the Agreement is executed (step 8 above)",
+          isDone: t.AfsQPStatus === "Confirmed" || afsRegistered,
+          isLocked: !agreementDone,
+          unlockedHint: "Unlocks once the Agreement is executed (Phase 1)",
         },
         {
           key: "afsReg",
           label: "Agreement Registration Visit",
-          sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 1)",
+          sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 1) — Agreement becomes Registered",
           path: "/crm/afs-registry",
           no: t.AfsRegNo || null,
           status: t.AfsRegistryStatus || null,
-          isDone: t.AfsRegistryStatus === "Completed" || t.AgreementStatus === "Registered",
-          isLocked: !agrDone || (t.AfsQPStatus !== "Confirmed" && t.AgreementStatus !== "Registered"),
+          isDone: afsRegistered,
+          isLocked: !agreementDone || (t.AfsQPStatus !== "Confirmed" && !afsRegistered),
           unlockedHint: "Requires Agreement Registration Fees to be Confirmed first",
         },
       ],
     },
+
+    // ── NOC ───────────────────────────────────────────────────────────────
     {
+      key: "noc",
+      title: "No Objection Certificates",
+      isApplicable: true,
+      description: "Once the Agreement for Sale is registered, the legal team obtains No Objection Certificates from the bank (for loan-financed buyers, confirming the lender has no objection) and from the developer organisation (confirming no outstanding dues).",
+      stages: [
+        {
+          key: "bankNoc",
+          label: "No Objection Certificate — Bank",
+          sublabel: "Bank confirms it has no objection to the AFS registration (loan-case NOC)",
+          path: "/crm/noc?nocType=Bank",
+          no: t.BankNocNo || null,
+          status: t.BankNocStatus || null,
+          isDone: t.BankNocStatus === "Issued",
+          isLocked: !afsGate,
+          unlockedHint: "Unlocks once the Agreement for Sale is registered (Visit 1 completed)",
+        },
+        {
+          key: "orgNoc",
+          label: "No Objection Certificate — Organisation",
+          sublabel: "Developer confirms no outstanding dues or objections",
+          path: "/crm/noc?nocType=Organisation",
+          no: t.OrgNocNo || null,
+          status: t.OrgNocStatus || null,
+          isDone: t.OrgNocStatus === "Issued",
+          isLocked: !afsGate,
+          unlockedHint: "Unlocks once the Agreement for Sale is registered (Visit 1 completed)",
+        },
+      ],
+    },
+
+    // ── Possession & Key Handover ─────────────────────────────────────────
+    {
+      key: "possession",
+      title: "Possession & Key Handover",
+      isApplicable: true,
+      description: "Once the AFS is registered and the project receives its Occupancy Certificate, the developer schedules a pre-possession inspection, issues a Possession Notice, and hands over keys.",
+      stages: [
+        {
+          key: "ocCc",
+          label: "OC / CC",
+          sublabel: "Project's Occupancy or Completion Certificate from the authority — a project-level record, not gated on any single booking's progress (the backend has no per-booking gate on this)",
+          path: "/crm/oc-cc",
+          no: null,
+          status: null,
+          isDone: t.OcCcReceived === 1,
+          isLocked: false,
+          unlockedHint: "",
+        },
+        {
+          key: "prePossession",
+          label: "Pre-Possession Inspection",
+          sublabel: "Site inspection and snag list before offering possession to the buyer",
+          path: "/crm/pre-possession",
+          no: null,
+          status: t.PrePossessionStatus || null,
+          isDone: t.PrePossessionStatus === "Ready",
+          isLocked: !afsGate || t.OcCcReceived !== 1,
+          unlockedHint: "Unlocks once AFS is registered and OC/CC is received",
+        },
+        {
+          key: "possessionNotice",
+          label: "Possession Notice",
+          sublabel: "Developer issues notice with offered possession date; buyer acknowledges or disputes",
+          path: "/crm/possession-notice",
+          no: null,
+          status: t.PossessionNoticeStatus || null,
+          isDone: t.PossessionNoticeStatus === "Acknowledged",
+          isLocked: t.PrePossessionStatus !== "Ready",
+          unlockedHint: "Unlocks once Pre-Possession Inspection is Ready",
+        },
+        {
+          key: "handover",
+          label: "Handover",
+          sublabel: isPhysicallyComplete
+            ? "Physical key handover — all NOCs issued, no open snags, no outstanding dues. Project already complete, so this can happen same-day as Sale Deed registration."
+            : "Physical key handover — all NOCs issued, no open snags, no outstanding dues",
+          path: "/crm/handover",
+          no: null,
+          status: t.HandoverStatus || null,
+          isDone: t.HandoverStatus === "Completed",
+          // Mirrors crmHandover.js POST / exactly — all 4 real gates, not
+          // just Possession Notice. Missing any of these would previously
+          // show this stage as unlocked when the actual Handover page
+          // would reject the submission.
+          isLocked: !afsGate
+            || t.PossessionNoticeStatus !== "Acknowledged"
+            || ["Pending", "Approved"].includes(t.BankNocStatus)
+            || ["Pending", "Approved"].includes(t.OrgNocStatus)
+            || t.HasOutstandingDues === 1,
+          unlockedHint: !afsGate
+            ? "Requires the Agreement for Sale to be Registered"
+            : t.PossessionNoticeStatus !== "Acknowledged"
+              ? "Unlocks once the Possession Notice is Acknowledged by the customer"
+              : ["Pending", "Approved"].includes(t.BankNocStatus)
+                ? "Requires the Bank NOC to be Issued first"
+                : ["Pending", "Approved"].includes(t.OrgNocStatus)
+                  ? "Requires the Organisation NOC to be Issued first"
+                  : "Requires all payment milestones to be paid or waived first",
+        },
+      ],
+    },
+
+    // ── Sale Deed ─────────────────────────────────────────────────────────
+    {
+      key: "saleDeed",
       title: "Sale Deed Preparation",
-      description:
-        "After the Agreement for Sale is registered, the legal team prepares the Sale Deed — the document that legally transfers ownership of the property to the buyer. This is typically done closer to the handover date.",
+      isApplicable: true,
+      description: "The Sale Deed is the document that legally conveys ownership of the property to the buyer (s.54, Transfer of Property Act 1882). It can be prepared once the Agreement for Sale is registered."
+        + (isPhysicallyComplete ? " This project is already complete, so it does not have to wait for Handover to finish first." : " Possession/Handover is a separate, parallel track and does not have to precede it."),
       stages: [
         {
           key: "salesDeed",
           label: "Sale Deed",
-          sublabel: "Ownership-transfer document prepared by the legal team",
+          sublabel: "Ownership-transfer document — internal drafting, approvals, execution & registration",
           path: "/crm/sales-deed",
           no: t.DeedNo || null,
           status: deedStatus,
           isDone: !!t.SalesDeedId,
-          isLocked: !agrDone,
-          unlockedHint: "Unlocks once the Agreement is executed (step 8 above)",
+          isLocked: !afsGate,
+          unlockedHint: "Unlocks once the Agreement for Sale is registered (Visit 1 completed)",
         },
       ],
     },
+
+    // ── Sub-Registrar Visit 2 — Sale Deed Registration ───────────────────
     {
+      key: "afsVisit2",
       title: "Sub-Registrar Visit 2 — Registering the Sale Deed",
-      description:
-        "Once the Sale Deed is ready, the same process as Visit 1 repeats for the Sale Deed: confirm the stamp duty & registration fees, then attend in person to register the Sale Deed. After this, the property is legally transferred.",
+      isApplicable: true,
+      description: "Once the Sale Deed is Director Approved: confirm the stamp duty & registration fees (net of any AFS credit), then both parties attend in person to register the Sale Deed. After this, ownership is officially and permanently transferred.",
       stages: [
         {
           key: "queryPayment",
           label: "Sale Deed Registration Fees",
-          sublabel: "Stamp duty & registration fee due before Visit 2",
+          sublabel: "Net stamp duty & registration fee due before Visit 2 (AFS credit applied)",
           path: "/crm/query-payment",
           no: t.QPNo || null,
           status: t.QueryPaymentStatus || null,
           isDone: t.QueryPaymentStatus === "Confirmed",
-          isLocked: !t.SalesDeedId,
-          unlockedHint: "Requires the Sale Deed to be created first",
+          isLocked: !t.SalesDeedId || t.DeedDirectorApprovalStatus !== "Approved",
+          unlockedHint: "Requires the Sale Deed to be Director Approved first",
         },
         {
           key: "registry",
           label: "Sale Deed Registration Visit",
-          sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 2)",
+          sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 2) — ownership transferred",
           path: "/crm/registry",
           no: t.RegNo || null,
           status: t.RegistryStatus || null,
@@ -164,15 +318,18 @@ function buildJourneySections(t: any, agrDone: boolean): JourneySection[] {
         },
       ],
     },
+
+    // ── Post-Registration ─────────────────────────────────────────────────
     {
-      title: "Post-Registration Formalities",
-      description:
-        "Once the Sale Deed is officially registered at the Sub-Registrar's Office, the municipal records are updated to reflect the new owner (Mutation/Khata Transfer) and any outstanding Bank or Organisation approvals are obtained.",
+      key: "mutation",
+      title: "Post-Registration",
+      isApplicable: true,
+      description: "Once the Sale Deed is officially registered, the municipal land records are updated to reflect the new owner (Mutation / Khata Transfer / Dakhil Kharij). This is mandatory under the 2025 government ruling.",
       stages: [
         {
           key: "mutation",
           label: "Property Mutation (Khata Transfer)",
-          sublabel: "Municipal land records updated to the new owner's name",
+          sublabel: "Municipal land records updated to the new owner — mandatory post Sale Deed registration",
           path: "/crm/mutation",
           no: t.MutationNo || null,
           status: t.MutationStatus || null,
@@ -180,73 +337,31 @@ function buildJourneySections(t: any, agrDone: boolean): JourneySection[] {
           isLocked: t.RegistryStatus !== "Completed",
           unlockedHint: "Requires Sale Deed Registration Visit to be Completed first",
         },
-        {
-          key: "bankNoc",
-          label: "No Objection Certificate — Bank",
-          sublabel: "Bank confirms it has no objection to the transfer (loan-case NOC)",
-          path: "/crm/noc",
-          no: t.BankNocNo || null,
-          status: t.BankNocStatus || null,
-          isDone: t.BankNocStatus === "Issued",
-          isLocked: !t.SalesDeedId,
-          unlockedHint: "Requires the Sale Deed to exist first",
-        },
-        {
-          key: "orgNoc",
-          label: "No Objection Certificate — Organisation",
-          sublabel: "Developer confirms no outstanding dues or objections",
-          path: "/crm/noc",
-          no: t.OrgNocNo || null,
-          status: t.OrgNocStatus || null,
-          isDone: t.OrgNocStatus === "Issued",
-          isLocked: false,
-          unlockedHint: "",
-        },
-      ],
-    },
-    {
-      title: "Possession & Key Handover",
-      description:
-        "Once all registrations and formalities are complete, the developer issues a Possession Notice to the buyer with the offered possession date. The buyer acknowledges receipt to confirm key handover.",
-      stages: [
-        {
-          key: "possessionNotice",
-          label: "Possession Notice",
-          sublabel: "Developer issues notice; buyer acknowledges or disputes",
-          path: "/crm/possession-notice",
-          no: null,
-          status: t.PossessionNoticeStatus || null,
-          isDone: t.PossessionNoticeStatus === "Acknowledged",
-          isLocked: t.RegistryStatus !== "Completed",
-          unlockedHint: "Requires Sale Deed Registration Visit to be Completed first",
-        },
       ],
     },
   ];
-}
 
-// ─── Left-panel card status ───────────────────────────────────────────────────
+  // Flat list of every applicable stage across every applicable phase —
+  // the single feed for both the progress dots and the left-panel journey
+  // label, so those two views can never drift out of sync with each other
+  // or with what the detail panel actually shows.
+  const applicableStages = phases.filter((p) => p.isApplicable).flatMap((p) => p.stages);
 
-function getJourneyLabel(t: any): { text: string; done: boolean } {
-  const agrDone = t.FinalExecutionStatus === "Completed";
-  if (!agrDone) {
-    const stepLabel = STEPS[(t.CurrentStep ?? 1) - 1]?.label ?? "Agreement Preparation";
-    return { text: `Agreement: ${stepLabel}`, done: false };
+  const progressChecks = [
+    { label: "Agreement signed", done: agreementDone },
+    ...applicableStages.map((s) => ({ label: s.label, done: s.isDone })),
+  ];
+
+  let journeyLabel: { text: string; done: boolean };
+  if (!agreementDone) {
+    const stepLabel = AGREEMENT_STEPS[(t.CurrentStep ?? 1) - 1]?.label ?? "Agreement Preparation";
+    journeyLabel = { text: `Agreement: ${stepLabel}`, done: false };
+  } else {
+    const pending = applicableStages.find((s) => !s.isDone);
+    journeyLabel = pending ? { text: `${pending.label} pending`, done: false } : { text: "Journey Complete", done: true };
   }
-  const afsRegistered = t.AgreementStatus === "Registered";
-  const postChecks = [
-    { label: "Agreement Registration Fees",  done: t.AfsQPStatus === "Confirmed" || afsRegistered },
-    { label: "Agreement Registration Visit", done: t.AfsRegistryStatus === "Completed" || afsRegistered },
-    { label: "Sale Deed",                    done: !!t.SalesDeedId },
-    { label: "Sale Deed Registration Fees",  done: t.QueryPaymentStatus === "Confirmed" },
-    { label: "Sale Deed Registration Visit", done: t.RegistryStatus === "Completed" },
-    { label: "Property Mutation",            done: t.MutationStatus === "Approved" },
-    { label: "Bank NOC",                     done: t.BankNocStatus === "Issued" },
-    { label: "Organisation NOC",             done: t.OrgNocStatus === "Issued" },
-  ];
-  const pending = postChecks.find((c) => !c.done);
-  if (!pending) return { text: "Journey Complete", done: true };
-  return { text: `${pending.label} pending`, done: false };
+
+  return { isPhysicallyComplete, agreementDone, phases, progressChecks, journeyLabel };
 }
 
 // ─── Status colour map ────────────────────────────────────────────────────────
@@ -269,7 +384,7 @@ const statusColor: Record<string, string> = {
 // ─── Stage row component ──────────────────────────────────────────────────────
 
 const StageRow: React.FC<{
-  stage: PostStage;
+  stage: Stage;
   isLast: boolean;
   bookingId: number;
   navigate: (path: string) => void;
@@ -280,12 +395,10 @@ const StageRow: React.FC<{
 
   return (
     <div className="relative flex gap-4 pb-5 last:pb-0">
-      {/* Connector line */}
       {!isLast && (
         <div className={`absolute left-[15px] top-8 bottom-0 w-0.5 ${isDone ? "bg-green-300" : "bg-border"}`} />
       )}
 
-      {/* State icon */}
       <div className="shrink-0 z-10 mt-1">
         {isDone ? (
           <div className="w-8 h-8 rounded-full bg-green-100 border-2 border-green-400 dark:bg-green-900/40 dark:border-green-600 flex items-center justify-center">
@@ -302,7 +415,6 @@ const StageRow: React.FC<{
         )}
       </div>
 
-      {/* Card */}
       <div className={`flex-1 rounded-xl border transition-colors ${
         isDone
           ? "border-green-200 bg-green-500/[0.04] dark:border-green-900/60 dark:bg-green-950/20"
@@ -330,7 +442,7 @@ const StageRow: React.FC<{
             </div>
           </div>
           <button
-            onClick={() => navigate(`${stage.path}?bookingId=${bookingId}`)}
+            onClick={() => navigate(`${stage.path}${stage.path.includes("?") ? "&" : "?"}bookingId=${bookingId}`)}
             className={`shrink-0 flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
               isDone
                 ? "border-green-300 text-green-700 bg-green-50 hover:bg-green-100 dark:bg-green-900/30 dark:border-green-800 dark:text-green-300"
@@ -347,12 +459,95 @@ const StageRow: React.FC<{
   );
 };
 
+// ─── Phase 1 (Agreement Signing) card ─────────────────────────────────────────
+// Always applicable — the Agreement for Sale + AFS Registration is mandatory
+// for every booking, regardless of project type.
+
+const AgreementPhaseCard: React.FC<{ model: WorkflowModel; t: any; onStepUpdate: (step: string, status: string) => void; canEdit: boolean }> =
+  ({ model, t, onStepUpdate, canEdit }) => {
+  const { agreementDone } = model;
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className={`px-5 py-3.5 border-b border-border flex items-center justify-between gap-3 ${agreementDone ? "bg-green-500/[0.06]" : "bg-primary/[0.04]"}`}>
+        <div>
+          <div className="flex items-center gap-2">
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${agreementDone ? "bg-green-100 border-green-300 text-green-700 dark:bg-green-900/30 dark:border-green-700 dark:text-green-400" : "bg-primary/10 border-primary/30 text-primary"}`}>PHASE 1</span>
+            <h3 className="text-sm font-bold">Agreement Preparation &amp; Signing</h3>
+            {agreementDone && <CheckCircle2 size={14} className="text-green-500" />}
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-0.5">Internal 8-step process to prepare and get the Agreement for Sale signed by both parties</p>
+        </div>
+        <span className={`shrink-0 text-[11px] px-2.5 py-1 rounded-lg border font-semibold ${agreementDone ? "bg-green-100 border-green-300 text-green-700 dark:bg-green-900/30" : "bg-muted/40 border-border text-muted-foreground"}`}>
+          {AGREEMENT_STEPS.filter((s) => t[`${s.key}Status`] === "Completed").length}/{AGREEMENT_STEPS.length} steps
+        </span>
+      </div>
+      <div className="p-5 space-y-0">
+        {AGREEMENT_STEPS.map((s, idx) => {
+          const stepStatus = t[`${s.key}Status`];
+          const done = t[`${s.key}Done`];
+          const isDone = stepStatus === "Completed";
+          const isCurrent = t.CurrentStep === idx + 1;
+          const isLast = idx === AGREEMENT_STEPS.length - 1;
+          return (
+            <div key={s.key} className="relative flex gap-4 pb-4 last:pb-0">
+              {!isLast && (
+                <div className={`absolute left-[15px] top-8 bottom-0 w-0.5 ${isDone ? "bg-green-300" : "bg-border"}`} />
+              )}
+              <div className="shrink-0 z-10 mt-1">
+                {isDone ? (
+                  <div className="w-8 h-8 rounded-full bg-green-100 border-2 border-green-400 dark:bg-green-900/40 dark:border-green-600 flex items-center justify-center">
+                    <CheckCircle2 size={15} className="text-green-600 dark:text-green-400" />
+                  </div>
+                ) : (
+                  <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-[11px] font-bold ${isCurrent ? "bg-primary text-primary-foreground border-primary" : "bg-muted border-border text-muted-foreground/60"}`}>
+                    {idx + 1}
+                  </div>
+                )}
+              </div>
+              <div className={`flex-1 rounded-xl border px-4 py-2.5 flex items-center justify-between gap-3 ${
+                isDone ? "border-green-200 bg-green-500/[0.04] dark:border-green-900/50"
+                : isCurrent ? "border-primary/40 bg-primary/[0.04]"
+                : "border-border bg-muted/10 opacity-60"
+              }`}>
+                <div>
+                  <div className={`text-sm font-semibold ${isDone ? "text-green-700 dark:text-green-300" : isCurrent ? "text-foreground" : "text-muted-foreground"}`}>
+                    {s.label}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                    {isDone
+                      ? <span className="text-green-600 dark:text-green-400">{done ? `Completed ${String(done).slice(0, 10)}` : "Completed"}</span>
+                      : isCurrent
+                      ? <span className="text-primary flex items-center gap-1"><ChevronRight size={10} /> {s.hint || "In progress"}</span>
+                      : "Not started yet"}
+                  </div>
+                </div>
+                {canEdit && !isDone && MANUAL_STEPS.has(s.key) && isCurrent && (
+                  <button
+                    onClick={() => onStepUpdate(s.key, "Completed")}
+                    className="text-xs px-3 py-1.5 bg-primary text-primary-foreground border border-primary rounded-lg font-semibold hover:bg-primary/90 whitespace-nowrap shrink-0"
+                  >
+                    Mark Done
+                  </button>
+                )}
+                {!isDone && !MANUAL_STEPS.has(s.key) && isCurrent && (
+                  <span className="text-[10px] text-muted-foreground bg-muted/60 border border-border rounded px-2 py-1 whitespace-nowrap shrink-0">Auto-synced</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 const CrmLegalMilestones: React.FC = () => {
   const rights = usePageRights("crm-legal-milestones");
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [sp, setSp] = useSearchParams();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [newDialog, setNewDialog] = useState(false);
   const [bookingId, setBookingId] = useState("");
@@ -368,6 +563,15 @@ const CrmLegalMilestones: React.FC = () => {
     queryFn: fetchBookings,
     staleTime: 5 * 60_000,
   });
+
+  // Auto-select from ?bookingId= URL param (deep-link from stage buttons on this page)
+  useEffect(() => {
+    const urlBookingId = sp.get("bookingId");
+    if (!urlBookingId || !(trackers as any[]).length) return;
+    const match = (trackers as any[]).find((t: any) => String(t.BookingId) === urlBookingId);
+    if (match) setSelectedId(match.Id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp, trackers]);
 
   const selected = (trackers as any[]).find((t: any) => t.Id === selectedId);
   const trackedBookingIds = new Set((trackers as any[]).map((t: any) => t.BookingId));
@@ -410,15 +614,14 @@ const CrmLegalMilestones: React.FC = () => {
     }
   };
 
-  const agrDone = selected?.FinalExecutionStatus === "Completed" || selected?.AgreementStatus === "Registered";
-  const journeySections = selected ? buildJourneySections(selected, agrDone) : [];
+  const model = selected ? buildWorkflowModel(selected) : null;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Legal Journey Overview"]} />
       <CrmShell
         title="Legal Journey Overview"
-        subtitle="The complete property transaction lifecycle — from Agreement signing to Mutation — for every booking"
+        subtitle="The complete property transaction lifecycle — from Agreement signing to Mutation — for every booking, dynamically laid out per its own project's sale process"
         action={
           <div className="flex items-center gap-3">
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
@@ -443,20 +646,25 @@ const CrmLegalMilestones: React.FC = () => {
             ) : trackers.length === 0 ? (
               <div className="p-4 text-center text-muted-foreground text-sm">No legal workflows started</div>
             ) : (trackers as any[]).map((t: any) => {
-              const { text, done } = getJourneyLabel(t);
-              const agrDoneCard = t.FinalExecutionStatus === "Completed" || t.AgreementStatus === "Registered";
+              const m = buildWorkflowModel(t);
+              const { text, done } = m.journeyLabel;
               return (
                 <button
                   key={t.Id}
-                  onClick={() => setSelectedId(t.Id)}
+                  onClick={() => { setSelectedId(t.Id); setSp({ bookingId: String(t.BookingId) }, { replace: true }); }}
                   className={`w-full text-left rounded-lg border overflow-hidden transition-colors ${
                     selectedId === t.Id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/20"
                   }`}
                 >
                   <div className="flex">
-                    <div className={`w-[3px] shrink-0 self-stretch ${done ? "bg-green-500" : agrDoneCard ? "bg-blue-500" : "bg-amber-400"}`} />
+                    <div className={`w-[3px] shrink-0 self-stretch ${done ? "bg-green-500" : m.agreementDone ? "bg-blue-500" : "bg-amber-400"}`} />
                     <div className="flex-1 min-w-0 p-3 space-y-1">
-                      <div className="text-sm font-semibold truncate">{t.ApplicantName}</div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="text-sm font-semibold truncate">{t.ApplicantName}</div>
+                        {m.isPhysicallyComplete && (
+                          <span className="shrink-0 text-[9px] px-1.5 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="Project already complete — Handover doesn't have to wait on the Sale Deed">Completed</span>
+                        )}
+                      </div>
                       <div className="text-[11px] text-muted-foreground">{t.BookingNo} · {t.UnitNo}</div>
                       <div className={`text-[11px] font-medium flex items-center gap-1 ${done ? "text-green-600" : "text-muted-foreground"}`}>
                         {done ? <CheckCircle2 size={10} /> : <Circle size={10} />}
@@ -471,7 +679,7 @@ const CrmLegalMilestones: React.FC = () => {
 
           {/* ── Right panel: journey detail ── */}
           <div className="flex-1 overflow-y-auto thin-scroll">
-            {!selected ? (
+            {!selected || !model ? (
               <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
                 Select a booking on the left to view its legal journey
               </div>
@@ -481,7 +689,14 @@ const CrmLegalMilestones: React.FC = () => {
                 <div className="rounded-xl border border-border bg-card overflow-hidden">
                   <div className="px-5 py-4 flex items-center justify-between gap-3 border-b border-border bg-muted/20">
                     <div className="min-w-0">
-                      <h2 className="font-heading font-bold text-[15px] truncate">{selected.ApplicantName}</h2>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2 className="font-heading font-bold text-[15px] truncate">{selected.ApplicantName}</h2>
+                        {model.isPhysicallyComplete && (
+                          <span className="shrink-0 text-[10px] px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="Project already complete — Handover doesn't have to wait on the Sale Deed. Agreement/AFS Registration is still required as normal.">
+                            Project Completed
+                          </span>
+                        )}
+                      </div>
                       <div className="text-[11px] text-muted-foreground mt-0.5">{selected.BookingNo} · {selected.UnitNo}</div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 flex-wrap">
@@ -506,19 +721,13 @@ const CrmLegalMilestones: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                  {/* Overall progress dots */}
+                  {/* Overall progress dots — driven entirely by model.progressChecks,
+                      which already excludes not-applicable stages, so this can
+                      never show a false "AFS pending" pill for a Ready-to-Move booking. */}
                   <div className="px-5 py-3 flex items-center gap-2">
                     <span className="text-[11px] text-muted-foreground font-medium shrink-0">Journey progress:</span>
                     <div className="flex items-center gap-1 flex-wrap">
-                      {[
-                        { label: "Agreement signed", done: agrDone },
-                        { label: "AFS registered", done: selected.AfsRegistryStatus === "Completed" || selected.AgreementStatus === "Registered" },
-                        { label: "Sale Deed", done: !!selected.SalesDeedId },
-                        { label: "Deed registered", done: selected.RegistryStatus === "Completed" },
-                        { label: "Mutation done", done: selected.MutationStatus === "Approved" },
-                        { label: "NOC obtained", done: selected.BankNocStatus === "Issued" && selected.OrgNocStatus === "Issued" },
-                        { label: "Possession", done: selected.PossessionNoticeStatus === "Acknowledged" },
-                      ].map((p) => (
+                      {model.progressChecks.map((p) => (
                         <span key={p.label} title={p.label}
                           className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${
                             p.done ? "bg-green-100 border-green-300 text-green-700 dark:bg-green-900/30 dark:border-green-700 dark:text-green-300" : "bg-muted/40 border-border text-muted-foreground/60"
@@ -531,112 +740,48 @@ const CrmLegalMilestones: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Phase 1 — Agreement Signing */}
-                <div className="rounded-xl border border-border bg-card overflow-hidden">
-                  <div className={`px-5 py-3.5 border-b border-border flex items-center justify-between gap-3 ${agrDone ? "bg-green-500/[0.06]" : "bg-primary/[0.04]"}`}>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${agrDone ? "bg-green-100 border-green-300 text-green-700 dark:bg-green-900/30 dark:border-green-700 dark:text-green-400" : "bg-primary/10 border-primary/30 text-primary"}`}>PHASE 1</span>
-                        <h3 className="text-sm font-bold">Agreement Preparation &amp; Signing</h3>
-                        {agrDone && <CheckCircle2 size={14} className="text-green-500" />}
-                      </div>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">Internal 8-step process to prepare and get the Agreement for Sale signed by both parties</p>
-                    </div>
-                    <span className={`shrink-0 text-[11px] px-2.5 py-1 rounded-lg border font-semibold ${agrDone ? "bg-green-100 border-green-300 text-green-700 dark:bg-green-900/30" : "bg-muted/40 border-border text-muted-foreground"}`}>
-                      {STEPS.filter((s) => selected[`${s.key}Status`] === "Completed").length}/{STEPS.length} steps
-                    </span>
-                  </div>
-                  <div className="p-5 space-y-0">
-                    {STEPS.map((s, idx) => {
-                      const stepStatus = selected[`${s.key}Status`];
-                      const due = selected[`${s.key}Due`];
-                      const done = selected[`${s.key}Done`];
-                      const isDone = stepStatus === "Completed";
-                      const isCurrent = selected.CurrentStep === idx + 1;
-                      const isLast = idx === STEPS.length - 1;
-                      return (
-                        <div key={s.key} className="relative flex gap-4 pb-4 last:pb-0">
-                          {!isLast && (
-                            <div className={`absolute left-[15px] top-8 bottom-0 w-0.5 ${isDone ? "bg-green-300" : "bg-border"}`} />
-                          )}
-                          <div className="shrink-0 z-10 mt-1">
-                            {isDone ? (
-                              <div className="w-8 h-8 rounded-full bg-green-100 border-2 border-green-400 dark:bg-green-900/40 dark:border-green-600 flex items-center justify-center">
-                                <CheckCircle2 size={15} className="text-green-600 dark:text-green-400" />
-                              </div>
-                            ) : (
-                              <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-[11px] font-bold ${isCurrent ? "bg-primary text-primary-foreground border-primary" : "bg-muted border-border text-muted-foreground/60"}`}>
-                                {idx + 1}
-                              </div>
-                            )}
-                          </div>
-                          <div className={`flex-1 rounded-xl border px-4 py-2.5 flex items-center justify-between gap-3 ${
-                            isDone ? "border-green-200 bg-green-500/[0.04] dark:border-green-900/50"
-                            : isCurrent ? "border-primary/40 bg-primary/[0.04]"
-                            : "border-border bg-muted/10 opacity-60"
-                          }`}>
-                            <div>
-                              <div className={`text-sm font-semibold ${isDone ? "text-green-700 dark:text-green-300" : isCurrent ? "text-foreground" : "text-muted-foreground"}`}>
-                                {s.label}
-                              </div>
-                              <div className="text-[11px] text-muted-foreground mt-0.5">
-                                {isDone
-                                  ? <span className="text-green-600 dark:text-green-400">{done ? `Completed ${String(done).slice(0, 10)}` : "Completed"}</span>
-                                  : isCurrent
-                                  ? <span className="text-primary flex items-center gap-1"><ChevronRight size={10} /> {s.hint || "In progress"}</span>
-                                  : "Not started yet"}
-                              </div>
-                            </div>
-                            {rights.canEdit && !isDone && MANUAL_STEPS.has(s.key) && isCurrent && (
-                              <button
-                                onClick={() => handleStepUpdate(s.key, "Completed")}
-                                className="text-xs px-3 py-1.5 bg-primary text-primary-foreground border border-primary rounded-lg font-semibold hover:bg-primary/90 whitespace-nowrap shrink-0"
-                              >
-                                Mark Done
-                              </button>
-                            )}
-                            {!isDone && !MANUAL_STEPS.has(s.key) && isCurrent && (
-                              <span className="text-[10px] text-muted-foreground bg-muted/60 border border-border rounded px-2 py-1 whitespace-nowrap shrink-0">Auto-synced</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                {/* Phase 1 — Agreement Signing: the full 8-step tracker,
+                    driven by the model. Always applicable. */}
+                <AgreementPhaseCard model={model} t={selected} onStepUpdate={handleStepUpdate} canEdit={rights.canEdit} />
 
-                {/* Post-agreement phases */}
-                {!agrDone ? (
+                {/* Phase 2 onward */}
+                {!model.agreementDone ? (
                   <div className="rounded-xl border border-border bg-card p-5 flex items-start gap-3">
                     <div className="w-8 h-8 shrink-0 rounded-full bg-muted/60 border-2 border-border flex items-center justify-center">
                       <Lock size={13} className="text-muted-foreground/50" />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-muted-foreground">Phases 2–6 are locked</p>
+                      <p className="text-sm font-semibold text-muted-foreground">Phases 2 onward are locked</p>
                       <p className="text-xs text-muted-foreground mt-0.5">Registration, Sale Deed, Mutation and NOC steps will appear here once Phase 1 (Agreement Signing) reaches Final Execution.</p>
                     </div>
                   </div>
                 ) : (
-                  journeySections.map((section, sIdx) => (
-                    <div key={section.title} className="rounded-xl border border-border bg-card overflow-hidden">
+                  model.phases.map((phase, sIdx) => (
+                    <div key={phase.key} className="rounded-xl border border-border bg-card overflow-hidden">
                       <div className="px-5 py-3.5 border-b border-border bg-muted/20 flex items-start gap-3">
-                        <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-muted/60 border-border text-muted-foreground mt-0.5">PHASE {sIdx + 2}</span>
+                        <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border mt-0.5 ${
+                          phase.isApplicable ? "bg-muted/60 border-border text-muted-foreground" : "bg-emerald-100 border-emerald-300 text-emerald-700 dark:bg-emerald-900/30 dark:border-emerald-700"
+                        }`}>PHASE {sIdx + 2}</span>
                         <div>
-                          <h3 className="text-sm font-bold">{section.title}</h3>
-                          <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">{section.description}</p>
+                          <h3 className="text-sm font-bold">{phase.title}</h3>
+                          <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                            {phase.isApplicable ? phase.description : phase.notApplicableReason}
+                          </p>
                         </div>
                       </div>
-                      <div className="p-5 space-y-0">
-                        {section.stages.map((stage, idx) => (
-                          <StageRow
-                            key={stage.key}
-                            stage={stage}
-                            isLast={idx === section.stages.length - 1}
-                            bookingId={selected.BookingId}
-                            navigate={navigate}
-                          />
-                        ))}
-                      </div>
+                      {phase.isApplicable && (
+                        <div className="p-5 space-y-0">
+                          {phase.stages.map((stage, idx) => (
+                            <StageRow
+                              key={stage.key}
+                              stage={stage}
+                              isLast={idx === phase.stages.length - 1}
+                              bookingId={selected.BookingId}
+                              navigate={navigate}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -662,7 +807,7 @@ const CrmLegalMilestones: React.FC = () => {
               </select>
               {startableBookings.length === 0 && (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Every booking either already has a legal workflow or has no agreement yet — trackers start automatically once an agreement is created.
+                  Every booking either already has a legal workflow or has no agreement yet — trackers start automatically once an agreement (or, for Ready-to-Move units, a Sale Deed) is created.
                 </p>
               )}
             </div>

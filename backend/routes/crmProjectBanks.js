@@ -39,7 +39,7 @@ router.get("/", requirePageRight("crm-project-banks", "view"), async (req, res) 
 //      to ANY project at all. A bank tagged elsewhere must stay invisible
 //      here even though this Project itself has no tags of its own —
 //      "untagged" is the fallback pool, not "everything".
-router.get("/for-project/:projectId", requirePageRight("crm-project-banks", "view"), async (req, res) => {
+router.get("/for-project/:projectId", async (req, res) => {
   try {
     const pool = getPool();
     const projectId = parseInt(req.params.projectId);
@@ -67,14 +67,14 @@ router.get("/for-project/:projectId", requirePageRight("crm-project-banks", "vie
       return res.json(rows.recordset.filter((r) => r.BStatus === 1).map(({ BId, BName }) => ({ BId, BName })));
     }
 
-    const untagged = await pool.request().query(`
+    // No banks are tagged to this project — show ALL active company banks
+    const allBanks = await pool.request().query(`
       SELECT ah.LHeadId AS BId, ah.LHeadName AS BName
       FROM dbo.AccountHeadMaster ah
       WHERE ah.LHeadType = 'B' AND ah.LHeadStatus = 1
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmProjectBank pb WHERE pb.BankLHeadId = ah.LHeadId AND pb.IsActive = 1)
       ORDER BY ah.LHeadName
     `);
-    res.json(untagged.recordset);
+    res.json(allBanks.recordset);
   } catch (e) {
     console.error("[crm-project-banks] GET /for-project error:", e.message);
     res.status(500).json({ error: e.message });

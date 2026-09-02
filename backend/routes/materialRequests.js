@@ -222,6 +222,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
     const result = await pool.request().query(`
       SELECT  img.M_Id,
               img.M_Name,
+              img.M_Type,
               grp.M_Name AS M_Group,
               ${hasUOM ? "img.M_UOM AS DefaultUOM," : "NULL AS DefaultUOM,"}
               uom.UOMName  AS DefaultUOMName,
@@ -237,7 +238,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
         ${godownFilter}
       ${hasUOM ? "LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = img.M_UOM" : "LEFT JOIN dbo.UOMMaster uom ON 1=0"}
       WHERE (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
-      GROUP BY img.M_Id, img.M_Name, grp.M_Name
+      GROUP BY img.M_Id, img.M_Name, img.M_Type, grp.M_Name
                ${hasUOM ? ", img.M_UOM" : ""},
                uom.UOMName, uom.Symbol
       ORDER BY img.M_Name

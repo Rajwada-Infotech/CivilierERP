@@ -8,6 +8,12 @@ export interface PickableItem {
   itemType?: string;
 }
 
+const TAB_LABELS: Record<"Goods" | "Service" | "FixedAsset", string> = {
+  Goods: "Goods",
+  Service: "Service",
+  FixedAsset: "Fixed Asset",
+};
+
 export function ItemPicker({
   items,
   value,
@@ -21,7 +27,7 @@ export function ItemPicker({
 }) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
-  const [tab, setTab] = React.useState<"Goods" | "Service" | "Other">("Goods");
+  const [tab, setTab] = React.useState<"Goods" | "Service" | "FixedAsset">("Goods");
   const [pos, setPos] = React.useState({ top: 0, left: 0, width: 0 });
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
@@ -66,13 +72,13 @@ export function ItemPicker({
   }, [open, updatePosition]);
 
   const byType = React.useMemo(() => {
-    const groups: Record<"Goods" | "Service" | "Other", PickableItem[]> = {
+    const groups: Record<"Goods" | "Service" | "FixedAsset", PickableItem[]> = {
       Goods: [],
       Service: [],
-      Other: [],
+      FixedAsset: [],
     };
     for (const item of items) {
-      const bucket = item.itemType === "Goods" ? "Goods" : item.itemType === "Service" ? "Service" : "Other";
+      const bucket = item.itemType === "Goods" ? "Goods" : item.itemType === "Service" ? "Service" : "FixedAsset";
       groups[bucket].push(item);
     }
     return groups;
@@ -83,8 +89,8 @@ export function ItemPicker({
     if (byType.Goods.length > 0) return;
     if (byType.Service.length > 0) {
       setTab("Service");
-    } else if (byType.Other.length > 0) {
-      setTab("Other");
+    } else if (byType.FixedAsset.length > 0) {
+      setTab("FixedAsset");
     }
   }, [byType]);
 
@@ -116,7 +122,7 @@ export function ItemPicker({
             className="z-[100] bg-card border border-border rounded-xl shadow-xl overflow-hidden"
           >
             <div className="flex border-b border-border">
-              {(["Goods", "Service", "Other"] as const).map((t) => (
+              {(["Goods", "Service", "FixedAsset"] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -127,7 +133,7 @@ export function ItemPicker({
                       : "text-muted-foreground hover:text-foreground border-b-2 border-transparent"
                   }`}
                 >
-                  {t} ({byType[t].length})
+                  {TAB_LABELS[t]} ({byType[t].length})
                 </button>
               ))}
             </div>

@@ -588,16 +588,8 @@ class ReceiptError extends Error {
 // must already be Paid or Waived first (always true for milestone #1, the
 // only one the auto-booking caller ever targets, since it has no earlier
 // milestone to check against).
-// enforceBankMandate defaults true for every direct caller (POST /:id/receipts
-// below), and — now that CrmApplication.tsx's Details step actually captures
-// a Payment Details section (Token Type/Value, Payment Mode, Deposit Bank) —
-// also true for createCrmBookingRecord's auto-sync (crmEntityCreation.js).
-// Still wrapped in that caller's own try/catch, so a genuinely missing bank
-// (e.g. an Application submitted before this field existed) fails the
-// auto-receipt-sync alone rather than blocking Booking creation itself;
-// staff can then record it manually through the mandate-enforced path like
-// any other receipt.
-async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, actorEmail, { enforceBankMandate = true } = {}) {
+// DepositBankId is always optional — callers pass it when known, omit when not.
+async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, actorEmail, _opts = {}) {
   const amount = parseFloat(data.Amount);
   if (!amount || amount <= 0) throw new ReceiptError("Amount must be greater than 0");
 
@@ -617,13 +609,8 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
   const activeErr = await requireActiveBooking(pool, targetRow.BookingId);
   if (activeErr) throw new ReceiptError(activeErr);
 
-  if (enforceBankMandate) {
-    const tagged = await pool.request().input("pid", sql.Int, targetRow.ProjectId)
-      .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmProjectBank WHERE ProjectId = @pid AND IsActive = 1");
-    if (tagged.recordset[0].Cnt > 0 && !data.DepositBankId) {
-      throw new ReceiptError("Deposit bank is required for this project");
-    }
-  }
+  // DepositBankId is optional — staff may not always know which bank account
+  // received the cheque/cash at the time of entry.
 
   const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
     .query(`
@@ -1385,15 +1372,7 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
     if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
     const booking = bkRes.recordset[0];
 
-    // Same rule as a milestone payment: a deposit against a project with one
-    // or more tagged bank accounts must say which one it landed in. A
-    // project with nothing tagged falls back to the open company bank
-    // list, so nothing is mandated there.
-    const tagged = await pool.request().input("pid", sql.Int, booking.ProjectId)
-      .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmProjectBank WHERE ProjectId = @pid AND IsActive = 1");
-    if (tagged.recordset[0].Cnt > 0 && !b.DepositBankId) {
-      return res.status(400).json({ error: "Deposit bank is required for this project" });
-    }
+    // DepositBankId is optional — record it when provided, skip when not.
 
     const actorEmail = req.user?.email || req.user?.name || null;
     const { createReceivedPaymentInternal, invalidateReceivedPaymentWorkflowCaches } = require("./receivedPayment");

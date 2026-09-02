@@ -328,11 +328,16 @@ async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
 
 /**
  * Auto-start the Legal Milestone tracker for a booking the instant it has
- * an agreement — mirrors POST /api/crm/legal-milestones' own rule (an
- * agreement must exist first) and its MilestoneNo scheme. No-op if a
- * tracker already exists for this booking (UNIQUE BookingId) or the
- * booking has no agreement yet. Idempotent/race-safe like the sibling
- * maybeAutoCreate* helpers — safe to call from multiple trigger points.
+ * an agreement OR a sale deed — mirrors POST /api/crm/legal-milestones' own
+ * rule and its MilestoneNo scheme. The sale-deed trigger exists because a
+ * Ready-to-Move booking never gets an Agreement at all (the developer
+ * executes the Sale Deed directly — see crmSalesDeed.js POST /) and without
+ * it this tracker, and the whole Legal Journey Overview page, would never
+ * show that booking at all — NOC/Possession/Mutation would have no visible
+ * home for staff to track from. No-op if a tracker already exists for this
+ * booking (UNIQUE BookingId) or neither an agreement nor a deed exists yet.
+ * Idempotent/race-safe like the sibling maybeAutoCreate* helpers — safe to
+ * call from multiple trigger points.
  */
 async function maybeAutoCreateLegalMilestone(pool, bookingId, actorUserId) {
   const existing = await pool.request().input("bid", sql.Int, bookingId)
@@ -341,7 +346,11 @@ async function maybeAutoCreateLegalMilestone(pool, bookingId, actorUserId) {
 
   const agr = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
-  if (!agr.recordset.length) return null;
+  if (!agr.recordset.length) {
+    const deed = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
+    if (!deed.recordset.length) return null;
+  }
 
   const milestoneNo = "LGL-" + Date.now().toString(36).toUpperCase().slice(-7);
   try {
@@ -359,6 +368,51 @@ async function maybeAutoCreateLegalMilestone(pool, bookingId, actorUserId) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) return null;
     throw e;
   }
+}
+
+/**
+ * Shared project-status lookup — used only to decide whether Handover must
+ * complete BEFORE a Sale Deed can be created (crmSalesDeed.js POST /).
+ *
+ * CORRECTION: an earlier version of this helper also let "Ready-to-Move"
+ * (or a project Timeline Status of "Completed") skip the Agreement for Sale
+ * / AFS Registration requirement entirely, on the theory that ownership
+ * legally vests on the Sale Deed rather than the Agreement (Supreme Court
+ * dicta on s.54 TPA 1882). That was wrong for this business: an Agreement
+ * for Sale, registered at the Sub-Registrar (AFS), is REQUIRED for every
+ * booking regardless of the project's construction state — no exception.
+ * Legal theory about when title *could* validly transfer doesn't override
+ * how this company actually runs a sale. Do not resurrect that bypass here
+ * or in any of Sale Deed / NOC / Pre-Possession / Handover.
+ *
+ * What legitimately still varies by project state is only physical
+ * possession timing: a project already complete (explicitly tagged
+ * "ReadyToMove", or its Timeline Status has reached "Completed") doesn't
+ * need Handover to finish before the Sale Deed is drafted, because the unit
+ * is already built and keys can go out same-day as registration. A project
+ * still tagged "UnderConstruction" (and not yet Completed) does need
+ * Handover to finish first. Every other gate in the app (Agreement
+ * Registered, AFS Query Payment, NOC, Pre-Possession) is unaffected by this
+ * and must stay identical for both.
+ */
+async function getProjectSaleGate(pool, bookingId) {
+  const row = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 proj.entity_type AS ProjectType, proj.status AS ProjectStatus
+    FROM dbo.CrmBooking b
+    LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
+    WHERE b.Id = @bid
+  `);
+  const r = row.recordset[0] || {};
+  const projectType = r.ProjectType || null;
+  const projectStatus = r.ProjectStatus || null;
+  const isPhysicallyComplete = projectType === "ReadyToMove" || projectStatus === "Completed";
+  return {
+    projectType,
+    projectStatus,
+    isPhysicallyComplete,
+    // Only meaningful for the Handover-before-Sale-Deed gate.
+    requiresHandoverBeforeDeed: projectType === "UnderConstruction" && !isPhysicallyComplete,
+  };
 }
 
 /**
@@ -1071,6 +1125,7 @@ module.exports = {
   maybeAutoCreateAgreement,
   maybeAutoCreateLegalMilestone,
   maybeAutoCreateSalesDeed,
+  getProjectSaleGate,
   maybeAutoCreateBrokerage,
   maybeUnlockBrokerageOnAgreementExecuted,
   proposeAgreementDate,

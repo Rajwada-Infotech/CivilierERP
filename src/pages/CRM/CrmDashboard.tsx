@@ -213,7 +213,7 @@ const ThisWeekStrip: React.FC<{ data: any[] }> = ({ data }) => {
                 </button>
               )}
               {day.MilestonesDue > 0 && (
-                <button onClick={() => navigate("/crm/payment-milestones")}
+                <button onClick={() => navigate("/crm/payments")}
                   className="w-full flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded px-1 py-0.5 hover:opacity-80">
                   <IndianRupee size={9} /> {day.MilestonesDue}
                 </button>

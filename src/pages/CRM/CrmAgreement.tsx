@@ -829,7 +829,7 @@ const CrmAgreement: React.FC = () => {
       if (action === "mark-executed") {
         promptNextStep(navigate, "Agreement executed — Legal Milestones and NOC can now begin.", "/crm/legal-milestones", "Go to Legal Milestones");
       } else if (action === "mark-registered") {
-        promptNextStep(navigate, "Agreement registered — Sales Deed can now be created.", "/crm/sales-deed", "Go to Sales Deed");
+        promptNextStep(navigate, "Agreement registered — you may now request NOC and begin the possession process.", "/crm/noc", "Go to NOC");
       }
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -1340,6 +1340,10 @@ const CrmAgreement: React.FC = () => {
                     {detail.agreement?.Status === CrmStatus.EXECUTED && (
                       isBookingCancelled(detail.agreement) ? (
                         <span title="Booking is cancelled — cannot mark registered" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
+                          Mark Registered
+                        </span>
+                      ) : detail.agreement?.AfsRegistryStatus !== "Completed" ? (
+                        <span title="AFS Registry (the Sub-Registrar Visit 1 tracker) must be marked Completed first" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
                           Mark Registered
                         </span>
                       ) : (
