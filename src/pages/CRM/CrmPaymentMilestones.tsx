@@ -96,9 +96,8 @@ const CrmPaymentMilestones: React.FC = () => {
   const rights = usePageRights("crm-payments");
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [sp] = useSearchParams();
-  const bkgParam = sp.get("bookingId") || "";
-  const [selectedBookingId, setSelectedBookingId] = useState(bkgParam);
+  const [sp, setSp] = useSearchParams();
+  const selectedBookingId = sp.get("bookingId") || "";
   const [editingId, setEditingId] = useState<number | null>(null);
   const [payForm, setPayForm] = useState({ AmountPaid: "", PaidDate: "", PaymentMode: "", TransactionRef: "", Remarks: "", DepositBankId: "" });
   const [saving, setSaving] = useState(false);
@@ -533,7 +532,7 @@ const CrmPaymentMilestones: React.FC = () => {
         <div className="flex gap-3 items-end flex-wrap">
           <div className="flex-1 min-w-64">
             <label className="text-xs text-muted-foreground block mb-1">Select Booking</label>
-            <select value={selectedBookingId} onChange={(e) => setSelectedBookingId(e.target.value)}
+            <select value={selectedBookingId} onChange={(e) => setSp(e.target.value ? { bookingId: e.target.value } : {}, { replace: true })}
               className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
               <option value="">— Choose a booking —</option>
               {(bookings as any[]).map((b: any) => (
@@ -814,7 +813,7 @@ const CrmPaymentMilestones: React.FC = () => {
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs text-muted-foreground block mb-1">
-                    Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project` : ""}
+                    Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project` : ""} <span className="text-muted-foreground/60">(optional)</span>
                   </label>
                   <select value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
@@ -849,7 +848,7 @@ const CrmPaymentMilestones: React.FC = () => {
               <button onClick={() => setEditingId(null)}
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleRecordPayment}
-                disabled={saving || !!(payForm.AmountPaid && bankOptions.length > 0 && !payForm.DepositBankId)}
+                disabled={saving}
                 className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
                 {saving ? "Submitting..." : "Submit for Approval"}
               </button>
@@ -965,7 +964,7 @@ const CrmPaymentMilestones: React.FC = () => {
               <button onClick={() => setOnAccountDialog(false)}
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleDepositOnAccount}
-                disabled={saving || !onAccountForm.Amount || (bankOptions.length > 0 && !onAccountForm.DepositBankId)}
+                disabled={saving || !onAccountForm.Amount}
                 className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
                 {saving ? "Submitting..." : "Submit for Approval"}
               </button>

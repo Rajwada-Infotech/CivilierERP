@@ -78,6 +78,35 @@ router.get("/booking/:bookingId", requirePageRight("crm-query-payment", "view"),
   }
 });
 
+// GET /eligible-bookings — bookings whose Sale Deed is Director Approved and
+// don't have Query Payment tracking started yet. Replaces the generic
+// crm-bookings + client-side filter the dialog used to rely on.
+// MUST be registered before GET /:id — Express matches routes in
+// registration order, and ":id" would otherwise swallow this literal path
+// (treating "eligible-bookings" as the :id value), making this handler
+// completely unreachable. (That was a live, confirmed bug: this endpoint
+// 404'd with "Query Payment not found" on every call before this fix.)
+router.get("/eligible-bookings", requirePageRight("crm-query-payment", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
+             sd.DeedNo, sd.Id AS SalesDeedId
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id AND sd.DirectorApprovalStatus = 'Approved'
+      WHERE b.Status <> 'Cancelled'
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmQueryPayment WHERE BookingId = b.Id)
+      ORDER BY b.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-query-payment] eligible-bookings error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/:id", requirePageRight("crm-query-payment", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -111,10 +140,16 @@ router.post("/", requirePageRight("crm-query-payment", "create"), async (req, re
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    // Stamp duty amount is locked only after Director Approval (both internal
+    // and customer review complete). Communicating the amount before that risks
+    // the customer paying the wrong figure.
     const deed = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
+      .query("SELECT TOP 1 Id, DirectorApprovalStatus FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC");
     if (!deed.recordset.length) {
-      return res.status(400).json({ error: "Query Payment requires a Sales Deed to exist for this booking first (that's where the stamp duty / registration fee amount comes from)" });
+      return res.status(400).json({ error: "Query Payment requires a Sales Deed to exist for this booking first (that's where the stamp duty / registration fee comes from)" });
+    }
+    if (deed.recordset[0].DirectorApprovalStatus !== "Approved") {
+      return res.status(400).json({ error: "Query Payment can only be started after the Sales Deed is Director Approved — the stamp duty amount must be finalised before communicating it to the customer" });
     }
 
     const qpNo = await getNextDocNumber(pool, "QP", "QP");

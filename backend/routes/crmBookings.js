@@ -111,6 +111,7 @@ const BOOKING_SELECT = `
     -- Master is immediately reflected on every booking without a data migration.
     -- The stored snapshot column is the COALESCE fallback for legacy rows only.
     COALESCE(proj.name,     b.ProjectName) AS ProjectName,
+    proj.entity_type AS ProjectType,
     b.CompanyId,
     COALESCE(um.UnitName,   b.UnitNo)    AS UnitNo,
     COALESCE(blk.BlockName, b.BlockName) AS BlockName,
@@ -170,7 +171,13 @@ const BOOKING_SELECT = `
   LEFT JOIN dbo.Users cu ON cu.id = b.CreatedBy
   LEFT JOIN dbo.CrmPaymentPlanTemplate pp ON pp.Id = b.PaymentPlanId
   LEFT JOIN dbo.enterprise comp ON comp.id = b.CompanyId AND comp.business_type = 'C'
-  LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
+  OUTER APPLY (
+    SELECT TOP 1 Id, SeniorApprovalStatus, CustomerApprovalStatus,
+                 AgreementDate, DateApprovalStatus, Status,
+                 AfsStampDuty, AfsRegistrationFee
+    FROM dbo.CrmAgreement
+    WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+  ) ag
 `;
 
 // GET / â€” all bookings. By default, Cancelled/Rejected bookings are

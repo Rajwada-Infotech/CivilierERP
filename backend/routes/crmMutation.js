@@ -53,6 +53,34 @@ router.get("/booking/:bookingId", requirePageRight("crm-mutation", "view"), asyn
   }
 });
 
+// GET /eligible-bookings — bookings whose Sale Deed Registry is Completed
+// and don't have a Mutation tracker yet. Without this, the Start dialog was
+// falling back to the generic booking list with only a client-side
+// "not already tracked" filter — every booking that hadn't reached Registry
+// Completed would appear selectable and then fail on submit with the real
+// backend gate's error.
+router.get("/eligible-bookings", requirePageRight("crm-mutation", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
+             reg.RegNo, sd.DeedNo
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      JOIN dbo.CrmRegistry reg ON reg.BookingId = b.Id AND reg.Status = 'Completed'
+      LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id
+      WHERE b.Status <> 'Cancelled'
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmMutation WHERE BookingId = b.Id)
+      ORDER BY b.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-mutation] eligible-bookings error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST / — start mutation tracking. Gate: Sale Deed Registry must be Completed.
 router.post("/", requirePageRight("crm-mutation", "create"), async (req, res) => {
   try {

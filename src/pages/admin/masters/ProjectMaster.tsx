@@ -580,6 +580,8 @@ export default function ProjectMaster() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const projectTypes = useLookup("PROJECT_TYPE", [
+    "UnderConstruction",
+    "ReadyToMove",
     "Construction",
     "IT",
     "Infrastructure",

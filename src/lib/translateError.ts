@@ -110,9 +110,6 @@ const ERROR_MAP: [RegExp, string][] = [
   [/database.*error|sql.*error|DB error/i,
     "A database error occurred. Please try again or contact IT support."],
 
-  // ── Payments / banking ──────────────────────────────────────────────────
-  [/deposit bank.*required|bank.*required.*project/i,
-    "Select which company bank this payment landed in (Deposited To) before submitting."],
 
   // ── Generic validation ────────────────────────────────────────────────────
   // Kept last among "required" patterns on purpose — anything more specific
