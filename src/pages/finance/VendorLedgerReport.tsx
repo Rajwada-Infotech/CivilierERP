@@ -241,8 +241,15 @@ export function VendorLedgerReportBody() {
 
   return (
     <div className="space-y-4">
-      {/* ── Search ── */}
-      <div className="glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60">
+      {/* ── Search ──
+          relative z-30: .glass uses backdrop-blur, which creates a new
+          stacking context per card — without an explicit z-index here, this
+          card and the Range card below it are sibling stacking contexts
+          with no elevation, so DOM order alone decides paint order and the
+          later Range card would render on top of this card's absolutely-
+          positioned search-results dropdown regardless of the dropdown's
+          own z-20. */}
+      <div className="relative z-30 glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60">
         <div className="flex items-center justify-between gap-2">
           <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
             Search Party / General Ledger
