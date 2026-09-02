@@ -497,33 +497,68 @@ function StructuredStatement({
           />
           <DividerRow />
 
-          {/* ── EXPENSES ── */}
+          {/* ── EXPENSES — Direct, then Gross Profit as the Trading-Account
+              carry-forward, then Indirect, matching the classic Trading &
+              P&L Account flow rather than listing both expense rows before
+              any subtotal. ── */}
           <SectionSpacer label={`${romanize(3)}. Expenses:`} />
-          {statement.expenseSections.map((s, i) => (
-            <SubRow
-              key={s.key}
-              letter={alpha(i + 1)}
-              label={s.label ?? sectionLabel(s.key, entityClass)}
-              amount={s.total}
-              priorAmount={getPriorSection(s.key)?.total}
-              rowKey={`exp-${s.key}`}
-              heads={s.heads}
-            />
-          ))}
+          {(() => {
+            const directSection = statement.expenseSections.find((s) => s.key === "directExpenses");
+            const indirectSection = statement.expenseSections.find((s) => s.key === "indirectExpenses");
+            const otherSections = statement.expenseSections.filter(
+              (s) => s.key !== "directExpenses" && s.key !== "indirectExpenses",
+            );
+            return (
+              <>
+                {directSection && (
+                  <SubRow
+                    letter="a"
+                    label={directSection.label ?? sectionLabel(directSection.key, entityClass)}
+                    amount={directSection.total}
+                    priorAmount={getPriorSection(directSection.key)?.total}
+                    rowKey={`exp-${directSection.key}`}
+                    heads={directSection.heads}
+                  />
+                )}
+
+                {/* ── GROSS PROFIT — the Trading Account's carry-forward,
+                    sitting between Direct and Indirect Expenses. ── */}
+                <TotalRow
+                  label="Gross Profit / (Loss)"
+                  formula="(Total Revenue − Direct Expenses)"
+                  amount={statement.grossProfit}
+                  priorAmount={prior?.grossProfit}
+                  variant="subtotal"
+                />
+
+                {indirectSection && (
+                  <SubRow
+                    letter="b"
+                    label={indirectSection.label ?? sectionLabel(indirectSection.key, entityClass)}
+                    amount={indirectSection.total}
+                    priorAmount={getPriorSection(indirectSection.key)?.total}
+                    rowKey={`exp-${indirectSection.key}`}
+                    heads={indirectSection.heads}
+                  />
+                )}
+                {otherSections.map((s, i) => (
+                  <SubRow
+                    key={s.key}
+                    letter={alpha(i + 3)}
+                    label={s.label ?? sectionLabel(s.key, entityClass)}
+                    amount={s.total}
+                    priorAmount={getPriorSection(s.key)?.total}
+                    rowKey={`exp-${s.key}`}
+                    heads={s.heads}
+                  />
+                ))}
+              </>
+            );
+          })()}
           <TotalRow
             label={`Total Expenses (${romanize(3)})`}
             amount={statement.totalExpenses}
             priorAmount={prior?.totalExpenses}
-          />
-          <DividerRow />
-
-          {/* ── GROSS PROFIT ── */}
-          <TotalRow
-            label="Gross Profit / (Loss)"
-            formula="(Total Revenue − Direct Expenses)"
-            amount={statement.grossProfit}
-            priorAmount={prior?.grossProfit}
-            variant="subtotal"
           />
           <DividerRow />
 
