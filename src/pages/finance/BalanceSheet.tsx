@@ -191,7 +191,7 @@ function StatementSheet({
 function SectionHeader({ roman, label }: { roman: string; label: string }) {
   return (
     <tr className="bg-muted/30">
-      <td colSpan={2} className="py-2 px-3">
+      <td colSpan={4} className="py-2 px-3">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-mono text-muted-foreground/60">{roman}.</span>
           <span className="text-xs font-bold text-foreground uppercase tracking-wide">{label}</span>
@@ -201,15 +201,23 @@ function SectionHeader({ roman, label }: { roman: string; label: string }) {
   );
 }
 
+// A running counter shared across the whole statement so every group gets a
+// stable, sequential footnote number ("Note No.") — same convention as the
+// printed Schedule III-style format, one counter threaded through every
+// section in the order they're rendered, not reset per-section.
+type NoteRef = { current: number };
+
 // ─── Group Row (collapsible) ──────────────────────────────────────────────────
 
 function GroupRow({
-  group, openKey, onToggle, indent = 8,
+  group, openKey, onToggle, indent = 8, showNote, noteNum,
 }: {
-  group:    StatementGroup;
-  openKey:  string | null;
-  onToggle: (k: string) => void;
-  indent?:  number;
+  group:     StatementGroup;
+  openKey:   string | null;
+  onToggle:  (k: string) => void;
+  indent?:   number;
+  showNote?: boolean;
+  noteNum?:  number;
 }) {
   const key       = `g-${group.groupId}`;
   const isOpen    = openKey === key;
@@ -231,6 +239,14 @@ function GroupRow({
             <span className={clickable ? "font-medium" : ""}>{group.groupName}</span>
           </div>
         </td>
+        {/* Note ref */}
+        <td className="py-2 px-3 text-right text-[9px] text-muted-foreground/40 w-16">
+          {showNote && noteNum ? noteNum : ""}
+        </td>
+        {/* Sub-amount (heads sum) — only shown when there's more than one head to sum */}
+        <td className="py-2 px-3 text-right text-[11px] tabular-nums text-muted-foreground/70 w-32">
+          {group.heads.length > 1 ? fmt(group.total) : ""}
+        </td>
         <td className="py-2 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium text-foreground w-36">
           {fmt(group.total)}
         </td>
@@ -238,7 +254,7 @@ function GroupRow({
 
       {isOpen && group.heads.length > 0 && (
         <tr>
-          <td colSpan={2} className="pb-1.5">
+          <td colSpan={4} className="pb-1.5">
             <div className="ml-4 mr-5 border-l-2 border-primary/20 pl-3 py-1 space-y-0.5" style={{ marginLeft: indent * 4 + 8 }}>
               {group.heads.map((h) => (
                 <div key={h.id ?? h.name} className="flex items-center justify-between text-[10px] text-muted-foreground group">
@@ -257,20 +273,22 @@ function GroupRow({
 // ─── Group list (with "no entries" fallback) ─────────────────────────────────
 
 function GroupList({
-  groups, openKey, onToggle, emptyLabel,
+  groups, openKey, onToggle, emptyLabel, noteRef,
 }: {
   groups: StatementGroup[];
   openKey: string | null;
   onToggle: (k: string) => void;
   emptyLabel: string;
+  noteRef: NoteRef;
 }) {
   if (groups.length === 0) {
-    return <tr><td colSpan={2} className="py-1.5 pl-8 text-[10px] text-muted-foreground italic">— {emptyLabel} —</td></tr>;
+    return <tr><td colSpan={4} className="py-1.5 pl-8 text-[10px] text-muted-foreground italic">— {emptyLabel} —</td></tr>;
   }
   return (
     <>
       {groups.map((g) => (
-        <GroupRow key={String(g.groupId)} group={g} openKey={openKey} onToggle={onToggle} />
+        <GroupRow key={String(g.groupId)} group={g} openKey={openKey} onToggle={onToggle}
+          showNote noteNum={noteRef.current++} />
       ))}
     </>
   );
@@ -282,16 +300,16 @@ function SectionBlock({ label, amount, children }: { label: string; amount: numb
   return (
     <>
       <tr>
-        <td colSpan={2} className="pt-2.5 pb-0.5 pl-5">
+        <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
           <span className="text-[11px] font-bold text-foreground uppercase tracking-wide">{label}</span>
         </td>
       </tr>
       {children}
       <tr className="border-t border-border/60">
-        <td className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — {label}</td>
+        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — {label}</td>
         <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36">{fmt(amount)}</td>
       </tr>
-      <tr><td colSpan={2} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
+      <tr><td colSpan={4} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
     </>
   );
 }
@@ -305,7 +323,7 @@ function GrandTotalRow({ label, amount, variant }: { label: string; amount: numb
 
   return (
     <tr className="border-t-2 border-double border-foreground/35">
-      <td className={`py-2 pl-5 pr-3 text-xs font-bold ${colors}`}>{label}</td>
+      <td colSpan={3} className={`py-2 pl-5 pr-3 text-xs font-bold ${colors}`}>{label}</td>
       <td className={`py-2 pl-3 pr-5 text-right text-xs font-bold tabular-nums w-36 ${colors}`}>
         {fmt(amount)}
       </td>
@@ -322,19 +340,25 @@ function GrandTotalRow({ label, amount, variant }: { label: string; amount: numb
 // partner's Capital A/c) expand separately.
 
 function PartnersCapitalBlock({
-  data, openKey, onToggle,
+  data, openKey, onToggle, noteRef,
 }: {
   data: PartnersCapital;
   openKey: string | null;
   onToggle: (k: string) => void;
+  noteRef: NoteRef;
 }) {
   const capitalKey = "capital-heads";
   const capitalOpen = openKey === capitalKey;
+  // Only "Opening Partners' Capital" is an actual chart-of-accounts group
+  // (it expands to the individual Capital A/c heads) — the Retained
+  // Earnings/Further Capital/Net Profit/Drawings lines below are computed
+  // roll-forward figures, not groups, so they carry no note number.
+  const openingNoteNum = data.capitalHeads.length > 0 ? noteRef.current++ : null;
 
   return (
     <>
       <tr>
-        <td colSpan={2} className="pt-2.5 pb-0.5 pl-5">
+        <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
           <span className="text-[11px] font-bold text-foreground uppercase tracking-wide">Partners' Capital</span>
         </td>
       </tr>
@@ -353,11 +377,15 @@ function PartnersCapitalBlock({
             Opening Partners' Capital
           </div>
         </td>
+        <td className="py-1.5 px-3 text-right text-[9px] text-muted-foreground/40 w-16">{openingNoteNum ?? ""}</td>
+        <td className="py-1.5 px-3 text-right text-[11px] tabular-nums text-muted-foreground/70 w-32">
+          {data.capitalHeads.length > 1 ? fmt(data.openingCapital) : ""}
+        </td>
         <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.openingCapital} /></td>
       </tr>
       {capitalOpen && data.capitalHeads.length > 0 && (
         <tr>
-          <td colSpan={2} className="pb-1.5">
+          <td colSpan={4} className="pb-1.5">
             <div className="ml-16 mr-5 border-l-2 border-primary/20 pl-3 py-1 space-y-0.5">
               {data.capitalHeads.map((h) => (
                 <div key={h.id ?? h.name} className="flex items-center justify-between text-[10px] text-muted-foreground">
@@ -373,32 +401,40 @@ function PartnersCapitalBlock({
       {Math.abs(data.retainedEarningsPrior) > 0.005 && (
         <tr className="border-b border-border/30">
           <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">+ Retained Earnings b/f (Prior Years)</td>
+          <td className="w-16" />
+          <td className="w-32" />
           <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.retainedEarningsPrior} /></td>
         </tr>
       )}
 
       <tr className="border-b border-border/30">
         <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">+ Further Capital</td>
+        <td className="w-16" />
+        <td className="w-32" />
         <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.furtherCapital} /></td>
       </tr>
 
       <tr className="border-b border-border/30">
         <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">+ Net Profit (Current Period)</td>
+        <td className="w-16" />
+        <td className="w-32" />
         <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.netProfitCurrent} /></td>
       </tr>
 
       <tr className="border-b border-border/30">
         <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">− Partners' Drawings</td>
+        <td className="w-16" />
+        <td className="w-32" />
         <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36 text-red-600 dark:text-red-400">
           {data.drawings > 0.005 ? `(${fmt(data.drawings)})` : fmt(0)}
         </td>
       </tr>
 
       <tr className="border-t border-border/60">
-        <td className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Partners' Capital</td>
+        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Partners' Capital</td>
         <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36">{fmt(data.total)}</td>
       </tr>
-      <tr><td colSpan={2} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
+      <tr><td colSpan={4} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
     </>
   );
 }
@@ -442,6 +478,11 @@ function VerticalStatement({
   const [openKey, setOpenKey] = useState<string | null>(null);
   const toggle = (k: string) => setOpenKey((c) => (c === k ? null : k));
 
+  // Fresh each render (deterministic given the same data) — one counter
+  // shared across every section so note numbers run continuously down the
+  // statement, matching the printed Schedule III-style "Note No." column.
+  const noteRef: NoteRef = { current: 1 };
+
   const totalProvisionsReserves = data.provisionsReserves.reduce((s, g) => s + g.total, 0);
   const totalFixedLiabilities = data.fixedLiabilities.reduce((s, g) => s + g.total, 0);
   const totalCurrentLiabilities = data.currentLiabilities.reduce((s, g) => s + g.total, 0);
@@ -454,11 +495,17 @@ function VerticalStatement({
 
   return (
     <StatementSheet companyName={data.companyName} asOfLabel={asOfLabel}>
-      <table className="w-full border-collapse min-w-[480px]">
+      <table className="w-full border-collapse min-w-[560px]">
         <thead>
           <tr className="border-b-2 border-foreground/20">
             <th className="pb-2.5 pl-5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
               Particulars
+            </th>
+            <th className="pb-2.5 px-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-16">
+              Note No.
+            </th>
+            <th className="pb-2.5 px-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-32">
+              Sub-Total ₹
             </th>
             <th className="pb-2.5 pl-3 pr-5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-36">
               Amount ₹
@@ -470,59 +517,59 @@ function VerticalStatement({
           {/* ═══════════════ LIABILITIES ═══════════════ */}
           <SectionHeader roman="I" label="Liabilities" />
 
-          <PartnersCapitalBlock data={data.partnersCapital} openKey={openKey} onToggle={toggle} />
+          <PartnersCapitalBlock data={data.partnersCapital} openKey={openKey} onToggle={toggle} noteRef={noteRef} />
 
           <SectionBlock label="Provisions & Reserves" amount={totalProvisionsReserves}>
-            <GroupList groups={data.provisionsReserves} openKey={openKey} onToggle={toggle} emptyLabel="No provisions or reserves" />
+            <GroupList groups={data.provisionsReserves} openKey={openKey} onToggle={toggle} emptyLabel="No provisions or reserves" noteRef={noteRef} />
           </SectionBlock>
 
           <SectionBlock label="Fixed Liabilities" amount={totalFixedLiabilities}>
-            <GroupList groups={data.fixedLiabilities} openKey={openKey} onToggle={toggle} emptyLabel="No fixed liabilities" />
+            <GroupList groups={data.fixedLiabilities} openKey={openKey} onToggle={toggle} emptyLabel="No fixed liabilities" noteRef={noteRef} />
           </SectionBlock>
 
           <SectionBlock label="Current Liabilities" amount={totalCurrentLiabilities}>
-            <GroupList groups={data.currentLiabilities} openKey={openKey} onToggle={toggle} emptyLabel="No current liabilities" />
+            <GroupList groups={data.currentLiabilities} openKey={openKey} onToggle={toggle} emptyLabel="No current liabilities" noteRef={noteRef} />
           </SectionBlock>
 
           <GrandTotalRow label="Total Liabilities" amount={data.totals.liabilities} variant="liabilities" />
 
           {/* ═══════════════ ASSETS ═══════════════ */}
-          <tr><td colSpan={2} className="pt-4" /></tr>
+          <tr><td colSpan={4} className="pt-4" /></tr>
           <SectionHeader roman="II" label="Assets" />
 
           <tr>
-            <td colSpan={2} className="pt-2.5 pb-0.5 pl-5">
+            <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
               <span className="text-[11px] font-bold text-foreground uppercase tracking-wide">Fixed Assets</span>
             </td>
           </tr>
           <tr>
-            <td colSpan={2} className="pt-1 pb-0.5 pl-7">
+            <td colSpan={4} className="pt-1 pb-0.5 pl-7">
               <span className="text-[10px] font-semibold text-foreground/70">Tangible Assets</span>
             </td>
           </tr>
-          <GroupList groups={data.fixedAssets.tangible} openKey={openKey} onToggle={toggle} emptyLabel="No tangible assets" />
+          <GroupList groups={data.fixedAssets.tangible} openKey={openKey} onToggle={toggle} emptyLabel="No tangible assets" noteRef={noteRef} />
           <tr>
-            <td colSpan={2} className="pt-1.5 pb-0.5 pl-7">
+            <td colSpan={4} className="pt-1.5 pb-0.5 pl-7">
               <span className="text-[10px] font-semibold text-foreground/70">Intangible Assets</span>
             </td>
           </tr>
-          <GroupList groups={data.fixedAssets.intangible} openKey={openKey} onToggle={toggle} emptyLabel="No intangible assets" />
+          <GroupList groups={data.fixedAssets.intangible} openKey={openKey} onToggle={toggle} emptyLabel="No intangible assets" noteRef={noteRef} />
           <tr className="border-t border-border/60">
-            <td className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Fixed Assets</td>
+            <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Fixed Assets</td>
             <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36">{fmt(totalFixedAssets)}</td>
           </tr>
-          <tr><td colSpan={2} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
+          <tr><td colSpan={4} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
 
           <SectionBlock label="Investments" amount={totalInvestments}>
-            <GroupList groups={data.investments} openKey={openKey} onToggle={toggle} emptyLabel="No investments" />
+            <GroupList groups={data.investments} openKey={openKey} onToggle={toggle} emptyLabel="No investments" noteRef={noteRef} />
           </SectionBlock>
 
           <SectionBlock label="Current Assets" amount={totalCurrentAssets}>
-            <GroupList groups={data.currentAssets} openKey={openKey} onToggle={toggle} emptyLabel="No current assets" />
+            <GroupList groups={data.currentAssets} openKey={openKey} onToggle={toggle} emptyLabel="No current assets" noteRef={noteRef} />
           </SectionBlock>
 
           <SectionBlock label="Fictitious Assets / Deferred Revenue Expenditure" amount={totalFictitiousAssets}>
-            <GroupList groups={data.fictitiousAssets} openKey={openKey} onToggle={toggle} emptyLabel="No fictitious assets" />
+            <GroupList groups={data.fictitiousAssets} openKey={openKey} onToggle={toggle} emptyLabel="No fictitious assets" noteRef={noteRef} />
           </SectionBlock>
 
           <GrandTotalRow label="Total Assets" amount={data.totals.assets} variant="assets" />
