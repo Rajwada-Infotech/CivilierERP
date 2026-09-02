@@ -44,18 +44,13 @@ interface Statement {
   otherIncome:           { heads: Head[]; total: number };
   totalRevenue:          number;
   expenseSections:       ExpenseSection[];
-  totalExpensesExclTax:  number;
+  totalExpenses:         number;
   grossProfit:           number;
-  ebitda:                number;
-  profitBeforeExceptional: number;
-  profitBeforeTax:       number;
-  taxExpense:            { heads: Head[]; total: number };
-  profitAfterTax:        number;
+  netProfit:             number;
   // helpers
   directCosts:           number;
-  financeCostsTotal:     number;
-  depreciationTotal:     number;
-  exceptionalTotal:      number;
+  indirectTotal:         number;
+  taxExpense:            { heads: Head[]; total: number };
 }
 
 interface StatementGroup { groupId: number | string; groupName: string; heads: Head[]; total: number; }
@@ -517,75 +512,30 @@ function StructuredStatement({
           ))}
           <TotalRow
             label={`Total Expenses (${romanize(3)})`}
-            amount={statement.totalExpensesExclTax}
-            priorAmount={prior?.totalExpensesExclTax}
+            amount={statement.totalExpenses}
+            priorAmount={prior?.totalExpenses}
           />
           <DividerRow />
 
-          {/* ── INTERMEDIATE SUBTOTALS ── */}
-          {/* Gross Profit */}
+          {/* ── GROSS PROFIT ── */}
           <TotalRow
             label="Gross Profit / (Loss)"
-            formula={`(${romanize(1)} − Direct Costs)`}
+            formula="(Total Revenue − Direct Expenses)"
             amount={statement.grossProfit}
             priorAmount={prior?.grossProfit}
             variant="subtotal"
           />
-          {/* No intermediate EBITDA/Net-Profit row here — the statement
-              already reaches the true final Net Profit through the existing
-              IV -> V -> VI -> "Loss for the Period" cascade below. An extra
-              row here (previously mislabeled EBITDA, briefly relabeled Net
-              Profit) just duplicated that final figure one place too early,
-              landing before "Profit Before Tax" — the wrong order for a
-              figure that's only meaningful after tax. */}
-
           <DividerRow />
 
-          {/* ── PBT ── */}
-          <MajorRow
-            numeral={romanize(4)}
-            label="Profit / (Loss) Before Exceptional Items and Tax"
-            formula={`(${romanize(1)} + ${romanize(2)} − ${romanize(3)})`}
-            amount={statement.profitBeforeExceptional}
-            priorAmount={prior?.profitBeforeExceptional}
-            emphasis
-          />
-          <MajorRow
-            numeral={romanize(5)}
-            label="Profit / (Loss) Before Tax"
-            formula={`(${romanize(4)} ± Exceptional Items)`}
-            amount={statement.profitBeforeTax}
-            priorAmount={prior?.profitBeforeTax}
-            emphasis
-          />
-
-          {/* ── TAX ── */}
-          <SectionSpacer label={`${romanize(6)}. Tax Expense:`} />
-          {statement.taxExpense.heads.length > 0 ? (
-            statement.taxExpense.heads.map((h, i) => (
-              <SubRow
-                key={h.id ?? h.name}
-                letter={alpha(i + 1)}
-                label={h.name}
-                amount={h.amount}
-                rowKey={`tax-${h.id ?? h.name}`}
-                heads={[]}
-              />
-            ))
-          ) : (
-            <SubRow letter="a" label="Current Tax" amount={0} rowKey="tax-none" heads={[]} />
-          )}
-          <DividerRow />
-
-          {/* ── NET PROFIT / LOSS ── */}
+          {/* ── NET PROFIT / LOSS ──
+              Gross Profit − Indirect Expenses (Tax Expense is folded into
+              Indirect Expenses above — its own heads show in that row's
+              drilldown — rather than a separate statutory Tax section). */}
           <TotalRow
-            label={
-              statement.profitAfterTax >= 0
-                ? `Net Profit for the Period (${romanize(5)} − ${romanize(6)})`
-                : `Net Loss for the Period (${romanize(5)} − ${romanize(6)})`
-            }
-            amount={statement.profitAfterTax}
-            priorAmount={prior?.profitAfterTax}
+            label="Net Profit / (Loss)"
+            formula="(Gross Profit − Indirect Expenses)"
+            amount={statement.netProfit}
+            priorAmount={prior?.netProfit}
             double
             variant="grand"
           />
@@ -1007,20 +957,20 @@ export default function ProfitAndLoss() {
                 <div className="mb-5">
                   {/* Profit/Loss headline */}
                   <div className={`mb-3 rounded-xl border p-4 flex items-center justify-between gap-4 bg-gradient-to-r ${
-                    st.profitAfterTax >= 0
+                    st.netProfit >= 0
                       ? "from-emerald-500/10 to-emerald-500/5 border-emerald-500/25"
                       : "from-red-500/10 to-red-500/5 border-red-500/25"
                   }`}>
                     <div>
                       <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/70 mb-0.5">
-                        {st.profitAfterTax >= 0 ? "Net Profit After Tax" : "Net Loss After Tax"}
+                        {st.netProfit >= 0 ? "Net Profit After Tax" : "Net Loss After Tax"}
                       </p>
                       <p className={`text-2xl font-bold tabular-nums tracking-tight ${
-                        st.profitAfterTax >= 0
+                        st.netProfit >= 0
                           ? "text-emerald-700 dark:text-emerald-400"
                           : "text-red-700 dark:text-red-400"
                       }`}>
-                        {st.profitAfterTax < 0 ? "(" : ""}{fmt(st.profitAfterTax)}{st.profitAfterTax < 0 ? ")" : ""}
+                        {st.netProfit < 0 ? "(" : ""}{fmt(st.netProfit)}{st.netProfit < 0 ? ")" : ""}
                       </p>
                       <p className="text-[10px] text-muted-foreground/60 mt-0.5">{periodLabel}</p>
                     </div>
@@ -1028,15 +978,15 @@ export default function ProfitAndLoss() {
                       {/* Net profit margin badge */}
                       {st.totalRevenue !== 0 && (
                         <div className={`rounded-lg px-3 py-2 text-center ${
-                          st.profitAfterTax >= 0
+                          st.netProfit >= 0
                             ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
                             : "bg-red-500/15 text-red-700 dark:text-red-400"
                         }`}>
                           <p className="text-[9px] font-heading uppercase tracking-widest opacity-70">Net Margin</p>
-                          <p className="text-lg font-bold">{pct(st.profitAfterTax, st.totalRevenue)}</p>
+                          <p className="text-lg font-bold">{pct(st.netProfit, st.totalRevenue)}</p>
                         </div>
                       )}
-                      {st.profitAfterTax >= 0
+                      {st.netProfit >= 0
                         ? <TrendingUp size={32} className="text-emerald-500/40" />
                         : <TrendingDown size={32} className="text-red-500/40" />
                       }
@@ -1060,15 +1010,16 @@ export default function ProfitAndLoss() {
                     />
                     <KpiCard
                       label="Net Profit / (Loss)"
-                      amount={st.profitAfterTax}
+                      amount={st.netProfit}
                       icon={Activity}
-                      subtitle={`Margin: ${pct(st.profitAfterTax, st.totalRevenue)}`}
+                      subtitle={`Margin: ${pct(st.netProfit, st.totalRevenue)}`}
                     />
                     <KpiCard
-                      label="Profit Before Tax"
-                      amount={st.profitBeforeTax}
+                      label="Indirect Expenses"
+                      amount={st.indirectTotal}
                       icon={Target}
-                      subtitle={`Tax: ₹${fmt(st.taxExpense.total)}`}
+                      variant="neutral"
+                      subtitle={`Incl. Tax: ₹${fmt(st.taxExpense.total)}`}
                     />
                   </div>
 
@@ -1084,7 +1035,7 @@ export default function ProfitAndLoss() {
                       {[
                         { label: "Revenue", cur: st.totalRevenue, pri: pst.totalRevenue },
                         { label: "Gross Profit", cur: st.grossProfit, pri: pst.grossProfit },
-                        { label: "PAT", cur: st.profitAfterTax, pri: pst.profitAfterTax },
+                        { label: "PAT", cur: st.netProfit, pri: pst.netProfit },
                       ].map(({ label, cur, pri }) => {
                         const delta = cur - pri;
                         const isUp = delta >= 0;
