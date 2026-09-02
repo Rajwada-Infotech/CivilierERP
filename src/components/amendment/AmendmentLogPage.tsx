@@ -17,6 +17,136 @@ import {
 } from "@/api/amendmentLogApi";
 import { toast } from "sonner";
 
+// Several doc types (PO, GRN, Material Request, ...) store their line items
+// as a JSON-blob column, which the generic full-row diff in amendmentLog.js
+// then dumps as raw stringified JSON — unreadable in the audit trail. Detect
+// that shape and render it as an item-by-item quantity/rate/amount diff
+// instead of the JSON text.
+function tryParseItems(value: string | null): any[] | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      Array.isArray(parsed) &&
+      parsed.length > 0 &&
+      parsed.some(
+        (p) => p && typeof p === "object" && ("itemDescription" in p || "description" in p) && "amount" in p,
+      )
+    ) {
+      return parsed;
+    }
+  } catch {
+    /* not JSON — falls through to plain text rendering */
+  }
+  return null;
+}
+
+function itemKey(item: any, idx: number): string {
+  return item?.itemId || item?.mrItemId || item?.ItemId || String(idx);
+}
+
+function numOrNull(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+interface ItemDiffEntry {
+  key: string;
+  name: string;
+  unit: string;
+  before: { quantity: number | null; rate: number | null; amount: number | null } | null;
+  after: { quantity: number | null; rate: number | null; amount: number | null } | null;
+}
+
+function diffItems(oldArr: any[] | null, newArr: any[] | null): ItemDiffEntry[] {
+  const map = new Map<string, ItemDiffEntry>();
+  (oldArr || []).forEach((it, i) => {
+    map.set(itemKey(it, i), {
+      key: itemKey(it, i),
+      name: it.itemDescription || it.description || "—",
+      unit: it.unit || "",
+      before: { quantity: numOrNull(it.quantity), rate: numOrNull(it.rate), amount: numOrNull(it.amount) },
+      after: null,
+    });
+  });
+  (newArr || []).forEach((it, i) => {
+    const key = itemKey(it, i);
+    const existing = map.get(key);
+    const after = { quantity: numOrNull(it.quantity), rate: numOrNull(it.rate), amount: numOrNull(it.amount) };
+    if (existing) {
+      existing.after = after;
+    } else {
+      map.set(key, { key, name: it.itemDescription || it.description || "—", unit: it.unit || "", before: null, after });
+    }
+  });
+  return Array.from(map.values());
+}
+
+function fmtNum(n: number | null): string {
+  if (n == null) return "—";
+  return n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+}
+
+function DiffCell({ before, after }: { before: number | null; after: number | null }) {
+  if (before == null && after != null) {
+    return <td className="px-2.5 py-1.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{fmtNum(after)}</td>;
+  }
+  if (after == null && before != null) {
+    return <td className="px-2.5 py-1.5 text-right tabular-nums text-red-600 dark:text-red-400 line-through">{fmtNum(before)}</td>;
+  }
+  if (before === after) {
+    return <td className="px-2.5 py-1.5 text-right tabular-nums">{fmtNum(after)}</td>;
+  }
+  return (
+    <td className="px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap">
+      <span className="text-red-600 dark:text-red-400 line-through">{fmtNum(before)}</span>
+      {" → "}
+      <span className="text-emerald-600 dark:text-emerald-400 font-medium">{fmtNum(after)}</span>
+    </td>
+  );
+}
+
+function ItemsDiffTable({ entries }: { entries: ItemDiffEntry[] }) {
+  return (
+    <div className="rounded-lg border border-border overflow-x-auto">
+      <table className="w-full text-[11px] min-w-[420px]">
+        <thead className="bg-muted/40">
+          <tr>
+            <th className="text-left px-2.5 py-1.5 font-medium text-muted-foreground">Item</th>
+            <th className="text-right px-2.5 py-1.5 font-medium text-muted-foreground">Quantity</th>
+            <th className="text-right px-2.5 py-1.5 font-medium text-muted-foreground">Rate</th>
+            <th className="text-right px-2.5 py-1.5 font-medium text-muted-foreground">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((e) => (
+            <tr key={e.key} className="border-t border-border/60">
+              <td className="px-2.5 py-1.5">
+                <div className="font-medium">{e.name}</div>
+                {e.unit && <div className="text-[10px] text-muted-foreground">{e.unit}</div>}
+              </td>
+              <DiffCell before={e.before?.quantity ?? null} after={e.after?.quantity ?? null} />
+              <DiffCell before={e.before?.rate ?? null} after={e.after?.rate ?? null} />
+              <DiffCell before={e.before?.amount ?? null} after={e.after?.amount ?? null} />
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Plain (non-items) field values: format numeric-looking strings with
+// thousands separators so amounts/rates/quantities read cleanly instead of
+// as a raw digit string.
+function fmtCellValue(v: string | null): string {
+  if (v == null || v === "") return "—";
+  if (/^-?\d+(\.\d+)?$/.test(v.trim())) {
+    return Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  }
+  return v;
+}
+
 function fmtDateTime(value: string | null) {
   if (!value) return "—";
   // Backend timestamps here come from SQL Server's SYSDATETIME(), which is
@@ -231,17 +361,33 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
                     </tr>
                   </thead>
                   <tbody>
-                    {detail.changes.map((c) => (
-                      <tr key={c.Id} className="border-t border-border">
-                        <td className="px-3 py-2 font-medium">{c.FieldLabel || c.FieldName}</td>
-                        <td className="px-3 py-2 text-red-600 dark:text-red-400 break-all">
-                          {c.OldValue ?? "—"}
-                        </td>
-                        <td className="px-3 py-2 text-emerald-600 dark:text-emerald-400 break-all">
-                          {c.NewValue ?? "—"}
-                        </td>
-                      </tr>
-                    ))}
+                    {detail.changes.map((c) => {
+                      const oldItems = tryParseItems(c.OldValue);
+                      const newItems = tryParseItems(c.NewValue);
+                      if (oldItems || newItems) {
+                        return (
+                          <tr key={c.Id} className="border-t border-border">
+                            <td className="px-3 py-2 font-medium align-top whitespace-nowrap">
+                              {c.FieldLabel || c.FieldName}
+                            </td>
+                            <td colSpan={2} className="px-3 py-2">
+                              <ItemsDiffTable entries={diffItems(oldItems, newItems)} />
+                            </td>
+                          </tr>
+                        );
+                      }
+                      return (
+                        <tr key={c.Id} className="border-t border-border">
+                          <td className="px-3 py-2 font-medium">{c.FieldLabel || c.FieldName}</td>
+                          <td className="px-3 py-2 text-red-600 dark:text-red-400 break-all tabular-nums">
+                            {fmtCellValue(c.OldValue)}
+                          </td>
+                          <td className="px-3 py-2 text-emerald-600 dark:text-emerald-400 break-all tabular-nums">
+                            {fmtCellValue(c.NewValue)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {detail.changes.length === 0 && (
                       <tr>
                         <td colSpan={3} className="px-3 py-4 text-center text-muted-foreground">
