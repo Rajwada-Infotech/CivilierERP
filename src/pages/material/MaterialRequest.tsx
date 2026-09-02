@@ -8,6 +8,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ExportMenu } from "@/components/ExportMenu";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import * as mrApi from "@/api/materialRequestApi";
+import { ItemPicker } from "./ItemPicker";
 import {
   CalendarDays,
   FileText,
@@ -352,6 +353,16 @@ export default function MaterialRequest() {
     for (const item of itemOptions as any[]) m[String(item.M_Id)] = item;
     return m;
   }, [itemOptions]);
+
+  const pickableItems = useMemo(
+    () =>
+      (itemOptions as any[]).map((item) => ({
+        id: String(item.M_Id),
+        name: `${item.M_Name} — Stock: ${Number(item.AvailableStock).toFixed(2)}${item.M_Group ? ` · ${item.M_Group}` : ""}`,
+        itemType: item.M_Type ?? "",
+      })),
+    [itemOptions],
+  );
 
   const uomMap = useMemo(() => {
     const m: Record<string, any> = {};
@@ -1189,26 +1200,11 @@ export default function MaterialRequest() {
                     <label className="md:hidden text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
                       Item *
                     </label>
-                    <div className="relative">
-                      <select
-                        value={ci.ItemId}
-                        onChange={(e) => pickItem(ci._key, e.target.value)}
-                        className={selectCls}
-                      >
-                        <option value="">Select item…</option>
-                        {(itemOptions as any[]).map((item) => (
-                          <option key={item.M_Id} value={String(item.M_Id)}>
-                            {item.M_Name} — Stock:{" "}
-                            {Number(item.AvailableStock).toFixed(2)}
-                            {item.M_Group ? ` · ${item.M_Group}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown
-                        size={13}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                      />
-                    </div>
+                    <ItemPicker
+                      items={pickableItems}
+                      value={ci.ItemId}
+                      onChange={(id) => pickItem(ci._key, id)}
+                    />
                   </div>
 
                   {/* UOM selector */}
