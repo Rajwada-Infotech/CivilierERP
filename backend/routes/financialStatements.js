@@ -101,6 +101,82 @@ function rootOf(groupMap, groupId, rootIds) {
   return null;
 }
 
+// ── Partnership Balance Sheet section classification ────────────────────────
+// The chart of accounts is a fixed 4-root tree (LIABILITIES/ASSETS/REVENUE/
+// EXPENSES) that a user can nest arbitrarily deep under via Account Group
+// Master — so, same discipline as the Current/Non-Current heuristics above,
+// every section below is resolved by walking a head's FULL ancestor chain
+// and keyword-matching group names, never a hardcoded AGId. Two groups
+// (PARTNERS DRAWINGS, FICTITIOUS ASSETS) don't exist in every chart of
+// accounts yet — see migration 361 — so those sections simply come back
+// empty until an accountant tags heads under them, same as "Further Capital
+// = ₹0 when none exists" per spec.
+function chainNames(groupMap, groupId) {
+  const names = [];
+  let cur = groupMap.get(Number(groupId));
+  let hops = 0;
+  while (cur && hops < 20) {
+    names.push(cur.name);
+    if (cur.parentId == null) break;
+    cur = groupMap.get(cur.parentId);
+    hops++;
+  }
+  return names;
+}
+const chainMatches = (names, re) => names.some((n) => re.test(n));
+
+// The group directly under the LIABILITIES/ASSETS root a leaf group rolls
+// up into — same "one hop below the root" walk P&L's scheduleBucketOf uses.
+function secondLevelAncestorOf(groupMap, groupId, rootId) {
+  let cur = groupMap.get(Number(groupId));
+  let hops = 0;
+  while (cur && hops < 20) {
+    if (cur.parentId === rootId) return cur;
+    if (cur.parentId == null) return null;
+    cur = groupMap.get(cur.parentId);
+    hops++;
+  }
+  return null;
+}
+
+const RE_PROVISION_RESERVE = /provision|reserve/i;
+const RE_DRAWINGS = /drawing/i;
+const RE_CAPITAL = /shareholder|partner.?s?\s*capital|proprietor|share capital/i;
+const RE_LONG_TERM = /non.?current|long.?term|fixed liab/i;
+const RE_CURRENT_LIAB = /current liab/i;
+const RE_INVESTMENT = /investment/i;
+const RE_FICTITIOUS = /fictitious|deferred revenue/i;
+const RE_INTANGIBLE = /intangible/i;
+const RE_TANGIBLE = /\btangible\b|work.?in.?progress/i;
+const RE_LOANS_ADVANCES_GIVEN = /loans?\s*(and|&)?\s*advances?/i;
+const RE_CURRENT_ASSET = /current asset/i;
+
+function classifyLiabilitySection(groupMap, groupId, rootId) {
+  const names = chainNames(groupMap, groupId);
+  if (chainMatches(names, RE_DRAWINGS)) return "partnersDrawings";
+  if (chainMatches(names, RE_PROVISION_RESERVE)) return "provisionsReserves";
+  const second = secondLevelAncestorOf(groupMap, groupId, rootId);
+  const secondName = second?.name || "";
+  if (RE_CAPITAL.test(secondName)) return "partnersCapital";
+  if (RE_CURRENT_LIAB.test(secondName)) return "currentLiabilities";
+  if (RE_LONG_TERM.test(secondName)) return "fixedLiabilities";
+  return "fixedLiabilities"; // fallback for stray/system groups directly under the root
+}
+
+function classifyAssetSection(groupMap, groupId, rootId) {
+  const names = chainNames(groupMap, groupId);
+  if (chainMatches(names, RE_FICTITIOUS)) return "fictitiousAssets";
+  if (chainMatches(names, RE_INVESTMENT)) return "investments";
+  if (chainMatches(names, RE_LOANS_ADVANCES_GIVEN)) return "investments"; // spec's own "Loans & Advances Given" example
+  if (chainMatches(names, RE_INTANGIBLE)) return "fixedAssetsIntangible";
+  if (chainMatches(names, RE_TANGIBLE)) return "fixedAssetsTangible";
+  const second = secondLevelAncestorOf(groupMap, groupId, rootId);
+  const secondName = second?.name || "";
+  if (RE_CURRENT_ASSET.test(secondName)) return "currentAssets";
+  if (/non.?current|fixed asset/i.test(secondName)) return "fixedAssetsTangible"; // unclassified fixed-asset-like heads default to Tangible
+  return "currentAssets"; // fallback for stray/system groups (e.g. STATUTORY receivables)
+}
+
 // ── GET /balance-sheet?asOf=&companyId=&projectId=&costCenterId= ───────────
 router.get("/balance-sheet", async (req, res) => {
   try {
@@ -151,7 +227,7 @@ router.get("/balance-sheet", async (req, res) => {
       `);
 
     // Net P&L (income - expenses, life-to-date through asOf) rolls into
-    // Liabilities as "Profit & Loss A/c" — same as any statutory Balance
+    // Partners' Capital as Net Profit — same as any statutory Balance
     // Sheet, since the ledger has no year-end closing/transfer entry to
     // Reserves & Surplus yet. We split this into prior years and current year.
     const asOfDate = new Date(asOf);
@@ -212,10 +288,47 @@ router.get("/balance-sheet", async (req, res) => {
 
     const netProfitPrior = calcNet(plResPrior.recordset);
     const netProfitCurrent = calcNet(plResCurrent.recordset);
-    const netProfit = Math.round((netProfitPrior + netProfitCurrent) * 100) / 100;
 
-    const liabilityGroups = new Map(); // groupId -> { name, heads: [] }
-    const assetGroups = new Map();
+    // Prior/Current split PER HEAD (not just per group) — used only to break
+    // Partners' Capital heads into Opening Capital (life-to-date before this
+    // FY) vs Further Capital (introduced during this FY). Same fyStart
+    // cutoff as the P&L split above.
+    const movementRes = await pool
+      .request()
+      .input("asOf", sql.Date, asOf)
+      .input("fyStart", sql.Date, fyStart)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
+      .input("costCenterId", sql.Int, costCenterId).query(`
+        SELECT
+          ahm.LHeadId AS id,
+          ISNULL(SUM(CASE WHEN gle.VoucherDate < @fyStart THEN gle.DebitAmount ELSE 0 END), 0) AS debitPrior,
+          ISNULL(SUM(CASE WHEN gle.VoucherDate < @fyStart THEN gle.CreditAmount ELSE 0 END), 0) AS creditPrior,
+          ISNULL(SUM(CASE WHEN gle.VoucherDate >= @fyStart AND gle.VoucherDate <= @asOf THEN gle.DebitAmount ELSE 0 END), 0) AS debitCurrent,
+          ISNULL(SUM(CASE WHEN gle.VoucherDate >= @fyStart AND gle.VoucherDate <= @asOf THEN gle.CreditAmount ELSE 0 END), 0) AS creditCurrent
+        FROM dbo.AccountHeadMaster ahm
+        JOIN dbo.GeneralLedgerEntry gle ON gle.LHeadId = ahm.LHeadId AND gle.IsReversed = 0
+          AND gle.VoucherDate <= @asOf
+          AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+          AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+          AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
+        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1
+        GROUP BY ahm.LHeadId
+      `);
+    const movementByHeadId = new Map(movementRes.recordset.map((r) => [Number(r.id), r]));
+
+    const sectionBuckets = {
+      partnersCapital: new Map(),
+      partnersDrawings: new Map(),
+      provisionsReserves: new Map(),
+      fixedLiabilities: new Map(),
+      currentLiabilities: new Map(),
+      fixedAssetsTangible: new Map(),
+      fixedAssetsIntangible: new Map(),
+      investments: new Map(),
+      currentAssets: new Map(),
+      fictitiousAssets: new Map(),
+    };
 
     const pushHead = (bucket, groupId, groupName, head) => {
       if (!bucket.has(groupId)) bucket.set(groupId, { groupId, groupName, heads: [], total: 0 });
@@ -225,6 +338,8 @@ router.get("/balance-sheet", async (req, res) => {
     };
 
     let incomeSummaryBalance = 0;
+    let capitalOpening = 0;
+    let capitalFurther = 0;
 
     for (const h of headsRes.recordset) {
       const debit = Number(h.debit) || 0;
@@ -240,7 +355,7 @@ router.get("/balance-sheet", async (req, res) => {
       // If it's the Income Summary system head used for Year-End Close, capture
       // its balance to offset the synthetic P&L prior years calculation, and skip rendering.
       if (h.code === "INCOME-SUMMARY") {
-        // As a liability head, a debit balance (net > 0) means it was debited 
+        // As a liability head, a debit balance (net > 0) means it was debited
         // to transfer profit TO Retained Earnings. So its true liability balance is -net.
         incomeSummaryBalance = -net;
         continue;
@@ -248,14 +363,12 @@ router.get("/balance-sheet", async (req, res) => {
 
       if (root == null && gid !== loansGroupId) continue; // orphan/unmapped, skip
       if (gid === loansGroupId) {
-        // Per-head sign classification (see file header comment). Relabel
-        // the group name too — "LOANS AND ADVANCES" alone doesn't match
-        // isCurrentAsset/isCurrentLiability below, so these heads used to
-        // fall through to Non-Current. A per-company inter-company loan
-        // (LOAN-C-<id> heads) is a short-term intercompany balance, not a
-        // long-term investment/borrowing, so it belongs in Current — and
-        // "Receivable"/"Payable" are exactly the keywords those regexes
-        // already look for, so relabeling is enough without touching them.
+        // Per-head sign classification (see file header comment). A
+        // per-company inter-company loan (LOAN-C-<id> heads) is a
+        // short-term intercompany balance, not a long-term investment/
+        // borrowing, so it belongs in Current — "Receivable"/"Payable" are
+        // exactly the keywords the section classifiers below look for, so
+        // relabeling is enough without a special case there.
         root = net > 0 ? rootIds.ASSETS : rootIds.LIABILITIES;
         groupName = net > 0 ? "Loan Receivable" : "Loan Payable";
       }
@@ -264,111 +377,128 @@ router.get("/balance-sheet", async (req, res) => {
         // Asset head: positive (debit) balance is normal. A credit balance
         // on an asset head still reports under Assets, shown as a negative
         // figure, rather than silently flipping sides.
-        pushHead(assetGroups, gid, groupName, { id: h.id, name: h.name, amount: net });
+        const section = classifyAssetSection(groupMap, gid, rootIds.ASSETS);
+        pushHead(sectionBuckets[section], gid, groupName, { id: h.id, name: h.name, amount: net });
       } else if (root === rootIds.LIABILITIES) {
-        pushHead(liabilityGroups, gid, groupName, { id: h.id, name: h.name, amount: -net });
+        const section = classifyLiabilitySection(groupMap, gid, rootIds.LIABILITIES);
+
+        if (section === "partnersDrawings") {
+          // "Amounts withdrawn during the period" — current-FY movement
+          // only, not the head's full life-to-date balance.
+          const mv = movementByHeadId.get(Number(h.id));
+          const currentAmt = mv
+            ? Math.round(((Number(mv.debitCurrent) || 0) - (Number(mv.creditCurrent) || 0)) * 100) / 100
+            : net;
+          if (Math.abs(currentAmt) > 0.005) {
+            pushHead(sectionBuckets.partnersDrawings, gid, groupName, { id: h.id, name: h.name, amount: currentAmt });
+          }
+          continue;
+        }
+
+        if (section === "partnersCapital") {
+          const mv = movementByHeadId.get(Number(h.id));
+          if (mv) {
+            capitalOpening = Math.round((capitalOpening + (Number(mv.creditPrior) || 0) - (Number(mv.debitPrior) || 0)) * 100) / 100;
+            capitalFurther = Math.round((capitalFurther + (Number(mv.creditCurrent) || 0) - (Number(mv.debitCurrent) || 0)) * 100) / 100;
+          }
+        }
+
+        pushHead(sectionBuckets[section], gid, groupName, { id: h.id, name: h.name, amount: -net });
       }
       // REVENUE/EXPENSES heads never carry a Balance Sheet closing balance in
       // this schema (they're period accounts, folded into netProfit above).
     }
 
     // Adjust prior years profit by the amount already transferred to Retained Earnings
-    const adjustedNetProfitPrior = Math.round((netProfitPrior + incomeSummaryBalance) * 100) / 100;
-
-    if (Math.abs(adjustedNetProfitPrior) > 0.005 || Math.abs(netProfitCurrent) > 0.005) {
-      const bucket = liabilityGroups.get("PL") || { groupId: "PL", groupName: "Profit & Loss A/c", heads: [], total: 0 };
-      if (Math.abs(adjustedNetProfitPrior) > 0.005) {
-        bucket.heads.push({ id: null, name: "Retained Earnings (Prior Years)", amount: adjustedNetProfitPrior });
-        bucket.total = Math.round((bucket.total + adjustedNetProfitPrior) * 100) / 100;
-      }
-      if (Math.abs(netProfitCurrent) > 0.005) {
-        bucket.heads.push({ id: null, name: "Net Profit (Current Period)", amount: netProfitCurrent });
-        bucket.total = Math.round((bucket.total + netProfitCurrent) * 100) / 100;
-      }
-      liabilityGroups.set("PL", bucket);
-    }
+    const retainedEarningsPrior = Math.round((netProfitPrior + incomeSummaryBalance) * 100) / 100;
 
     const toRows = (m) =>
       Array.from(m.values())
         .filter((g) => Math.abs(g.total) > 0.005)
         .sort((a, b) => a.groupName.localeCompare(b.groupName));
 
-    const liabilities = toRows(liabilityGroups);
-    const assets = toRows(assetGroups);
-    const totalLiabilities = Math.round(liabilities.reduce((s, g) => s + g.total, 0) * 100) / 100;
-    const totalAssets = Math.round(assets.reduce((s, g) => s + g.total, 0) * 100) / 100;
+    const partnersDrawingsRows = toRows(sectionBuckets.partnersDrawings);
+    const totalDrawings = Math.round(partnersDrawingsRows.reduce((s, g) => s + g.total, 0) * 100) / 100;
+
+    const provisionsReserves = toRows(sectionBuckets.provisionsReserves);
+    const fixedLiabilities = toRows(sectionBuckets.fixedLiabilities);
+    const currentLiabilities = toRows(sectionBuckets.currentLiabilities);
+    const fixedAssetsTangible = toRows(sectionBuckets.fixedAssetsTangible);
+    const fixedAssetsIntangible = toRows(sectionBuckets.fixedAssetsIntangible);
+    const investments = toRows(sectionBuckets.investments);
+    const currentAssets = toRows(sectionBuckets.currentAssets);
+    const fictitiousAssets = toRows(sectionBuckets.fictitiousAssets);
+    const capitalHeads = toRows(sectionBuckets.partnersCapital).flatMap((g) => g.heads);
+
+    const sumTotal = (rows) => Math.round(rows.reduce((s, g) => s + g.total, 0) * 100) / 100;
+    const totalProvisionsReserves = sumTotal(provisionsReserves);
+    const totalFixedLiabilities = sumTotal(fixedLiabilities);
+    const totalCurrentLiabilities = sumTotal(currentLiabilities);
+    const totalFixedAssetsTangible = sumTotal(fixedAssetsTangible);
+    const totalFixedAssetsIntangible = sumTotal(fixedAssetsIntangible);
+    const totalInvestments = sumTotal(investments);
+    const totalCurrentAssets = sumTotal(currentAssets);
+    const totalFictitiousAssets = sumTotal(fictitiousAssets);
+
+    // Partners' Capital = Opening + Retained Earnings b/f + Further Capital
+    // + Net Profit (current period) − Drawings, per spec.
+    const partnersCapitalTotal = Math.round(
+      (capitalOpening + retainedEarningsPrior + capitalFurther + netProfitCurrent - totalDrawings) * 100,
+    ) / 100;
+
+    const totalLiabilities = Math.round(
+      (partnersCapitalTotal + totalProvisionsReserves + totalFixedLiabilities + totalCurrentLiabilities) * 100,
+    ) / 100;
+    const totalAssets = Math.round(
+      (totalFixedAssetsTangible + totalFixedAssetsIntangible + totalInvestments + totalCurrentAssets + totalFictitiousAssets) * 100,
+    ) / 100;
 
     const { companyName, entityType } = await resolveCompanyType(pool, companyId);
 
-    // ── Schedule III classification heuristics (case-insensitive group name) ──
-    // A "long-term" / "non-current" prefix overrides current-keyword matches
-    // so that "Long-term Provisions" stays non-current even though it contains
-    // "provision". Similarly "Loans & Advances (Given)" stays non-current
-    // unless explicitly tagged "Short" or "Current".
-    const isLongTerm = (name) =>
-      /long.?term|non.?current/i.test(name);
-    const isCurrentAsset = (name) =>
-      !isLongTerm(name) &&
-      /cash|bank|receivable|inventory|stock|(?<!\blong.?term\b.*)advance|prepaid|current|debtor/i.test(name);
-    const isInventory = (name) =>
-      /inventory|stock|wip|work in progress/i.test(name);
-    const isEquity = (name) =>
-      /share.?capital|reserves?\b|surplus|equity|profit.*loss|capital.?account|partner.*capital|proprietor/i.test(name);
-    const isCurrentLiability = (name) =>
-      !isLongTerm(name) && !isEquity(name) &&
-      /payable|creditor|current|short.?term|overdraft|(?<!\blong.?term\b.*)provision/i.test(name);
-
-    let totalCurrentAssets = 0;
-    let totalNonCurrentAssets = 0;
-    let totalInventories = 0;
-    for (const g of assets) {
-      if (isCurrentAsset(g.groupName)) {
-        totalCurrentAssets = Math.round((totalCurrentAssets + g.total) * 100) / 100;
-        if (isInventory(g.groupName)) {
-          totalInventories = Math.round((totalInventories + g.total) * 100) / 100;
-        }
-      } else {
-        totalNonCurrentAssets = Math.round((totalNonCurrentAssets + g.total) * 100) / 100;
-      }
-    }
-
-    // Separate liabilities into Equity / Non-Current Liabilities / Current
-    // Liabilities — critical for correct ratio computation. Previously,
-    // totalEquity was computed as (totalAssets - totalLiabilities) which is
-    // always ~0 when balanced because totalLiabilities already includes
-    // equity groups. Now we sum equity groups directly.
-    let totalEquity = 0;
-    let totalCurrentLiabilities = 0;
-    let totalNonCurrentLiabilities = 0;
-    for (const g of liabilities) {
-      if (isEquity(g.groupName)) {
-        totalEquity = Math.round((totalEquity + g.total) * 100) / 100;
-      } else if (isCurrentLiability(g.groupName)) {
-        totalCurrentLiabilities = Math.round((totalCurrentLiabilities + g.total) * 100) / 100;
-      } else {
-        totalNonCurrentLiabilities = Math.round((totalNonCurrentLiabilities + g.total) * 100) / 100;
-      }
-    }
-
     // ── Financial ratios ──────────────────────────────────────────────────────
+    const isInventory = (name) => /inventory|stock|wip|work in progress/i.test(name);
+    let totalInventories = 0;
+    for (const g of currentAssets) {
+      if (isInventory(g.groupName)) totalInventories = Math.round((totalInventories + g.total) * 100) / 100;
+    }
+    const totalNonCurrentAssets = Math.round((totalAssets - totalCurrentAssets) * 100) / 100;
+    const totalNonCurrentLiabilities = Math.round((totalFixedLiabilities + totalProvisionsReserves) * 100) / 100;
+    const totalEquity = partnersCapitalTotal;
+
     const safeDiv = (n, d) => (Math.abs(d) < 0.005 ? null : Math.round((n / d) * 10000) / 10000);
-    // Debt = Total Liabilities (all groups) minus Equity (shareholders' funds).
-    // This gives the actual borrowed/owed capital for ratio purposes.
+    // Debt = Total Liabilities (all groups) minus Equity (Partners' Capital).
     const totalDebt = Math.round((totalLiabilities - totalEquity) * 100) / 100;
     const currentRatio = safeDiv(totalCurrentAssets, totalCurrentLiabilities);
     const quickRatio   = safeDiv(totalCurrentAssets - totalInventories, totalCurrentLiabilities);
     const workingCapital = Math.round((totalCurrentAssets - totalCurrentLiabilities) * 100) / 100;
     const debtToEquity = safeDiv(totalDebt, totalEquity);
 
+    const difference = Math.round((totalAssets - totalLiabilities) * 100) / 100;
+
     res.json({
       asOf,
       companyName,
       entityType,
-      liabilities,
-      assets,
-      totals: { liabilities: totalLiabilities, assets: totalAssets },
-      balanced: Math.abs(totalLiabilities - totalAssets) < 0.5,
-      netProfit,
+      partnersCapital: {
+        openingCapital: capitalOpening,
+        retainedEarningsPrior,
+        furtherCapital: capitalFurther,
+        netProfitCurrent,
+        drawings: totalDrawings,
+        total: partnersCapitalTotal,
+        capitalHeads,
+      },
+      partnersDrawings: partnersDrawingsRows,
+      provisionsReserves,
+      fixedLiabilities,
+      currentLiabilities,
+      fixedAssets: { tangible: fixedAssetsTangible, intangible: fixedAssetsIntangible },
+      investments,
+      currentAssets,
+      fictitiousAssets,
+      totals: { liabilities: totalLiabilities, assets: totalAssets, difference },
+      balanced: Math.abs(difference) < 0.5,
+      netProfit: netProfitCurrent,
       ratios: {
         currentRatio,
         quickRatio,
