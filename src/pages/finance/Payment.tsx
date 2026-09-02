@@ -2687,16 +2687,16 @@ const Payment: React.FC = () => {
                           >
                             <option value="">Select party…</option>
                             {(() => {
-                              // Group by category (Suppliers / Contractors / Brokers) so the
-                              // list isn't one flat undifferentiated block — falls back to a
-                              // single "Other" group for any row missing a recognised type.
+                              // Group by category (Suppliers / Contractors / Brokers / Customers)
+                              // so the list isn't one flat undifferentiated block — falls back
+                              // to a single "Other" group for any row missing a recognised type.
                               const groups = new Map<string, typeof supplierOptions>();
                               supplierOptions.forEach((s) => {
                                 const key = PARTY_TYPE_LABELS[(s.type ?? "").trim()] ?? "Other";
                                 if (!groups.has(key)) groups.set(key, []);
                                 groups.get(key)!.push(s);
                               });
-                              const order = ["Suppliers", "Contractors", "Brokers", "Other"];
+                              const order = ["Suppliers", "Contractors", "Brokers", "Customers", "Other"];
                               const sortedKeys = [...groups.keys()].sort(
                                 (a, b) => order.indexOf(a) - order.indexOf(b),
                               );

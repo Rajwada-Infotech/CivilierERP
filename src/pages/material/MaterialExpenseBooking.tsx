@@ -369,8 +369,9 @@ export default function MaterialExpenseBooking() {
     if (supplierHeads.some((s) => s.id === id)) return `s:${id}`;
     if (contractorHeads.some((c) => c.id === id)) return `c:${id}`;
     if (brokerHeads.some((b) => b.id === id)) return `b:${id}`;
+    if (customerHeads.some((cu) => cu.id === id)) return `a:${id}`;
     return "";
-  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads]);
+  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads, customerHeads]);
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
@@ -1885,7 +1886,10 @@ export default function MaterialExpenseBooking() {
                             const [prefix, idStr] = key.split(":");
                             const id = Number(idStr);
                             const list =
-                              prefix === "s" ? supplierHeads : prefix === "c" ? contractorHeads : brokerHeads;
+                              prefix === "s" ? supplierHeads
+                              : prefix === "c" ? contractorHeads
+                              : prefix === "a" ? customerHeads
+                              : brokerHeads;
                             const head = list.find((h) => h.id === id);
                             const name = head?.label ?? "";
                             set("supplier", name);
@@ -1944,6 +1948,14 @@ export default function MaterialExpenseBooking() {
                                 <SelectLabel>Brokers</SelectLabel>
                                 {brokerHeads.map((b) => (
                                   <SelectItem key={`b-${b.id}`} value={`b:${b.id}`}>{b.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            {customerHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Customers</SelectLabel>
+                                {customerHeads.map((cu) => (
+                                  <SelectItem key={`a-${cu.id}`} value={`a:${cu.id}`}>{cu.label}</SelectItem>
                                 ))}
                               </SelectGroup>
                             )}
