@@ -221,4 +221,62 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
   }
 });
 
+// ── GET /all-transactions — every party's transactions, unfiltered ─────────
+// The report's default view before a specific party is searched/selected —
+// every posting across every ledger head, newest first, so there's always
+// something to look at rather than an empty "search first" placeholder. No
+// running balance here (it's only meaningful scoped to one head), and a
+// PartyName/PartyType column takes the place of the balance one.
+router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const from = req.query.from ? String(req.query.from) : null;
+    const to = req.query.to ? String(req.query.to) : null;
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 500, 1), 2000);
+
+    const result = await pool
+      .request()
+      .input("Limit", sql.Int, limit)
+      .input("From", sql.Date, from || null)
+      .input("To", sql.Date, to || null).query(`
+      SELECT TOP (@Limit)
+        gle.EntryId, gle.VoucherNo, gle.VoucherDate, gle.DebitAmount, gle.CreditAmount,
+        gle.Narration, gle.SourceType, gle.SourceId, gle.CompanyId, gle.ProjectId, gle.CostCenterId,
+        gle.LHeadId, ISNULL(ahm.DisplayName, ahm.LHeadName) AS PartyName, ahm.LHeadType AS PartyType,
+        cc.Code AS CostCenterCode, cc.Name AS CostCenterName,
+        np.DocNo   AS NewPaymentDocNo,
+        rp.RPDocNo AS ReceivedPaymentDocNo,
+        jv.JVNo    AS JournalVoucherNo,
+        ft.DocNo   AS FundTransferDocNo,
+        eb.EDocNo  AS ExpenseBookingDocNo,
+        ls.LoanNo  AS LoanDocNo
+      FROM dbo.GeneralLedgerEntry gle
+      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = gle.LHeadId
+      LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = gle.CostCenterId
+      LEFT JOIN dbo.NewPayment np
+        ON gle.SourceType IN ('NewPayment', 'PaymentPosting', 'BounceChargePosting', 'LoanRepayment')
+       AND np.PPaymentID = gle.SourceId
+      LEFT JOIN dbo.ReceivedPayment rp
+        ON gle.SourceType = 'ReceivedPayment' AND rp.RPPaymentID = gle.SourceId
+      LEFT JOIN dbo.JournalVoucher jv
+        ON gle.SourceType = 'JournalVoucher' AND jv.JVID = gle.SourceId
+      LEFT JOIN dbo.FundTransfer ft
+        ON gle.SourceType = 'FundTransfer' AND ft.FTId = gle.SourceId
+      LEFT JOIN dbo.ExpenseBooking eb
+        ON gle.SourceType = 'ExpenseBooking' AND eb.Eid = gle.SourceId
+      LEFT JOIN dbo.LoanSanction ls
+        ON gle.SourceType = 'LoanPosting' AND ls.LoanId = gle.SourceId
+      WHERE gle.IsReversed = 0
+        AND (@From IS NULL OR gle.VoucherDate >= @From)
+        AND (@To IS NULL OR gle.VoucherDate <= @To)
+      ORDER BY gle.VoucherDate DESC, gle.EntryId DESC
+    `);
+
+    res.json({ transactions: result.recordset });
+  } catch (err) {
+    console.error("VENDOR LEDGER ALL-TRANSACTIONS ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

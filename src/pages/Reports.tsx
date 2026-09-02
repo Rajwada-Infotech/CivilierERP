@@ -14,6 +14,7 @@ import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { WorkerAttendanceLogGroups } from "@/pages/civilworkdpr/WorkerAttendance";
 import type { AttendanceReportRow } from "@/api/workerAttendanceApi";
+import { VendorLedgerReportBody } from "@/pages/finance/VendorLedgerReport";
 import {
   Building2,
   Calendar,
@@ -401,6 +402,34 @@ const ALL_REPORTS: ReportDef[] = [
       },
       { header: "Type", accessor: "LHeadType" },
       { header: "Group", accessor: "GroupName" },
+    ],
+  },
+  {
+    // Special-cased below (isVendorLedger) — renders VendorLedgerReportBody
+    // directly instead of the generic apiPath-fetched flat table, since this
+    // report is search-driven (any party/GL head) with its own internal
+    // fetching, not a single filterable list. apiPath/columns are still
+    // required by ReportDef's type and harmless if ever fetched generically,
+    // but load() skips calling them for this id.
+    id: "vendor-ledger-report",
+    label: "Vendor Ledger Report",
+    description: "Every transaction posted against a supplier, customer, contractor, broker or any GL head",
+    icon: Users,
+    color: "#6366f1",
+    apiPath: "/api/vendor-ledger/all-transactions",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
+    columns: [
+      { header: "Date", accessor: (r) => (r.VoucherDate ? String(r.VoucherDate).slice(0, 10) : "—") },
+      { header: "Party", accessor: (r) => (r.PartyName ?? "—") as string },
+      { header: "Voucher No", accessor: "VoucherNo" },
+      { header: "Debit", accessor: (r) => (r.DebitAmount ?? 0) as number },
+      { header: "Credit", accessor: (r) => (r.CreditAmount ?? 0) as number },
     ],
   },
   {
@@ -1698,6 +1727,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "received-payment",
       "emi-register",
       "pending-payment",
+      "vendor-ledger-report",
       "bank-report",
       "brs-report",
       "ledger-report",
@@ -2025,6 +2055,13 @@ const ReportTable: React.FC<{
   //     Worker Attendance page itself uses, instead of a flat table. ─────────
   const isWorkerAttendance = report.id === "worker-attendance";
 
+  // ── Vendor Ledger Report is search-driven (any party/GL head) with its
+  //     own internal fetching (search, per-party passbook, all-transactions
+  //     default view) — it doesn't fit the generic apiPath+filters+flat-rows
+  //     shape at all, so it renders VendorLedgerReportBody directly and
+  //     load() below skips fetching report.apiPath entirely for this id. ──
+  const isVendorLedger = report.id === "vendor-ledger-report";
+
   // ── Payment Reason switcher (payment-reason-report only) ─────────────────
   const isPaymentReasonReport = report.id === "payment-reason-report";
   const [reasonFilter, setReasonFilter] = useState<string>("");
@@ -2077,6 +2114,12 @@ const ReportTable: React.FC<{
   };
 
   const load = useCallback(async () => {
+    // VendorLedgerReportBody fetches everything it needs itself — nothing
+    // for this generic apiPath flow to do.
+    if (isVendorLedger) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -2150,13 +2193,14 @@ const ReportTable: React.FC<{
           <span className="text-sm font-heading font-semibold text-foreground">
             {report.label}
           </span>
-          {!loading && !error && (
+          {!loading && !error && !isVendorLedger && (
             <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
               {rows.length} records
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
+          {!isVendorLedger && (
           <button
             onClick={load}
             disabled={loading}
@@ -2165,6 +2209,7 @@ const ReportTable: React.FC<{
             <RefreshCw size={11} className={loading ? "animate-spin" : ""} />{" "}
             Refresh
           </button>
+          )}
 
           {/* Godown switcher — stock-summary only */}
           {isStockSummary && godowns.length > 0 && (
@@ -2218,6 +2263,7 @@ const ReportTable: React.FC<{
             </div>
           )}
 
+          {!isVendorLedger && (
           <ExportMenu
             data={rows as unknown as Record<string, unknown>[]}
             columns={report.columns}
@@ -2225,9 +2271,16 @@ const ReportTable: React.FC<{
             filename={report.id}
             disabled={loading || rows.length === 0}
           />
+          )}
         </div>
       </div>
 
+      {isVendorLedger ? (
+        <div className="p-4">
+          <VendorLedgerReportBody />
+        </div>
+      ) : (
+        <>
       {/* States */}
       {loading && (
         <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
@@ -2330,6 +2383,8 @@ const ReportTable: React.FC<{
           )}
         </>
         )
+      )}
+        </>
       )}
     </div>
 

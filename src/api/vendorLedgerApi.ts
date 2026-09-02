@@ -55,12 +55,22 @@ export interface LedgerEntry {
   FundTransferDocNo: string | null;
   ExpenseBookingDocNo: string | null;
   LoanDocNo: string | null;
-  RunningBalance: number;
+  // Present only on a single party's ledger (/:headId/transactions) — a
+  // running balance across mixed parties wouldn't mean anything.
+  RunningBalance?: number;
+  // Present only on the unfiltered all-parties view (/all-transactions).
+  LHeadId?: number;
+  PartyName?: string | null;
+  PartyType?: string | null;
 }
 
 export interface LedgerTransactionsResponse {
   head: LedgerHead;
   windowOpeningBalance: number;
+  transactions: LedgerEntry[];
+}
+
+export interface AllLedgerTransactionsResponse {
   transactions: LedgerEntry[];
 }
 
@@ -90,4 +100,15 @@ export const getLedgerTransactions = async (
   if (params.limit) qs.set("limit", String(params.limit));
   const res = await fetchWithAuth(`${BASE}/${headId}/transactions?${qs.toString()}`);
   return handleResponse<LedgerTransactionsResponse>(res);
+};
+
+export const getAllLedgerTransactions = async (
+  params: { from?: string; to?: string; limit?: number } = {},
+): Promise<AllLedgerTransactionsResponse> => {
+  const qs = new URLSearchParams();
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  if (params.limit) qs.set("limit", String(params.limit));
+  const res = await fetchWithAuth(`${BASE}/all-transactions?${qs.toString()}`);
+  return handleResponse<AllLedgerTransactionsResponse>(res);
 };
