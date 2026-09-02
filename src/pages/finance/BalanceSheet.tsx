@@ -264,7 +264,7 @@ function GroupRow({
         </td>
         {/* Sub-amount (heads sum) */}
         <td className="py-2 px-3 text-right text-[11px] tabular-nums text-muted-foreground/70 w-32">
-          {group.heads.length > 1 ? `₹${fmt(group.total)}` : ""}
+          {group.heads.length > 1 ? fmt(group.total) : ""}
         </td>
         {/* Main amount */}
         <td className="py-2 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium text-foreground w-36">
@@ -813,7 +813,7 @@ export default function BalanceSheet() {
                     <RatioCard
                       label="Working Capital"
                       value={r.workingCapital}
-                      formatted={`₹${fmt(r.workingCapital)}`}
+                      formatted={fmt(r.workingCapital)}
                       icon={Banknote}
                       healthKey="workingCapital"
                       subtitle="Current Assets − Current Liabilities"
