@@ -508,10 +508,10 @@ export default function YearEndClose() {
                         <tr key={`${h.voucherNo}-${i}`} className="bg-muted/5 border-b border-border/10">
                           <td className="py-1.5 pl-12 text-[10px] text-foreground/80">{d.headName}</td>
                           <td className="py-1.5 px-4 text-right tabular-nums text-[10px]">
-                            {d.debit > 0 ? `₹${fmt(d.debit)}` : "—"}
+                            {d.debit > 0 ? fmt(d.debit) : "—"}
                           </td>
                           <td className="py-1.5 px-4 text-right tabular-nums text-[10px]">
-                            {d.credit > 0 ? `₹${fmt(d.credit)}` : "—"}
+                            {d.credit > 0 ? fmt(d.credit) : "—"}
                           </td>
                         </tr>
                       ))}

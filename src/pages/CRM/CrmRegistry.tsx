@@ -13,7 +13,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/registry";
-const BKG_API = "/api/crm/bookings";
 
 const statusColor: Record<string, string> = {
   Pending:   "text-orange-600 bg-orange-50 border-orange-200",
@@ -26,9 +25,9 @@ async function fetchAll(): Promise<any[]> {
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load Registry trackers");
   return r.json();
 }
-async function fetchBookings(): Promise<any[]> {
-  const r = await fetchWithAuth(BKG_API);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load bookings");
+async function fetchEligible(): Promise<any[]> {
+  const r = await fetchWithAuth(`${API}/eligible-bookings`);
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load eligible bookings");
   return r.json();
 }
 
@@ -45,10 +44,9 @@ const CrmRegistry: React.FC = () => {
   const [completedDate, setCompletedDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-registry"], queryFn: fetchAll, staleTime: 30_000 });
-  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  const { data: startableBookings = [] } = useQuery({ queryKey: ["crm-registry-eligible"], queryFn: fetchEligible, staleTime: 60_000 });
 
   const trackedBookingIds = new Set((rows as any[]).map((r: any) => r.BookingId));
-  const startableBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
 
   // Deep-link from Legal Milestones: pre-fill the Start dialog if this
   // booking doesn't have a Registry tracker yet.
@@ -59,7 +57,7 @@ const CrmRegistry: React.FC = () => {
       setDialogOpen(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkBookingId, rows.length, bookings.length]);
+  }, [deepLinkBookingId, rows.length, startableBookings.length]);
 
   const handleStart = async () => {
     if (!bookingId) { toast.error("Booking is required"); return; }
@@ -76,7 +74,9 @@ const CrmRegistry: React.FC = () => {
       setDialogOpen(false);
       setBookingId("");
       qc.invalidateQueries({ queryKey: ["crm-registry"] });
+      qc.invalidateQueries({ queryKey: ["crm-registry-eligible"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -99,6 +99,7 @@ const CrmRegistry: React.FC = () => {
       setScheduledDate("");
       qc.invalidateQueries({ queryKey: ["crm-registry"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -118,6 +119,7 @@ const CrmRegistry: React.FC = () => {
       setCompleteId(null);
       qc.invalidateQueries({ queryKey: ["crm-registry"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -162,7 +164,7 @@ const CrmRegistry: React.FC = () => {
 
   return (
     <CrmShell
-      title="Sale Deed Registration — Sub-Registrar Visit 2"
+      title="Sale Deed Registration — Sub-Registrar Office"
       subtitle="Both parties appear at the Sub-Registrar Office to officially register the Sale Deed — legally transfers ownership to the buyer"
       action={
         <div className="flex items-center gap-3">
@@ -201,6 +203,9 @@ const CrmRegistry: React.FC = () => {
               ))}
             </select>
             <p className="text-[11px] text-muted-foreground mt-1">Requires Query Payment to be Confirmed for this booking first.</p>
+            {!startableBookings.length && (
+              <p className="text-[11px] text-amber-600 mt-1">No bookings are eligible yet — Query Payment must be Confirmed first.</p>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setDialogOpen(false); setBookingId(""); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>

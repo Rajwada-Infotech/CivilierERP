@@ -43,6 +43,34 @@ router.get("/", requirePageRight("crm-afs-registry", "view"), async (req, res) =
   }
 });
 
+// GET /eligible-bookings — bookings that can have an AFS Registry started:
+//   - Active, not Cancelled/Rejected
+//   - AFS Query Payment Status = 'Confirmed'
+//   - No existing CrmAfsRegistry record
+// Single SQL pass for the "Start AFS Registry" dropdown; avoids N+1 and
+// client-side filtering against the full bookings list.
+router.get("/eligible-bookings", requirePageRight("crm-afs-registry", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const q = [
+      "SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName",
+      "FROM dbo.CrmBooking b",
+      "JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId",
+      "LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id",
+      "WHERE b.IsActive = 1",
+      "  AND b.Status NOT IN ('Cancelled', 'Rejected')",
+      "  AND NOT EXISTS (SELECT 1 FROM dbo.CrmAfsRegistry ar WHERE ar.BookingId = b.Id)",
+      "  AND EXISTS (SELECT 1 FROM dbo.CrmAfsQueryPayment aqp WHERE aqp.BookingId = b.Id AND aqp.Status = 'Confirmed')",
+      "ORDER BY b.BookingNo",
+    ].join(" ");
+    const result = await pool.request().query(q);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-afs-registry] GET /eligible-bookings error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/booking/:bookingId", requirePageRight("crm-afs-registry", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -76,7 +104,7 @@ router.post("/", requirePageRight("crm-afs-registry", "create"), async (req, res
     }
 
     const agr = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+      .query("SELECT TOP 1 Id FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
 
     // Pre-check: guard against duplicate creation before consuming a doc-number
     // sequence slot. UNIQUE(BookingId) exists (migration 371) but only fires at

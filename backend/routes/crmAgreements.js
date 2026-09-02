@@ -74,7 +74,12 @@ const AGR_SELECT = `
     -- no AFS QP record exists for this booking yet (pre-Sales-Deed stage).
     (SELECT TOP 1 StampDuty        FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpStampDuty,
     (SELECT TOP 1 RegistrationFee  FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpRegistrationFee,
-    (SELECT TOP 1 ConfirmedAmount  FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpConfirmedAmount
+    (SELECT TOP 1 ConfirmedAmount  FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpConfirmedAmount,
+    -- AFS Registry status — the Sub-Registrar Visit 1 tracker must be
+    -- Completed before mark-registered will succeed (see the matching gate
+    -- in PUT /:id/mark-registered). Surfaced so the frontend can show/hide
+    -- the "Mark Registered" action instead of only failing after the click.
+    (SELECT TOP 1 Status FROM dbo.CrmAfsRegistry WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsRegistryStatus
   FROM dbo.CrmAgreement ag
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -1165,7 +1170,7 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
     }
 
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status FROM dbo.CrmAgreement WHERE Id = @id");
+      .query("SELECT Status, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
     if (cur.recordset[0].Status !== CrmStatus.EXECUTED) {
       return res.status(400).json({ error: `Cannot mark-registered from status '${cur.recordset[0].Status}'` });
@@ -1173,6 +1178,19 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
 
     const lockReason = await getAgreementBookingLockReason(pool, id);
     if (lockReason) return res.status(409).json({ error: `Cannot mark registered — ${lockReason}. Cancel the agreement instead.` });
+
+    // The physical Sub-Registrar visit must actually have happened before
+    // staff can record its outcome here — mirrors the identical pattern on
+    // the Sale Deed side (RegistrationNo can't be set until CrmRegistry is
+    // Completed; see crmSalesDeed.js PUT /:id). Without this, staff could
+    // type in an AFS Registration No/Date without the AFS Registry tracker
+    // (crmAfsRegistry.js) ever having been marked Completed — a real
+    // integrity gap the two Visit-1/Visit-2 flows should enforce identically.
+    const afsReg = await pool.request().input("bid", sql.Int, cur.recordset[0].BookingId)
+      .query("SELECT TOP 1 Status FROM dbo.CrmAfsRegistry WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+    if (!afsReg.recordset.length || afsReg.recordset[0].Status !== "Completed") {
+      return res.status(400).json({ error: "AFS Registry must be marked Completed (the Sub-Registrar visit tracker) before the Agreement can be marked Registered" });
+    }
 
     const regNo = String(AfsRegistrationNo).trim();
     const regDate = AfsRegistrationDate;

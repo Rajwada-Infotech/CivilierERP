@@ -25,22 +25,45 @@ const AlertDialogOverlay = React.forwardRef<
 ));
 AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
 
+// See the identical helper + rationale in ui/dialog.tsx — some
+// AlertDialogContent call sites in this codebase omit a Title/Description,
+// which throws the same Radix accessibility console warnings. This injects
+// a screen-reader-only fallback only when the caller didn't supply its own.
+function containsType(node: React.ReactNode, type: unknown, depth = 0): boolean {
+  if (depth > 6 || node == null || typeof node === "string" || typeof node === "number" || typeof node === "boolean") {
+    return false;
+  }
+  if (Array.isArray(node)) return node.some((n) => containsType(n, type, depth + 1));
+  if (!React.isValidElement(node)) return false;
+  if (node.type === type) return true;
+  const childChildren = (node.props as { children?: React.ReactNode })?.children;
+  return childChildren !== undefined && containsType(childChildren, type, depth + 1);
+}
+
 const AlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
->(({ className, ...props }, ref) => (
-  <AlertDialogPortal>
-    <AlertDialogOverlay />
-    <AlertDialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
-        className,
-      )}
-      {...props}
-    />
-  </AlertDialogPortal>
-));
+>(({ className, children, ...props }, ref) => {
+  const hasTitle = containsType(children, AlertDialogTitle);
+  const hasDescription = containsType(children, AlertDialogDescription);
+  return (
+    <AlertDialogPortal>
+      <AlertDialogOverlay />
+      <AlertDialogPrimitive.Content
+        ref={ref}
+        className={cn(
+          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+          className,
+        )}
+        {...props}
+      >
+        {!hasTitle && <AlertDialogTitle className="sr-only">Alert</AlertDialogTitle>}
+        {!hasDescription && <AlertDialogDescription className="sr-only">Alert content</AlertDialogDescription>}
+        {children}
+      </AlertDialogPrimitive.Content>
+    </AlertDialogPortal>
+  );
+});
 AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName;
 
 const AlertDialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (

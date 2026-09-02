@@ -20,6 +20,44 @@ const PN_SELECT = `
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
 `;
 
+// GET /eligible-bookings — bookings that pass both gates and have no
+// blocking active notice (Draft or Sent); Acknowledged/Disputed are OK.
+router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        b.Id, b.BookingNo,
+        COALESCE(bv.UnitNo, b.UnitNo) AS UnitNo,
+        a.ApplicantName
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      OUTER APPLY (
+        SELECT TOP 1 UnitNo FROM dbo.vw_CrmBookingDisplay WHERE BookingId = b.Id
+      ) bv
+      WHERE b.IsActive = 1
+        AND b.Status NOT IN ('Cancelled', 'Rejected')
+        AND EXISTS (
+          SELECT 1 FROM dbo.CrmPrePossession pp
+          WHERE pp.BookingId = b.Id AND pp.Status = 'Ready'
+        )
+        AND EXISTS (
+          SELECT 1 FROM dbo.CrmOccupancyCertificate oc
+          WHERE oc.ProjectId = b.ProjectId AND oc.Status = 'Received'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.CrmPossessionNotice pn
+          WHERE pn.BookingId = b.Id AND pn.Status IN ('Draft', 'Sent')
+        )
+      ORDER BY b.BookingNo
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-possession-notice] eligible-bookings error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -53,6 +91,17 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
       return res.status(400).json({ error: "Possession notice requires the pre-possession check to be Ready first" });
     }
 
+    // OC / CC must be received for the project (same check as Pre-Possession).
+    const bk = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 ProjectId FROM dbo.CrmBooking WHERE Id = @bid");
+    if (bk.recordset[0]?.ProjectId) {
+      const occc = await pool.request().input("pid", sql.Int, bk.recordset[0].ProjectId)
+        .query("SELECT TOP 1 Id FROM dbo.CrmOccupancyCertificate WHERE ProjectId = @pid AND Status = 'Received'");
+      if (!occc.recordset.length) {
+        return res.status(400).json({ error: "Possession notice requires the project's OC / CC to be received first" });
+      }
+    }
+
     const noticeNo = await getNextDocNumber(pool, "PN", "PN");
 
     const result = await pool.request()
@@ -72,6 +121,27 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
     res.status(201).json({ success: true, id: result.recordset[0].Id, NoticeNo: noticeNo });
   } catch (e) {
     console.error("[crm-possession-notice] POST error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /:id — only Draft notices may be deleted (Sent/Acknowledged/Disputed
+// have external significance and must be retracted through the workflow).
+router.delete("/:id", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id   = parseInt(req.params.id);
+    const cur  = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, NoticeNo FROM dbo.CrmPossessionNotice WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Possession notice not found" });
+    if (cur.recordset[0].Status !== "Draft") {
+      return res.status(400).json({ error: `Only Draft notices can be deleted. Current status: '${cur.recordset[0].Status}'` });
+    }
+    await pool.request().input("id", sql.Int, id)
+      .query("DELETE FROM dbo.CrmPossessionNotice WHERE Id = @id");
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-possession-notice] DELETE error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -270,13 +340,18 @@ router.put("/:id/proxy-acknowledge", requirePageRight("crm-possession-notice", "
       return res.status(400).json({ error: `Can only record acknowledgement for a Sent notice (current: '${cur.recordset[0].Status}')` });
     }
 
-    await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).query(`
-      UPDATE dbo.CrmPossessionNotice SET
-        Status = 'Acknowledged', AcknowledgedAt = SYSDATETIME(),
-        Notes = ISNULL(Notes + CHAR(10), '') + '[Acknowledged via ${ProxyMethod} — recorded by staff]',
-        UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-      WHERE Id = @id
-    `);
+    const proxyNote = `[Acknowledged via ${ProxyMethod} — recorded by staff] ${ProxyRemarks.trim()}`;
+    await pool.request()
+      .input("id",   sql.Int, id)
+      .input("note", sql.NVarChar(sql.MAX), proxyNote)
+      .input("ub",   sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmPossessionNotice SET
+          Status = 'Acknowledged', AcknowledgedAt = SYSDATETIME(),
+          Notes = ISNULL(Notes + CHAR(10), '') + @note,
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
 
     res.json({ success: true, status: "Acknowledged" });
   } catch (e) {
