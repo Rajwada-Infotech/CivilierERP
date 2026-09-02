@@ -117,6 +117,10 @@ const SOURCE_META: Record<string, { label: string; icon: React.ElementType; colo
   DebitNoteAdjustment: { label: "Debit Note", icon: FileText, color: "text-red-500", bg: "bg-red-500/10" },
   QualityRejectionDebitNote: { label: "Debit Note", icon: FileText, color: "text-red-500", bg: "bg-red-500/10" },
   OnAccountAdjustment: { label: "On A/C Adjustment", icon: FileText, color: "text-teal-500", bg: "bg-teal-500/10" },
+  // Standalone advance / excess payment sitting in the pooled Company On
+  // Account A/c until applied — dbo.OnAccountLedger, not a GeneralLedgerEntry.
+  OnAccountAdvance: { label: "Advance / On A/C", icon: TrendingUp, color: "text-teal-500", bg: "bg-teal-500/10" },
+  OnAccountApplied: { label: "On A/C Applied to Invoice", icon: TrendingDown, color: "text-teal-500", bg: "bg-teal-500/10" },
 };
 function sourceMeta(sourceType: string) {
   return SOURCE_META[sourceType] || { label: sourceType, icon: Receipt, color: "text-muted-foreground", bg: "bg-muted" };
