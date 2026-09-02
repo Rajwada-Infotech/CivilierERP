@@ -581,8 +581,8 @@ function StructuredStatement({
           <TotalRow
             label={
               statement.profitAfterTax >= 0
-                ? `Profit for the Period (${romanize(5)} − ${romanize(6)})`
-                : `Loss for the Period (${romanize(5)} − ${romanize(6)})`
+                ? `Net Profit for the Period (${romanize(5)} − ${romanize(6)})`
+                : `Net Loss for the Period (${romanize(5)} − ${romanize(6)})`
             }
             amount={statement.profitAfterTax}
             priorAmount={prior?.profitAfterTax}
