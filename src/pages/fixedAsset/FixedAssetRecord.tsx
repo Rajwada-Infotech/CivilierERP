@@ -22,6 +22,7 @@ import {
   getFixedAssetReversalPlan, reverseFixedAsset,
   type FixedAssetListItem, type FixedAssetDetail,
 } from "@/api/fixedAssetApi";
+import { getSacCodes } from "@/api/hsnApi";
 import { getUnassignedFAItemCodes, type UnassignedFAItemCode } from "@/api/fixedAssetTaggingApi";
 import { ASSET_CATEGORIES, CATEGORY_ICONS, CATEGORY_COLORS } from "./assetCategories";
 import { Button } from "@/components/ui/button";
@@ -157,6 +158,7 @@ interface FormState {
   godownId: string;
   godownName: string;
   assetCategory: string;
+  repairType: string;
   brand: string;
   model: string;
   serialNumber: string;
@@ -190,6 +192,7 @@ const emptyForm = (finYear = ""): FormState => ({
   godownId:           "",
   godownName:         "",
   assetCategory:      "",
+  repairType:         "",
   brand:              "",
   model:              "",
   serialNumber:       "",
@@ -461,6 +464,12 @@ export default function FixedAssetRecord() {
     queryKey: ["depreciation-setups-active"],
     queryFn:  getActiveDepreciationSetups,
   });
+  // SAC codes for the "Type of Repairs SAC Code" field — sourced from the
+  // Material-module HSN master (rows with the "Is SAC Code" toggle on).
+  const { data: sacCodes = [] } = useQuery({
+    queryKey: ["hsn-sac-codes"],
+    queryFn:  getSacCodes,
+  });
   const { data: unassignedCodes = [], isLoading: codesLoading } = useQuery({
     queryKey: ["fa-unassigned-codes"],
     queryFn:  getUnassignedFAItemCodes,
@@ -644,6 +653,7 @@ export default function FixedAssetRecord() {
         godownId:            String(d.GodownID || ""),
         godownName:          d.GodownName || "",
         assetCategory:       d.AssetCategory || "",
+        repairType:          d.RepairType || "",
         brand:               d.Brand || "",
         model:               d.Model || "",
         serialNumber:        d.SerialNumber || "",
@@ -722,6 +732,7 @@ export default function FixedAssetRecord() {
       assetName:           form.assetName,
       sourceTagId:         !editingId && form.sourceTagId ? Number(form.sourceTagId) : undefined,
       assetCategory:       form.assetCategory,
+      repairType:          form.repairType || null,
       brand:               form.brand || undefined,
       model:               form.model || undefined,
       serialNumber:        form.serialNumber || undefined,
@@ -870,6 +881,7 @@ export default function FixedAssetRecord() {
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
               {[
                 ["FA Item Code",      d.FAItemCode],
+                ["Type of Repairs SAC Code", d.RepairType],
                 ["Brand",             d.Brand],
                 ["Model",             d.Model],
                 ["Serial Number",     d.SerialNumber],
@@ -1067,6 +1079,25 @@ export default function FixedAssetRecord() {
                     </span>
                   )}
                 </div>
+              </div>
+              <div>
+                <label className={labelCls}>Type of Repairs SAC Code</label>
+                <select value={form.repairType} onChange={(e) => setField("repairType", e.target.value)} className={inputCls}>
+                  <option value="">Select SAC code…</option>
+                  {sacCodes.map((s) => (
+                    <option key={s.HId} value={s.HCode}>
+                      {s.HCode}{s.HShortDescription || s.HDescription ? ` — ${s.HShortDescription || s.HDescription}` : ""}
+                    </option>
+                  ))}
+                  {form.repairType && !sacCodes.some((s) => s.HCode === form.repairType) && (
+                    <option value={form.repairType}>{form.repairType}</option>
+                  )}
+                </select>
+                {sacCodes.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    No SAC codes yet — add one in Material → Setup → HSN with “Is SAC Code” enabled.
+                  </p>
+                )}
               </div>
               <div>
                 <label className={labelCls}><Hash size={11} /> Doc No.</label>

@@ -24,6 +24,7 @@ export interface FixedAssetListItem {
   DepreciationRate: number | null;
   AssetStatus: "Pending" | "Active" | "Sold" | "Scrapped" | "Under Maintenance";
   SellingPrice: number | null;
+  RepairType: string | null;   // SAC code (dbo.HSN.HCode where HIsSAC = 1)
   Status: string;
   CompanyId: number | null;
   CompanyName: string | null;
@@ -84,6 +85,7 @@ export interface FixedAssetPayload {
   remarks?: string;
   status?: string;
   pictureBase64?: string | null;
+  repairType?: string | null;
 }
 
 async function handleError(res: Response, fallback: string) {
