@@ -1000,7 +1000,7 @@ export default function ProfitAndLoss() {
                       amount={st.revenueFromOperations.total}
                       icon={BarChart2}
                       variant="neutral"
-                      subtitle={`+ ₹${fmt(st.otherIncome.total)} other income`}
+                      subtitle={`+ ${fmt(st.otherIncome.total)} other income`}
                     />
                     <KpiCard
                       label="Gross Profit / (Loss)"
@@ -1019,7 +1019,7 @@ export default function ProfitAndLoss() {
                       amount={st.indirectTotal}
                       icon={Target}
                       variant="neutral"
-                      subtitle={`Incl. Tax: ₹${fmt(st.taxExpense.total)}`}
+                      subtitle={`Incl. Tax: ${fmt(st.taxExpense.total)}`}
                     />
                   </div>
 
