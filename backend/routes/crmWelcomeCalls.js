@@ -182,7 +182,7 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId);
 
-    const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, recentCallsRes] = await Promise.all([
+    const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, recentCallsRes, padRes] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId).query(`
         SELECT b.Id, b.BookingNo,
                COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
@@ -235,6 +235,17 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
       // it "ConsecutiveNonReached" but it counted ALL non-reached rows).
       pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT TOP 20 Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CallDate DESC, CreatedAt DESC"),
+      // Latest NON-NULL PreferredAgreementDate across every call logged so
+      // far — a follow-up call that didn't re-ask/re-enter it must not make
+      // it look like nothing was ever captured. Surfaced so the "Log Call"
+      // form can pre-fill/carry it forward instead of silently starting
+      // blank on every new call (see the same latest-non-null fix in
+      // crmAgreements.js POST / which reads this for real).
+      pool.request().input("bid", sql.Int, bookingId).query(`
+        SELECT TOP 1 PreferredAgreementDate FROM dbo.CrmWelcomeCall
+        WHERE BookingId = @bid AND PreferredAgreementDate IS NOT NULL
+        ORDER BY CreatedAt DESC
+      `),
     ]);
     if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
 
@@ -260,6 +271,9 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
       // so the Bank Preference tab can show the current selection without an
       // additional fetch.
       financingType: booking.FinancingType || null,
+      // Latest known PreferredAgreementDate, carried forward across follow-up
+      // calls that didn't re-enter it — see comment on the query above.
+      latestPreferredAgreementDate: padRes.recordset[0]?.PreferredAgreementDate || null,
     });
   } catch (e) {
     console.error("[crm-welcome-calls] GET /:bookingId/call-context error:", e.message);

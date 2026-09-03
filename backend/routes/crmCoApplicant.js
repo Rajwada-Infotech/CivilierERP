@@ -5,6 +5,8 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
+const { isLegalWorkStarted } = require("../services/crmWorkflowGuards");
+const { createAmendmentRequest } = require("../services/crmAmendments");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -23,7 +25,51 @@ router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"),
   }
 });
 
-// POST /booking/:bookingId — add a co-applicant
+// A newly added (or removed) co-applicant changes whether the "Co-Applicant
+// Details" welcome-call verification item even applies (see getActiveTemplate
+// in crmWelcomeChecklist.js) — adding one to a booking whose checklist is
+// already Submitted and locked would otherwise leave that locked checklist
+// silently claiming "fully verified" for a fact nobody ever actually
+// checked. Block the edit here instead, same as the checklist's own
+// assertUnlocked gate — staff reopen the checklist first, which is an
+// explicit, logged action, rather than this silently going stale.
+async function assertWelcomeChecklistUnlocked(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT IsLocked FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid");
+  if (r.recordset[0]?.IsLocked) {
+    return "The welcome call verification checklist for this booking is already submitted and locked. Reopen it on the Welcome Calls page before adding or removing a co-applicant.";
+  }
+  return null;
+}
+
+// The actual insert, shared by the direct (pre-legal-work) path below and
+// the amendment-approval replay path in crmBookingAmendments.js — never
+// duplicated logic between the two.
+async function applyAddCoApplicant(pool, bookingId, b, actorUserId) {
+  const result = await pool.request()
+    .input("bid",  sql.Int, bookingId)
+    .input("name", sql.NVarChar(200), b.Name.trim())
+    .input("rel",  sql.NVarChar(50), b.Relation || null)
+    .input("mob",  sql.NVarChar(20), b.Mobile || null)
+    .input("em",   sql.NVarChar(200), b.Email || null)
+    .input("pan",  sql.NVarChar(20), b.PanNo || null)
+    .input("aadh", sql.NVarChar(20), b.AadhaarNo || null)
+    .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+    .input("cb",   sql.Int, actorUserId)
+    .query(`
+      INSERT INTO dbo.CrmCoApplicant (BookingId, Name, Relation, Mobile, Email, PanNo, AadhaarNo, Notes, CreatedBy, CreatedAt)
+      OUTPUT INSERTED.Id
+      VALUES (@bid, @name, @rel, @mob, @em, @pan, @aadh, @note, @cb, SYSDATETIME())
+    `);
+  return { id: result.recordset[0].Id };
+}
+
+// POST /booking/:bookingId — add a co-applicant. A co-applicant is a named
+// party on the Agreement for Sale itself — once that document actually has
+// pages under verification (isLegalWorkStarted), adding one directly would
+// silently leave the document out of sync with who it names. Same pattern
+// crmExtraCharges.js / crmParking.js already use: queue a
+// CrmBookingAmendmentRequest for approval instead of applying immediately.
 router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -31,22 +77,20 @@ router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit")
     const b = req.body;
     if (!b.Name?.trim()) return res.status(400).json({ error: "Name is required" });
 
-    const result = await pool.request()
-      .input("bid",  sql.Int, bookingId)
-      .input("name", sql.NVarChar(200), b.Name.trim())
-      .input("rel",  sql.NVarChar(50), b.Relation || null)
-      .input("mob",  sql.NVarChar(20), b.Mobile || null)
-      .input("em",   sql.NVarChar(200), b.Email || null)
-      .input("pan",  sql.NVarChar(20), b.PanNo || null)
-      .input("aadh", sql.NVarChar(20), b.AadhaarNo || null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cb",   sql.Int, actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmCoApplicant (BookingId, Name, Relation, Mobile, Email, PanNo, AadhaarNo, Notes, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@bid, @name, @rel, @mob, @em, @pan, @aadh, @note, @cb, SYSDATETIME())
-      `);
-    res.status(201).json({ success: true, id: result.recordset[0].Id });
+    const lockErr = await assertWelcomeChecklistUnlocked(pool, bookingId);
+    if (lockErr) return res.status(400).json({ error: lockErr });
+
+    if (await isLegalWorkStarted(pool, bookingId)) {
+      if (!b.Reason?.trim()) return res.status(400).json({ error: "A reason is required to request this change — legal documents are already under verification for this booking" });
+      const requestId = await createAmendmentRequest(pool, {
+        bookingId, changeType: "CoApplicant", action: "Add", targetId: null,
+        proposedChange: b, reason: b.Reason.trim(), requestedBy: actorId(req),
+      });
+      return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
+    }
+
+    const result = await applyAddCoApplicant(pool, bookingId, b, actorId(req));
+    res.status(201).json({ success: true, ...result });
   } catch (e) {
     console.error("[crm-co-applicant] POST error:", e.message);
     res.status(500).json({ error: e.message });
@@ -101,14 +145,39 @@ router.put("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"]
   }
 });
 
-// DELETE /:id — soft delete. Same dual-gate reasoning as PUT /:id above.
+// Shared with the amendment-approval replay path — see applyAddCoApplicant.
+async function applyRemoveCoApplicant(pool, id) {
+  await pool.request().input("id", sql.Int, id)
+    .query("UPDATE dbo.CrmCoApplicant SET IsActive = 0 WHERE Id = @id");
+  return { success: true };
+}
+
+// DELETE /:id — soft delete. Same dual-gate reasoning as PUT /:id above,
+// plus the same legal-work-started amendment gate as POST above (removing a
+// named party from the Agreement is exactly as consequential as adding one).
 router.delete("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
-    await pool.request().input("id", sql.Int, id)
-      .query("UPDATE dbo.CrmCoApplicant SET IsActive = 0 WHERE Id = @id");
-    res.json({ success: true });
+    const row = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId FROM dbo.CrmCoApplicant WHERE Id = @id");
+    const bookingId = row.recordset[0]?.BookingId;
+    if (bookingId) {
+      const lockErr = await assertWelcomeChecklistUnlocked(pool, bookingId);
+      if (lockErr) return res.status(400).json({ error: lockErr });
+
+      if (await isLegalWorkStarted(pool, bookingId)) {
+        const reason = req.body?.Reason?.trim();
+        if (!reason) return res.status(400).json({ error: "A reason is required to request this change — legal documents are already under verification for this booking" });
+        const requestId = await createAmendmentRequest(pool, {
+          bookingId, changeType: "CoApplicant", action: "Remove", targetId: id,
+          proposedChange: {}, reason, requestedBy: actorId(req),
+        });
+        return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
+      }
+    }
+    const result = await applyRemoveCoApplicant(pool, id);
+    res.json(result);
   } catch (e) {
     console.error("[crm-co-applicant] DELETE error:", e.message);
     res.status(500).json({ error: e.message });
@@ -198,3 +267,5 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
 });
 
 module.exports = router;
+module.exports.applyAddCoApplicant = applyAddCoApplicant;
+module.exports.applyRemoveCoApplicant = applyRemoveCoApplicant;

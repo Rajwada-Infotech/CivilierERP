@@ -294,8 +294,16 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
       });
     }
 
+    // Latest NON-NULL PreferredAgreementDate, not just the latest call row —
+    // a follow-up call logged after the one that actually captured this date
+    // (e.g. a callback just confirming something else) leaves its own
+    // PreferredAgreementDate blank, and "latest row" alone would silently
+    // lose the real value the customer already gave. Whichever call last
+    // SET a date wins, regardless of which call happened most recently overall.
     const wc = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT TOP 1 PreferredAgreementDate FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CreatedAt DESC
+      SELECT TOP 1 PreferredAgreementDate FROM dbo.CrmWelcomeCall
+      WHERE BookingId = @bid AND PreferredAgreementDate IS NOT NULL
+      ORDER BY CreatedAt DESC
     `);
     const preferredDate = wc.recordset[0]?.PreferredAgreementDate || null;
 

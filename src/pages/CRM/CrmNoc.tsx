@@ -23,7 +23,6 @@ import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const API = "/api/crm/noc";
-const NOC_TYPES = ["Organisation", "Bank"] as const;
 
 // ─── Status badge ──────────────────────────────────────────────────────────
 
@@ -75,9 +74,13 @@ async function fetchAll(type?: string, status?: string): Promise<any[]> {
   } catch { return []; }
 }
 
-async function fetchEligibleBookings(type: string): Promise<any[]> {
+// No type param here — NOC type is resolved per booking (see NocType on
+// each returned row), never chosen up front. Filtering this list by a
+// pre-selected type before the user has even picked a booking would hide
+// genuinely eligible bookings of the other type.
+async function fetchEligibleBookings(): Promise<any[]> {
   try {
-    const r = await fetchWithAuth(`${API}/eligible-bookings?type=${encodeURIComponent(type)}`);
+    const r = await fetchWithAuth(`${API}/eligible-bookings`);
     return r.ok ? r.json() : [];
   } catch { return []; }
 }
@@ -228,8 +231,8 @@ const CrmNoc: React.FC = () => {
   });
 
   const { data: eligibleBookings = [], isFetching: bkgFetching } = useQuery({
-    queryKey: ["crm-noc-eligible", form.NocType],
-    queryFn: () => fetchEligibleBookings(form.NocType),
+    queryKey: ["crm-noc-eligible"],
+    queryFn: fetchEligibleBookings,
     enabled: dialogOpen,
     staleTime: 0,
   });
@@ -280,24 +283,20 @@ const CrmNoc: React.FC = () => {
     setBankFieldsLocked(true);
   }, [form.NocType, context]);
 
-  const handleTypeChange = (t: string) => {
-    setForm((f) => ({ ...f, NocType: t }));
-    setBankFieldsLocked(true);
-  };
-
-  // When booking changes, auto-suggest NOC type based on HasLoan flag
+  // When booking changes, resolve NOC type from the booking's financing —
+  // never a manual choice, since a booking only ever has one NOC type.
   const handleBookingChange = (bookingId: string) => {
     setForm((f) => {
       const bk = (eligibleBookings as any[]).find((b: any) => String(b.Id) === bookingId);
-      const suggestedType = bk?.HasLoan ? "Bank" : "Organisation";
-      return { ...f, BookingId: bookingId, NocType: suggestedType };
+      const resolvedType = bk?.NocType || (bk?.HasLoan ? "Bank" : "Organisation");
+      return { ...f, BookingId: bookingId, NocType: resolvedType };
     });
     setBankFieldsLocked(true);
   };
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["crm-noc"] });
-    qc.invalidateQueries({ queryKey: ["crm-noc-eligible"] }); // prefix match — clears both Bank and Organisation entries
+    qc.invalidateQueries({ queryKey: ["crm-noc-eligible"] });
     qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
     qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
     qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
@@ -457,7 +456,7 @@ const CrmNoc: React.FC = () => {
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle className="font-heading text-base">Request NOC</DialogTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">One NOC per type — Bank (lender's charge released) + Organisation (developer no-dues)</p>
+              <p className="text-xs text-muted-foreground mt-0.5">A single NOC per booking — Bank (loan-financed) or Organisation (self-funded), decided automatically by how the booking is financed</p>
             </DialogHeader>
 
             <div className="space-y-4">
@@ -469,7 +468,7 @@ const CrmNoc: React.FC = () => {
                 ) : (eligibleBookings as any[]).length === 0 ? (
                   <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
                     <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                    <span>No eligible bookings. Requires: AFS Registered at Sub-Registrar + no existing {form.NocType} NOC for the booking.</span>
+                    <span>No eligible bookings. Requires: AFS Registered at Sub-Registrar + no NOC already on file for the booking.</span>
                   </div>
                 ) : (
                   <select value={form.BookingId}
@@ -485,23 +484,17 @@ const CrmNoc: React.FC = () => {
                 )}
               </div>
 
-              {/* Step 2 — NOC type (shown once booking selected) */}
+              {/* NOC type — resolved automatically from the booking's financing,
+                  never a free choice (this booking has exactly one NOC). */}
               {form.BookingId && (
                 <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">NOC Issued By *</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {NOC_TYPES.map((t) => (
-                      <button key={t} type="button" onClick={() => handleTypeChange(t)}
-                        className={cn(
-                          "flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors text-left",
-                          form.NocType === t
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border hover:bg-muted text-muted-foreground",
-                        )}>
-                        {t === "Bank" ? <Landmark size={14} /> : <Building2 size={14} />}
-                        <span>{t === "Bank" ? "Bank (Lender)" : "Organisation (Developer)"}</span>
-                      </button>
-                    ))}
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">NOC Issued By</label>
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-primary bg-primary/10 text-primary text-sm font-medium">
+                    {form.NocType === "Bank" ? <Landmark size={14} /> : <Building2 size={14} />}
+                    <span>{form.NocType === "Bank" ? "Bank (Lender)" : "Organisation (Developer)"}</span>
+                    <span className="ml-auto text-[11px] font-normal text-primary/70">
+                      {form.NocType === "Bank" ? "loan-financed booking" : "self-funded booking"}
+                    </span>
                   </div>
                 </div>
               )}

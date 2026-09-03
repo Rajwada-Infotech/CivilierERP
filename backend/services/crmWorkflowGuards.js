@@ -1120,7 +1120,54 @@ async function checkLoanProcessingCleared(pool, bookingId) {
   return null;
 }
 
+/**
+ * No Objection Certificate is a SINGLE step per booking, not two independent
+ * ones — the bank's NOC (releasing its charge on the unit) and the
+ * developer's NOC (confirming no outstanding dues) serve the same purpose
+ * in this business's actual process: clearing the booking to proceed to
+ * Possession/Handover. A booking gets exactly one, never both — which one
+ * is decided by how the booking is financed, not by free user choice.
+ *
+ * Resolution order:
+ *   1. If a non-Rejected CrmNoc row already exists for this booking, that
+ *      row's type IS the answer — real work already happened under it, so
+ *      the resolution must never contradict data already on file (this is
+ *      also what protects a booking whose financing was recorded loosely,
+ *      e.g. a stray/incomplete CrmLoanDetail row, from having its already-
+ *      requested NOC hidden or mismatched).
+ *   2. Otherwise, derive it the same way IsLoanFinanced is derived
+ *      everywhere else in the legal chain: FinancingType = 'LoanFinanced',
+ *      OR an active loan on file (CrmLoanDetail with SanctionStatus NOT IN
+ *      ('NotApplied','Rejected') — a rejected/never-applied loan record
+ *      leaves no real lender charge to clear) → 'Bank'; otherwise
+ *      'Organisation'.
+ *
+ * Returns { nocType: 'Bank'|'Organisation', isLoanFinanced: boolean }.
+ */
+async function resolveNocType(pool, bookingId) {
+  const row = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 n.NocType
+    FROM dbo.CrmNoc n
+    WHERE n.BookingId = @bid AND n.Status <> 'Rejected'
+    ORDER BY n.CreatedAt DESC
+  `);
+  if (row.recordset.length) {
+    return { nocType: row.recordset[0].NocType, isLoanFinanced: row.recordset[0].NocType === "Bank" };
+  }
+  const b = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT
+      CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
+        SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
+          AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+      ) THEN 1 ELSE 0 END AS IsLoanFinanced
+    FROM dbo.CrmBooking b WHERE b.Id = @bid
+  `);
+  const isLoanFinanced = b.recordset[0]?.IsLoanFinanced === 1;
+  return { nocType: isLoanFinanced ? "Bank" : "Organisation", isLoanFinanced };
+}
+
 module.exports = {
+  resolveNocType,
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
   maybeAutoCreateLegalMilestone,

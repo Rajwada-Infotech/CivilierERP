@@ -140,6 +140,10 @@ type VcSection = { section: string; label: string; items: VcItem[]; complete: bo
 type VcState = {
   items: VcItem[]; sections: VcSection[]; totalCount: number; checkedCount: number; openRecheckCount: number; canSubmit: boolean;
   submission: { IsLocked: boolean; SubmittedBy: number | null; SubmittedAt: string | null } | null;
+  // Whether a call with Outcome "Welcomed" has actually been logged for this
+  // booking — the checklist can't be legitimately submitted without one,
+  // since it's staff sign-off on facts confirmed DURING that call.
+  hasWelcomedCall: boolean;
 };
 async function fetchVerificationChecklist(bookingId: number): Promise<VcState | null> {
   try { const r = await fetchWithAuth(`${VC_API}/${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
@@ -255,6 +259,31 @@ const InvoicePdfDialog: React.FC<{ bookingId: number; invoice: any; onClose: () 
   );
 };
 
+// Shared checkbox rendering for every checklist item (InlineVerify and
+// ChecklistItemRow both use it). Once a checklist is Submitted and locked,
+// the item stays permanently disabled — but a disabled native checkbox at
+// 14px with 50% opacity renders as a barely-visible grey smudge, so a fully
+// verified, locked checklist visually looked almost identical to an
+// unchecked one. Locked state gets its own always-legible badge instead of
+// a dimmed native input; only the still-editable state uses a real checkbox.
+const VerifyCheckbox: React.FC<{
+  checked: boolean; locked: boolean; disabled?: boolean; onChange: () => void;
+}> = ({ checked, locked, disabled, onChange }) => {
+  if (locked) {
+    return checked ? (
+      <span className="shrink-0 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center">
+        <Check size={11} strokeWidth={3} />
+      </span>
+    ) : (
+      <span className="shrink-0 w-4 h-4 rounded-full border-2 border-dashed border-border" />
+    );
+  }
+  return (
+    <input type="checkbox" checked={checked} disabled={disabled} onChange={onChange}
+      className="shrink-0 w-4 h-4 accent-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
+  );
+};
+
 // ─── Verification Checklist — every mandatory item across every section,
 // ticked and saved one at a time, with a remarks field and a "Send for
 // Recheck" escape hatch for anything that doesn't match what the customer
@@ -263,29 +292,53 @@ const InvoicePdfDialog: React.FC<{ bookingId: number; invoice: any; onClose: () 
 const ChecklistItemRow: React.FC<{
   item: VcItem; bookingId: number; locked: boolean; onChanged: () => void;
 }> = ({ item, bookingId, locked, onChanged }) => {
-  const [checked, setChecked] = useState(item.IsChecked);
   const [remarks, setRemarks] = useState(item.Remarks || "");
   const [saving, setSaving] = useState(false);
   const [flagging, setFlagging] = useState(false);
   const [recheckReason, setRecheckReason] = useState("");
   const [showRecheckBox, setShowRecheckBox] = useState(false);
   const [showRemarksBox, setShowRemarksBox] = useState(false);
-  const dirty = checked !== item.IsChecked || remarks !== (item.Remarks || "");
   const isOpenRecheck = item.RecheckStatus === CrmStatus.OPEN;
 
-  useEffect(() => { setChecked(item.IsChecked); setRemarks(item.Remarks || ""); }, [item.IsChecked, item.Remarks]);
+  useEffect(() => { setRemarks(item.Remarks || ""); }, [item.Remarks]);
 
-  const handleSave = async () => {
+  // Ticking the box saves immediately — same pattern as InlineVerify on the
+  // Overview tab. This used to be local-only state with a separate "Save"
+  // button rendered right underneath the checkbox: two clicks to record one
+  // fact, and a checkbox that visibly LOOKED ticked yet silently hadn't been
+  // saved until that second click was found — the exact inconsistency this
+  // page's other tabs never had. Every checklist item now behaves the same
+  // way everywhere it appears.
+  const handleToggleChecked = async () => {
+    if (locked || isOpenRecheck || saving) return;
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${VC_API}/${bookingId}/items/${item.ItemKey}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ IsChecked: checked, Remarks: remarks }),
+        body: JSON.stringify({ IsChecked: !item.IsChecked, Remarks: remarks }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Save failed");
-      toast.success(`Saved — ${item.Label}`);
+      onChanged();
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveRemarks = async () => {
+    setSaving(true);
+    try {
+      const res = await fetchWithAuth(`${VC_API}/${bookingId}/items/${item.ItemKey}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ IsChecked: item.IsChecked, Remarks: remarks }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Save failed");
+      toast.success("Remarks saved");
       onChanged();
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -333,9 +386,9 @@ const ChecklistItemRow: React.FC<{
       isOpenRecheck ? "border-red-200 bg-red-50/50" : item.IsChecked ? "border-emerald-200 bg-emerald-50/30" : "border-border"
     }`}>
       <div className="flex items-start gap-2">
-        <input type="checkbox" checked={checked} disabled={locked || isOpenRecheck}
-          onChange={(e) => setChecked(e.target.checked)}
-          className="mt-0.5 shrink-0 w-4 h-4 accent-amber-500 disabled:opacity-50" />
+        <div className="mt-0.5">
+          <VerifyCheckbox checked={item.IsChecked} locked={locked} disabled={isOpenRecheck || saving} onChange={handleToggleChecked} />
+        </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <span className={`text-sm ${item.IsChecked ? "text-foreground" : "text-foreground/90"}`}>{item.Label}</span>
@@ -364,10 +417,6 @@ const ChecklistItemRow: React.FC<{
             <>
               {!locked && (
                 <div className="flex items-center gap-3 mt-1">
-                  <button type="button" onClick={handleSave} disabled={saving || !dirty}
-                    className="text-[11px] font-medium px-2 py-1 rounded text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 disabled:opacity-40 hover:shadow-lg hover:shadow-amber-500/20">
-                    {saving ? "Saving..." : "Save"}
-                  </button>
                   <button type="button" onClick={() => setShowRemarksBox((v) => !v)}
                     className="text-[11px] text-muted-foreground hover:text-primary hover:underline">
                     {showRemarksBox ? "Hide" : remarks ? "Remarks noted · edit" : "Remarks"}
@@ -381,9 +430,15 @@ const ChecklistItemRow: React.FC<{
               {locked && remarks && <p className="mt-1 text-[11px] text-muted-foreground">— {remarks}</p>}
 
               {showRemarksBox && !locked && (
-                <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)}
-                  placeholder="Remarks (optional) — anything noted while confirming this with the customer"
-                  rows={2} className="mt-1.5 w-full text-xs border border-border rounded px-2 py-1 bg-background resize-none" />
+                <div className="mt-1.5 space-y-1">
+                  <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)}
+                    placeholder="Remarks (optional) — anything noted while confirming this with the customer"
+                    rows={2} className="w-full text-xs border border-border rounded px-2 py-1 bg-background resize-none" />
+                  <button type="button" onClick={handleSaveRemarks} disabled={saving || remarks === (item.Remarks || "")}
+                    className="text-[11px] font-medium px-2 py-1 rounded bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90">
+                    {saving ? "Saving..." : "Save Remarks"}
+                  </button>
+                </div>
               )}
 
               {showRecheckBox && !locked && (
@@ -417,7 +472,13 @@ const ChecklistItemRow: React.FC<{
 // ChecklistItemRow, just laid out for this purpose. ──────────────────────
 const InlineVerify: React.FC<{
   item: VcItem | undefined; bookingId: number; locked: boolean; onChanged: () => void;
-}> = ({ item, bookingId, locked, onChanged }) => {
+  // Short, distinguishing label shown before "Verify"/"Verified" — required
+  // wherever more than one InlineVerify can appear inside the same card
+  // (e.g. Payment Plan's "Plan structure" + "Milestone dates"), which
+  // otherwise render as two identical, unlabeled "Verified" rows with no
+  // way to tell what each one actually confirms.
+  label?: string;
+}> = ({ item, bookingId, locked, onChanged, label }) => {
   const [open, setOpen] = useState(false);
   const [remarks, setRemarks] = useState(item?.Remarks || "");
   const [saving, setSaving] = useState(false);
@@ -522,9 +583,8 @@ const InlineVerify: React.FC<{
   return (
     <div className="mt-1 flex items-center gap-1.5">
       <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
-        <input type="checkbox" checked={item.IsChecked} disabled={locked || saving}
-          onChange={handleToggleChecked}
-          className="w-3.5 h-3.5 accent-primary disabled:opacity-50" />
+        <VerifyCheckbox checked={item.IsChecked} locked={locked} disabled={saving} onChange={handleToggleChecked} />
+        {label && <span className="text-muted-foreground">{label}</span>}
         <span className={item.IsChecked ? "text-emerald-700 font-medium" : "text-muted-foreground"}>
           {item.IsChecked ? "Verified" : "Verify"}
         </span>
@@ -698,10 +758,12 @@ const ChecklistSubmitFooter: React.FC<{
         </div>
       ) : (
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] text-muted-foreground">
-            {vc.canSubmit ? "All items verified — ready to submit." : "Every item must be checked, with no open rechecks, before this can be submitted."}
+          <p className={`text-[11px] ${!vc.hasWelcomedCall && vc.canSubmit ? "text-amber-700 font-medium" : "text-muted-foreground"}`}>
+            {!vc.hasWelcomedCall
+              ? "Log a call with outcome \"Welcomed\" first — this checklist confirms facts checked during that call."
+              : vc.canSubmit ? "All items verified — ready to submit." : "Every item must be checked, with no open rechecks, before this can be submitted."}
           </p>
-          <button type="button" onClick={onSubmit} disabled={!vc.canSubmit || submitting}
+          <button type="button" onClick={onSubmit} disabled={!vc.canSubmit || !vc.hasWelcomedCall || submitting}
             className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 shrink-0">
             {submitting ? "Submitting..." : "Submit Verification"}
           </button>
@@ -762,7 +824,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerRunning]);
   const fmtTimer = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  const [coForm, setCoForm] = useState({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "" });
+  const [coForm, setCoForm] = useState({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "", Reason: "" });
   const [addingCo, setAddingCo] = useState(false);
 
   // Bank Preference tab — telecaller captures which bank(s) the customer
@@ -799,6 +861,19 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
     queryKey: ["crm-welcome-call-context", booking.BookingId],
     queryFn: () => fetchCallContext(booking.BookingId),
   });
+  // Carry the customer's already-known preferred Agreement date forward onto
+  // a NEW call (never onto an edit of a past call, which has its own real
+  // value or intentional blank). Without this, a follow-up call that's just
+  // confirming something else — not re-asking about the Agreement date —
+  // left this field blank, and since crmAgreements.js used to read only the
+  // LATEST call's own value, that blank silently overwrote/hid the date the
+  // customer already gave. Only fills an empty field — never clobbers
+  // something staff already typed into this same call.
+  useEffect(() => {
+    if (isEditingCall || !callContext?.latestPreferredAgreementDate) return;
+    setForm((f) => f.PreferredAgreementDate ? f : { ...f, PreferredAgreementDate: String(callContext.latestPreferredAgreementDate).slice(0, 10) });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callContext?.latestPreferredAgreementDate]);
   const { data: docData = { documents: [], standardTypes: [] }, refetch: refetchDocs } = useQuery({
     queryKey: ["crm-booking-documents", booking.BookingId],
     queryFn: () => fetchDocs(booking.BookingId),
@@ -1047,8 +1122,15 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(coForm),
       });
-      if (!res.ok) throw new Error((await res.json()).error);
-      setCoForm({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error);
+      // A co-applicant is a named party on the Agreement itself — once legal
+      // documents already exist for this booking, adding one is queued for
+      // approval instead of applying immediately (see crmCoApplicant.js).
+      toast.success(data.pending
+        ? "Amendment queued — legal documents are under verification. This needs sign-off before it applies."
+        : "Co-applicant added");
+      setCoForm({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "", Reason: "" });
       setAddingCo(false);
       refetchCo();
     } catch (e: any) {
@@ -1058,7 +1140,23 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
 
   const handleRemoveCoApplicant = async (id: number) => {
     try {
-      await fetchWithAuth(`${CO_API}/${id}`, { method: "DELETE" });
+      let res = await fetchWithAuth(`${CO_API}/${id}`, { method: "DELETE" });
+      let data = await res.json().catch(() => ({}));
+      // Same legal-work-started gate as adding one — the backend asks for a
+      // reason only when it's actually needed, so ask here rather than
+      // always demanding one up front for the common (no legal work yet) case.
+      if (!res.ok && /reason is required/i.test(data.error || "")) {
+        const reason = window.prompt("Legal documents already exist for this booking — describe why this co-applicant should be removed:");
+        if (!reason?.trim()) return;
+        res = await fetchWithAuth(`${CO_API}/${id}`, {
+          method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Reason: reason.trim() }),
+        });
+        data = await res.json().catch(() => ({}));
+      }
+      if (!res.ok) throw new Error(data.error);
+      toast.success(data.pending
+        ? "Amendment queued — legal documents are under verification. This needs sign-off before it applies."
+        : "Co-applicant removed");
       refetchCo();
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -1169,8 +1267,19 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
 
         {/* Persistent verification progress — the master submit-readiness
             gate, same "always visible regardless of which tab you're on"
-            treatment as CrmBookingDetail.tsx's Data Review Checklist strip. */}
+            treatment as CrmBookingDetail.tsx's Data Review Checklist strip.
+            Submit sits right here too, not buried at the bottom of the
+            Bank Preference tab (tab 4 of 4) — that used to mean the one
+            action that actually finishes this whole dossier was invisible
+            unless staff happened to click through every tab, and easy to
+            miss entirely on a self-funded booking where that tab shows
+            nothing but "Not on file". It belongs next to the progress it
+            reports on, reachable from every tab, same as Log Call. */}
         <ChecklistProgressBar vc={vcState.vc} bookingId={booking.BookingId} />
+        <ChecklistSubmitFooter
+          vc={vcState.vc} locked={vcState.locked} submitting={vcState.submitting} reopening={vcState.reopening}
+          onSubmit={vcState.handleSubmit} onReopen={vcState.handleReopen}
+        />
 
         {/* F3 — Escalation banner: fires when customer has been unreachable 3+ consecutive times */}
         {(callContext?.consecutiveNonReached ?? 0) >= 3 && (
@@ -1505,6 +1614,10 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                   <div className="font-medium text-sm truncate" title={callContext?.booking?.PaymentPlanName}>{callContext?.booking?.PaymentPlanName || "7-stage default"}</div>
                 </button>
                 <div className="px-2.5 pb-2">
+                  {/* Single merged checklist item — plan structure and its
+                      milestone schedule are confirmed together as one fact,
+                      not two separate ticks. Always visible here regardless
+                      of whether the schedule itself is expanded below. */}
                   <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "plan_structure")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
                 </div>
                 {expandedCard === "plan" && (
@@ -1542,9 +1655,6 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                         </div>
                       );
                     })}
-                    <div className="relative pt-0.5">
-                      <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "milestone_dates")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
-                    </div>
                   </div>
                 )}
               </div>
@@ -1608,9 +1718,12 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
 
             {/* Parking & Extra Charges — read-only reference so staff can
                 actually see what was sold before confirming it with the
-                customer. Always shown (even with nothing sold) since both
-                checklist items are "confirmed... or marked N/A if none" —
-                the tick still needs a place to live either way. */}
+                customer. The reference card always shows (so "None on this
+                booking" is visible either way), but the verify checkbox
+                below it is dynamic: it only renders when vc.items actually
+                contains that key, which the backend only includes when this
+                booking really has a parking allotment / extra charge on
+                file. Nothing to verify → no checkbox, not a forced "N/A" tick. */}
             <div className="rounded-xl border border-border p-3.5 space-y-2.5">
               <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Parking &amp; Extra Charges</h4>
               <div className="relative space-y-1">
@@ -1753,7 +1866,9 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                 <div key={c.Id} className="rounded-lg border border-border p-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="font-medium text-sm text-foreground">{c.Name}{c.Relation ? <span className="text-muted-foreground font-normal"> · {c.Relation}</span> : ""}</div>
-                    <button onClick={() => handleRemoveCoApplicant(c.Id)} className="text-xs text-red-600 hover:underline shrink-0">Remove</button>
+                    {!vcState.locked && (
+                      <button onClick={() => handleRemoveCoApplicant(c.Id)} className="text-xs text-red-600 hover:underline shrink-0">Remove</button>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1 mt-2 text-xs">
                     <div><span className="text-muted-foreground block">Mobile</span>{c.Mobile || "—"}</div>
@@ -1763,7 +1878,14 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                   </div>
                 </div>
               ))}
-              {!addingCo ? (
+              {/* Adding/removing a co-applicant changes whether the
+                  "Co-Applicant Details" verification item even applies —
+                  doing that after the checklist is Submitted and locked
+                  would leave a locked, "fully verified" checklist silently
+                  stale. Reopen first, same gate the backend enforces. */}
+              {vcState.locked ? (
+                <p className="text-[11px] text-muted-foreground flex items-center gap-1"><Lock size={10} /> Reopen the verification checklist to add or remove a co-applicant.</p>
+              ) : !addingCo ? (
                 <button onClick={() => setAddingCo(true)} className="text-xs text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-0.5">
                   <Plus size={11} /> Add Co-Applicant
                 </button>
@@ -1783,6 +1905,9 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                     <input placeholder="Aadhaar No." value={coForm.AadhaarNo} onChange={(e) => setCoForm((f) => ({ ...f, AadhaarNo: e.target.value }))}
                       className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
                   </div>
+                  <input placeholder="Reason (only needed if legal documents already exist for this booking)"
+                    value={coForm.Reason} onChange={(e) => setCoForm((f) => ({ ...f, Reason: e.target.value }))}
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                   <div className="flex gap-2">
                     <button onClick={handleAddCoApplicant} className="text-xs px-3 py-1.5 text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20">Save</button>
                     <button onClick={() => setAddingCo(false)} className="text-xs px-3 py-1.5 border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
@@ -1911,11 +2036,6 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
               />
             </div>
           </div>
-
-          <ChecklistSubmitFooter
-            vc={vcState.vc} locked={vcState.locked} submitting={vcState.submitting} reopening={vcState.reopening}
-            onSubmit={vcState.handleSubmit} onReopen={vcState.handleReopen}
-          />
         </div>
         )}
           </div>
