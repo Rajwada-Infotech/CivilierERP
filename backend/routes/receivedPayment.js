@@ -741,6 +741,15 @@ router.delete("/:id", requirePageRight("received-payment", "delete"), async (req
 
     const linkedSIId = existing.recordset[0].SourceSaleInvoiceId;
 
+    // Reverse whatever GL this payment posted at approval (SourceType
+    // 'ReceivedPayment', SourceId = RPPaymentID — see generalLedger.js's
+    // postReceivedPaymentApproval) before hard-deleting it. Previously
+    // skipped, so a deleted receipt's GeneralLedgerEntry rows survived with
+    // IsReversed=0 forever, inflating every ledger/report reading off that
+    // table. Same fix already applied to loanSanction.js's DELETE.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    await reversePostingBySource(tx, "ReceivedPayment", id);
+
     await new sql.Request(tx).input("id", sql.Int, id).query(`
       DELETE FROM dbo.BankReconciliation
       WHERE SourceType = 'RECEIVED' AND SourceID = @id

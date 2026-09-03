@@ -275,16 +275,38 @@ export const updateLoanSanction = (id: number, payload: LoanEditPayload) =>
     body: JSON.stringify(payload),
   }).then((r) => handle(r));
 
-// Scoped to the company the payment is being made from — a loan's EMI is
-// only "payable" from the company that is its lender or borrower, same
-// scoping the backend enforces (400s without a companyId).
-// direction "outgoing" (default): Inter-Company/Bank Loan repayments this
-// company pays OUT — feeds Finance > Payment's Loan EMIs picker.
-// direction "incoming": Customer Loan repayments only, where this company
-// is the lender being paid BACK — feeds Received Payment's Loan EMIs
-// picker (migration 356).
-export const getPayableEmis = (companyId: number, direction: "outgoing" | "incoming" = "outgoing") =>
-  fetchWithAuth(`${BASE}/emi-payable?companyId=${companyId}&direction=${direction}`).then((r) => handle<PayableEmi[]>(r));
+// Scoped to the company the repayment is being settled for — a loan's EMI
+// is only "payable" from the company that is its lender (Inter-Company /
+// Customer Loan) or borrower (Bank Loan), same scoping the backend
+// enforces (400s without a companyId). Repayment of every loan type is
+// recorded through Received Payment only — see ReceivedPayment.tsx's Loan
+// Repayment picker; there is no repayment flow on the Payment page.
+export const getPayableEmis = (companyId: number) =>
+  fetchWithAuth(`${BASE}/emi-payable?companyId=${companyId}`).then((r) => handle<PayableEmi[]>(r));
+
+export interface UndisbursedLoan {
+  LoanId: number;
+  LoanNo: string;
+  LoanDate: string;
+  Amount: number;
+  LenderBankAccountId: number | null;
+  BorrowerBankAccountId: number | null;
+  BorrowerCompanyName: string | null;
+}
+
+// Sanctioned Inter-Company loans this (lender) company hasn't disbursed to
+// GL yet — feeds Finance > Payment's "Loan Disbursement" picker.
+export const getUndisbursedLoans = (companyId: number) =>
+  fetchWithAuth(`${BASE}/undisbursed?companyId=${companyId}`).then((r) => handle<UndisbursedLoan[]>(r));
+
+// Posts a Sanctioned loan's disbursement to GL — the deliberate action
+// that used to happen automatically at sanction time for Inter-Company
+// loans (see POST / above). Same endpoint the loan's own "Post to GL"
+// action already used.
+export const postLoanToGL = (loanId: number) =>
+  fetchWithAuth(`${BASE}/${loanId}/post-to-gl`, { method: "POST" }).then((r) =>
+    handle<{ voucherNo: string; message: string }>(r),
+  );
 
 export const getLoanPayments = (loanId: number) =>
   fetchWithAuth(`${BASE}/${loanId}/payments`).then((r) => handle<LoanPayment[]>(r));

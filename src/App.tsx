@@ -212,6 +212,7 @@ const FixedAssetInventoryImport = lazy(() => import("./pages/fixedAsset/FixedAss
 const FixedAssetAssignment = lazy(() => import("./pages/fixedAsset/FixedAssetAssignment"));
 const AssetTransfer = lazy(() => import("./pages/fixedAsset/AssetTransfer"));
 const FixedAssetQualityCheck = lazy(() => import("./pages/fixedAsset/FixedAssetQualityCheck"));
+const FixedAssetMaintenance = lazy(() => import("./pages/fixedAsset/FixedAssetMaintenance"));
 const IDTemplateMaster = lazy(() => import("./pages/fixedAsset/IDTemplateMaster"));
 const ShortClose = lazy(() => import("./pages/material/ShortClose"));
 const DepreciationSetup = lazy(() => import("./pages/fixedAsset/DepreciationSetup"));
@@ -1200,6 +1201,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="fixed-asset-quality-check">
             <FixedAssetQualityCheck />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/maintenance"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-maintenance">
+            <FixedAssetMaintenance />
           </ProtectedRoute>
         }
       />

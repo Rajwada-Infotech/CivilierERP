@@ -487,11 +487,16 @@ export default function ReceivedPaymentPage() {
     !!form.bankName && !MAJOR_BANKS.includes(form.bankName) && !MINOR_BANKS.includes(form.bankName),
   );
 
-  // ── Loan Repayment (Customer Loan only) ─────────────────────────────────
-  // A Customer Loan repayment is cash coming IN from the customer who
-  // borrowed it — the same direction every other Received Payment already
-  // models, so it belongs here rather than on the outgoing Payment page
-  // (see migration 356 / getPayableEmis's direction="incoming").
+  // ── Loan Repayment (every loan type) ────────────────────────────────────
+  // Repayment of every loan type — Customer Loan, Inter-Company, Bank Loan
+  // — is recorded here exclusively; the Payment page no longer has a
+  // repayment picker of its own (only a "Loan Disbursement" one, a
+  // different action — see Payment.tsx). Customer Loan and Inter-Company
+  // repayment is cash coming IN to this company (the lender). Bank Loan
+  // repayment is genuinely outgoing (we're paying an external bank back),
+  // but is tracked through this same single surface by design rather than
+  // a separate outgoing page — payLoan()'s own GL posting is correct for
+  // each loan type regardless of which page triggered it.
   const [loanEmiOptions, setLoanEmiOptions] = useState<PayableEmi[]>([]);
   const [loanEmisLoading, setLoanEmisLoading] = useState(false);
   const [selectedLoanEmi, setSelectedLoanEmi] = useState<PayableEmi | null>(null);
@@ -509,7 +514,7 @@ export default function ReceivedPaymentPage() {
       return;
     }
     setLoanEmisLoading(true);
-    getPayableEmis(companyId, "incoming")
+    getPayableEmis(companyId)
       .then(setLoanEmiOptions)
       .catch(() => setLoanEmiOptions([]))
       .finally(() => setLoanEmisLoading(false));
@@ -538,13 +543,17 @@ export default function ReceivedPaymentPage() {
     setLoanLumpSumAmount("");
     setLoanLateFee("");
     setLoanPaymentNotes("");
-    // Customer Loan only reaches this picker (direction="incoming" already
-    // filters server-side) — Company is the LENDER (whose books this
-    // repayment is recorded under), Customer Name is the borrower paying
-    // it back.
+    // form.companyId (the page's own top-level company selector, already
+    // scoped server-side by /emi-payable) is left untouched — for Customer
+    // Loan/Inter-Company it's already the lender receiving repayment; for
+    // Bank Loan it's already the borrower (us) settling with the external
+    // bank. "Customer Name" here means "who this settlement is with," so
+    // it needs the OPPOSITE party for Bank Loan: the lender (the bank),
+    // not the borrower (us).
+    const counterpartyName = emi.LoanType === "Bank Loan" ? emi.LenderName : emi.BorrowerName;
     setForm((prev) => ({
       ...prev,
-      customerName: emi.BorrowerName || prev.customerName,
+      customerName: counterpartyName || prev.customerName,
       amount: String(Number(emi.EMIAmount)),
       remarks: `Loan EMI ${emi.InstallmentNo} — ${emi.LoanNo}`,
     }));
@@ -1505,9 +1514,10 @@ export default function ReceivedPaymentPage() {
                   </div>
                 </div>
 
-                {/* Loan EMIs — a Customer Loan repayment this company (as
-                    lender) is due to receive back. Only shows once a
-                    company with outstanding Customer Loan EMIs is picked. */}
+                {/* Loan EMIs — any loan repayment this company is due to
+                    settle (Customer Loan/Inter-Company as lender, Bank
+                    Loan as borrower). Only shows once a company with
+                    outstanding EMIs is picked. */}
                 {form.companyId && !editingId && (loanEmisLoading || loanEmiOptions.length > 0) && (
                   <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
                     <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-muted-foreground">
@@ -1532,7 +1542,7 @@ export default function ReceivedPaymentPage() {
                             )}
                           >
                             <Landmark size={11} />
-                            {emi.LoanNo} — {emi.BorrowerName}
+                            {emi.LoanNo} — {emi.LoanType === "Bank Loan" ? emi.LenderName : emi.BorrowerName}
                           </button>
                         ))}
                       </div>

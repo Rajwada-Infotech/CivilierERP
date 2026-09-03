@@ -3701,6 +3701,16 @@ router.delete("/:id", requirePageRight("expense-booking", "delete"), async (req,
       });
     }
 
+    // Reverse whatever GL this invoice posted at approval (SourceType
+    // 'ExpenseBooking', SourceId = Eid — see generalLedger.js's
+    // postExpenseBookingApproval) before hard-deleting it. Previously
+    // skipped, so a deleted invoice's GeneralLedgerEntry rows survived with
+    // IsReversed=0 forever — Vendor Ledger Report and every other report
+    // reading off that table kept counting an invoice that no longer
+    // existed. Same fix already applied to loanSanction.js's DELETE.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    await reversePostingBySource(pool, "ExpenseBooking", numericId);
+
     await pool
       .request()
       .input("Eid", sql.Int, numericId)
