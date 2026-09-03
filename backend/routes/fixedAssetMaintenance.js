@@ -344,7 +344,8 @@ router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
   }
 });
 
-// ── PUT /:id — edit (Draft only) ───────────────────────────────────────────
+// ── PUT /:id — edit. Editing a Posted record reverses its GL voucher and
+//    returns it to Draft (the client can then re-post via /:id/post). ───────
 router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
   const email = requireUser(req, res);
   if (!email) return;
@@ -355,8 +356,22 @@ router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
     const cur = await pool.request().input("Id", sql.Int, id)
       .query(`SELECT Status FROM dbo.FixedAssetMaintenance WHERE MaintenanceId = @Id`);
     if (!cur.recordset.length) return res.status(404).json({ error: "Not found" });
-    if (cur.recordset[0].Status !== "Draft")
-      return res.status(409).json({ error: "Only Draft records can be edited. Posted records must be reversed." });
+    if (cur.recordset[0].Status === "Cancelled")
+      return res.status(409).json({ error: "Cancelled records cannot be edited." });
+
+    const wasPosted = cur.recordset[0].Status === "Posted";
+    if (wasPosted) {
+      // Reverse the existing accounting entry before applying the edit; the
+      // record drops back to Draft.
+      await reverseMaintenancePosting(pool, id);
+      await pool.request().input("Id", sql.Int, id).input("By", sql.NVarChar(200), email).query(`
+        UPDATE dbo.FixedAssetMaintenance
+        SET Status = 'Draft', VoucherNo = NULL, PostedBy = NULL, PostedAt = NULL,
+            UpdatedBy = @By, UpdatedAt = SYSDATETIME()
+        WHERE MaintenanceId = @Id
+      `);
+      await bumpCacheVersion("general-ledger");
+    }
 
     const check = await validateBody(pool, req.body);
     if (typeof check === "string") return res.status(400).json({ error: check });
@@ -404,7 +419,7 @@ router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
         WHERE MaintenanceId = @Id AND Status = 'Draft'
       `);
     await bumpCacheVersion("fixed-asset-maintenance");
-    res.json({ ok: true });
+    res.json({ ok: true, wasPosted });
   } catch (err) {
     console.error("[faMaintenance] PUT /:id:", err.message);
     res.status(400).json({ error: err.message });

@@ -269,7 +269,7 @@ function printMaintenanceVoucher(d: MaintenanceItem) {
 }
 
 // Local preview mirrors the backend posting rule exactly:
-//   Dr Repairs & Maintenance - Direct/Indirect A/c   taxable
+//   Dr Direct/Indirect Repair Expense A/c            taxable
 //   Dr GST Credit Available (Input GST)              GST
 //   Cr Vendor                                        taxable + GST
 function localPostingPreview(
@@ -294,8 +294,8 @@ function localPostingPreview(
   }
 
   const expenseAcct = f.repairExpenseType === "Direct"
-    ? "Repairs & Maintenance - Direct A/c"
-    : "Repairs & Maintenance - Indirect A/c";
+    ? "Direct Repair Expense A/c"
+    : "Indirect Repair Expense A/c";
   const gstAmount = round2(taxable * sac.ratePct / 100);
   const total = round2(taxable + gstAmount);
 
@@ -460,7 +460,12 @@ export default function FixedAssetMaintenance() {
   });
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Parameters<typeof updateMaintenance>[1] }) => updateMaintenance(id, data),
-    onSuccess: () => { toast.success("Maintenance record updated"); invalidate(); backToList(); },
+    onSuccess: (r) => {
+      toast.success(r?.wasPosted
+        ? "Record updated — previous posting reversed, re-post from the Posting tab"
+        : "Maintenance record updated");
+      invalidate(); backToList();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const postMut = useMutation({
@@ -481,7 +486,7 @@ export default function FixedAssetMaintenance() {
     setViewMode("form");
   };
   const goToEdit = (c: MaintenanceItem) => {
-    if (c.Status !== "Draft") { toast.error("Only Draft records can be edited"); return; }
+    if (c.Status === "Cancelled") { toast.error("Cancelled records cannot be edited"); return; }
     resetForm(); setEditingId(c.MaintenanceId); setViewMode("form");
   };
 
@@ -553,7 +558,7 @@ export default function FixedAssetMaintenance() {
             </button>
             <button onClick={handleSave} disabled={busy}
               className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-yellow-500/40 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/10 transition-all disabled:opacity-50">
-              <Check size={13} /> {editingId ? "Update Draft" : "Save Draft"}
+              <Check size={13} /> {editingId ? (editDetail?.Status === "Posted" ? "Save & Unpost" : "Update Draft") : "Save Draft"}
             </button>
             <button onClick={handleSaveAndPost} disabled={busy}
               className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
@@ -563,6 +568,15 @@ export default function FixedAssetMaintenance() {
         }
       >
         <div className="w-full max-w-[1100px]">
+          {editingId && editDetail?.Status === "Posted" && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>
+                This record is <b>Posted</b> (voucher {editDetail.VoucherNo}). Saving will reverse the current
+                accounting entry and return it to Draft — use <b>Save &amp; Post</b> to re-post with the new values.
+              </span>
+            </div>
+          )}
           <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
             <TabsList className="mb-4">
               <TabsTrigger value="details">Transaction</TabsTrigger>
@@ -888,8 +902,8 @@ export default function FixedAssetMaintenance() {
                               <button onClick={() => postMut.mutate(c.MaintenanceId)} title="Post to GL"
                                 className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-muted transition-colors"><Send size={14} /></button>
                             )}
-                            {rights.canEdit && c.Status === "Draft" && (
-                              <button onClick={() => goToEdit(c)} title="Edit"
+                            {rights.canEdit && c.Status !== "Cancelled" && (
+                              <button onClick={() => goToEdit(c)} title={c.Status === "Posted" ? "Edit (reverses the posting)" : "Edit"}
                                 className="p-1.5 rounded-lg text-muted-foreground hover:text-yellow-600 dark:hover:text-yellow-400 hover:bg-muted transition-colors"><Pencil size={14} /></button>
                             )}
                             {rights.canDelete && (
@@ -978,11 +992,19 @@ export default function FixedAssetMaintenance() {
                   </table>
                 </div>
               )}
-              {rights.canEdit && viewDetail.Status === "Draft" && (
-                <button onClick={() => { setViewingId(null); postMut.mutate(viewDetail.MaintenanceId); }}
-                  className="w-full inline-flex items-center justify-center gap-1.5 font-semibold text-white text-xs px-3 py-2 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600">
-                  <Send size={13} /> Post to GL
-                </button>
+              {rights.canEdit && viewDetail.Status !== "Cancelled" && (
+                <div className="flex gap-2">
+                  <button onClick={() => { const c = viewDetail; setViewingId(null); goToEdit(c); }}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 font-semibold text-xs px-3 py-2 rounded-lg border border-yellow-500/40 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/10">
+                    <Pencil size={13} /> Edit
+                  </button>
+                  {viewDetail.Status === "Draft" && (
+                    <button onClick={() => { setViewingId(null); postMut.mutate(viewDetail.MaintenanceId); }}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 font-semibold text-white text-xs px-3 py-2 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600">
+                      <Send size={13} /> Post to GL
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           </div>,

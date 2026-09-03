@@ -4,7 +4,7 @@
 //
 // Posting rules for FA Maintenance & Repair (routes/fixedAssetMaintenance.js).
 //
-//   Dr  Repairs & Maintenance - Direct / Indirect A/c   (taxable amount)
+//   Dr  Direct / Indirect Repair Expense A/c            (taxable amount)
 //   Dr  GST Credit Available  (input GST credit ledger)  (GST amount)
 //   Cr  <Vendor ledger>                                  (taxable + GST)
 //
@@ -23,9 +23,12 @@ const { postVoucher, hasPosting, reversePostingBySource } = require("./generalLe
 
 const SOURCE_TYPE = "FAMaintenance";
 
+// The ERP's standard repair expense heads (dev migrations 394-396):
+//   Direct   -> "Direct Repair Expense A/c"   (Construction Expenses)
+//   Indirect -> "Indirect Repair Expense A/c" (Indirect Expenses)
 const EXPENSE_HEAD_BY_TYPE = {
-  Direct: "Repairs & Maintenance - Direct A/c",
-  Indirect: "Repairs & Maintenance - Indirect A/c",
+  Direct: "Direct Repair Expense A/c",
+  Indirect: "Indirect Repair Expense A/c",
 };
 
 // The ERP's confirmed input-tax-credit ledger (migration 237). Same account
@@ -50,7 +53,7 @@ async function resolveExpenseHead(pool, repairExpenseType) {
     .input("Name", sql.NVarChar(200), name)
     .query(`SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadName = @Name AND LHeadType = 'GL'`);
   const id = r.recordset[0]?.LHeadId ?? null;
-  if (!id) throw cfgErr(`Repair Expense Account "${name}" is not configured. Run migration 392.`);
+  if (!id) throw cfgErr(`Repair Expense Account "${name}" is not configured in the Chart of Accounts.`);
   return { lHeadId: id, name };
 }
 

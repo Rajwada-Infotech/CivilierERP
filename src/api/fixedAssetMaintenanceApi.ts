@@ -178,7 +178,7 @@ export const createMaintenance = async (data: MaintenancePayload): Promise<{ mai
   return res.json();
 };
 
-export const updateMaintenance = async (id: number, data: MaintenancePayload): Promise<{ ok: true }> => {
+export const updateMaintenance = async (id: number, data: MaintenancePayload): Promise<{ ok: true; wasPosted?: boolean }> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
   });

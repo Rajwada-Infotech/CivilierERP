@@ -20,6 +20,7 @@ import { getActiveDepreciationSetups, type DepreciationSetup } from "@/api/depre
 import {
   getFixedAssets, getFixedAsset, createFixedAsset, updateFixedAsset, deleteFixedAsset,
   getFixedAssetReversalPlan, reverseFixedAsset,
+  getAssetDepreciation, postAssetDepreciation, reverseAssetDepreciation,
   type FixedAssetListItem, type FixedAssetDetail,
 } from "@/api/fixedAssetApi";
 import { getSacCodes } from "@/api/hsnApi";
@@ -255,6 +256,171 @@ function SummaryCard({ label, value, color = "", icon: Icon }: { label: string; 
       {Icon && <Icon size={13} className={`mx-auto mb-1 ${color || "text-muted-foreground"}`} />}
       <p className="text-xs text-muted-foreground mb-1">{label}</p>
       <p className={`text-base font-bold tabular-nums ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+const DEP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Monthly depreciation posting for an asset:
+//   Dr Depreciation Expense A/c  /  Cr Accumulated Depreciation A/c
+// The charge is computed by the backend from the asset's SLM/WDV rate.
+function DepreciationPostingCard({ assetId, glassSection }: { assetId: number; glassSection: React.CSSProperties }) {
+  const rights = usePageRights("fixed-asset-record");
+  const qc = useQueryClient();
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+
+  const { data, isFetching } = useQuery({
+    queryKey: ["fa-depreciation", assetId, year, month],
+    queryFn: () => getAssetDepreciation(assetId, year, month),
+  });
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["fa-depreciation", assetId] });
+    qc.invalidateQueries({ queryKey: ["fixed-asset", assetId] });
+  };
+  const postMut = useMutation({
+    mutationFn: () => postAssetDepreciation(assetId, year, month),
+    onSuccess: (r) => { toast.success(`Depreciation posted — ${r.voucherNo}`); invalidate(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const reverseMut = useMutation({
+    mutationFn: (entryId: number) => reverseAssetDepreciation(assetId, entryId),
+    onSuccess: () => { toast.success("Depreciation entry reversed"); invalidate(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const plan = data?.plan ?? null;
+  const dep = plan?.depreciation;
+  const history = data?.history ?? [];
+  const yearOptions = Array.from({ length: 7 }, (_, i) => now.getFullYear() - 4 + i);
+
+  return (
+    <div className={sectionCls} style={glassSection}>
+      <SectionHeader icon={TrendingDown}>Depreciation Posting</SectionHeader>
+      <p className="text-xs text-muted-foreground">
+        Depreciation Expense A/c Dr &nbsp;·&nbsp; To Accumulated Depreciation A/c — one entry per month,
+        computed from the asset's {dep?.method || "SLM/WDV"} rate.
+      </p>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className={labelCls}>Month</label>
+          <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className={`${inputCls} w-28`}>
+            {DEP_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>Year</label>
+          <select value={year} onChange={(e) => setYear(Number(e.target.value))} className={`${inputCls} w-28`}>
+            {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        {rights.canEdit && plan && !plan.error && !plan.isPosted && (
+          <button onClick={() => postMut.mutate()} disabled={postMut.isPending}
+            className="inline-flex items-center gap-1.5 font-heading font-semibold text-white shadow-sm text-xs px-4 py-2 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+            <Check size={13} /> {postMut.isPending ? "Posting…" : `Post ${DEP_MONTHS[month - 1]} ${year}`}
+          </button>
+        )}
+      </div>
+
+      {isFetching && !data ? (
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Loading…</p>
+      ) : plan?.error ? (
+        <div className="flex items-center gap-2 text-xs text-red-600 dark:text-red-400 py-3">
+          <AlertCircle size={14} /> {plan.error}
+        </div>
+      ) : dep ? (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            {[
+              ["Opening Book Value", fmtCur(dep.openingBookValue)],
+              [`Depreciation (${dep.ratePct}% ${dep.method})`, fmtCur(dep.depreciationAmount)],
+              ["Closing Book Value", fmtCur(dep.closingBookValue)],
+              ["Accumulated Dep.", fmtCur(dep.accumulatedDepreciation)],
+            ].map(([k, v]) => (
+              <div key={k} className="bg-muted/40 rounded-lg p-2">
+                <p className="text-muted-foreground">{k}</p>
+                <p className="font-semibold tabular-nums mt-0.5">{v}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[420px]">
+              <thead>
+                <tr className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
+                  <th className="px-3 py-2 text-left">Account</th>
+                  <th className="px-3 py-2 text-center">Dr/Cr</th>
+                  <th className="px-3 py-2 text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {(plan.entries ?? []).map((e, i) => (
+                  <tr key={i}>
+                    <td className="px-3 py-2">{e.account}</td>
+                    <td className="px-3 py-2 text-center">
+                      <span className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-bold ${e.debit ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"}`}>
+                        {e.debit ? "Dr" : "Cr"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{fmtCur(e.debit || e.credit)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {plan.isPosted && (
+            <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
+              Already posted for {DEP_MONTHS[month - 1]} {year}{plan.voucherRef ? ` · voucher ${plan.voucherRef}` : ""}.
+            </p>
+          )}
+        </>
+      ) : null}
+
+      {history.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground mb-2 mt-1">Posted Depreciation History</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs min-w-[560px]">
+              <thead>
+                <tr className="text-muted-foreground text-[10px] uppercase tracking-wide">
+                  <th className="px-3 py-1.5 text-left">Period</th>
+                  <th className="px-3 py-1.5 text-left">Voucher</th>
+                  <th className="px-3 py-1.5 text-right">Opening</th>
+                  <th className="px-3 py-1.5 text-right">Depreciation</th>
+                  <th className="px-3 py-1.5 text-right">Closing</th>
+                  <th className="px-3 py-1.5 text-center">Status</th>
+                  <th className="px-3 py-1.5"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {history.map((h) => (
+                  <tr key={h.EntryId} className={h.Status === "Reversed" ? "opacity-50" : ""}>
+                    <td className="px-3 py-1.5">{DEP_MONTHS[h.PeriodMonth - 1]} {h.PeriodYear}</td>
+                    <td className="px-3 py-1.5 font-mono">{h.VoucherNo || "—"}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtCur(h.OpeningBookValue)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtCur(h.DepreciationAmount)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtCur(h.ClosingBookValue)}</td>
+                    <td className="px-3 py-1.5 text-center">
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${h.Status === "Reversed" ? "bg-muted text-muted-foreground" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"}`}>{h.Status}</span>
+                    </td>
+                    <td className="px-3 py-1.5 text-right">
+                      {rights.canEdit && h.Status === "Posted" && (
+                        <button onClick={() => reverseMut.mutate(h.EntryId)} disabled={reverseMut.isPending} title="Reverse this entry"
+                          className="p-1 rounded text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-muted"><Undo2 size={13} /></button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -927,6 +1093,9 @@ export default function FixedAssetRecord() {
               </div>
             </div>
           )}
+
+          {/* depreciation posting */}
+          <DepreciationPostingCard assetId={d.AssetId} glassSection={glassSection} />
 
           {/* sale info */}
           {d.AssetStatus === "Sold" && (

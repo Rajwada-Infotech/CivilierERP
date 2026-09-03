@@ -121,6 +121,75 @@ export const getFixedAsset = async (id: number): Promise<FixedAssetDetail> => {
   return res.json();
 };
 
+// ── Depreciation posting ────────────────────────────────────────────────────
+export interface DepreciationEntry {
+  EntryId: number;
+  PeriodYear: number;
+  PeriodMonth: number;
+  FinYear: string | null;
+  Method: string;
+  RatePct: number;
+  OpeningBookValue: number;
+  DepreciationAmount: number;
+  ClosingBookValue: number;
+  AccumulatedDepreciation: number;
+  Status: "Posted" | "Reversed";
+  VoucherNo: string | null;
+  PostedBy: string | null;
+  PostedAt: string | null;
+}
+
+export interface DepreciationPlan {
+  isPosted: boolean;
+  voucherRef: string | null;
+  error?: string;
+  depreciation?: {
+    method: string;
+    ratePct: number;
+    cost: number;
+    openingBookValue: number;
+    depreciationAmount: number;
+    closingBookValue: number;
+    accumulatedDepreciation: number;
+    finYear: string;
+  };
+  entries?: { account: string; debit: number; credit: number }[];
+}
+
+export interface DepreciationResponse {
+  year: number;
+  month: number;
+  plan: DepreciationPlan | null;
+  history: DepreciationEntry[];
+}
+
+export const getAssetDepreciation = async (
+  id: number, year: number, month: number,
+): Promise<DepreciationResponse> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/depreciation?year=${year}&month=${month}`);
+  if (!res.ok) await handleError(res, "Failed to fetch depreciation");
+  return res.json();
+};
+
+export const postAssetDepreciation = async (
+  id: number, year: number, month: number,
+): Promise<{ ok: true; voucherNo: string; entryId: number }> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/depreciation/post`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ year, month }),
+  });
+  if (!res.ok) await handleError(res, "Failed to post depreciation");
+  return res.json();
+};
+
+export const reverseAssetDepreciation = async (
+  id: number, entryId: number,
+): Promise<{ ok: true }> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/depreciation/${entryId}/reverse`, { method: "POST" });
+  if (!res.ok) await handleError(res, "Failed to reverse depreciation");
+  return res.json();
+};
+
 export const createFixedAsset = async (data: FixedAssetPayload): Promise<{ assetId: number; docNo: string; assetCode: string }> => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
