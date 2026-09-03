@@ -11,7 +11,7 @@
 // GET /orders) and Received by Customer (GET /grns, i.e. GRN receipt
 // progress against what was supplied) — genuinely useful "what's my stuff
 // doing right now" info that was otherwise buried behind unbuilt screens.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -54,6 +54,15 @@ const isDueSoon = (due?: string | null) =>
 export default function DashboardScreen() {
   const { currentUser } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  // Section y-offsets within the ScrollView's content, captured via onLayout
+  // as each QSection mounts — lets the stat-row tiles jump straight to the
+  // matching section instead of just being decorative counts.
+  const sectionY = useRef<{ pending?: number; submitted?: number }>({});
+  const scrollToSection = (key: "pending" | "submitted") => {
+    const y = sectionY.current[key];
+    if (y != null) scrollRef.current?.scrollTo({ y: Math.max(y - 12, 0), animated: true });
+  };
 
   const quotationsQ = useQuery({
     queryKey: ["supplier-quotations"],
@@ -103,6 +112,7 @@ export default function DashboardScreen() {
 
   return (
     <ScrollView
+      ref={scrollRef}
       className="flex-1"
       style={{ backgroundColor: "#0c0c12" }}
       contentContainerStyle={{ padding: 16, paddingBottom: 110 }}
@@ -184,28 +194,47 @@ export default function DashboardScreen() {
         </LinearGradient>
       </View>
 
-      {/* Stat row */}
+      {/* Stat row — each tile jumps to the matching section below */}
       <View className="flex-row gap-3 mb-4">
         {[
-          { label: "Total", value: quotations.length, color: "#e7e9ef" },
-          { label: "Pending", value: pending.length, color: pending.length > 0 ? "#fcd34d" : "#818898" },
-          { label: "Submitted", value: submitted.length, color: "#6ee7b7" },
+          {
+            label: "Total",
+            value: quotations.length,
+            color: "#e7e9ef",
+            onPress: () => scrollToSection(pending.length > 0 ? "pending" : "submitted"),
+            disabled: quotations.length === 0,
+          },
+          {
+            label: "Pending",
+            value: pending.length,
+            color: pending.length > 0 ? "#fcd34d" : "#818898",
+            onPress: () => scrollToSection("pending"),
+            disabled: pending.length === 0,
+          },
+          {
+            label: "Submitted",
+            value: submitted.length,
+            color: "#6ee7b7",
+            onPress: () => scrollToSection("submitted"),
+            disabled: submitted.length === 0,
+          },
         ].map((s) => (
-          <View
-            key={s.label}
-            className="flex-1"
-            style={{
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: "#272735",
-              backgroundColor: "#15151e",
-              paddingVertical: 12,
-              paddingHorizontal: 10,
-            }}
-          >
-            <Text style={{ fontSize: 18, fontFamily: fonts.heading.bold, color: s.color }}>{s.value}</Text>
-            <Text style={{ fontSize: 10, fontFamily: fonts.body.medium, color: "#818898", marginTop: 2 }}>{s.label}</Text>
-          </View>
+          <Pressable key={s.label} className="flex-1" disabled={s.disabled} onPress={s.onPress}>
+            <View
+              style={{
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: "#272735",
+                backgroundColor: "#15151e",
+                paddingVertical: 12,
+                paddingHorizontal: 10,
+                opacity: s.disabled ? 0.6 : 1,
+              }}
+            >
+              <Text style={{ fontSize: 18, fontFamily: fonts.heading.bold, color: s.color }}>{s.value}</Text>
+              <Text style={{ fontSize: 10, fontFamily: fonts.body.medium, color: "#818898", marginTop: 2 }}>{s.label}</Text>
+            </View>
+          </Pressable>
         ))}
       </View>
 
@@ -233,19 +262,23 @@ export default function DashboardScreen() {
       )}
 
       {pending.length > 0 && (
-        <QSection title="Awaiting your response" count={pending.length} tint="amber" icon={FileSpreadsheet}>
-          {pending.map((q) => (
-            <QuotationCard key={q.QuotationId} q={q} />
-          ))}
-        </QSection>
+        <View onLayout={(e) => { sectionY.current.pending = e.nativeEvent.layout.y; }}>
+          <QSection title="Awaiting your response" count={pending.length} tint="amber" icon={FileSpreadsheet}>
+            {pending.map((q) => (
+              <QuotationCard key={q.QuotationId} q={q} />
+            ))}
+          </QSection>
+        </View>
       )}
 
       {submitted.length > 0 && (
-        <QSection title="Already submitted" count={submitted.length} tint="emerald" icon={CheckCircle2}>
-          {submitted.map((q) => (
-            <QuotationCard key={q.QuotationId} q={q} />
-          ))}
-        </QSection>
+        <View onLayout={(e) => { sectionY.current.submitted = e.nativeEvent.layout.y; }}>
+          <QSection title="Already submitted" count={submitted.length} tint="emerald" icon={CheckCircle2}>
+            {submitted.map((q) => (
+              <QuotationCard key={q.QuotationId} q={q} />
+            ))}
+          </QSection>
+        </View>
       )}
 
       {/* ── Orders ───────────────────────────────────────────────────── */}

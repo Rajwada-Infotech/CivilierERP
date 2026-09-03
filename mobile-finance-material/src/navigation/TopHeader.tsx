@@ -3,14 +3,14 @@
 // phone's status bar/notch). Visually mirrors the web app's TopNavbar:
 // logo + wordmark + live version string on the left, notification bell +
 // user avatar on the right.
-import { View, Text, Image, Pressable } from "react-native";
+import { View, Text, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackHeaderProps } from "@react-navigation/native-stack";
 import { Bell } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { useAuth } from "@/auth/AuthContext";
-import { useAppVersion } from "@/hooks/useAppVersion";
+import { AnimatedLogo } from "@/components/AnimatedLogo";
 import { navigate } from "./navigationRef";
 
 function initialsOf(name?: string) {
@@ -25,7 +25,6 @@ function initialsOf(name?: string) {
 
 export function TopHeader({ route }: NativeStackHeaderProps) {
   const { currentUser } = useAuth();
-  const { appVersion, isLoading } = useAppVersion();
 
   return (
     <SafeAreaView
@@ -33,16 +32,8 @@ export function TopHeader({ route }: NativeStackHeaderProps) {
       style={{ backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: `${colors.border}80` }}
     >
       <View className="flex-row items-center justify-between px-4 py-2.5">
-        <View className="flex-row items-center gap-2 flex-1 min-w-0">
-          <Image source={require("../../assets/branding/Civilier.png")} style={{ width: 28, height: 28, borderRadius: 7 }} />
-          <View className="min-w-0">
-            <Text numberOfLines={1} style={{ color: colors.primary, fontSize: 15, fontFamily: fonts.heading.bold, letterSpacing: -0.3 }}>
-              CivilierERP
-            </Text>
-            <Text style={{ color: "#10b981", fontSize: 10, fontFamily: fonts.body.medium }}>
-              {isLoading ? "…" : `v${appVersion}`}
-            </Text>
-          </View>
+        <View className="flex-1 min-w-0">
+          <AnimatedLogo iconSize={28} />
         </View>
 
         <View className="flex-row items-center gap-2.5">
