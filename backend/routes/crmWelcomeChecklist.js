@@ -6,7 +6,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
 
@@ -344,7 +344,10 @@ router.post("/:bookingId/submit", requirePageRight("crm-welcome-calls", "edit"),
   try {
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId);
-    const activeErr = await requireActiveBooking(pool, bookingId);
+    // Same gate as the rest of the Welcome Call workflow (crmWelcomeCalls.js
+    // POST / uses requireApprovedBooking) — this checklist can't be
+    // meaningfully "verified" on a booking that isn't itself Approved.
+    const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const state = await loadItems(pool, bookingId);

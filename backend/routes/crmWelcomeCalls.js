@@ -6,7 +6,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { maybeAutoCreateAgreement, requireActiveBooking, requireApprovedBooking } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateAgreement, requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
 
@@ -564,7 +564,13 @@ router.put("/:bookingId/financing-type", requirePageRight("crm-welcome-calls", "
       return res.status(400).json({ error: "FinancingType must be SelfFunded or LoanFinanced" });
     }
 
-    const activeErr = await requireActiveBooking(pool, bookingId);
+    // Same gate as the Welcome Call itself (POST / above uses
+    // requireApprovedBooking) — this whole workflow (call, financing type,
+    // bank preference, checklist, co-applicant, customer bank/KYC) only ever
+    // starts once the booking is actually Approved, so every action inside
+    // it should require the same, not the weaker "merely still active"
+    // (which also lets through Pending/Expired) requireActiveBooking.
+    const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     await pool.request()
@@ -616,7 +622,9 @@ router.post("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls"
       return res.status(400).json({ error: "BankName is required" });
     }
 
-    const activeErr = await requireActiveBooking(pool, bookingId);
+    // Same gate as the rest of this workflow — see the comment on
+    // PUT /:bookingId/financing-type above.
+    const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const result = await pool.request()

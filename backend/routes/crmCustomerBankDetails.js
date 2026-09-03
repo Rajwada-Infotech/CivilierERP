@@ -6,7 +6,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { maybeAutoCreateAgreement, requireActiveBooking, isLegalWorkStarted } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateAgreement, requireApprovedBooking, isLegalWorkStarted } = require("../services/crmWorkflowGuards");
 const { CRM_APPROVER_ROLES } = require("../services/approvalService");
 
 router.use(authMiddleware);
@@ -154,7 +154,12 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
 
     if (!(await requireAssignedOrApprover(req, res, pool, { bookingId: bid }))) return;
 
-    const activeErr = await requireActiveBooking(pool, bid);
+    // Same gate as the rest of the Welcome-Call-onward workflow
+    // (crmWelcomeCalls.js POST / uses requireApprovedBooking) — Customer
+    // Bank/KYC details are captured as part of that same flow, so this
+    // should require the booking to actually be Approved, not merely still
+    // "active" (which also lets through Pending/Expired).
+    const activeErr = await requireApprovedBooking(pool, bid);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     // The frontend already refuses to save unless Milestone 1 (Booking
@@ -382,7 +387,7 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
       .query("SELECT Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1");
     const linkedBookingId = linkedBooking.recordset[0]?.Id || null;
     if (linkedBookingId) {
-      const activeErr = await requireActiveBooking(pool, linkedBookingId);
+      const activeErr = await requireApprovedBooking(pool, linkedBookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
       // Same real freeze point as the Booking-keyed endpoint — this comment
       // above already said these two endpoints were SUPPOSED to freeze

@@ -113,6 +113,7 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
       else return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType ParkingAllotment` });
     } else if (reqRow.ChangeType === "CoApplicant") {
       if (reqRow.Action === "Add") applyResult = await coApplicantRouter.applyAddCoApplicant(pool, reqRow.BookingId, proposedChange, actor);
+      else if (reqRow.Action === "Edit") applyResult = await coApplicantRouter.applyEditCoApplicant(pool, reqRow.TargetId, proposedChange, actor);
       else if (reqRow.Action === "Remove") applyResult = await coApplicantRouter.applyRemoveCoApplicant(pool, reqRow.TargetId);
       else return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType CoApplicant` });
     } else {

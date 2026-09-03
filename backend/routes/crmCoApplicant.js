@@ -5,7 +5,7 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { isLegalWorkStarted } = require("../services/crmWorkflowGuards");
+const { isLegalWorkStarted, requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 
 router.use(authMiddleware);
@@ -77,6 +77,9 @@ router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit")
     const b = req.body;
     if (!b.Name?.trim()) return res.status(400).json({ error: "Name is required" });
 
+    const activeErr = await requireApprovedBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
     const lockErr = await assertWelcomeChecklistUnlocked(pool, bookingId);
     if (lockErr) return res.status(400).json({ error: lockErr });
 
@@ -97,6 +100,38 @@ router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit")
   }
 });
 
+// Shared with the amendment-approval replay path — see applyAddCoApplicant.
+async function applyEditCoApplicant(pool, id, b, actorUserId) {
+  await pool.request()
+    .input("id",     sql.Int, id)
+    .input("name",   sql.NVarChar(200), b.Name.trim())
+    .input("rel",    sql.NVarChar(50), b.Relation || null)
+    .input("mob",    sql.NVarChar(20), b.Mobile || null)
+    .input("em",     sql.NVarChar(200), b.Email || null)
+    .input("pan",    sql.NVarChar(20), b.PanNo || null)
+    .input("aadh",   sql.NVarChar(20), b.AadhaarNo || null)
+    .input("dob",    sql.Date,          b.DateOfBirth || null)
+    .input("gender", sql.NVarChar(10),  b.Gender || null)
+    .input("occ",    sql.NVarChar(100), b.Occupation || null)
+    .input("inc",    sql.Decimal(18,2), b.AnnualIncome ? parseFloat(b.AnnualIncome) : null)
+    .input("addr",   sql.NVarChar(300), b.Address || null)
+    .input("city",   sql.NVarChar(100), b.City || null)
+    .input("state",  sql.NVarChar(100), b.State || null)
+    .input("pin",    sql.NVarChar(10),  b.Pincode || null)
+    .input("note",   sql.NVarChar(sql.MAX), b.Notes || null)
+    .input("ub",     sql.Int, actorUserId)
+    .query(`
+      UPDATE dbo.CrmCoApplicant SET
+        Name = @name, Relation = @rel, Mobile = @mob, Email = @em,
+        PanNo = @pan, AadhaarNo = @aadh,
+        DateOfBirth = @dob, Gender = @gender, Occupation = @occ, AnnualIncome = @inc,
+        Address = @addr, City = @city, [State] = @state, Pincode = @pin, Notes = @note,
+        UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+  return { success: true };
+}
+
 // PUT /:id — update a co-applicant. The only edit route for BOTH a
 // Booking-stage row (Welcome Call) and an Application-stage row (the wizard's
 // own Co-Applicant tab, added below) — there's no separate
@@ -104,6 +139,14 @@ router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit")
 // unique key regardless of which stage it belongs to. Gated on either right
 // so an Application-stage salesperson (crm-applications, no Welcome Call
 // access) can still edit/remove the co-applicant they themselves just added.
+//
+// Editing PAN/Aadhaar/Name on a booking-stage row is exactly as consequential
+// as adding or removing one — arguably more so, since it can silently
+// corrupt identity data a legal document already names, with no trace at
+// all if left unguarded. Same dual gate as POST/DELETE above: blocked while
+// the welcome checklist is locked, and routed through the amendment queue
+// once legal work has started (an Application-stage row, with no BookingId
+// yet, has neither concern — there's no Agreement to be stale against).
 router.put("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -111,34 +154,31 @@ router.put("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"]
     const b = req.body;
     if (!b.Name?.trim()) return res.status(400).json({ error: "Name is required" });
 
-    await pool.request()
-      .input("id",     sql.Int, id)
-      .input("name",   sql.NVarChar(200), b.Name.trim())
-      .input("rel",    sql.NVarChar(50), b.Relation || null)
-      .input("mob",    sql.NVarChar(20), b.Mobile || null)
-      .input("em",     sql.NVarChar(200), b.Email || null)
-      .input("pan",    sql.NVarChar(20), b.PanNo || null)
-      .input("aadh",   sql.NVarChar(20), b.AadhaarNo || null)
-      .input("dob",    sql.Date,          b.DateOfBirth || null)
-      .input("gender", sql.NVarChar(10),  b.Gender || null)
-      .input("occ",    sql.NVarChar(100), b.Occupation || null)
-      .input("inc",    sql.Decimal(18,2), b.AnnualIncome ? parseFloat(b.AnnualIncome) : null)
-      .input("addr",   sql.NVarChar(300), b.Address || null)
-      .input("city",   sql.NVarChar(100), b.City || null)
-      .input("state",  sql.NVarChar(100), b.State || null)
-      .input("pin",    sql.NVarChar(10),  b.Pincode || null)
-      .input("note",   sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("ub",     sql.Int, actorId(req))
-      .query(`
-        UPDATE dbo.CrmCoApplicant SET
-          Name = @name, Relation = @rel, Mobile = @mob, Email = @em,
-          PanNo = @pan, AadhaarNo = @aadh,
-          DateOfBirth = @dob, Gender = @gender, Occupation = @occ, AnnualIncome = @inc,
-          Address = @addr, City = @city, [State] = @state, Pincode = @pin, Notes = @note,
-          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-    res.json({ success: true });
+    const row = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId FROM dbo.CrmCoApplicant WHERE Id = @id");
+    if (!row.recordset.length) return res.status(404).json({ error: "Co-applicant not found" });
+    const bookingId = row.recordset[0].BookingId;
+
+    if (bookingId) {
+      const activeErr = await requireApprovedBooking(pool, bookingId);
+      if (activeErr) return res.status(400).json({ error: activeErr });
+
+      const lockErr = await assertWelcomeChecklistUnlocked(pool, bookingId);
+      if (lockErr) return res.status(400).json({ error: lockErr });
+
+      if (await isLegalWorkStarted(pool, bookingId)) {
+        const reason = b.Reason?.trim();
+        if (!reason) return res.status(400).json({ error: "A reason is required to request this change — legal documents are already under verification for this booking" });
+        const requestId = await createAmendmentRequest(pool, {
+          bookingId, changeType: "CoApplicant", action: "Edit", targetId: id,
+          proposedChange: b, reason, requestedBy: actorId(req),
+        });
+        return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
+      }
+    }
+
+    const result = await applyEditCoApplicant(pool, id, b, actorId(req));
+    res.json(result);
   } catch (e) {
     console.error("[crm-co-applicant] PUT error:", e.message);
     res.status(500).json({ error: e.message });
@@ -163,6 +203,9 @@ router.delete("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-application
       .query("SELECT BookingId FROM dbo.CrmCoApplicant WHERE Id = @id");
     const bookingId = row.recordset[0]?.BookingId;
     if (bookingId) {
+      const activeErr = await requireApprovedBooking(pool, bookingId);
+      if (activeErr) return res.status(400).json({ error: activeErr });
+
       const lockErr = await assertWelcomeChecklistUnlocked(pool, bookingId);
       if (lockErr) return res.status(400).json({ error: lockErr });
 
@@ -269,3 +312,4 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
 module.exports = router;
 module.exports.applyAddCoApplicant = applyAddCoApplicant;
 module.exports.applyRemoveCoApplicant = applyRemoveCoApplicant;
+module.exports.applyEditCoApplicant = applyEditCoApplicant;

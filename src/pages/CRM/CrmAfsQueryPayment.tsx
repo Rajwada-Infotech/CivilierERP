@@ -158,6 +158,18 @@ async function fetchBookings(): Promise<any[]> {
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load bookings");
   return r.json();
 }
+// Used only for the "Start" dialog's dropdown — mirrors the real POST / gate
+// exactly (Approved + active booking, Agreement Executed/Registered, no
+// tracker yet) instead of the generic bookings list filtered client-side
+// against AgreementStatus, which could silently drift from that gate. The
+// deep-link banner below still needs the full fetchBookings() list above —
+// it has to show context for a booking that ISN'T eligible (already
+// tracked, or Agreement not yet Executed), which this deliberately excludes.
+async function fetchEligibleBookings(): Promise<any[]> {
+  const r = await fetchWithAuth(`${API}/eligible-bookings`);
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load eligible bookings");
+  return r.json();
+}
 async function fetchDetail(id: number | null): Promise<any> {
   if (!id) return null;
   const r = await fetchWithAuth(`${API}/${id}`);
@@ -358,16 +370,17 @@ const CrmAfsQueryPayment: React.FC = () => {
 
   const { data: rows = [], isLoading, dataUpdatedAt: listUpdatedAt, isFetching: listFetching, refetch: refetchList } = useQuery({ queryKey: ["crm-afs-query-payment"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  const { data: eligibleBookings = [] } = useQuery({ queryKey: ["crm-afs-query-payment-eligible"], queryFn: fetchEligibleBookings, staleTime: 60_000 });
   const { data: detail, refetch: refetchDetail } = useQuery({
     queryKey: ["crm-afs-query-payment-detail", selectedId],
     queryFn: () => fetchDetail(selectedId),
     enabled: !!selectedId,
   });
 
-  const trackedBookingIds = new Set((rows as any[]).map((r: any) => r.BookingId));
-  const startableBookings = (bookings as any[]).filter(
-    (b: any) => !trackedBookingIds.has(b.Id) && (b.AgreementStatus === "Executed" || b.AgreementStatus === "Registered")
-  );
+  // /eligible-bookings already applies the real gate (Approved + active
+  // booking, Agreement Executed/Registered, no tracker yet) — no client-side
+  // filtering needed.
+  const startableBookings = eligibleBookings as any[];
 
   // The booking the user navigated to from Legal Journey (may or may not have a record)
   const deepLinkedBooking = deepLinkBookingId

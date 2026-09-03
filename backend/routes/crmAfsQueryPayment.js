@@ -8,7 +8,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -68,6 +68,37 @@ router.get("/booking/:bookingId", requirePageRight("crm-afs-query-payment", "vie
   }
 });
 
+// GET /eligible-bookings — bookings the "Start" dialog should offer. Mirrors
+// the real POST / gate exactly (Agreement Executed/Registered, no tracker
+// yet) instead of the frontend fetching the generic /api/crm/bookings list
+// and filtering client-side against an AgreementStatus field — the same
+// drift risk fixed for Legal Milestones/Query Payment/Mutation this session:
+// a client-side filter can silently fall out of sync with the real gate.
+// MUST be registered before GET /:id below — Express matches routes in
+// registration order, and ":id" would otherwise swallow this literal path
+// (treating "eligible-bookings" as the :id value), the exact bug already
+// found and fixed once this session in crmQueryPayment.js.
+router.get("/eligible-bookings", requirePageRight("crm-afs-query-payment", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
+             ag.AgreementNo, ag.Id AS AgreementId
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id AND ag.Status IN ('Executed', 'Registered')
+      WHERE b.Status = 'Approved' AND b.IsActive = 1
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmAfsQueryPayment WHERE BookingId = b.Id)
+      ORDER BY b.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-afs-query-payment] eligible-bookings error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/:id", requirePageRight("crm-afs-query-payment", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -97,7 +128,10 @@ router.post("/", requirePageRight("crm-afs-query-payment", "create"), async (req
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
 
-    const activeErr = await requireActiveBooking(pool, bookingId);
+    // Same upgrade as crmQueryPayment.js — requireActiveBooking allowed
+    // Expired/Pending bookings through; this whole module only ever starts
+    // once an Agreement is Executed, so the booking should still be Approved.
+    const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     // Agreement must exist and be at least Executed — that's when both sides
@@ -110,6 +144,17 @@ router.post("/", requirePageRight("crm-afs-query-payment", "create"), async (req
     const agr = agreement.recordset[0];
     if (![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.Status)) {
       return res.status(400).json({ error: `AFS Query Payment requires the Agreement for Sale to be Executed or Registered first (current status: ${agr.Status})` });
+    }
+
+    // Unlike crmQueryPayment.js (which reads the amount live from an
+    // upstream table), this amount is typed in right here — but nothing
+    // stopped it being typed in as blank. A tracker with no real Stamp
+    // Duty/Registration Fee is indistinguishable from one correctly showing
+    // "nothing owed", which is never actually true for AFS registration.
+    const stampIn = b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : 0;
+    const regFeeIn = b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : 0;
+    if (stampIn + regFeeIn <= 0) {
+      return res.status(400).json({ error: "Enter a Stamp Duty or Registration Fee amount before starting AFS Query Payment tracking." });
     }
 
     const aqpNo = await getNextDocNumber(pool, "AQP", "AQP");
@@ -146,7 +191,7 @@ router.put("/:id", requirePageRight("crm-afs-query-payment", "edit"), async (req
       .query("SELECT BookingId, Status FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
     const row = cur.recordset[0];
-    const activeErr = await requireActiveBooking(pool, row.BookingId);
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
     if (row.Status !== CrmStatus.PENDING) {
       return res.status(400).json({ error: "Stamp Duty and Registration Fee can no longer be edited once the paperwork has been sent to the customer" });
@@ -182,7 +227,7 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
       .query("SELECT BookingId, Status FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
     const row = cur.recordset[0];
-    const activeErr = await requireActiveBooking(pool, row.BookingId);
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const rawFiles = Array.isArray(req.body.files) ? req.body.files : [];
@@ -248,7 +293,7 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
     if (row.Status !== "InfoSent") {
       return res.status(400).json({ error: "Payment details must be sent to the customer (InfoSent) before confirming — the customer must know what they paid and why" });
     }
-    const activeErr = await requireActiveBooking(pool, row.BookingId);
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     let proof = null;
