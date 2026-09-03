@@ -302,25 +302,30 @@ router.get("/emi-reminders", requirePageRight("loan-sanction", "view"), async (r
   }
 });
 
-// ── GET /emi-payable — unpaid EMIs, split by which direction money
-//    actually moves for that loan type ──────────────────────────────────
-// direction=outgoing (default) — Inter-Company/Bank Loan repayments: this
-//   company pays OUT. Feeds Finance > Payment's "Loan EMIs" picker.
-// direction=incoming — Customer Loan repayments only: a customer pays this
-//   company (the lender) BACK. Feeds Received Payment's "Loan EMIs"
-//   picker (migration 356) — a customer repayment is cash coming IN, the
-//   same direction every other Received Payment flow already models, so
-//   it never belonged on the outgoing Payment page to begin with.
+// ── GET /emi-payable — unpaid EMIs for loans this company can settle from
+//    Received Payment ────────────────────────────────────────────────────
+// Repayment of every loan type — Inter-Company, Bank Loan, Customer Loan —
+// is recorded through Received Payment only; there is no repayment picker
+// on the outgoing Payment page any more (see the "Loan Disbursement"
+// picker there instead, which is a different action — the initial money-
+// out event, not repayment). This scopes to whichever of this company's
+// roles is the one settling the EMI:
+//   - Customer Loan / Inter-Company: this company is the LENDER (being
+//     paid back).
+//   - Bank Loan: this company is the BORROWER (paying an external bank
+//     back) — there's no "lender company" of ours for that case, but the
+//     repayment still gets tracked here rather than a separate outgoing
+//     page, per the same single-surface decision.
+// DisbursedAt IS NOT NULL excludes any loan that hasn't actually been
+// disbursed yet — repaying before disbursing doesn't make sense, and
+// disbursement is now always a deliberate separate step (see POST / and
+// the "Loan Disbursement" picker).
 // Registered before "/:id" so it isn't swallowed by the param route.
 router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req, res) => {
   const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-  const direction = req.query.direction === "incoming" ? "incoming" : "outgoing";
   if (!companyId) return res.status(400).json({ error: "companyId is required" });
   try {
     const pool = getPool();
-    const companyScope = direction === "incoming"
-      ? "ls.LoanType = 'Customer Loan' AND ls.LenderCompanyId = @CompanyId"
-      : "ls.LoanType <> 'Customer Loan' AND (ls.LenderCompanyId = @CompanyId OR ls.BorrowerCompanyId = @CompanyId)";
     const result = await pool.request().input("CompanyId", sql.Int, companyId).query(`
       SELECT
         e.EMIId, e.LoanId, e.InstallmentNo, e.DueDate, e.EMIAmount,
@@ -328,18 +333,11 @@ router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req
         ls.LoanNo, ls.LoanType,
         COALESCE(bc.name, cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerName,
         -- Company-only borrower name (NULL for a customer-side loan) — lets
-        -- the Payment page auto-fill its own Company field only when the
-        -- borrower actually is one of our own companies, never a customer.
+        -- the picker distinguish an internal counterparty from an external
+        -- customer.
         bc.name AS BorrowerCompanyName,
-        -- Lender is always a company per the LoanSanction schema — this is
-        -- who repayment actually goes to, auto-filling "Payable To" on the
-        -- Payment page instead of leaving staff to look it up manually.
+        -- Lender is always a company per the LoanSanction schema.
         lc.name AS LenderName,
-        -- Same lender company, but as the auto-fill source for the Payment
-        -- page's Company field on a Customer Loan — there the borrower is
-        -- external (a customer), so the LENDER is whose books this
-        -- repayment is actually recorded under, the reverse of Inter-Company
-        -- /Bank Loan where the borrower company is the one paying out.
         lc.name AS LenderCompanyName,
         CASE WHEN e.DueDate < CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS IsOverdue
       FROM dbo.LoanEMISchedule e
@@ -348,9 +346,45 @@ router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req
       LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
       LEFT JOIN dbo.enterprise lc ON lc.id = ls.LenderCompanyId AND lc.business_type = 'C'
-      WHERE e.IsPaid = 0 AND ls.Status <> 'Closed'
-        AND ${companyScope}
+      WHERE e.IsPaid = 0 AND ls.Status <> 'Closed' AND ls.DisbursedAt IS NOT NULL
+        AND (
+          ls.LenderCompanyId = @CompanyId
+          OR (ls.LoanType = 'Bank Loan' AND ls.BorrowerCompanyId = @CompanyId)
+        )
       ORDER BY e.DueDate ASC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /undisbursed — Sanctioned Inter-Company loans this company has
+//    lent out but not yet disbursed to GL ─────────────────────────────────
+// Feeds Finance > Payment's "Loan Disbursement" picker — disbursement is a
+// deliberate action now (see POST / above), not automatic at sanction
+// time, so this is how staff find the loans still waiting on it. Scoped to
+// the LENDER company (the one whose Payment page this shows up on — they
+// are the one paying out). Bank Loan/Customer Loan aren't included: their
+// disbursement was never automatic to begin with (the other side is
+// external), so they've always used the existing manual "Post to GL"
+// action from the loan's own detail page.
+// Registered before "/:id" so it isn't swallowed by the param route.
+router.get("/undisbursed", requirePageRight("loan-sanction", "view"), async (req, res) => {
+  const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+  if (!companyId) return res.status(400).json({ error: "companyId is required" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("CompanyId", sql.Int, companyId).query(`
+      SELECT
+        ls.LoanId, ls.LoanNo, ls.LoanDate, ls.Amount,
+        ls.LenderBankAccountId, ls.BorrowerBankAccountId,
+        bc.name AS BorrowerCompanyName
+      FROM dbo.LoanSanction ls
+      LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
+      WHERE ls.LoanType = 'Inter-Company' AND ls.Status <> 'Closed'
+        AND ls.DisbursedAt IS NULL AND ls.LenderCompanyId = @CompanyId
+      ORDER BY ls.LoanDate ASC
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -775,81 +809,21 @@ async function createLoanSanctionInternal(payload, createdBy) {
 router.post("/", requirePageRight("loan-sanction", "create"), async (req, res) => {
   const createdBy = req.user?.email || req.user?.name || "system";
   try {
-    const { loanId, loanNo, lenderLHeadId, borrowerLHeadId } = await createLoanSanctionInternal(req.body, createdBy);
+    const { loanId, loanNo } = await createLoanSanctionInternal(req.body, createdBy);
 
-    // Inter-Company: two of our own companies, so the disbursement is real
-    // money leaving one company's bank and landing in the other's the
-    // moment it's sanctioned — post both sides now instead of waiting on
-    // the manual POST /:id/post-to-gl step. Same SourceType/SourceId as
-    // that endpoint's own posting, so its "already posted" guard covers
-    // this and neither can double-post.
-    // Each company's own books reference the OTHER (counterparty) company
-    // by name, not itself — Lender's books carry "Loan - <Borrower>"
-    // (what's receivable from them), Borrower's books carry "Loan -
-    // <Lender>" (what's payable to them). Repayment (see PUT /:id/pay)
-    // mirrors and reverses these same two legs.
-    // Bank Loan/Customer Loan involve only one of our own companies (the
-    // other side is an external bank or customer), so they're left to the
-    // existing manual post-to-gl flow.
-    // The loan row itself is already committed at this point
-    // (createLoanSanctionInternal's own transaction) — GL posting below is
-    // a separate, best-effort step. If it throws, the loan MUST NOT be
-    // reported as failed (a 500 here previously invited the client to
-    // retry the whole create, which would sanction a second, duplicate
-    // loan on top of the first). Instead the loan is returned as created
-    // with glPosted:false, and POST /:id/post-to-gl (which now handles the
-    // Inter-Company two-voucher split too) is the retry path.
-    let glPosted = false;
-    let glError = null;
-    if (req.body.loanType === "Inter-Company" && lenderLHeadId && borrowerLHeadId) {
-      const lenderBankAccountId = req.body.lenderBankAccountId ? parseInt(req.body.lenderBankAccountId, 10) : null;
-      const borrowerBankAccountId = req.body.borrowerBankAccountId ? parseInt(req.body.borrowerBankAccountId, 10) : null;
-      const lenderCompanyId = parseInt(req.body.lenderCompanyId, 10);
-      const borrowerCompanyId = parseInt(req.body.borrowerCompanyId, 10);
-      const amt = parseFloat(req.body.amount);
-      if (lenderBankAccountId && borrowerBankAccountId) {
-        try {
-          const { postVoucher } = require("../services/generalLedger");
-          const pool = getPool();
-          await postVoucher(pool, {
-            voucherNo: loanNo,
-            voucherDate: req.body.loanDate,
-            sourceType: "LoanPosting",
-            sourceId: loanId,
-            companyId: lenderCompanyId,
-            createdBy,
-            legs: [
-              { lHeadId: borrowerLHeadId, debit: amt, narration: `${loanNo} — inter-company loan receivable (funds sent)` },
-              { lHeadId: lenderBankAccountId, credit: amt, narration: `${loanNo} — loan disbursed` },
-            ],
-          });
-          await postVoucher(pool, {
-            voucherNo: loanNo,
-            voucherDate: req.body.loanDate,
-            sourceType: "LoanPosting",
-            sourceId: loanId,
-            companyId: borrowerCompanyId,
-            createdBy,
-            legs: [
-              { lHeadId: borrowerBankAccountId, debit: amt, narration: `${loanNo} — loan received` },
-              { lHeadId: lenderLHeadId, credit: amt, narration: `${loanNo} — inter-company loan payable (funds received)` },
-            ],
-          });
-          await bumpCacheVersion("journal-voucher");
-          // BUG 9 FIX: stamp DisbursedAt — Inter-Company loans auto-post at
-          // sanction time, so disbursement happens immediately on creation.
-          await pool.request()
-            .input("LoanId", sql.Int, loanId)
-            .query("UPDATE dbo.LoanSanction SET DisbursedAt = SYSDATETIME() WHERE LoanId = @LoanId AND DisbursedAt IS NULL");
-          glPosted = true;
-        } catch (glErr) {
-          console.error("[loan-sanction] Inter-Company GL posting failed after loan creation committed:", glErr.message);
-          glError = "Loan was sanctioned, but posting it to the General Ledger failed. Retry from the loan's detail page.";
-        }
-      }
-    }
-
-    res.status(201).json({ loanId, loanNo, glPosted, glError });
+    // Disbursement is now always a deliberate, separate step — never
+    // automatic at sanction time, for any loan type. Inter-Company used to
+    // auto-post both sides of the disbursement right here the moment the
+    // loan was sanctioned; that silently moved real money (and, via the
+    // Payment page's "Loan EMIs" picker reusing this same disbursement's
+    // bank/cheque for what should have been a separate repayment, caused a
+    // duplicate-cheque data-entry bug — see fixDuplicateLoanDisbursementPayments.js).
+    // Every loan — Inter-Company included — now sits Sanctioned and
+    // undisbursed (glPosted always false) until someone explicitly posts
+    // it: Finance > Payment's "Loan Disbursement" picker for Inter-Company,
+    // or POST /:id/post-to-gl directly (still the only posting mechanism —
+    // this route just no longer calls it automatically).
+    res.status(201).json({ loanId, loanNo, glPosted: false, glError: null });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }

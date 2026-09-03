@@ -536,7 +536,10 @@ export default function LoanSanctionPage() {
   }, [tab, viewingLoan?.LoanId]);
 
   // Auto-post the moment the preview has loaded and isn't already posted —
-  // no manual "Post to GL" click, same as GRN's Posting tab.
+  // no manual "Post to GL" click, same as GRN's Posting tab. Inter-Company
+  // is excluded: its disbursement is now a deliberate action from Finance
+  // > Payment's "Loan Disbursement" picker, not something that should fire
+  // just because someone opened this tab to look at the loan.
   useEffect(() => {
     if (
       tab !== "posting" ||
@@ -544,7 +547,8 @@ export default function LoanSanctionPage() {
       !loanPostingData ||
       loanPostingData.isPosted ||
       loanPosting ||
-      !viewingLoan?.LoanId
+      !viewingLoan?.LoanId ||
+      viewingLoan?.LoanType === "Inter-Company"
     )
       return;
     setLoanPosting(true);
@@ -2365,6 +2369,10 @@ export default function LoanSanctionPage() {
                       <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/10 text-red-600 border border-red-500/20">
                         <AlertCircle size={10} /> {loanPostingError}
                       </span>
+                    ) : viewingLoan?.LoanType === "Inter-Company" ? (
+                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                        <AlertCircle size={10} /> Not disbursed
+                      </span>
                     ) : null
                   )}
                 </div>
@@ -2466,6 +2474,13 @@ export default function LoanSanctionPage() {
                     <div className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-4 py-3">
                       <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
                       <p className="text-xs text-muted-foreground">Posting to General Ledger…</p>
+                    </div>
+                  ) : viewingLoan?.LoanType === "Inter-Company" ? (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+                      <AlertCircle size={13} className="text-amber-600 flex-shrink-0" />
+                      <p className="text-xs text-amber-700 dark:text-amber-400">
+                        Not yet disbursed — go to Finance &gt; Payment's "Loan Disbursement" picker to post this to GL.
+                      </p>
                     </div>
                   ) : null
                 )}
