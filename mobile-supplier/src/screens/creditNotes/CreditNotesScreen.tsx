@@ -3,9 +3,9 @@
 // rest of the app's emerald), since a credit note represents a deduction
 // (rejected/short-received goods), not something to celebrate green.
 import { useMemo, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { ReceiptText, AlertTriangle } from "lucide-react-native";
+import { ReceiptText, AlertTriangle, Search, Building2, FolderKanban } from "lucide-react-native";
 import * as spApi from "@/api/supplierPortalApi";
 import { fonts } from "@/theme/fonts";
 
@@ -17,6 +17,7 @@ const fmtDate = (d?: string | null) =>
 
 export default function CreditNotesScreen() {
   const [refreshing, setRefreshing] = useState(false);
+  const [search, setSearch] = useState("");
   const notesQ = useQuery({
     queryKey: ["supplier-credit-notes"],
     queryFn: spApi.getSupplierCreditNotes,
@@ -28,6 +29,20 @@ export default function CreditNotesScreen() {
     () => notes.filter((n) => n.Status !== "Cancelled").reduce((s, n) => s + Number(n.Amount || 0), 0),
     [notes],
   );
+  const activeCount = useMemo(() => notes.filter((n) => n.Status !== "Cancelled").length, [notes]);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return notes;
+    const s = search.trim().toLowerCase();
+    return notes.filter(
+      (n) =>
+        n.DocNo?.toLowerCase().includes(s) ||
+        n.ItemName?.toLowerCase().includes(s) ||
+        n.ProjectName?.toLowerCase().includes(s) ||
+        n.CompanyName?.toLowerCase().includes(s) ||
+        n.PONumber?.toLowerCase().includes(s),
+    );
+  }, [notes, search]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -53,17 +68,38 @@ export default function CreditNotesScreen() {
         <Text style={{ fontSize: 12, fontFamily: fonts.body.regular, color: "#818898" }}>
           Deductions for short-received or rejected quantities
         </Text>
-        <View className="flex-row items-end justify-between" style={{ marginTop: 12 }}>
-          <View>
-            <Text style={{ fontSize: 10, fontFamily: fonts.heading.semibold, color: "#818898", textTransform: "uppercase", letterSpacing: 1 }}>
-              Total deducted
+        <View className="flex-row gap-2" style={{ marginTop: 12 }}>
+          <View className="flex-1" style={{ borderRadius: 10, backgroundColor: "rgba(21,21,30,0.6)", borderWidth: 1, borderColor: "#272735", padding: 10 }}>
+            <Text style={{ fontSize: 9, fontFamily: fonts.heading.semibold, color: "#818898", textTransform: "uppercase", letterSpacing: 0.8 }}>
+              Total Notes
             </Text>
-            <Text style={{ fontSize: 20, fontFamily: fonts.heading.bold, color: "#fda4af", marginTop: 2 }}>{fmt(totalAmount)}</Text>
+            <Text style={{ fontSize: 17, fontFamily: fonts.heading.bold, color: "#e7e9ef", marginTop: 2 }}>{notes.length}</Text>
           </View>
-          <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: "#818898" }}>
-            {notes.length} note{notes.length !== 1 ? "s" : ""}
-          </Text>
+          <View className="flex-1" style={{ borderRadius: 10, backgroundColor: "rgba(21,21,30,0.6)", borderWidth: 1, borderColor: "#272735", padding: 10 }}>
+            <Text style={{ fontSize: 9, fontFamily: fonts.heading.semibold, color: "#818898", textTransform: "uppercase", letterSpacing: 0.8 }}>
+              Total Deducted
+            </Text>
+            <Text style={{ fontSize: 17, fontFamily: fonts.heading.bold, color: "#fda4af", marginTop: 2 }}>{fmt(totalAmount)}</Text>
+          </View>
+          <View className="flex-1" style={{ borderRadius: 10, backgroundColor: "rgba(21,21,30,0.6)", borderWidth: 1, borderColor: "#272735", padding: 10 }}>
+            <Text style={{ fontSize: 9, fontFamily: fonts.heading.semibold, color: "#818898", textTransform: "uppercase", letterSpacing: 0.8 }}>
+              Active
+            </Text>
+            <Text style={{ fontSize: 17, fontFamily: fonts.heading.bold, color: "#e7e9ef", marginTop: 2 }}>{activeCount}</Text>
+          </View>
         </View>
+      </View>
+
+      {/* Search */}
+      <View className="flex-row items-center" style={{ borderRadius: 10, borderWidth: 1, borderColor: "#272735", backgroundColor: "#15151e", paddingHorizontal: 10, marginBottom: 14 }}>
+        <Search size={13} color="#818898" />
+        <TextInput
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search doc no, item, project…"
+          placeholderTextColor="rgba(148,163,184,0.4)"
+          style={{ flex: 1, color: "#e7e9ef", paddingVertical: 9, paddingHorizontal: 8, fontSize: 12 }}
+        />
       </View>
 
       {notesQ.isLoading && (
@@ -88,8 +124,18 @@ export default function CreditNotesScreen() {
         </View>
       )}
 
+      {!notesQ.isLoading && notes.length > 0 && filtered.length === 0 && (
+        <View
+          className="items-center justify-center gap-3"
+          style={{ paddingVertical: 48, borderRadius: 12, borderWidth: 1, borderStyle: "dashed", borderColor: "#272735" }}
+        >
+          <Search size={26} color="rgba(129,136,152,0.4)" />
+          <Text style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: "#e7e9ef" }}>No results match your search</Text>
+        </View>
+      )}
+
       <View style={{ gap: 10 }}>
-        {notes.map((n) => {
+        {filtered.map((n) => {
           const cancelled = n.Status === "Cancelled";
           return (
             <View
@@ -110,6 +156,22 @@ export default function CreditNotesScreen() {
                 </Text>
               </View>
               <Text style={{ fontSize: 12, fontFamily: fonts.body.medium, color: "#e7e9ef" }}>{n.ItemName ?? "—"}</Text>
+              {(n.CompanyName || n.ProjectName) && (
+                <View className="flex-row flex-wrap gap-x-3 mt-1.5">
+                  {n.CompanyName && (
+                    <View className="flex-row items-center gap-1">
+                      <Building2 size={10} color="#818898" />
+                      <Text style={{ fontSize: 11, color: "#818898", fontFamily: fonts.body.regular }}>{n.CompanyName}</Text>
+                    </View>
+                  )}
+                  {n.ProjectName && (
+                    <View className="flex-row items-center gap-1">
+                      <FolderKanban size={10} color="#818898" />
+                      <Text style={{ fontSize: 11, color: "#818898", fontFamily: fonts.body.regular }}>{n.ProjectName}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
               <View className="flex-row flex-wrap gap-x-4 mt-2" style={{ borderTopWidth: 1, borderTopColor: "#272735", paddingTop: 8 }}>
                 <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: "#818898" }}>{fmtDate(n.DebitDate)}</Text>
                 {n.RejectedQty != null && (

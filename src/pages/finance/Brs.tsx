@@ -27,6 +27,7 @@ import {
   getBRS,
   getBRSFilters,
   markClear,
+  markUnclear,
   markBounced,
   type BrsEntry,
   type BrsFilterOption,
@@ -157,19 +158,15 @@ function PayStatusBadge({ status }: { status: string | null }) {
 }
 
 function PassbookCheck({ checked, loading, onChange }: { checked: boolean; loading: boolean; onChange: () => void }) {
-  // Once cleared, this is locked — the bank has confirmed the payment in
-  // the passbook, so it can never be un-cleared from here again (server
-  // enforces the same rule independently, see PUT /:sourceType/:id/unclear).
-  const locked = checked;
   return (
     <button
       onClick={onChange}
-      disabled={loading || locked}
-      title={locked ? "Cleared — cannot be undone" : "Mark as Clear"}
+      disabled={loading}
+      title={checked ? "Cleared — click to revert to Unclear" : "Mark as Clear"}
       className={`
         relative flex items-center justify-center w-5 h-5 rounded border-2 transition-all duration-150
         focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50
-        ${loading ? "opacity-40 cursor-wait" : locked ? "cursor-not-allowed" : "cursor-pointer"}
+        ${loading ? "opacity-40 cursor-wait" : "cursor-pointer"}
         ${checked
           ? "bg-emerald-500 border-emerald-500 shadow-sm shadow-emerald-500/30"
           : "bg-transparent border-border hover:border-emerald-400 hover:bg-emerald-500/5"
@@ -320,6 +317,93 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
   );
 }
 
+// ─── Clear Modal ──────────────────────────────────────────────────────────────
+// Asks for the actual bank clearing date before marking an entry Clear —
+// previously this was an instant one-click toggle with no way to record
+// which date the bank itself cleared the transaction (as opposed to
+// whenever the operator happened to click), same gap the Bounce flow
+// already fixed for bounce dates.
+
+interface ClearModalProps {
+  entry: BrsEntry;
+  onClose: () => void;
+  onConfirm: (bankClearingDate: string) => void;
+  saving: boolean;
+}
+
+function ClearModal({ entry, onClose, onConfirm, saving }: ClearModalProps) {
+  const [bankClearingDate, setBankClearingDate] = useState(format(new Date(), "yyyy-MM-dd"));
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5" onKeyDown={preventEnterSubmit}>
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center shrink-0">
+            <CheckCircle2 size={18} className="text-emerald-500" />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-foreground font-heading">Mark as Clear</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {entry.DocNo ?? entry.TxnId ?? `${entry.SourceType} #${entry.SourceID}`}
+              {entry.ChequeNo && <> · Cheque <span className="font-mono">{entry.ChequeNo}</span></>}
+            </p>
+          </div>
+          <button onClick={onClose} className="ml-auto text-muted-foreground hover:text-foreground transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="rounded-xl bg-emerald-500/[0.06] border border-emerald-500/20 px-4 py-3 space-y-1.5">
+          <div className="flex justify-between text-xs">
+            <span className="text-muted-foreground">Payee / Party</span>
+            <span className="font-medium text-foreground truncate max-w-[180px]">{entry.PaymentName || "—"}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-muted-foreground">Amount</span>
+            <span className="font-mono font-semibold text-foreground">{formatINR(entry.Amount)}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-muted-foreground">Bank</span>
+            <span className="font-medium text-foreground">{entry.BankName || "—"}</span>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Bank Clearing Date <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="date"
+            value={bankClearingDate}
+            onChange={(e) => setBankClearingDate(e.target.value)}
+            className="w-full h-9 px-3 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-emerald-400 outline-none"
+          />
+          <p className="text-[11px] text-muted-foreground">The date this transaction actually cleared in the bank passbook.</p>
+        </div>
+
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={onClose}
+            className="flex-1 h-9 rounded-lg border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onConfirm(bankClearingDate)}
+            disabled={saving || !bankClearingDate}
+            className="flex-1 h-9 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+          >
+            {saving ? <RotateCw size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+            Confirm Clear
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ─── Bounce Detail Tooltip ────────────────────────────────────────────────────
 
 function BounceDetailPanel({ entry }: { entry: BrsEntry }) {
@@ -421,6 +505,10 @@ export default function Brs() {
   const [bounceEntry, setBounceEntry] = useState<BrsEntry | null>(null);
   const [bounceSaving, setBounceSaving] = useState(false);
 
+  // ── Clear modal state ─────────────────────────────────────────────────────
+  const [clearEntry, setClearEntry] = useState<BrsEntry | null>(null);
+  const [clearSaving, setClearSaving] = useState(false);
+
   const navigate = useNavigate();
 
   // ── Filter options load ───────────────────────────────────────────────────
@@ -471,26 +559,46 @@ export default function Brs() {
   useEffect(() => { setPage(1); }, [bankId, fromDate, toDate, statusFilter]);
 
   // ── Toggle clear / unclear ────────────────────────────────────────────────
+  // Unclear -> Clear opens the Clear modal (needs a bank clearing date).
+  // Clear -> Unclear is a direct call after a native confirm — reverting a
+  // mistaken tick no longer needs a form, just a "are you sure" (the lock
+  // that used to make this permanent was removed; see PUT .../unclear).
   const toggle = useCallback(async (entry: BrsEntry) => {
     if (isBounced(entry) || isCancelled(entry)) return; // can't toggle a bounced or cancelled-cheque entry
-    // Clearing is one-way — once matched, it's locked (server enforces this
-    // independently in PUT /:sourceType/:id/unclear). PassbookCheck already
-    // disables the control at that point; this is the second guard so
-    // nothing else calling toggle() can slip past it either.
-    if (isCleared(entry)) return;
-    const key = `${entry.SourceType}-${entry.SourceID}`;
-    setTogglingId(key);
+    if (isCleared(entry)) {
+      if (!window.confirm("Revert this entry to Unclear? This clears the bank clearing date and cleared-by record.")) return;
+      const key = `${entry.SourceType}-${entry.SourceID}`;
+      setTogglingId(key);
+      try {
+        await markUnclear(entry.SourceType, entry.SourceID);
+        toast.success("Reverted to Unclear");
+        await fetchData();
+      } catch (err) {
+        console.error("BRS unclear error", err);
+        toast.error("Failed to update status");
+      } finally {
+        setTogglingId(null);
+      }
+      return;
+    }
+    setClearEntry(entry);
+  }, [fetchData]);
+
+  const handleConfirmClear = useCallback(async (bankClearingDate: string) => {
+    if (!clearEntry) return;
+    setClearSaving(true);
     try {
-      await markClear(entry.SourceType, entry.SourceID);
+      await markClear(clearEntry.SourceType, clearEntry.SourceID, bankClearingDate);
       toast.success("Marked as Clear ✓");
+      setClearEntry(null);
       await fetchData();
     } catch (err) {
-      console.error("BRS toggle error", err);
+      console.error("BRS clear error", err);
       toast.error("Failed to update status");
     } finally {
-      setTogglingId(null);
+      setClearSaving(false);
     }
-  }, [fetchData]);
+  }, [clearEntry, fetchData]);
 
   // ── Bounce actions ────────────────────────────────────────────────────────
   const handleConfirmBounce = useCallback(async (bounceDate: string, bounceReason: string, bounceRemarks: string) => {
@@ -567,6 +675,16 @@ export default function Brs() {
       if (isCancelled(e)) return "Cheque Cancelled";
       if (e.IsBounced === 1 || e.IsBounced === true) return "Bounced";
       return e.IsMatched === 1 || e.IsMatched === true ? "Clear" : "Unclear";
+    }},
+    { header: "Bank Clearing Date", accessor: (r) => {
+      const e = r as unknown as BrsEntry;
+      if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
+      return e.BankClearingDate ? fmt(e.BankClearingDate) : "—";
+    }},
+    { header: "Cleared By", accessor: (r) => {
+      const e = r as unknown as BrsEntry;
+      if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
+      return e.ClearedBy ?? "—";
     }},
     { header: "Cleared On", accessor: (r) => {
       const e = r as unknown as BrsEntry;
@@ -920,15 +1038,16 @@ export default function Brs() {
                         </span>
                         <ClearBadge cleared={cleared} bounced={bounced} cancelled={cancelled} />
                         {bounced && <BounceDetailPanel entry={entry} />}
-                        {cleared && entry.ClearingDate && (() => {
-                          const { date, time } = fmtDT(entry.ClearingDate);
-                          return (
-                            <div className="text-right">
-                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">{date}</p>
-                              {time && <p className="text-[10px] text-muted-foreground">{time}</p>}
-                            </div>
-                          );
-                        })()}
+                        {cleared && (entry.BankClearingDate || entry.ClearingDate) && (
+                          <div className="text-right">
+                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                              {entry.BankClearingDate ? fmt(entry.BankClearingDate) : fmtDT(entry.ClearingDate).date}
+                            </p>
+                            {entry.ClearedBy && (
+                              <p className="text-[10px] text-muted-foreground truncate max-w-[110px]">{entry.ClearedBy}</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1093,15 +1212,16 @@ export default function Brs() {
                         </div>
                       </td>
                       <td className="px-3 py-4 hidden xl:table-cell align-middle">
-                        {cleared && entry.ClearingDate ? (() => {
-                          const { date, time } = fmtDT(entry.ClearingDate);
-                          return (
-                            <div>
-                              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">{date}</p>
-                              {time && <p className="text-[10px] text-muted-foreground">{time}</p>}
-                            </div>
-                          );
-                        })() : (
+                        {cleared && (entry.BankClearingDate || entry.ClearingDate) ? (
+                          <div>
+                            <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                              {entry.BankClearingDate ? fmt(entry.BankClearingDate) : fmtDT(entry.ClearingDate).date}
+                            </p>
+                            {entry.ClearedBy && (
+                              <p className="text-[10px] text-muted-foreground truncate max-w-[120px]">{entry.ClearedBy}</p>
+                            )}
+                          </div>
+                        ) : (
                           <span className="text-[10px] text-muted-foreground">—</span>
                         )}
                       </td>
@@ -1204,6 +1324,16 @@ export default function Brs() {
           onClose={() => setBounceEntry(null)}
           onConfirm={handleConfirmBounce}
           saving={bounceSaving}
+        />
+      )}
+
+      {/* ── Clear Modal (portal) ───────────────────────────────────────────── */}
+      {clearEntry && (
+        <ClearModal
+          entry={clearEntry}
+          onClose={() => setClearEntry(null)}
+          onConfirm={handleConfirmClear}
+          saving={clearSaving}
         />
       )}
     </>

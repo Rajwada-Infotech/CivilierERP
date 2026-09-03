@@ -206,6 +206,8 @@ router.get("/", cache("brs", 60), async (req, res) => {
           -- Clearing timestamp: FORMAT() returns a plain string so mssql does not
           -- reinterpret the IST DATETIME2 value as UTC (which would add +5:30 in the browser).
           CASE WHEN brc.IsMatched = 1 THEN FORMAT(brc.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
+          brc.BankClearingDate     AS BankClearingDate,
+          brc.ClearedBy            AS ClearedBy,
           -- Re-issue chain: DocNo of the payment that replaced this one (if any)
           repl.DocNo               AS ReplacementDocNo,
           repl.PPaymentID          AS ReplacementPaymentId,
@@ -285,6 +287,8 @@ router.get("/", cache("brs", 60), async (req, res) => {
           brc2.BounceRemarks       AS BounceRemarks,
           brc2.BRSID               AS BRSID,
           CASE WHEN brc2.IsMatched = 1 THEN FORMAT(brc2.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
+          brc2.BankClearingDate    AS BankClearingDate,
+          brc2.ClearedBy           AS ClearedBy,
           CAST(NULL AS NVARCHAR(100)) AS ReplacementDocNo,
           CAST(NULL AS INT)           AS ReplacementPaymentId,
           CAST(NULL AS NVARCHAR(100)) AS OriginalDocNo,
@@ -334,6 +338,8 @@ router.get("/", cache("brs", 60), async (req, res) => {
           brc3.BounceRemarks       AS BounceRemarks,
           brc3.BRSID               AS BRSID,
           CASE WHEN brc3.IsMatched = 1 THEN FORMAT(brc3.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
+          brc3.BankClearingDate    AS BankClearingDate,
+          brc3.ClearedBy           AS ClearedBy,
           CAST(NULL AS NVARCHAR(100)) AS ReplacementDocNo,
           CAST(NULL AS INT)           AS ReplacementPaymentId,
           CAST(NULL AS NVARCHAR(100)) AS OriginalDocNo,
@@ -415,6 +421,8 @@ router.get("/", cache("brs", 60), async (req, res) => {
         u.OriginalDocNo,
         u.OriginalPaymentId,
         u.ClearingDate,
+        u.BankClearingDate,
+        u.ClearedBy,
         u.CreatedAt
       FROM UnifiedPayments u
       ${where}
@@ -455,24 +463,38 @@ router.put("/:sourceType/:sourceId/clear", async (req, res) => {
   if (!["PAYMENT", "RECEIVED", "CRM_RECEIVED"].includes(sourceType))
     return res.status(400).json({ error: "Invalid sourceType" });
 
+  const { bankClearingDate } = req.body;
+  if (!bankClearingDate)
+    return res.status(400).json({ error: "bankClearingDate is required" });
+
+  const clearedBy = req.user?.email || null;
+
   try {
     const pool = getPool();
 
-    // Upsert into BankReconciliation
+    // Upsert into BankReconciliation — BankClearingDate/ClearedBy/ClearedAt
+    // describe the CURRENT clear state and get overwritten on every
+    // clear/unclear cycle (unclear nulls them back out below), same
+    // convention BounceDate/BounceReason already use.
     await pool
       .request()
       .input("SourceType", sql.NVarChar(20), sourceType)
-      .input("SourceID", sql.Int, parseInt(sourceId)).query(`
+      .input("SourceID", sql.Int, parseInt(sourceId))
+      .input("BankClearingDate", sql.Date, bankClearingDate)
+      .input("ClearedBy", sql.NVarChar(150), clearedBy).query(`
         IF EXISTS (
           SELECT 1 FROM BankReconciliation
           WHERE SourceType = @SourceType AND SourceID = @SourceID
         )
           UPDATE BankReconciliation
-          SET IsMatched = 1, UpdatedAt = GETDATE()
+          SET IsMatched = 1, BankClearingDate = @BankClearingDate,
+              ClearedBy = @ClearedBy, ClearedAt = GETDATE(), UpdatedAt = GETDATE()
           WHERE SourceType = @SourceType AND SourceID = @SourceID
         ELSE
-          INSERT INTO BankReconciliation (SourceType, SourceID, IsMatched, CreatedAt, UpdatedAt)
-          VALUES (@SourceType, @SourceID, 1, GETDATE(), GETDATE())
+          INSERT INTO BankReconciliation
+            (SourceType, SourceID, IsMatched, BankClearingDate, ClearedBy, ClearedAt, CreatedAt, UpdatedAt)
+          VALUES
+            (@SourceType, @SourceID, 1, @BankClearingDate, @ClearedBy, GETDATE(), GETDATE(), GETDATE())
       `);
 
     await bumpCacheVersion("brs");
@@ -510,31 +532,18 @@ router.put("/:sourceType/:sourceId/unclear", async (req, res) => {
   try {
     const pool = getPool();
 
-    // A cleared entry is locked — once the bank has confirmed a payment in
-    // the passbook, un-clearing it here would silently disagree with a
-    // reconciliation that's already happened. Guard server-side, not just
-    // by hiding the checkbox client-side, so no caller (including a stale
-    // page, or a direct API call) can slip a matched entry back to unclear.
-    const existing = await pool
-      .request()
-      .input("SourceType", sql.NVarChar(20), sourceType)
-      .input("SourceID", sql.Int, parseInt(sourceId))
-      .query(`
-        SELECT IsMatched FROM BankReconciliation
-        WHERE SourceType = @SourceType AND SourceID = @SourceID
-      `);
-    if (existing.recordset[0]?.IsMatched) {
-      return res.status(409).json({
-        error: "This entry is already marked Clear and cannot be reverted to Unclear.",
-      });
-    }
-
+    // Un-clearing used to be blocked server-side once IsMatched=1 (a
+    // mis-tick was permanent). That's been relaxed: an operator can revert
+    // a Clear back to Unclear to correct a mistake. BankClearingDate/
+    // ClearedBy/ClearedAt describe the CURRENT clear state, so they're
+    // nulled out here rather than left stale/misleading.
     await pool
       .request()
       .input("SourceType", sql.NVarChar(20), sourceType)
       .input("SourceID", sql.Int, parseInt(sourceId)).query(`
         UPDATE BankReconciliation
-        SET IsMatched = 0, UpdatedAt = GETDATE()
+        SET IsMatched = 0, BankClearingDate = NULL, ClearedBy = NULL, ClearedAt = NULL,
+            UpdatedAt = GETDATE()
         WHERE SourceType = @SourceType AND SourceID = @SourceID
       `);
 

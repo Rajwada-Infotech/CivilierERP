@@ -33,6 +33,11 @@
       "expo-secure-store",
       "expo-font"
     ],
-    "owner": "grenxnja"
+    "owner": "grenxnja",
+    "extra": {
+      "eas": {
+        "projectId": "3e1fba70-d113-48b6-82dc-7d641ae96c20"
+      }
+    }
   }
 }
