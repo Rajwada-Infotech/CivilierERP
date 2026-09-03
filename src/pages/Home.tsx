@@ -580,6 +580,7 @@ export default function HomePage() {
       "fixed-asset-assignment",
       "asset-transfer",
       "fixed-asset-quality-check",
+      "fixed-asset-maintenance",
     ],
   };
 

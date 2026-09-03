@@ -9,8 +9,25 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { buildReversalPlan, executeReversal } = require("../services/fixedAssetReversal");
+const {
+  buildPostingPlan: buildDepreciationPlan,
+  postDepreciation,
+  reverseDepreciation,
+} = require("../services/fixedAssetDepreciationPosting");
 
 router.use(authenticateToken);
+
+const DEP_DOC_PREFIX = "FADEP";
+
+async function loadAssetForDepreciation(pool, id) {
+  const r = await pool.request().input("AssetId", sql.Int, id).query(`
+    SELECT AssetId, AssetCode, FAItemCode, AssetName, CompanyId, ProjectId,
+           PurchaseCost, PurchaseDate, ActivationDate, FinYear,
+           DepreciationType, DepreciationRate, AssetStatus, Status
+    FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId
+  `);
+  return r.recordset[0] || null;
+}
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;
@@ -86,6 +103,7 @@ router.get("/", async (req, res) => {
         fa.Location, fa.Department, fa.Custodian, fa.CustodianUserId,
         fa.DepreciationSetupId, fa.DepreciationType, fa.DepreciationRate, fa.UsefulLife,
         fa.AssetStatus, fa.SellingPrice, fa.SaleDate, fa.BuyerName,
+        fa.RepairType,
         fa.Status, fa.CreatedBy, fa.CreatedAt,
         fa.CompanyId, co.name AS CompanyName,
         fa.ProjectId, pr.name AS ProjectName,
@@ -149,7 +167,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       purchaseDate, activationDate, purchaseInvoiceRef, supplierId, purchaseCost, quantity,
       location, department, custodianUserId,
       depreciationSetupId, depreciationType, depreciationRate, usefulLife,
-      remarks, sourceTagId, pictureBase64,
+      remarks, sourceTagId, pictureBase64, repairType,
     } = req.body;
 
     if (!assetCategory)
@@ -223,6 +241,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
         .input("UsefulLife",          sql.Int,           usefulLife  ? parseInt(usefulLife, 10)  : null)
         .input("Remarks",             sql.NVarChar(sql.MAX), remarks || null)
         .input("PictureBase64",       sql.NVarChar(sql.MAX), pictureBase64 || null)
+        .input("RepairType",          sql.NVarChar(50),  repairType || null)
         .input("CreatedBy",           sql.NVarChar(200), email)
         .input("GodownId",            sql.Int,           sourceGodownId)
         .input("SourceTagId",         sql.Int,           sourceTagIdVal)
@@ -234,7 +253,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
              PurchaseDate, ActivationDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, Quantity,
              Location, Department, Custodian, CustodianUserId,
              DepreciationSetupId, DepreciationType, DepreciationRate, UsefulLife,
-             AssetStatus, Status, Remarks, PictureBase64, CreatedBy, CreatedAt,
+             AssetStatus, Status, Remarks, PictureBase64, RepairType, CreatedBy, CreatedAt,
              GodownID, SourceTagId, FAItemCode)
           VALUES
             (@DocNo, @DocDate, @CompanyId, @ProjectId, @FinYear,
@@ -242,7 +261,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
              @PurchaseDate, @ActivationDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @Quantity,
              @Location, @Department, @Custodian, @CustodianUserId,
              @DepreciationSetupId, @DepreciationType, @DepreciationRate, @UsefulLife,
-             'Active', 'Draft', @Remarks, @PictureBase64, @CreatedBy, SYSDATETIME(),
+             'Active', 'Draft', @Remarks, @PictureBase64, @RepairType, @CreatedBy, SYSDATETIME(),
              @GodownId, @SourceTagId, @FAItemCode);
           SELECT SCOPE_IDENTITY() AS AssetId;
         `);
@@ -284,7 +303,7 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
       location, department, custodianUserId,
       depreciationSetupId, depreciationType, depreciationRate, usefulLife,
       assetStatus, sellingPrice, saleDate, buyerName, saleRemarks,
-      remarks, status, pictureBase64,
+      remarks, status, pictureBase64, repairType,
     } = req.body;
 
     const custodianUserIdVal = custodianUserId ? parseInt(custodianUserId, 10) : null;
@@ -321,6 +340,7 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
       .input("BuyerName",          sql.NVarChar(200), buyerName || null)
       .input("SaleRemarks",        sql.NVarChar(sql.MAX), saleRemarks || null)
       .input("Remarks",            sql.NVarChar(sql.MAX), remarks || null)
+      .input("RepairType",         sql.NVarChar(50),  repairType || null)
       .input("PictureBase64",      sql.NVarChar(sql.MAX), pictureBase64 !== undefined ? (pictureBase64 || null) : null)
       .input("PictureProvided",    sql.Bit,           pictureBase64 !== undefined ? 1 : 0)
       .input("Status",             sql.NVarChar(30),  status || null)
@@ -356,6 +376,7 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
           BuyerName          = @BuyerName,
           SaleRemarks        = @SaleRemarks,
           Remarks            = @Remarks,
+          RepairType         = @RepairType,
           PictureBase64      = CASE WHEN @PictureProvided = 1 THEN @PictureBase64 ELSE PictureBase64 END,
           Status             = ISNULL(@Status,             Status),
           UpdatedBy          = @UpdatedBy,
@@ -468,6 +489,100 @@ router.post("/:id/reverse", requirePageRight("fixed-asset-record", "reverse"), a
     console.error("[fixedAssets] POST /:id/reverse:", err.message);
     const status = err.code === "BLOCKED" || err.code === "NOT_SOURCE_LINKED" || err.code === "ALREADY_DELETED" ? 409 : 500;
     res.status(status).json({ error: err.message, reason: err.reason || err.code });
+  }
+});
+
+// ── Depreciation posting ───────────────────────────────────────────────────
+// Monthly depreciation journal for an asset:
+//   Dr Depreciation Expense A/c  /  Cr Accumulated Depreciation A/c
+// The charge is computed from the asset's own SLM/WDV rate; the two GL heads
+// are looked up by name. See services/fixedAssetDepreciationPosting.js.
+
+const DEP_MONTHS = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n >= 1 && n <= 12 ? n : null; };
+const DEP_YEAR = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n >= 2000 && n <= 2100 ? n : null; };
+
+// GET /:id/depreciation?year=&month= — computed plan for the period + history
+router.get("/:id/depreciation", requirePageRight("fixed-asset-record", "view"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  const now = new Date();
+  const year = DEP_YEAR(req.query.year) ?? now.getFullYear();
+  const month = DEP_MONTHS(req.query.month) ?? (now.getMonth() + 1);
+  try {
+    const pool = getPool();
+    const asset = await loadAssetForDepreciation(pool, id);
+    if (!asset || !asset.AssetCode || asset.Status === "Deleted") return res.status(404).json({ error: "Not found" });
+
+    let plan = null;
+    try {
+      plan = await buildDepreciationPlan(pool, asset, year, month);
+    } catch (e) {
+      plan = { error: e.message };
+    }
+
+    const hist = await pool.request().input("AssetId", sql.Int, id).query(`
+      SELECT EntryId, PeriodYear, PeriodMonth, FinYear, Method, RatePct,
+             OpeningBookValue, DepreciationAmount, ClosingBookValue, AccumulatedDepreciation,
+             Status, VoucherNo, PostedBy, PostedAt
+      FROM dbo.FixedAssetDepreciationEntry
+      WHERE AssetId = @AssetId
+      ORDER BY PeriodYear DESC, PeriodMonth DESC, EntryId DESC
+    `);
+
+    res.json({ year, month, plan, history: hist.recordset });
+  } catch (err) {
+    console.error("[fixedAssets] GET /:id/depreciation:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:id/depreciation/post  { year, month }
+router.post("/:id/depreciation/post", requirePageRight("fixed-asset-record", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  const email = requireUser(req, res);
+  if (!email) return;
+  const year = DEP_YEAR(req.body.year);
+  const month = DEP_MONTHS(req.body.month);
+  if (!year || !month) return res.status(400).json({ error: "Valid year and month (1-12) are required" });
+  try {
+    const pool = getPool();
+    const asset = await loadAssetForDepreciation(pool, id);
+    if (!asset || !asset.AssetCode || asset.Status === "Deleted") return res.status(404).json({ error: "Not found" });
+
+    const docTypeId = await resolveDocTypeId(pool, sql, DEP_DOC_PREFIX);
+    const lockDocNo = (finYear) => lockNextDocNumber(pool, sql, {
+      docTypeId, finYear, tableName: "FixedAssetDepreciationEntry",
+      docNoColumn: "VoucherNo", issuedBy: email,
+    });
+
+    const result = await postDepreciation(pool, asset, year, month, email, lockDocNo);
+    await bumpCacheVersion("fixed-assets");
+    await bumpCacheVersion("general-ledger");
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[fixedAssets] POST /:id/depreciation/post:", err.message);
+    const status = err.code === "CONFIG_MISSING" ? 409 : 500;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// POST /:id/depreciation/:entryId/reverse
+router.post("/:id/depreciation/:entryId/reverse", requirePageRight("fixed-asset-record", "edit"), async (req, res) => {
+  const entryId = parseInt(req.params.entryId, 10);
+  if (!Number.isFinite(entryId)) return res.status(400).json({ error: "Invalid entry id" });
+  const email = requireUser(req, res);
+  if (!email) return;
+  try {
+    const pool = getPool();
+    const result = await reverseDepreciation(pool, entryId, email);
+    await bumpCacheVersion("fixed-assets");
+    await bumpCacheVersion("general-ledger");
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[fixedAssets] POST /:id/depreciation/:entryId/reverse:", err.message);
+    const status = err.code === "NOT_FOUND" ? 404 : 500;
+    res.status(status).json({ error: err.message });
   }
 });
 
