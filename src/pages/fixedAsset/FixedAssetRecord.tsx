@@ -336,19 +336,23 @@ function DepreciationPostingCard({ assetId, glassSection }: { assetId: number; g
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
             {[
-              ["Opening Book Value", fmtCur(dep.openingBookValue)],
-              [`Depreciation (${dep.ratePct}% ${dep.method})`, fmtCur(dep.depreciationAmount)],
-              ["Closing Book Value", fmtCur(dep.closingBookValue)],
-              ["Accumulated Dep.", fmtCur(dep.accumulatedDepreciation)],
-            ].map(([k, v]) => (
+              ["Opening Book Value", fmtCur(dep.openingBookValue), "this month"],
+              [`Depreciation (${dep.ratePct}% ${dep.method})`, fmtCur(dep.depreciationAmount), "this month"],
+              ["Closing Book Value", fmtCur(dep.closingBookValue), "this month"],
+              ["Accumulated Dep. (to date)", fmtCur(dep.accumulatedDepreciation), `cumulative through ${DEP_MONTHS[month - 1]} ${year}`],
+            ].map(([k, v, hint]) => (
               <div key={k} className="bg-muted/40 rounded-lg p-2">
                 <p className="text-muted-foreground">{k}</p>
                 <p className="font-semibold tabular-nums mt-0.5">{v}</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-0.5">{hint}</p>
               </div>
             ))}
           </div>
 
           <div className="overflow-x-auto">
+            <p className="text-[11px] text-muted-foreground mb-1.5">
+              Journal entry — {DEP_MONTHS[month - 1]} {year} only (current month's depreciation)
+            </p>
             <table className="w-full text-sm min-w-[420px]">
               <thead>
                 <tr className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">

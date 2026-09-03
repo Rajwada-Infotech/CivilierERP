@@ -56,8 +56,17 @@ function validateAssetForDepreciation(asset) {
   return null;
 }
 
-/** Sum of posted (non-reversed) depreciation strictly before (year, month). */
-async function accumulatedBefore(pool, assetId, year, month) {
+/**
+ * Sum of posted (non-reversed) DepreciationAmount over a period range.
+ *  - `inclusive = false` → strictly before (year, month)   [what a NEW month opens on]
+ *  - `inclusive = true`  → up to AND INCLUDING (year, month) [the accumulated balance to show]
+ * Always a LIVE recalculation from the entry rows, so reversing an earlier
+ * month immediately lowers every later month's accumulated figure.
+ */
+async function sumPostedDepreciation(pool, assetId, year, month, inclusive) {
+  const cmp = inclusive
+    ? "(PeriodYear < @Y OR (PeriodYear = @Y AND PeriodMonth <= @M))"
+    : "(PeriodYear < @Y OR (PeriodYear = @Y AND PeriodMonth < @M))";
   const r = await pool.request()
     .input("AssetId", sql.Int, assetId)
     .input("Y", sql.SmallInt, year)
@@ -65,28 +74,40 @@ async function accumulatedBefore(pool, assetId, year, month) {
     .query(`
       SELECT ISNULL(SUM(DepreciationAmount), 0) AS Accum
       FROM dbo.FixedAssetDepreciationEntry
-      WHERE AssetId = @AssetId AND Status <> 'Reversed'
-        AND (PeriodYear < @Y OR (PeriodYear = @Y AND PeriodMonth < @M))
+      WHERE AssetId = @AssetId AND Status <> 'Reversed' AND ${cmp}
     `);
   return round2(r.recordset[0]?.Accum || 0);
 }
 
-/** Is this exact (asset, year, month) already posted (non-reversed)? */
-async function alreadyPosted(pool, assetId, year, month) {
+/** The posted (non-reversed) entry for this exact (asset, year, month), or null. */
+async function postedEntry(pool, assetId, year, month) {
   const r = await pool.request()
     .input("AssetId", sql.Int, assetId)
     .input("Y", sql.SmallInt, year)
     .input("M", sql.TinyInt, month)
     .query(`
-      SELECT TOP 1 EntryId, VoucherNo FROM dbo.FixedAssetDepreciationEntry
+      SELECT TOP 1 EntryId, VoucherNo, Method, RatePct, PurchaseCost,
+             OpeningBookValue, DepreciationAmount, ClosingBookValue
+      FROM dbo.FixedAssetDepreciationEntry
       WHERE AssetId = @AssetId AND PeriodYear = @Y AND PeriodMonth = @M AND Status <> 'Reversed'
     `);
   return r.recordset[0] || null;
 }
+// Back-compat alias used by postDepreciation()'s duplicate guard.
+const alreadyPosted = postedEntry;
 
 /**
- * Compute the depreciation figures for one month (no DB writes beyond the
- * accumulated-before read). Throws CONFIG_MISSING on bad config / not-in-service.
+ * Depreciation figures for one month.
+ *
+ *  openingBookValue / depreciationAmount / closingBookValue  → THIS MONTH ONLY.
+ *      For an already-posted month these come straight from the stored entry
+ *      (historical rows are never recomputed / changed).
+ *  accumulatedDepreciation → cumulative balance = LIVE SUM of every posted
+ *      non-reversed entry up to and including the selected month (plus this
+ *      month's about-to-be-posted charge when it isn't posted yet).
+ *
+ * The journal posting (buildPostingPlan) only ever uses `depreciationAmount`
+ * — never `accumulatedDepreciation`.
  */
 async function computeMonth(pool, asset, year, month) {
   const bad = validateAssetForDepreciation(asset);
@@ -101,13 +122,34 @@ async function computeMonth(pool, asset, year, month) {
   const rate = Number(asset.DepreciationRate);
   const method = asset.DepreciationType.toUpperCase();
 
-  const accumBefore = await accumulatedBefore(pool, asset.AssetId, year, month);
+  const existing = await postedEntry(pool, asset.AssetId, year, month);
+
+  if (existing) {
+    // Already posted — show exactly what is in the ledger for this month, and
+    // the cumulative balance recalculated live (so a reversal of an earlier
+    // month is reflected here).
+    const accumInclusive = await sumPostedDepreciation(pool, asset.AssetId, year, month, true);
+    return {
+      method: existing.Method || method,
+      ratePct: existing.RatePct != null ? Number(existing.RatePct) : rate,
+      cost: round2(existing.PurchaseCost ?? cost),
+      openingBookValue: round2(existing.OpeningBookValue),
+      depreciationAmount: round2(existing.DepreciationAmount),
+      closingBookValue: round2(existing.ClosingBookValue),
+      accumulatedDepreciation: accumInclusive,
+      finYear: finYearOf(year, month),
+      isPosted: true,
+    };
+  }
+
+  // Not posted yet — preview.
+  const accumBefore = await sumPostedDepreciation(pool, asset.AssetId, year, month, false);
   const opening = round2(cost - accumBefore);
   if (opening <= 0.01) {
     throw cfgErr("This asset is already fully depreciated — no further depreciation to post.");
   }
 
-  // Monthly charge: SLM on cost, WDV on the opening book value. Rate is p.a.
+  // Monthly charge: SLM on cost (constant), WDV on the opening book value. Rate is p.a.
   const gross = method === "WDV" ? (opening * rate) / 1200 : (cost * rate) / 1200;
   const charge = round2(Math.min(gross, opening)); // never below zero book value
   const closing = round2(opening - charge);
@@ -119,6 +161,7 @@ async function computeMonth(pool, asset, year, month) {
     closingBookValue: closing,
     accumulatedDepreciation: round2(accumBefore + charge),
     finYear: finYearOf(year, month),
+    isPosted: false,
   };
 }
 
