@@ -1249,6 +1249,19 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
       }
     }
 
+    // Reverse whatever GL this payment posted (cheque clearance, bounce
+    // charges, or a loan-repayment leg — see vendorLedger.js's join, which
+    // is the exact set of SourceTypes ever keyed to a NewPayment's
+    // PPaymentID) before hard-deleting it. Previously skipped, so a deleted
+    // payment's GeneralLedgerEntry rows survived with IsReversed=0 forever —
+    // every ledger/report reading off that table (Vendor Ledger Report
+    // included) kept counting a payment that no longer existed. Same fix
+    // already applied to loanSanction.js's DELETE.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    for (const sourceType of ["NewPayment", "PaymentPosting", "BounceChargePosting", "LoanRepayment"]) {
+      await reversePostingBySource(pool, sourceType, id);
+    }
+
     const result = await pool
       .request()
       .input("PPaymentID", sql.Int, id)
