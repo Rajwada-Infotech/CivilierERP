@@ -20,7 +20,7 @@ import { getActiveDepreciationSetups, type DepreciationSetup } from "@/api/depre
 import {
   getFixedAssets, getFixedAsset, createFixedAsset, updateFixedAsset, deleteFixedAsset,
   getFixedAssetReversalPlan, reverseFixedAsset,
-  getAssetDepreciation, postAssetDepreciation, reverseAssetDepreciation,
+  getAssetDepreciation, postAssetDepreciation,
   type FixedAssetListItem, type FixedAssetDetail,
 } from "@/api/fixedAssetApi";
 import { getSacCodes } from "@/api/hsnApi";
@@ -286,15 +286,12 @@ function DepreciationPostingCard({ assetId, glassSection }: { assetId: number; g
     onSuccess: (r) => { toast.success(`Depreciation posted — ${r.voucherNo}`); invalidate(); },
     onError: (e: Error) => toast.error(e.message),
   });
-  const reverseMut = useMutation({
-    mutationFn: (entryId: number) => reverseAssetDepreciation(assetId, entryId),
-    onSuccess: () => { toast.success("Depreciation entry reversed"); invalidate(); },
-    onError: (e: Error) => toast.error(e.message),
-  });
 
   const plan = data?.plan ?? null;
   const dep = plan?.depreciation;
-  const history = data?.history ?? [];
+  // Only live (non-reversed) entries — a reversed month has no accounting
+  // impact and is immediately available to post again.
+  const history = (data?.history ?? []).filter((h) => h.Status !== "Reversed");
   const yearOptions = Array.from({ length: 7 }, (_, i) => now.getFullYear() - 4 + i);
 
   return (
@@ -389,7 +386,7 @@ function DepreciationPostingCard({ assetId, glassSection }: { assetId: number; g
         <div>
           <p className="text-xs font-semibold text-muted-foreground mb-2 mt-1">Posted Depreciation History</p>
           <div className="overflow-x-auto">
-            <table className="w-full text-xs min-w-[560px]">
+            <table className="w-full text-xs min-w-[520px]">
               <thead>
                 <tr className="text-muted-foreground text-[10px] uppercase tracking-wide">
                   <th className="px-3 py-1.5 text-left">Period</th>
@@ -397,27 +394,16 @@ function DepreciationPostingCard({ assetId, glassSection }: { assetId: number; g
                   <th className="px-3 py-1.5 text-right">Opening</th>
                   <th className="px-3 py-1.5 text-right">Depreciation</th>
                   <th className="px-3 py-1.5 text-right">Closing</th>
-                  <th className="px-3 py-1.5 text-center">Status</th>
-                  <th className="px-3 py-1.5"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {history.map((h) => (
-                  <tr key={h.EntryId} className={h.Status === "Reversed" ? "opacity-50" : ""}>
+                  <tr key={h.EntryId}>
                     <td className="px-3 py-1.5">{DEP_MONTHS[h.PeriodMonth - 1]} {h.PeriodYear}</td>
                     <td className="px-3 py-1.5 font-mono">{h.VoucherNo || "—"}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtCur(h.OpeningBookValue)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtCur(h.DepreciationAmount)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtCur(h.ClosingBookValue)}</td>
-                    <td className="px-3 py-1.5 text-center">
-                      <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${h.Status === "Reversed" ? "bg-muted text-muted-foreground" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"}`}>{h.Status}</span>
-                    </td>
-                    <td className="px-3 py-1.5 text-right">
-                      {rights.canEdit && h.Status === "Posted" && (
-                        <button onClick={() => reverseMut.mutate(h.EntryId)} disabled={reverseMut.isPending} title="Reverse this entry"
-                          className="p-1 rounded text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-muted"><Undo2 size={13} /></button>
-                      )}
-                    </td>
                   </tr>
                 ))}
               </tbody>
