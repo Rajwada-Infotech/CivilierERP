@@ -2,7 +2,14 @@ import axios from "./axios";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type BrsSourceType = "PAYMENT" | "RECEIVED";
+export type BrsSourceType =
+  | "PAYMENT"
+  | "RECEIVED"
+  | "CRM_RECEIVED"
+  | "FUND_TRANSFER_OUT"
+  | "FUND_TRANSFER_IN"
+  | "LOAN_DISBURSED"
+  | "LOAN_RECEIVED";
 
 export interface BrsEntry {
   BRSID: number | null;

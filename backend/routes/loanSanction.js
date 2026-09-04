@@ -359,16 +359,17 @@ router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req
   }
 });
 
-// ── GET /undisbursed — Sanctioned Inter-Company loans this company has
-//    lent out but not yet disbursed to GL ─────────────────────────────────
+// ── GET /undisbursed — Sanctioned loans this company has lent out but not
+//    yet disbursed to GL — Inter-Company AND Customer Loan (both are "we
+//    are the lender, money goes OUT of our bank") ─────────────────────────
 // Feeds Finance > Payment's "Loan Disbursement" picker — disbursement is a
-// deliberate action now (see POST / above), not automatic at sanction
-// time, so this is how staff find the loans still waiting on it. Scoped to
-// the LENDER company (the one whose Payment page this shows up on — they
-// are the one paying out). Bank Loan/Customer Loan aren't included: their
-// disbursement was never automatic to begin with (the other side is
-// external), so they've always used the existing manual "Post to GL"
-// action from the loan's own detail page.
+// deliberate action now (see POST / above and POST /:id/disburse below),
+// not automatic at sanction time, so this is how staff find the loans
+// still waiting on it. Scoped to the LENDER company (the one whose Payment
+// page this shows up on — they are the one paying out). Bank Loan isn't
+// included here — we're the BORROWER for that type (money comes IN), so
+// it belongs on Received Payment's picker instead (see GET
+// /undisbursed-incoming below).
 // Registered before "/:id" so it isn't swallowed by the param route.
 router.get("/undisbursed", requirePageRight("loan-sanction", "view"), async (req, res) => {
   const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
@@ -377,13 +378,45 @@ router.get("/undisbursed", requirePageRight("loan-sanction", "view"), async (req
     const pool = getPool();
     const result = await pool.request().input("CompanyId", sql.Int, companyId).query(`
       SELECT
-        ls.LoanId, ls.LoanNo, ls.LoanDate, ls.Amount,
+        ls.LoanId, ls.LoanNo, ls.LoanType, ls.LoanDate, ls.Amount,
         ls.LenderBankAccountId, ls.BorrowerBankAccountId,
-        bc.name AS BorrowerCompanyName
+        ls.BorrowerCustomerId, ls.BorrowerCustomerSource,
+        bc.name AS BorrowerCompanyName,
+        COALESCE(crmCust.CustomerName, ahmCust.LHeadName) AS BorrowerCustomerName
       FROM dbo.LoanSanction ls
       LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
-      WHERE ls.LoanType = 'Inter-Company' AND ls.Status <> 'Closed'
+      LEFT JOIN dbo.CrmCustomer crmCust ON ls.LoanType = 'Customer Loan' AND ls.BorrowerCustomerSource = 'CRM' AND crmCust.Id = ls.BorrowerCustomerId
+      LEFT JOIN dbo.AccountHeadMaster ahmCust ON ls.LoanType = 'Customer Loan' AND ls.BorrowerCustomerSource <> 'CRM' AND ahmCust.LHeadId = ls.BorrowerCustomerId
+      WHERE ls.LoanType IN ('Inter-Company', 'Customer Loan') AND ls.Status <> 'Closed'
         AND ls.DisbursedAt IS NULL AND ls.LenderCompanyId = @CompanyId
+      ORDER BY ls.LoanDate ASC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /undisbursed-incoming — Sanctioned Bank Loans this company has
+//    borrowed but not yet disbursed to GL ("we are the BORROWER, money
+//    comes IN from an external bank") ─────────────────────────────────────
+// Feeds Received Payment's "Disburse a Bank Loan" picker. Scoped to the
+// BORROWER company (the one whose Received Payment page this shows up on
+// — they are the one receiving the money).
+// Registered before "/:id" so it isn't swallowed by the param route.
+router.get("/undisbursed-incoming", requirePageRight("loan-sanction", "view"), async (req, res) => {
+  const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+  if (!companyId) return res.status(400).json({ error: "companyId is required" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("CompanyId", sql.Int, companyId).query(`
+      SELECT
+        ls.LoanId, ls.LoanNo, ls.LoanType, ls.LoanDate, ls.Amount,
+        ls.LenderBankId, lb.LHeadName AS LenderBankName
+      FROM dbo.LoanSanction ls
+      LEFT JOIN dbo.AccountHeadMaster lb ON lb.LHeadId = ls.LenderBankId
+      WHERE ls.LoanType = 'Bank Loan' AND ls.Status <> 'Closed'
+        AND ls.DisbursedAt IS NULL AND ls.BorrowerCompanyId = @CompanyId
       ORDER BY ls.LoanDate ASC
     `);
     res.json(result.recordset);
@@ -1242,6 +1275,80 @@ router.post("/:id/post-to-gl", requirePageRight("loan-sanction", "edit"), async 
     const pool = getPool();
     const result = await postLoanToGLInternal(pool, loanId, userEmail);
     res.json({ voucherNo: result.voucherNo, message: "Loan posted to GL successfully." });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── POST /:id/disburse — Bank Loan / Customer Loan disbursement ───────────
+// The deliberate counterpart to Inter-Company's POST /:id/post-to-gl, for
+// the two loan types where the other side isn't one of our own companies.
+// Unlike Inter-Company (which posts straight against a real bank head in
+// one click, no separate document needed), these need an actual NewPayment
+// (Customer Loan — money OUT to a customer) or ReceivedPayment (Bank Loan
+// — money IN from an external bank) as the real bank-side record, the same
+// way POST /:id/pay already requires for repayment. Callers create that
+// payment first through the normal Payment/Received Payment form (so a
+// real bank/cheque/reference gets captured), then call this with its id to
+// link it and post the loan-ledger side.
+router.post("/:id/disburse", requirePageRight("loan-sanction", "edit"), async (req, res) => {
+  const loanId = parseInt(req.params.id, 10);
+  const { newPaymentId, receivedPaymentId } = req.body;
+  const userEmail = req.user?.email || req.user?.name || "system";
+  if (!Number.isFinite(loanId)) return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const pool = getPool();
+    const loanRes = await pool.request().input("LoanId", sql.Int, loanId)
+      .query("SELECT LoanId, LoanNo, LoanType, DisbursedAt FROM dbo.LoanSanction WHERE LoanId = @LoanId");
+    const loan = loanRes.recordset[0];
+    if (!loan) return res.status(404).json({ error: "Loan not found" });
+    if (loan.LoanType === "Inter-Company") {
+      return res.status(400).json({ error: "Inter-Company loans are disbursed via POST /:id/post-to-gl, not this route." });
+    }
+    if (loan.DisbursedAt) {
+      return res.status(409).json({ error: "This loan has already been disbursed." });
+    }
+
+    let paymentId, paymentType, paymentDate;
+    if (loan.LoanType === "Customer Loan") {
+      paymentId = Number.isFinite(parseInt(newPaymentId, 10)) ? parseInt(newPaymentId, 10) : null;
+      if (!paymentId) return res.status(400).json({ error: "newPaymentId is required to disburse a Customer Loan (money going out)." });
+      const npRes = await pool.request().input("Id", sql.Int, paymentId)
+        .query("SELECT PPaymentID, PDate, DocNo FROM dbo.NewPayment WHERE PPaymentID = @Id");
+      if (!npRes.recordset.length) return res.status(404).json({ error: "That payment was not found." });
+      paymentType = "NewPayment";
+      paymentDate = npRes.recordset[0].PDate;
+    } else if (loan.LoanType === "Bank Loan") {
+      paymentId = Number.isFinite(parseInt(receivedPaymentId, 10)) ? parseInt(receivedPaymentId, 10) : null;
+      if (!paymentId) return res.status(400).json({ error: "receivedPaymentId is required to disburse a Bank Loan (money coming in)." });
+      const rpRes = await pool.request().input("Id", sql.Int, paymentId)
+        .query("SELECT RPPaymentID, RPDocDate, RPDocNo FROM dbo.ReceivedPayment WHERE RPPaymentID = @Id");
+      if (!rpRes.recordset.length) return res.status(404).json({ error: "That received payment was not found." });
+      paymentType = "ReceivedPayment";
+      paymentDate = rpRes.recordset[0].RPDocDate;
+    } else {
+      return res.status(400).json({ error: `Unknown loan type: ${loan.LoanType}` });
+    }
+
+    // postLoanToGLInternal posts the loan-ledger legs (Dr borrower / Cr
+    // lender against the "Loan - X" heads) and stamps DisbursedAt using the
+    // loan's own LoanDate — same mechanism Inter-Company's post-to-gl uses,
+    // just reached from this route for these two types instead.
+    const result = await postLoanToGLInternal(pool, loanId, userEmail);
+
+    await pool.request()
+      .input("LoanId", sql.Int, loanId)
+      .input("PaymentId", sql.Int, paymentId)
+      .input("PaymentType", sql.NVarChar(20), paymentType)
+      .query(`
+        UPDATE dbo.LoanSanction
+        SET DisbursementPaymentId = @PaymentId, DisbursementPaymentType = @PaymentType
+        WHERE LoanId = @LoanId
+      `);
+
+    await bumpCacheVersion("loan-sanction");
+    res.json({ voucherNo: result.voucherNo, message: "Loan disbursement recorded and posted to GL." });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }

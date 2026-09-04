@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "CivilierERP Fixed Asset",
+    "slug": "mobile-fixed-asset",
+    "scheme": "civiliererpfixedasset",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rajwadainfotech.civiliererpfixedasset",
+      "infoPlist": {
+        "NSCameraUsageDescription": "CivilierERP Fixed Asset uses the camera to attach photos to asset records.",
+        "NSPhotoLibraryUsageDescription": "CivilierERP Fixed Asset needs access to your photo library to attach existing photos to records."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.rajwadainfotech.civiliererpfixedasset",
+      "usesCleartextTraffic": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-font"
+    ],
+    "owner": "grenxnja"
+  }
+}
