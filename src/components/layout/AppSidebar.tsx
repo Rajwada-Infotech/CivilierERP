@@ -26,6 +26,7 @@ import {
   MoneyRecive,
   Cpu,
 } from "iconsax-react";
+import { Wrench } from "lucide-react";
 
 // ── Per-module nav definitions ────────────────────────────────────────────────
 import { engineeringNavItems } from "./sidebars/EngineeringSidebar";
@@ -43,6 +44,7 @@ import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { crmNavItems } from "./sidebars/CrmSidebar";
 import { loanNavItems } from "./sidebars/LoanSidebar";
 import { fixedAssetNavItems } from "./sidebars/FixedAssetSidebar";
+import { maintenanceNavItems } from "./sidebars/MaintenanceSidebar";
 import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
@@ -145,6 +147,13 @@ const MODULE_HEADER: Record<
     color: "#eab308",
     from: "from-yellow-500/30",
     to: "to-yellow-500/0",
+  },
+  maintenance: {
+    label: "Maintenance",
+    icon: Wrench,
+    color: "#64748b",
+    from: "from-slate-500/30",
+    to: "to-slate-500/0",
   },
   admin: {
     label: "Admin",
@@ -369,6 +378,9 @@ export const AppSidebar = () => {
         break;
       case "fixed-asset":
         raw = fixedAssetNavItems;
+        break;
+      case "maintenance":
+        raw = maintenanceNavItems;
         break;
       case "admin":
         raw = buildAdminNavItems(pendingApprovalCount);

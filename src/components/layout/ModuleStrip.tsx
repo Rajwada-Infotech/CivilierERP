@@ -17,7 +17,7 @@ import {
   Shield,
   MoneyRecive,
 } from "iconsax-react";
-import { HardHat } from "lucide-react";
+import { HardHat, Wrench } from "lucide-react";
 import { useModule } from "@/contexts/ModuleContext";
 import { MODULE_DASHBOARD_ROUTES, Module } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -36,6 +36,11 @@ const HardHatIcon: React.FC<{ size?: number; variant?: string; className?: strin
   variant,
   ...rest
 }) => <HardHat {...rest} />;
+
+const WrenchIcon: React.FC<{ size?: number; variant?: string; className?: string; style?: React.CSSProperties }> = ({
+  variant,
+  ...rest
+}) => <Wrench {...rest} />;
 
 const MODULES = [
   {
@@ -137,6 +142,15 @@ const MODULES = [
     bg: "rgba(14,165,233,0.22)",
     ringRgb: "14,165,233",
   },
+  {
+    id: "maintenance" as Module,
+    icon: WrenchIcon,
+    label: "Maintenance",
+    desc: "Upkeep, repairs & servicing",
+    color: "#64748b",
+    bg: "rgba(100,116,139,0.22)",
+    ringRgb: "100,116,139",
+  },
   // Records is always last — new modules get inserted above this entry
   {
     id: "records" as Module,
@@ -214,6 +228,7 @@ export const ModuleStrip: React.FC = () => {
     sales:       ["sale-order", "sale-invoice", "sales-payment"],
     civilworkdpr: ["civilworkdpr-dashboard"],
     "sales-automation": ["sa-social-media", "sa-campaigns", "sa-ads", "sa-leads", "sa-lead-distribution", "sa-inquiry", "sa-site-visits", "sa-marketing-invoices"],
+    maintenance: ["maintenance-dashboard"],
   };
 
   const userHasModuleAccess = (moduleId: string): boolean => {
