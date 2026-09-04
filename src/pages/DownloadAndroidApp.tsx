@@ -13,6 +13,10 @@ const APPS = [
     description:
       "Scan the QR code with your phone's camera, or use the download link below to install the APK directly.",
     apkPath: "/downloads/CivilierERP.apk",
+    // The actual save-as filename — set explicitly rather than left to
+    // whatever the browser derives from the URL, so it always reads
+    // clean regardless of how the file underneath is named/hosted.
+    downloadName: "CivilierERP.apk",
     version: "1.0.0",
   },
   {
@@ -21,11 +25,21 @@ const APPS = [
     description:
       "For admins — scan or download to install the admin console app on your device.",
     apkPath: "/downloads/CivilierERPAdmin.apk",
+    downloadName: "CivilierERP-Admin.apk",
+    version: "1.0.0",
+  },
+  {
+    key: "supplier",
+    title: "CivilierERP Supplier",
+    description:
+      "For suppliers — scan or download to install the Supplier Portal app on your device.",
+    apkPath: "/downloads/CivilierERPSupplier.apk",
+    downloadName: "CivilierERP-Supplier.apk",
     version: "1.0.0",
   },
 ] as const;
 
-function AppCard({ title, description, apkPath, version }: (typeof APPS)[number]) {
+function AppCard({ title, description, apkPath, downloadName, version }: (typeof APPS)[number]) {
   const downloadUrl =
     typeof window !== "undefined" ? `${window.location.origin}${apkPath}` : apkPath;
 
@@ -70,7 +84,7 @@ function AppCard({ title, description, apkPath, version }: (typeof APPS)[number]
 
         <a
           href={apkPath}
-          download
+          download={downloadName}
           className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold text-white transition-transform active:scale-95"
           style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)" }}
         >
