@@ -510,13 +510,19 @@ export default function ReceivedPaymentPage() {
     setLoanLateFee("");
     setLoanPaymentNotes("");
     // form.companyId (the page's own top-level company selector, already
-    // scoped server-side by /emi-payable) is left untouched — for Customer
-    // Loan/Inter-Company it's already the lender receiving repayment; for
-    // Bank Loan it's already the borrower (us) settling with the external
-    // bank. "Customer Name" here means "who this settlement is with," so
-    // it needs the OPPOSITE party for Bank Loan: the lender (the bank),
-    // not the borrower (us).
-    const counterpartyName = emi.LoanType === "Bank Loan" ? emi.LenderName : emi.BorrowerName;
+    // scoped server-side by /emi-payable) is left untouched — for the
+    // original Customer Loan direction/Inter-Company it's already the
+    // lender receiving repayment; for Bank Loan and the newer "Customer to
+    // Company" Customer Loan direction (migration 402) it's already the
+    // borrower (us) settling with the external party. "Customer Name" here
+    // means "who this settlement is with," so it needs the OPPOSITE party
+    // whenever we're the borrower: the lender (bank or customer), not us.
+    // Inter-Company rows in this list are always ones where we're the
+    // LENDER (the query only matches Inter-Company via LenderCompanyId —
+    // see /emi-payable), so BorrowerCompanyName being set doesn't mean
+    // "we're the borrower" there the way it does for Customer Loan.
+    const weAreBorrower = emi.LoanType === "Bank Loan" || (emi.LoanType === "Customer Loan" && !!emi.BorrowerCompanyName);
+    const counterpartyName = weAreBorrower ? emi.LenderName : emi.BorrowerName;
     setForm((prev) => ({
       ...prev,
       customerName: counterpartyName || prev.customerName,
@@ -566,7 +572,7 @@ export default function ReceivedPaymentPage() {
     setDisbursingBankLoan(loan);
     setForm((prev) => ({
       ...prev,
-      customerName: loan.LenderBankName || prev.customerName,
+      customerName: loan.LenderName || prev.customerName,
       amount: String(Number(loan.Amount)),
       remarks: `Loan disbursement — ${loan.LoanNo}`,
     }));
@@ -1560,7 +1566,7 @@ export default function ReceivedPaymentPage() {
                             )}
                           >
                             <Landmark size={11} />
-                            {emi.LoanNo} — {emi.LoanType === "Bank Loan" ? emi.LenderName : emi.BorrowerName}
+                            {emi.LoanNo} — {emi.LoanType === "Bank Loan" || (emi.LoanType === "Customer Loan" && !!emi.BorrowerCompanyName) ? emi.LenderName : emi.BorrowerName}
                           </button>
                         ))}
                       </div>
@@ -1595,18 +1601,20 @@ export default function ReceivedPaymentPage() {
                   </div>
                 )}
 
-                {/* Bank Loans not yet disbursed — "we are the BORROWER,
-                    money comes IN from an external bank". Selecting one
-                    pre-fills counterparty + amount; POST /:id/disburse
-                    links it once this Received Payment is saved. */}
+                {/* Bank Loans / Customer-to-Company Customer Loans not yet
+                    disbursed — "we are the BORROWER, money comes IN from an
+                    external party" (a bank, or now a customer — migration
+                    402). Selecting one pre-fills counterparty + amount;
+                    POST /:id/disburse links it once this Received Payment
+                    is saved. */}
                 {form.companyId && !editingId && (undisbursedBankLoansLoading || undisbursedBankLoans.length > 0) && (
                   <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
                     <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-amber-600 dark:text-amber-400">
-                      Disburse a Bank Loan
+                      Disburse a Loan
                     </p>
                     {undisbursedBankLoansLoading ? (
                       <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                        <Loader2 size={12} className="animate-spin" /> Checking for undisbursed bank loans…
+                        <Loader2 size={12} className="animate-spin" /> Checking for undisbursed loans…
                       </p>
                     ) : (
                       <div className="flex flex-wrap gap-2">
@@ -1623,7 +1631,7 @@ export default function ReceivedPaymentPage() {
                             )}
                           >
                             <Landmark size={11} />
-                            {loan.LoanNo} — {formatINR(loan.Amount)}{loan.LenderBankName ? ` from ${loan.LenderBankName}` : ""}
+                            {loan.LoanNo} — {formatINR(loan.Amount)}{loan.LenderName ? ` from ${loan.LenderName}` : ""}
                           </button>
                         ))}
                       </div>

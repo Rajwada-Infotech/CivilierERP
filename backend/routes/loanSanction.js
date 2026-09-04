@@ -127,6 +127,20 @@ async function ensureBankLoanLenderHead(pool, bankName, createdBy) {
   return newId;
 }
 
+// Resolve a Customer Loan counterparty (AH's Customer Master or CRM's
+// buyer list) by id + source — shared by both roles a customer can now
+// play: Borrower (the original "we lend to a customer" direction) and
+// Lender (the new "customer lends to us" direction, see migration 402).
+// Returns { custId, custName } or null if not found.
+async function resolveCustomerParty(tx, custId, source) {
+  const query =
+    source === "CRM"
+      ? "SELECT Id AS custId, CustomerName AS custName FROM dbo.CrmCustomer WHERE Id = @custId"
+      : "SELECT LHeadId AS custId, LHeadName AS custName FROM dbo.AccountHeadMaster WHERE LHeadId = @custId";
+  const res = await new sql.Request(tx).input("custId", sql.Int, parseInt(custId, 10)).query(query);
+  return res.recordset[0] || null;
+}
+
 // Builds the EMI schedule. Three modes:
 //   - No interest (hasInterest=false or rate<=0): flat principal-only split.
 //   - Simple Interest (SI): interest = P x r x (months/12), split evenly
@@ -279,8 +293,10 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
     if (companyId) request.input("CompanyId", sql.Int, companyId);
     if (nocSearch) request.input("NocSearch", sql.NVarChar(255), `%${nocSearch}%`);
     // A loan touches a company if it is the lender OR the borrower.
-    // Bank Loan: LenderCompanyId is NULL (lender is a bank), so only BorrowerCompanyId matches.
-    // Customer Loan: BorrowerCompanyId is NULL (borrower is a customer), so only LenderCompanyId matches.
+    // Bank Loan / Customer Loan (Customer-to-Company direction): LenderCompanyId
+    // is NULL (lender is a bank/customer instead), so only BorrowerCompanyId matches.
+    // Customer Loan (Company-to-Customer direction, the original one): BorrowerCompanyId
+    // is NULL (borrower is a customer), so only LenderCompanyId matches.
     // Inter-Company: both may match; UNION across both sides ensures the row appears once.
     // No companyId at all → the "All companies" view: every loan, unfiltered.
     const companyFilter = companyId ? "(ls.LenderCompanyId = @CompanyId OR ls.BorrowerCompanyId = @CompanyId)" : "1=1";
@@ -295,6 +311,8 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
         ls.BorrowerCustomerId, ls.BorrowerCustomerSource,
         COALESCE(cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerCustomerName,
         ls.BorrowerBankAccountId, bba.LHeadName AS BorrowerBankAccountName,
+        ls.LenderCustomerId, ls.LenderCustomerSource, ls.LenderCustomerBankName,
+        COALESCE(lender_cust_ah.LHeadName, lender_cust_crm.CustomerName) AS LenderCustomerName,
         ls.LoanDate, ls.Amount, ls.InterestRate, ls.TenureMonths,
         ls.Purpose, ls.Status, ls.Remarks,
         ls.LenderLHeadId, ls.BorrowerLHeadId,
@@ -321,6 +339,8 @@ router.get("/", requirePageRight("loan-sanction", "view"), async (req, res) => {
       LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
       LEFT JOIN dbo.AccountHeadMaster bba ON bba.LHeadId = ls.BorrowerBankAccountId
+      LEFT JOIN dbo.AccountHeadMaster lender_cust_ah ON lender_cust_ah.LHeadId = ls.LenderCustomerId AND ls.LenderCustomerSource = 'AH'
+      LEFT JOIN dbo.CrmCustomer lender_cust_crm ON lender_cust_crm.Id = ls.LenderCustomerId AND ls.LenderCustomerSource = 'CRM'
       LEFT JOIN dbo.LoanNOCAttachments noc ON noc.AttachmentId = ls.NOCAttachmentId
       WHERE ${companyFilter}
         ${nocSearch ? "AND noc.FileName LIKE @NocSearch" : ""}
@@ -397,8 +417,11 @@ router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req
         -- the picker distinguish an internal counterparty from an external
         -- customer.
         bc.name AS BorrowerCompanyName,
-        -- Lender is always a company per the LoanSanction schema.
-        lc.name AS LenderName,
+        -- Lender is a company for Inter-Company and the original ("Company
+        -- to Customer") Customer Loan direction, an external bank for Bank
+        -- Loan, or a customer for the new "Customer to Company" direction —
+        -- COALESCE across all three rather than assuming company always.
+        COALESCE(lc.name, lb.LHeadName, lender_cust_ah.LHeadName, lender_cust_crm.CustomerName) AS LenderName,
         lc.name AS LenderCompanyName,
         CASE WHEN e.DueDate < CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS IsOverdue
       FROM dbo.LoanEMISchedule e
@@ -407,10 +430,14 @@ router.get("/emi-payable", requirePageRight("loan-sanction", "view"), async (req
       LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
       LEFT JOIN dbo.enterprise lc ON lc.id = ls.LenderCompanyId AND lc.business_type = 'C'
+      LEFT JOIN dbo.AccountHeadMaster lb ON lb.LHeadId = ls.LenderBankId
+      LEFT JOIN dbo.AccountHeadMaster lender_cust_ah ON lender_cust_ah.LHeadId = ls.LenderCustomerId AND ls.LenderCustomerSource = 'AH'
+      LEFT JOIN dbo.CrmCustomer lender_cust_crm ON lender_cust_crm.Id = ls.LenderCustomerId AND ls.LenderCustomerSource = 'CRM'
       WHERE e.IsPaid = 0 AND ls.Status <> 'Closed' AND ls.DisbursedAt IS NOT NULL
         AND (
           ls.LenderCompanyId = @CompanyId
           OR (ls.LoanType = 'Bank Loan' AND ls.BorrowerCompanyId = @CompanyId)
+          OR (ls.LoanType = 'Customer Loan' AND ls.LenderCustomerId IS NOT NULL AND ls.BorrowerCompanyId = @CompanyId)
         )
       ORDER BY e.DueDate ASC
     `);
@@ -458,12 +485,15 @@ router.get("/undisbursed", requirePageRight("loan-sanction", "view"), async (req
   }
 });
 
-// ── GET /undisbursed-incoming — Sanctioned Bank Loans this company has
-//    borrowed but not yet disbursed to GL ("we are the BORROWER, money
-//    comes IN from an external bank") ─────────────────────────────────────
-// Feeds Received Payment's "Disburse a Bank Loan" picker. Scoped to the
-// BORROWER company (the one whose Received Payment page this shows up on
-// — they are the one receiving the money).
+// ── GET /undisbursed-incoming — Sanctioned Bank Loans / Customer-to-Company
+//    Customer Loans this company has borrowed but not yet disbursed to GL
+//    ("we are the BORROWER, money comes IN from an external party") ───────
+// Feeds Received Payment's "Disburse a Bank Loan" picker — also covers the
+// Customer Loan's "Customer to Company" direction now (migration 402):
+// same shape (external lender, we're the borrower, money comes in), just a
+// customer instead of a bank playing the lender role.
+// Scoped to the BORROWER company (the one whose Received Payment page this
+// shows up on — they are the one receiving the money).
 // Registered before "/:id" so it isn't swallowed by the param route.
 router.get("/undisbursed-incoming", requirePageRight("loan-sanction", "view"), async (req, res) => {
   const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
@@ -473,11 +503,18 @@ router.get("/undisbursed-incoming", requirePageRight("loan-sanction", "view"), a
     const result = await pool.request().input("CompanyId", sql.Int, companyId).query(`
       SELECT
         ls.LoanId, ls.LoanNo, ls.LoanType, ls.LoanDate, ls.Amount,
-        ls.LenderBankId, lb.LHeadName AS LenderBankName
+        ls.LenderBankId, lb.LHeadName AS LenderBankName,
+        ls.LenderCustomerId, ls.LenderCustomerSource,
+        COALESCE(lb.LHeadName, lender_cust_ah.LHeadName, lender_cust_crm.CustomerName) AS LenderName
       FROM dbo.LoanSanction ls
       LEFT JOIN dbo.AccountHeadMaster lb ON lb.LHeadId = ls.LenderBankId
-      WHERE ls.LoanType = 'Bank Loan' AND ls.Status <> 'Closed'
-        AND ls.DisbursedAt IS NULL AND ls.BorrowerCompanyId = @CompanyId
+      LEFT JOIN dbo.AccountHeadMaster lender_cust_ah ON lender_cust_ah.LHeadId = ls.LenderCustomerId AND ls.LenderCustomerSource = 'AH'
+      LEFT JOIN dbo.CrmCustomer lender_cust_crm ON lender_cust_crm.Id = ls.LenderCustomerId AND ls.LenderCustomerSource = 'CRM'
+      WHERE ls.Status <> 'Closed' AND ls.DisbursedAt IS NULL AND ls.BorrowerCompanyId = @CompanyId
+        AND (
+          ls.LoanType = 'Bank Loan'
+          OR (ls.LoanType = 'Customer Loan' AND ls.LenderCustomerId IS NOT NULL)
+        )
       ORDER BY ls.LoanDate ASC
     `);
     res.json(result.recordset);
@@ -577,6 +614,7 @@ router.get("/:id", requirePageRight("loan-sanction", "view"), async (req, res) =
         bc.name AS BorrowerCompanyName,
         COALESCE(cust_ah.LHeadName, cust_crm.CustomerName) AS BorrowerCustomerName,
         bba.LHeadName AS BorrowerBankAccountName,
+        COALESCE(lender_cust_ah.LHeadName, lender_cust_crm.CustomerName) AS LenderCustomerName,
         lender_gl.LHeadCode AS LenderLHeadCode,
         lender_grp.Name AS LenderGroupName,
         lender_parent.Name AS LenderParentGroupName,
@@ -591,6 +629,8 @@ router.get("/:id", requirePageRight("loan-sanction", "view"), async (req, res) =
       LEFT JOIN dbo.AccountHeadMaster cust_ah ON cust_ah.LHeadId = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'AH'
       LEFT JOIN dbo.CrmCustomer cust_crm ON cust_crm.Id = ls.BorrowerCustomerId AND ls.BorrowerCustomerSource = 'CRM'
       LEFT JOIN dbo.AccountHeadMaster bba ON bba.LHeadId = ls.BorrowerBankAccountId
+      LEFT JOIN dbo.AccountHeadMaster lender_cust_ah ON lender_cust_ah.LHeadId = ls.LenderCustomerId AND ls.LenderCustomerSource = 'AH'
+      LEFT JOIN dbo.CrmCustomer lender_cust_crm ON lender_cust_crm.Id = ls.LenderCustomerId AND ls.LenderCustomerSource = 'CRM'
       LEFT JOIN dbo.AccountHeadMaster lender_gl ON lender_gl.LHeadId = ls.LenderLHeadId
       LEFT JOIN dbo.AccountGroup lender_grp ON lender_grp.AGId = lender_gl.LBelongsTo
       LEFT JOIN dbo.AccountGroup lender_parent ON lender_parent.AGId = lender_grp.ParentGroupId
@@ -704,6 +744,14 @@ async function createLoanSanctionInternal(payload, createdBy) {
     // stops a future internal caller from doing so).
     lenderBankName,
     lenderBankAccountId,
+    // Customer Loan's second direction — a customer as LENDER instead of
+    // borrower. lenderCustomerBankName is descriptive only (which bank the
+    // money actually came from) — the customer itself already gets a real
+    // GL head via ensureLoanLedgerHead, same mechanism their Borrower role
+    // already used.
+    lenderCustomerId,
+    lenderCustomerSource,
+    lenderCustomerBankName,
     borrowerCompanyId,
     borrowerCustomerId,
     borrowerCustomerSource,
@@ -724,6 +772,11 @@ async function createLoanSanctionInternal(payload, createdBy) {
     chequeDate,
     isPostDated,
     digitalRefNumber,
+    // Demand Draft carries its own ref number + date, same as Cheque has
+    // ChequeNo/ChequeDate, rather than sharing the single generic
+    // digitalRefNumber field NEFT/RTGS use.
+    demandDraftNo,
+    demandDraftDate,
   } = payload;
 
   if (!loanType || !LOAN_TYPES.includes(loanType)) {
@@ -731,19 +784,30 @@ async function createLoanSanctionInternal(payload, createdBy) {
   }
   const isCustomerLoan = loanType === "Customer Loan";
   const isBankLoan = loanType === "Bank Loan";
+  // Customer Loan's second direction — a customer lending TO us, mirroring
+  // Bank Loan's shape (external lender, we're the borrower) rather than the
+  // original "we lend to a customer" direction. Inferred purely from
+  // lenderCustomerId being sent, same convention isBankLoan already uses
+  // for lenderBankId/lenderBankName.
+  const isCustomerToCompany = isCustomerLoan && !!lenderCustomerId;
   const custSource = borrowerCustomerSource === "CRM" ? "CRM" : "AH";
+  const lenderCustSource = lenderCustomerSource === "CRM" ? "CRM" : "AH";
   const useInterest = hasInterest !== false && hasInterest !== "false";
   const iType = INTEREST_TYPES.includes(interestType) ? interestType : "CI";
 
   if (isBankLoan && !lenderBankId && !String(lenderBankName || "").trim()) {
     throw Object.assign(new Error("Lender bank name is required"), { status: 400 });
   }
-  if (!isBankLoan && !lenderCompanyId) throw Object.assign(new Error("Lender company is required"), { status: 400 });
-  if (isCustomerLoan && !borrowerCustomerId) {
-    throw Object.assign(new Error("Borrower customer is required"), { status: 400 });
-  }
-  if (!isCustomerLoan && !borrowerCompanyId) {
-    throw Object.assign(new Error("Borrower company is required"), { status: 400 });
+  if (isCustomerToCompany) {
+    if (!borrowerCompanyId) throw Object.assign(new Error("Borrower company is required"), { status: 400 });
+  } else {
+    if (!isBankLoan && !lenderCompanyId) throw Object.assign(new Error("Lender company is required"), { status: 400 });
+    if (isCustomerLoan && !borrowerCustomerId) {
+      throw Object.assign(new Error("Borrower customer is required"), { status: 400 });
+    }
+    if (!isCustomerLoan && !borrowerCompanyId) {
+      throw Object.assign(new Error("Borrower company is required"), { status: 400 });
+    }
   }
   if (!loanDate) throw Object.assign(new Error("Loan date is required"), { status: 400 });
   const amt = parseFloat(amount);
@@ -768,6 +832,7 @@ async function createLoanSanctionInternal(payload, createdBy) {
 
     let lenderCompany = null;
     let lenderBank = null;
+    let lenderCustomer = null;
     if (isBankLoan) {
       const trimmedBankName = String(lenderBankName || "").trim();
       if (trimmedBankName) {
@@ -785,6 +850,9 @@ async function createLoanSanctionInternal(payload, createdBy) {
         lenderBank = bankRes.recordset[0];
         if (!lenderBank) throw Object.assign(new Error("Lender bank not found"), { status: 400 });
       }
+    } else if (isCustomerToCompany) {
+      lenderCustomer = await resolveCustomerParty(tx, lenderCustomerId, lenderCustSource);
+      if (!lenderCustomer) throw Object.assign(new Error("Lender customer not found"), { status: 400 });
     } else {
       const lenderRes = await new sql.Request(tx)
         .input("lenderId", sql.Int, parseInt(lenderCompanyId, 10))
@@ -795,25 +863,18 @@ async function createLoanSanctionInternal(payload, createdBy) {
 
     let borrowerCompany = null;
     let borrowerCustomer = null;
-    if (isCustomerLoan) {
-      if (custSource === "CRM") {
-        const custRes = await new sql.Request(tx)
-          .input("custId", sql.Int, parseInt(borrowerCustomerId, 10))
-          .query("SELECT Id AS custId, CustomerName AS custName FROM dbo.CrmCustomer WHERE Id = @custId");
-        borrowerCustomer = custRes.recordset[0];
-      } else {
-        const custRes = await new sql.Request(tx)
-          .input("custId", sql.Int, parseInt(borrowerCustomerId, 10))
-          .query("SELECT LHeadId AS custId, LHeadName AS custName FROM dbo.AccountHeadMaster WHERE LHeadId = @custId");
-        borrowerCustomer = custRes.recordset[0];
-      }
-      if (!borrowerCustomer) throw Object.assign(new Error("Borrower customer not found"), { status: 400 });
-    } else {
+    if (isCustomerToCompany || !isCustomerLoan) {
+      // Customer-to-Company direction, Bank Loan, and Inter-Company all
+      // borrow into a company.
       const borrRes = await new sql.Request(tx)
         .input("borrowerId", sql.Int, parseInt(borrowerCompanyId, 10))
         .query("SELECT id, name FROM dbo.enterprise WHERE business_type = 'C' AND id = @borrowerId");
       borrowerCompany = borrRes.recordset[0];
       if (!borrowerCompany) throw Object.assign(new Error("Borrower company not found"), { status: 400 });
+    } else {
+      // The original Customer Loan direction — Company to Customer.
+      borrowerCustomer = await resolveCustomerParty(tx, borrowerCustomerId, custSource);
+      if (!borrowerCustomer) throw Object.assign(new Error("Borrower customer not found"), { status: 400 });
     }
 
     const effectiveRate = useInterest && interestRate != null && interestRate !== "" ? parseFloat(interestRate) : null;
@@ -825,9 +886,12 @@ async function createLoanSanctionInternal(payload, createdBy) {
       .input("LenderCompanyId", sql.Int, lenderCompany ? lenderCompany.id : null)
       .input("LenderBankId", sql.Int, lenderBank ? lenderBank.id : null)
       .input("LenderBankAccountId", sql.Int, lenderBankAccountId ? parseInt(lenderBankAccountId, 10) : null)
+      .input("LenderCustomerId", sql.Int, lenderCustomer ? lenderCustomer.custId : null)
+      .input("LenderCustomerSource", sql.NVarChar(10), lenderCustomer ? lenderCustSource : null)
+      .input("LenderCustomerBankName", sql.NVarChar(200), lenderCustomer ? String(lenderCustomerBankName || "").trim() || null : null)
       .input("BorrowerCompanyId", sql.Int, borrowerCompany ? borrowerCompany.id : null)
       .input("BorrowerCustomerId", sql.Int, borrowerCustomer ? borrowerCustomer.custId : null)
-      .input("BorrowerCustomerSource", sql.NVarChar(10), isCustomerLoan ? custSource : null)
+      .input("BorrowerCustomerSource", sql.NVarChar(10), borrowerCustomer ? custSource : null)
       .input("BorrowerBankAccountId", sql.Int, borrowerBankAccountId ? parseInt(borrowerBankAccountId, 10) : null)
       .input("LoanDate", sql.Date, loanDate)
       .input("Amount", sql.Decimal(18, 2), amt)
@@ -844,16 +908,24 @@ async function createLoanSanctionInternal(payload, createdBy) {
       .input("ChequeDate", sql.Date, chequeDate || null)
       .input("IsPostDated", sql.Bit, isPostDated ? 1 : 0)
       .input("DigitalRefNumber", sql.NVarChar(100), digitalRefNumber || null)
+      .input("DemandDraftNo", sql.NVarChar(30), demandDraftNo || null)
+      .input("DemandDraftDate", sql.Date, demandDraftDate || null)
       .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
         INSERT INTO dbo.LoanSanction
-          (LoanNo, LoanType, LoanDocNo, LenderCompanyId, LenderBankId, LenderBankAccountId, BorrowerCompanyId, BorrowerCustomerId,
+          (LoanNo, LoanType, LoanDocNo, LenderCompanyId, LenderBankId, LenderBankAccountId,
+           LenderCustomerId, LenderCustomerSource, LenderCustomerBankName,
+           BorrowerCompanyId, BorrowerCustomerId,
            BorrowerCustomerSource, BorrowerBankAccountId, LoanDate, Amount, HasInterest, InterestType, InterestRate, TenureMonths,
-           Purpose, Status, Remarks, PaymentMode, ChequeLotId, ChequeLotNumber, ChequeNo, ChequeDate, IsPostDated, DigitalRefNumber, CreatedBy, CreatedAt)
+           Purpose, Status, Remarks, PaymentMode, ChequeLotId, ChequeLotNumber, ChequeNo, ChequeDate, IsPostDated, DigitalRefNumber,
+           DemandDraftNo, DemandDraftDate, CreatedBy, CreatedAt)
         OUTPUT INSERTED.LoanId
         VALUES
-          (@LoanNo, @LoanType, @LoanDocNo, @LenderCompanyId, @LenderBankId, @LenderBankAccountId, @BorrowerCompanyId, @BorrowerCustomerId,
+          (@LoanNo, @LoanType, @LoanDocNo, @LenderCompanyId, @LenderBankId, @LenderBankAccountId,
+           @LenderCustomerId, @LenderCustomerSource, @LenderCustomerBankName,
+           @BorrowerCompanyId, @BorrowerCustomerId,
            @BorrowerCustomerSource, @BorrowerBankAccountId, @LoanDate, @Amount, @HasInterest, @InterestType, @InterestRate, @TenureMonths,
-           @Purpose, 'Sanctioned', @Remarks, @PaymentMode, @ChequeLotId, @ChequeLotNumber, @ChequeNo, @ChequeDate, @IsPostDated, @DigitalRefNumber, @CreatedBy, SYSDATETIME())
+           @Purpose, 'Sanctioned', @Remarks, @PaymentMode, @ChequeLotId, @ChequeLotNumber, @ChequeNo, @ChequeDate, @IsPostDated, @DigitalRefNumber,
+           @DemandDraftNo, @DemandDraftDate, @CreatedBy, SYSDATETIME())
       `);
     const loanId = insertResult.recordset[0].LoanId;
     const loanNo = `LN-${String(loanId).padStart(6, "0")}`;
@@ -866,10 +938,16 @@ async function createLoanSanctionInternal(payload, createdBy) {
     // head (see ensureBankLoanLenderHead) — it has no pre-existing account
     // of its own the way one of our own registered banks would. Back-compat
     // path (lenderBank.id already set) skips straight to reusing that id,
-    // for the rare internal caller still passing one directly.
+    // for the rare internal caller still passing one directly. Customer-to-
+    // Company reuses the exact same ensureLoanLedgerHead shadow-account
+    // mechanism the customer's Borrower role already relies on — a customer
+    // lending TO us needs the same kind of ledger head a customer borrowing
+    // FROM us gets, just filling the lender slot instead.
     const lenderLHeadId = isBankLoan
       ? lenderBank.id ?? await ensureBankLoanLenderHead(pool, lenderBank.name, createdBy)
-      : await ensureLoanLedgerHead(pool, "C", lenderCompany.id, lenderCompany.name, createdBy);
+      : isCustomerToCompany
+        ? await ensureLoanLedgerHead(pool, lenderCustSource === "CRM" ? "CRMCUST" : "CUST", lenderCustomer.custId, lenderCustomer.custName, createdBy)
+        : await ensureLoanLedgerHead(pool, "C", lenderCompany.id, lenderCompany.name, createdBy);
     const borrowerLHeadId = await ensureLoanLedgerHead(pool, borrowerKeyPrefix, borrowerKeyId, borrowerName, createdBy);
 
     await new sql.Request(tx)
@@ -891,7 +969,7 @@ async function createLoanSanctionInternal(payload, createdBy) {
 
     // Borrower receives the loan as an available "on account" balance —
     // same CREDIT/DEBIT ledger the vendor on-account flow uses.
-    const lenderName = isBankLoan ? lenderBank.name : lenderCompany.name;
+    const lenderName = isBankLoan ? lenderBank.name : isCustomerToCompany ? lenderCustomer.custName : lenderCompany.name;
     await new sql.Request(tx)
       .input("PartyId", sql.Int, borrowerLHeadId)
       .input("PartyType", sql.NVarChar(20), "Loan")
@@ -1390,7 +1468,7 @@ router.post("/:id/disburse", requirePageRight("loan-sanction", "edit"), async (r
   try {
     const pool = getPool();
     const loanRes = await pool.request().input("LoanId", sql.Int, loanId)
-      .query("SELECT LoanId, LoanNo, LoanType, DisbursedAt FROM dbo.LoanSanction WHERE LoanId = @LoanId");
+      .query("SELECT LoanId, LoanNo, LoanType, DisbursedAt, LenderCustomerId FROM dbo.LoanSanction WHERE LoanId = @LoanId");
     const loan = loanRes.recordset[0];
     if (!loan) return res.status(404).json({ error: "Loan not found" });
     if (loan.LoanType === "Inter-Company") {
@@ -1400,8 +1478,15 @@ router.post("/:id/disburse", requirePageRight("loan-sanction", "edit"), async (r
       return res.status(409).json({ error: "This loan has already been disbursed." });
     }
 
+    // Customer Loan's "Customer to Company" direction (migration 402) is
+    // money coming IN, same as Bank Loan — the ORIGINAL "Company to
+    // Customer" direction is money going OUT. LenderCustomerId being set is
+    // what tells the two apart (see isCustomerToCompany in
+    // createLoanSanctionInternal).
+    const isCustomerToCompanyLoan = loan.LoanType === "Customer Loan" && !!loan.LenderCustomerId;
+
     let paymentId, paymentType, paymentDate;
-    if (loan.LoanType === "Customer Loan") {
+    if (loan.LoanType === "Customer Loan" && !isCustomerToCompanyLoan) {
       paymentId = Number.isFinite(parseInt(newPaymentId, 10)) ? parseInt(newPaymentId, 10) : null;
       if (!paymentId) return res.status(400).json({ error: "newPaymentId is required to disburse a Customer Loan (money going out)." });
       const npRes = await pool.request().input("Id", sql.Int, paymentId)
@@ -1409,9 +1494,9 @@ router.post("/:id/disburse", requirePageRight("loan-sanction", "edit"), async (r
       if (!npRes.recordset.length) return res.status(404).json({ error: "That payment was not found." });
       paymentType = "NewPayment";
       paymentDate = npRes.recordset[0].PDate;
-    } else if (loan.LoanType === "Bank Loan") {
+    } else if (loan.LoanType === "Bank Loan" || isCustomerToCompanyLoan) {
       paymentId = Number.isFinite(parseInt(receivedPaymentId, 10)) ? parseInt(receivedPaymentId, 10) : null;
-      if (!paymentId) return res.status(400).json({ error: "receivedPaymentId is required to disburse a Bank Loan (money coming in)." });
+      if (!paymentId) return res.status(400).json({ error: "receivedPaymentId is required to disburse this loan (money coming in)." });
       const rpRes = await pool.request().input("Id", sql.Int, paymentId)
         .query("SELECT RPPaymentID, RPDocDate, RPDocNo FROM dbo.ReceivedPayment WHERE RPPaymentID = @Id");
       if (!rpRes.recordset.length) return res.status(404).json({ error: "That received payment was not found." });
@@ -1571,7 +1656,8 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
       .input("LoanId", sql.Int, loanId)
       .query(`
         SELECT LoanId, LoanNo, LoanType, Status, BorrowerLHeadId, LenderLHeadId,
-               LenderCompanyId, BorrowerCompanyId, LenderBankAccountId, BorrowerBankAccountId
+               LenderCompanyId, BorrowerCompanyId, LenderBankAccountId, BorrowerBankAccountId,
+               LenderCustomerId
         FROM dbo.LoanSanction WHERE LoanId = @LoanId
       `);
     const loan = loanRes.recordset[0];
@@ -1825,16 +1911,22 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
       }
     }
 
-    // Customer Loan: single-sided posting into the LENDER's own books only
-    // — a customer has no company books of its own to post the mirror leg
-    // into. See postCustomerLoanRepayment above.
+    // Customer Loan's ORIGINAL direction only (Company to Customer):
+    // single-sided posting into the LENDER's (our) own books only — a
+    // customer has no company books of its own to post the mirror leg
+    // into. See postCustomerLoanRepayment above. The newer "Customer to
+    // Company" direction (migration 402, LenderCustomerId set) is the
+    // opposite shape — we're the BORROWER — and is handled by the Bank-
+    // Loan-shaped branch below instead, since it's the identical posting:
+    // Dr the lender's Loan ledger, Cr our own bank account.
     // BUG 7 FIX: the function now returns { posted, reason } so we can
     // surface a warning to the user when GL is skipped due to a missing bank
     // A/C tag, rather than silently no-oping. Also try/catch-wrapped for the
     // same post-commit reason as the Inter-Company branch above — postVoucher
     // itself can still throw (unbalanced legs, DB error), not just return
     // {posted:false} for the missing-bank-account precondition.
-    if (loan.LoanType === "Customer Loan") {
+    const isCustomerToCompanyLoan = loan.LoanType === "Customer Loan" && !!loan.LenderCustomerId;
+    if (loan.LoanType === "Customer Loan" && !isCustomerToCompanyLoan) {
       try {
         const glResult = await postCustomerLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor });
         if (glResult && glResult.posted) {
@@ -1848,10 +1940,14 @@ router.post("/:id/pay", requirePageRight("loan-sanction", "edit"), async (req, r
       }
     }
 
-    // Bank Loan: posting into the BORROWER (our) company's books only —
-    // the bank has no ledger in our system to post the mirror leg into.
+    // Bank Loan, and Customer Loan's "Customer to Company" direction:
+    // posting into the BORROWER (our) company's books only — the external
+    // lender (bank or customer) has no ledger in our system to post the
+    // mirror leg into. Same shape either way: Dr the lender's Loan ledger
+    // head, Cr our own bank account — postBankLoanRepayment already reads
+    // only generic loan fields, so it applies unchanged to both.
     // BUG 2 FIX: Bank Loan repayments now post to GL.
-    if (loan.LoanType === "Bank Loan") {
+    if (loan.LoanType === "Bank Loan" || isCustomerToCompanyLoan) {
       try {
         const glResult = await postBankLoanRepayment(pool, { loan, paymentId, paymentRef, paymentDate, principalInterestAmount, actor });
         if (glResult && glResult.posted) {

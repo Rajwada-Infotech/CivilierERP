@@ -124,6 +124,17 @@ const EMPTY_FORM = {
   // company the funds moved between (distinct from lenderBankName, which is
   // only for the Bank Loan type where the lender IS an external bank).
   lenderBankAccountId: "",
+  // Customer Loan's second direction — "Customer to Company" (a customer
+  // lends TO us), mirroring Bank Loan's shape rather than the original
+  // "Company to Customer" one. "toCustomer" (the original, default)
+  // preserves existing behavior for anyone not touching this toggle.
+  customerLoanDirection: "toCustomer" as "toCustomer" | "toCompany",
+  lenderCustomerId: "",
+  lenderCustomerSource: "AH" as "AH" | "CRM",
+  // Descriptive only (which bank the money came from) — same BankNamePicker
+  // Received Payment/Bank Loan use; the customer itself gets a real GL head
+  // via ensureLoanLedgerHead regardless of which bank they used.
+  lenderCustomerBankName: "",
   borrowerCompanyId: "",
   borrowerCustomerId: "",
   borrowerCustomerSource: "AH" as "AH" | "CRM",
@@ -146,6 +157,11 @@ const EMPTY_FORM = {
   chequeDate: "",
   isPostDated: false,
   digitalRefNumber: "",
+  // Demand Draft carries its own ref number + date, same as Cheque has
+  // chequeNo/chequeDate, rather than sharing the single generic
+  // digitalRefNumber field NEFT/RTGS use.
+  demandDraftNo: "",
+  demandDraftDate: "",
 };
 
 const fmt = (n: number | null | undefined) =>
@@ -679,10 +695,13 @@ export default function LoanSanctionPage() {
   const handleSave = async () => {
     const isCustomerLoan = form.loanType === "Customer Loan";
     const isBankLoan = form.loanType === "Bank Loan";
+    const isCustomerToCompany = isCustomerLoan && form.customerLoanDirection === "toCompany";
+    const isExternalLenderLoan = isBankLoan || isCustomerToCompany;
     if (isBankLoan && !form.lenderBankName.trim()) return toast.error("Select or enter the lender bank");
-    if (!isBankLoan && !form.lenderCompanyId) return toast.error("Select the lender company");
-    if (isCustomerLoan && !form.borrowerCustomerId) return toast.error("Select the borrower customer");
-    if (!isCustomerLoan && !form.borrowerCompanyId) return toast.error("Select the borrower company");
+    if (isCustomerToCompany && !form.lenderCustomerId) return toast.error("Select the lender customer");
+    if (!isBankLoan && !isCustomerToCompany && !form.lenderCompanyId) return toast.error("Select the lender company");
+    if (isCustomerLoan && !isCustomerToCompany && !form.borrowerCustomerId) return toast.error("Select the borrower customer");
+    if ((!isCustomerLoan || isCustomerToCompany) && !form.borrowerCompanyId) return toast.error("Select the borrower company");
     if (!form.loanDate) return toast.error("Loan date is required");
     if (!form.amount || Number(form.amount) <= 0) return toast.error("Enter a valid amount");
 
@@ -691,13 +710,16 @@ export default function LoanSanctionPage() {
       const res = await createLoanSanction({
         loanType: form.loanType,
         loanDocNo: form.loanDocNo || null,
-        lenderCompanyId: isBankLoan ? null : form.lenderCompanyId,
+        lenderCompanyId: (isBankLoan || isCustomerToCompany) ? null : form.lenderCompanyId,
         lenderBankName: isBankLoan ? form.lenderBankName.trim() : null,
-        lenderBankAccountId: (isInterCompanyType || isCustomerLoan) ? form.lenderBankAccountId || null : null,
-        borrowerCompanyId: isCustomerLoan ? null : form.borrowerCompanyId,
-        borrowerCustomerId: isCustomerLoan ? form.borrowerCustomerId : null,
-        borrowerCustomerSource: isCustomerLoan ? form.borrowerCustomerSource : null,
-        borrowerBankAccountId: isInterCompanyType ? form.borrowerBankAccountId || null : null,
+        lenderCustomerId: isCustomerToCompany ? form.lenderCustomerId : null,
+        lenderCustomerSource: isCustomerToCompany ? form.lenderCustomerSource : null,
+        lenderCustomerBankName: isCustomerToCompany ? form.lenderCustomerBankName.trim() || null : null,
+        lenderBankAccountId: (isInterCompanyType || (isCustomerLoan && !isCustomerToCompany)) ? form.lenderBankAccountId || null : null,
+        borrowerCompanyId: (isCustomerLoan && !isCustomerToCompany) ? null : form.borrowerCompanyId,
+        borrowerCustomerId: (isCustomerLoan && !isCustomerToCompany) ? form.borrowerCustomerId : null,
+        borrowerCustomerSource: (isCustomerLoan && !isCustomerToCompany) ? form.borrowerCustomerSource : null,
+        borrowerBankAccountId: (isInterCompanyType || isExternalLenderLoan) ? form.borrowerBankAccountId || null : null,
         loanDate: form.loanDate,
         amount: form.amount,
         hasInterest: form.hasInterest,
@@ -714,6 +736,8 @@ export default function LoanSanctionPage() {
         chequeDate: form.chequeDate || null,
         isPostDated: form.isPostDated,
         digitalRefNumber: form.digitalRefNumber || null,
+        demandDraftNo: form.demandDraftNo || null,
+        demandDraftDate: form.demandDraftDate || null,
       });
       toast.success(`Loan ${res.loanNo} sanctioned`);
       if (res.glError) {
@@ -934,15 +958,31 @@ export default function LoanSanctionPage() {
   const isBankLoanType = (viewingLoan?.LoanType ?? form.loanType) === "Bank Loan";
   const isCustomerLoan = form.loanType === "Customer Loan";
   const isBankLoan = form.loanType === "Bank Loan";
+  // Customer Loan's "Customer to Company" direction (migration 402) — a
+  // customer as LENDER instead of borrower, same shape as Bank Loan. View
+  // mode infers direction from the loaded loan's own LenderCustomerId
+  // (can't rely on form.customerLoanDirection there — it doesn't reset for
+  // a loaded view the way viewingLoan's own fields do), same pattern
+  // isBankLoanType already uses for viewingLoan?.LoanType.
+  const isCustomerToCompany = isCustomerLoan && form.customerLoanDirection === "toCompany";
+  const isCustomerToCompanyType = isCustomerLoanType && !!(viewingLoan ? viewingLoan.LenderCustomerId : isCustomerToCompany);
+  // Bank Loan and Customer-to-Company are the same shape end to end — an
+  // external lender, us as borrower, money coming in — so every place that
+  // branches on isBankLoan for payment mode / cheque handling / GL posting
+  // help text also needs Customer-to-Company. One combined flag instead of
+  // repeating "isBankLoan || isCustomerToCompany" everywhere.
+  const isExternalLenderLoan = isBankLoan || isCustomerToCompany;
 
   const displayLender = readOnly
-    ? viewingLoan?.LenderCompanyName ?? viewingLoan?.LenderBankName ?? ""
+    ? viewingLoan?.LenderCompanyName ?? viewingLoan?.LenderBankName ?? viewingLoan?.LenderCustomerName ?? ""
     : isBankLoan
       ? form.lenderBankName
-      : companyName(form.lenderCompanyId);
+      : isCustomerToCompany
+        ? customerName(form.lenderCustomerId)
+        : companyName(form.lenderCompanyId);
   const displayBorrower = readOnly
     ? viewingLoan?.BorrowerCompanyName ?? viewingLoan?.BorrowerCustomerName ?? ""
-    : isCustomerLoan
+    : isCustomerLoan && !isCustomerToCompany
       ? customerName(form.borrowerCustomerId)
       : companyName(form.borrowerCompanyId);
   const displayAmount = readOnly ? viewingLoan?.Amount ?? null : Number(form.amount) || null;
@@ -1109,15 +1149,17 @@ export default function LoanSanctionPage() {
                 )}
                 {/* BUG 9 FIX: perspective badge — tells the user which direction
                     the money flowed from OUR company's point of view.
-                    Customer Loan → we are the lender → "Loan Given"
-                    Bank Loan     → we are the borrower → "Loan Received"
+                    Customer Loan (Company to Customer, the original
+                      direction) → we are the lender → "Loan Given"
+                    Customer Loan (Customer to Company, migration 402) and
+                    Bank Loan → we are the borrower → "Loan Received"
                     Inter-Company → could be either; show both party labels */}
-                {viewingLoan && viewingLoan.LoanType === "Customer Loan" && (
+                {viewingLoan && viewingLoan.LoanType === "Customer Loan" && !viewingLoan.LenderCustomerId && (
                   <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">
                     <TrendingUp size={9} /> Loan Given
                   </span>
                 )}
-                {viewingLoan && viewingLoan.LoanType === "Bank Loan" && (
+                {viewingLoan && (viewingLoan.LoanType === "Bank Loan" || (viewingLoan.LoanType === "Customer Loan" && !!viewingLoan.LenderCustomerId)) && (
                   <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-purple-500/15 text-purple-600 dark:text-purple-400">
                     <TrendingDown size={9} /> Loan Received
                   </span>
@@ -1233,7 +1275,10 @@ export default function LoanSanctionPage() {
                               // Draft/Cheque) — "Cash" (the form's overall
                               // default) isn't one of them, so switching
                               // into Bank Loan without resetting would leave
-                              // every mode button unselected.
+                              // every mode button unselected. Customer Loan
+                              // only needs the same reset once its
+                              // direction toggle (below) picks "Customer to
+                              // Company" — handled there, not here.
                               if (lt === "Bank Loan" && !(LOAN_BANK_PAYMENT_MODES as readonly string[]).includes(form.paymentMode)) {
                                 set("paymentMode", "NEFT");
                               }
@@ -1249,6 +1294,38 @@ export default function LoanSanctionPage() {
                         ))}
                       </div>
                     </div>
+                    {form.loanType === "Customer Loan" && (
+                      <div className="space-y-2">
+                        <label className={labelCls}>Direction</label>
+                        <div className="grid grid-cols-2 gap-3">
+                          {(
+                            [
+                              { key: "toCustomer", label: "Company → Customer", hint: "We lend to the customer" },
+                              { key: "toCompany", label: "Customer → Company", hint: "The customer lends to us" },
+                            ] as const
+                          ).map((d) => (
+                            <button
+                              key={d.key}
+                              type="button"
+                              onClick={() => {
+                                set("customerLoanDirection", d.key);
+                                if (d.key === "toCompany" && !(LOAN_BANK_PAYMENT_MODES as readonly string[]).includes(form.paymentMode)) {
+                                  set("paymentMode", "NEFT");
+                                }
+                              }}
+                              className={`px-3 py-2 rounded-lg text-left text-sm font-medium border transition-colors ${
+                                form.customerLoanDirection === d.key
+                                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                  : "border-border text-muted-foreground hover:bg-muted/40"
+                              }`}
+                            >
+                              <span className="block">{d.label}</span>
+                              <span className="block text-[11px] font-normal opacity-75">{d.hint}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <label className={labelCls}>Loan Doc No.</label>
                       <div className="flex items-center gap-2">
@@ -1465,9 +1542,12 @@ export default function LoanSanctionPage() {
                     {/* Parties */}
                     <SectionLabel icon={Building2} label="Parties" />
                     <div className="grid grid-cols-2 gap-3">
-                      <InfoCard label={isBankLoanType ? "Lender (Bank)" : "Lender"} value={displayLender || "—"} />
                       <InfoCard
-                        label={isCustomerLoanType ? "Borrower (Customer)" : "Borrower (Company)"}
+                        label={isBankLoanType ? "Lender (Bank)" : isCustomerToCompanyType ? "Lender (Customer)" : "Lender"}
+                        value={displayLender || "—"}
+                      />
+                      <InfoCard
+                        label={isCustomerLoanType && !isCustomerToCompanyType ? "Borrower (Customer)" : "Borrower (Company)"}
                         value={displayBorrower || "—"}
                       />
                       {isInterCompanyType && (
@@ -1670,7 +1750,7 @@ export default function LoanSanctionPage() {
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                       <div className="space-y-2">
                         <label className={labelCls}>
-                          Lender {isBankLoan ? "Bank" : "Company"} <span className="text-red-500">*</span>
+                          Lender {isBankLoan ? "Bank" : isCustomerToCompany ? "Customer" : "Company"} <span className="text-red-500">*</span>
                         </label>
                         {isBankLoan ? (
                           // Any bank the loan is actually from — not
@@ -1687,6 +1767,16 @@ export default function LoanSanctionPage() {
                             placeholder="Select the lending bank…"
                             otherPlaceholder="Lending bank's name"
                             className={inputCls}
+                          />
+                        ) : isCustomerToCompany ? (
+                          <CustomerComboField
+                            customers={customers as CustomerOption[]}
+                            value={form.lenderCustomerId}
+                            onChange={(id, source) => {
+                              set("lenderCustomerId", id);
+                              setForm((f) => ({ ...f, lenderCustomerSource: source }));
+                            }}
+                            inputClassName={inputCls}
                           />
                         ) : (
                           <select
@@ -1708,9 +1798,24 @@ export default function LoanSanctionPage() {
                           </select>
                         )}
                       </div>
+                      {/* Which bank the customer actually sent the money
+                          from — descriptive only (same role as Bank Loan's
+                          own lender-bank field), not itself a GL account. */}
+                      {isCustomerToCompany && (
+                        <div className="space-y-2">
+                          <label className={labelCls}>Customer's Bank</label>
+                          <BankNamePicker
+                            value={form.lenderCustomerBankName}
+                            onChange={(v) => set("lenderCustomerBankName", v)}
+                            placeholder="Select the customer's bank…"
+                            otherPlaceholder="Customer's bank name"
+                            className={inputCls}
+                          />
+                        </div>
+                      )}
                       <div className="space-y-2">
-                        <label className={labelCls}>Borrower {isCustomerLoan ? "Customer" : "Company"} <span className="text-red-500">*</span></label>
-                        {isCustomerLoan ? (
+                        <label className={labelCls}>Borrower {isCustomerLoan && !isCustomerToCompany ? "Customer" : "Company"} <span className="text-red-500">*</span></label>
+                        {isCustomerLoan && !isCustomerToCompany ? (
                           <CustomerComboField
                             customers={customers as CustomerOption[]}
                             value={form.borrowerCustomerId}
@@ -1739,46 +1844,56 @@ export default function LoanSanctionPage() {
                         )}
                       </div>
 
-                      {(isInterCompanyType || isCustomerLoan) && (
-                        <>
-                          <div className="space-y-2">
-                            <label className={labelCls}>Lender Bank A/C</label>
-                            <select
-                              className={inputCls}
-                              value={form.lenderBankAccountId}
-                              onChange={(e) => set("lenderBankAccountId", e.target.value)}
-                              disabled={!form.lenderCompanyId}
-                            >
-                              <option value="">— Select —</option>
-                              {banksForCompany(companyName(form.lenderCompanyId)).map((b: BankRecord) => (
-                                <option key={b.BId} value={b.BId}>
-                                  {b.BName}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          {/* Borrower Bank A/C only applies to Inter-Company —
-                              a Customer Loan's borrower is external and has no
-                              bank account of ours to tag. */}
-                          {isInterCompanyType && (
-                            <div className="space-y-2">
-                              <label className={labelCls}>Borrower Bank A/C</label>
-                              <select
-                                className={inputCls}
-                                value={form.borrowerBankAccountId}
-                                onChange={(e) => set("borrowerBankAccountId", e.target.value)}
-                                disabled={!form.borrowerCompanyId}
-                              >
-                                <option value="">— Select —</option>
-                                {banksForCompany(companyName(form.borrowerCompanyId)).map((b: BankRecord) => (
-                                  <option key={b.BId} value={b.BId}>
-                                    {b.BName}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-                        </>
+                      {/* Lender Bank A/C — which of the lender COMPANY's own
+                          bank accounts the funds left from. Only meaningful
+                          when the lender actually is one of our companies
+                          (Inter-Company, or Customer Loan's original
+                          Company-to-Customer direction) — Bank Loan's lender
+                          is external (own field above), and Customer-to-
+                          Company's lender is a customer, neither has a bank
+                          account of ours to tag here. */}
+                      {(isInterCompanyType || (isCustomerLoan && !isCustomerToCompany)) && (
+                        <div className="space-y-2">
+                          <label className={labelCls}>Lender Bank A/C</label>
+                          <select
+                            className={inputCls}
+                            value={form.lenderBankAccountId}
+                            onChange={(e) => set("lenderBankAccountId", e.target.value)}
+                            disabled={!form.lenderCompanyId}
+                          >
+                            <option value="">— Select —</option>
+                            {banksForCompany(companyName(form.lenderCompanyId)).map((b: BankRecord) => (
+                              <option key={b.BId} value={b.BId}>
+                                {b.BName}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      {/* Borrower Bank A/C — which of the borrower COMPANY's
+                          own bank accounts receives the funds. Applies to
+                          Inter-Company AND every "external lender, we're
+                          the borrower" shape (Bank Loan, Customer-to-
+                          Company) — the original Customer Loan direction's
+                          borrower is external and has no bank account of
+                          ours to tag. */}
+                      {(isInterCompanyType || isExternalLenderLoan) && (
+                        <div className="space-y-2">
+                          <label className={labelCls}>Borrower Bank A/C</label>
+                          <select
+                            className={inputCls}
+                            value={form.borrowerBankAccountId}
+                            onChange={(e) => set("borrowerBankAccountId", e.target.value)}
+                            disabled={!form.borrowerCompanyId}
+                          >
+                            <option value="">— Select —</option>
+                            {banksForCompany(companyName(form.borrowerCompanyId)).map((b: BankRecord) => (
+                              <option key={b.BId} value={b.BId}>
+                                {b.BName}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       )}
 
                       <div className="space-y-2">
@@ -1901,7 +2016,7 @@ export default function LoanSanctionPage() {
                     <div className="space-y-2">
                       <label className={labelCls}>Payment Mode</label>
                       <div className="flex flex-wrap gap-2">
-                        {(isBankLoan ? LOAN_BANK_PAYMENT_MODES : PAYMENT_MODES).map((m) => {
+                        {(isExternalLenderLoan ? LOAN_BANK_PAYMENT_MODES : PAYMENT_MODES).map((m) => {
                           const s = MODE_STYLE[m] ?? { ring: "ring-border bg-muted", text: "text-muted-foreground", dot: "bg-muted-foreground" };
                           const active = form.paymentMode === m;
                           return (
@@ -1917,8 +2032,15 @@ export default function LoanSanctionPage() {
                                   set("chequeNo", "");
                                   set("chequeDate", "");
                                 }
-                                if (["Cash", "Cheque", "Post-Dated Cheque"].includes(m)) {
+                                // Demand Draft gets its own ref+date pair
+                                // below, not the shared Reference Number
+                                // field NEFT/RTGS/UPI use.
+                                if (["Cash", "Cheque", "Post-Dated Cheque", "Demand Draft"].includes(m)) {
                                   set("digitalRefNumber", "");
+                                }
+                                if (m !== "Demand Draft") {
+                                  set("demandDraftNo", "");
+                                  set("demandDraftDate", "");
                                 }
                               }}
                               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ring-1 ${
@@ -1937,31 +2059,33 @@ export default function LoanSanctionPage() {
 
                     {(() => {
                       const isChequeMode = form.paymentMode === "Cheque" || form.paymentMode === "Post-Dated Cheque";
-                      // Inter-Company/Customer Loan only: the lender
-                      // company's own tagged bank A/C (which bank the funds
-                      // actually left from) — cheque lots are scoped to
-                      // that specific bank, not shown at all until it's
-                      // picked. A Bank Loan's cheque doesn't come from any
-                      // lot of ours at all (see the isBankLoan branch
-                      // below) — the external bank issues it, not us.
-                      const chequeLotBankId = isBankLoan
+                      const isDemandDraftMode = form.paymentMode === "Demand Draft";
+                      // Inter-Company/Customer Loan (Company-to-Customer
+                      // direction) only: the lender company's own tagged
+                      // bank A/C (which bank the funds actually left from)
+                      // — cheque lots are scoped to that specific bank, not
+                      // shown at all until it's picked. Bank Loan and
+                      // Customer-to-Company's cheque doesn't come from any
+                      // lot of ours at all (see the isExternalLenderLoan
+                      // branch below) — the external party issues it, not us.
+                      const chequeLotBankId = isExternalLenderLoan
                         ? null
                         : (form.lenderBankAccountId ? Number(form.lenderBankAccountId) : null);
                       // Nothing to show for Cash, and (for Inter-Company/
                       // Customer Loan) nothing to show for Cheque mode
                       // until a bank is actually picked — skip the grid
                       // entirely rather than leaving an empty gap. Bank
-                      // Loan's cheque fields don't need a bank picked first
-                      // (they're free-typed), so this guard doesn't apply
-                      // to it.
-                      if (form.paymentMode === "Cash" || (isChequeMode && !isBankLoan && !chequeLotBankId)) return null;
+                      // Loan/Customer-to-Company's cheque fields don't need
+                      // a bank picked first (they're free-typed), so this
+                      // guard doesn't apply to them.
+                      if (form.paymentMode === "Cash" || (isChequeMode && !isExternalLenderLoan && !chequeLotBankId)) return null;
                       return (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      {isChequeMode && isBankLoan && (
-                        // A cheque disbursed BY an external bank isn't
-                        // drawn from any cheque lot of ours — free-typed
-                        // fields, same as the Reference Number field below
-                        // handles NEFT/RTGS/DD.
+                      {isChequeMode && isExternalLenderLoan && (
+                        // A cheque disbursed BY an external bank/customer
+                        // isn't drawn from any cheque lot of ours —
+                        // free-typed fields, same as the Reference Number
+                        // field below handles NEFT/RTGS.
                         <>
                           <div className="space-y-2">
                             <label className={labelCls}>Cheque Number</label>
@@ -1983,7 +2107,7 @@ export default function LoanSanctionPage() {
                           </div>
                         </>
                       )}
-                      {isChequeMode && !isBankLoan && (
+                      {isChequeMode && !isExternalLenderLoan && (
                         <LoanChequePicker
                           bankId={chequeLotBankId}
                           chequeLotId={form.chequeLotId}
@@ -2000,7 +2124,34 @@ export default function LoanSanctionPage() {
                         />
                       )}
 
-                      {!isChequeMode && (
+                      {/* Demand Draft carries its own ref number + date,
+                          same as Cheque has a number + date, rather than
+                          sharing the single generic Reference Number field
+                          NEFT/RTGS use below. */}
+                      {isDemandDraftMode && (
+                        <>
+                          <div className="space-y-2">
+                            <label className={labelCls}>DD Reference Number</label>
+                            <input
+                              className={inputCls}
+                              placeholder="Demand Draft number"
+                              value={form.demandDraftNo}
+                              onChange={(e) => set("demandDraftNo", e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className={labelCls}>DD Date</label>
+                            <input
+                              type="date"
+                              className={inputCls}
+                              value={form.demandDraftDate}
+                              onChange={(e) => set("demandDraftDate", e.target.value)}
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {!isChequeMode && !isDemandDraftMode && (
                         <div className="space-y-2">
                           <label className={labelCls}>Reference Number</label>
                           <input
@@ -2477,8 +2628,7 @@ export default function LoanSanctionPage() {
                 })()}
 
                 <p className="text-xs text-muted-foreground">
-                  All postings use system-generated GL accounts, auto-created per counterparty on
-                  first use{isBankLoanType ? " — for a Bank Loan, the lender's own existing GL account (and its real account group) is reused directly, not a shadow account" : ""}.
+                  All postings use system-generated GL accounts, auto-created per counterparty on first use.
                 </p>
 
                 {/* Posted / posting / error status banner — same layout as
