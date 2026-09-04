@@ -1,7 +1,7 @@
 // Depreciation Tag Stickers — view / filter / multi-select FA Item Codes
-// minted by the Fixed Asset Depreciation Tag workflow and print asset
-// stickers (FA Item Code + Item Name + Code 128 barcode) via the OS print
-// dialog. Read-only: no FA Item Code is generated here.
+// whose Fixed Asset Depreciation Tag (Asset Register) process is complete,
+// and print asset stickers (FA Item Code + Item Name + Code 128 barcode)
+// via the OS print dialog. Read-only: no FA Item Code is generated here.
 import { useMemo, useState } from "react";
 import {
   ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, Text, TextInput, View,
@@ -260,7 +260,7 @@ export default function StickerScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />}
           ListEmptyComponent={
             <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, textAlign: "center", paddingVertical: 40 }}>
-              No tagged FA Item Codes{hasFilters ? " match these filters" : " yet"}.
+No FA Item Codes with a completed Asset Register{hasFilters ? " match these filters" : " yet"}.
             </Text>
           }
         />

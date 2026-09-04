@@ -179,7 +179,7 @@ export default function FixedAssetDepreciationTagStickers() {
       <Breadcrumbs items={["Dashboard", "Fixed Asset", "Depreciation Tag Stickers"]} />
       <GlassShell
         title="Depreciation Tag Stickers"
-        subtitle="View, filter & print stickers for FA Item Codes created by the Fixed Asset Depreciation Tag workflow"
+        subtitle="View, filter & print stickers for FA Item Codes whose Fixed Asset Depreciation Tag (Asset Register) process is complete"
         icon={TagIcon}
         accentColor="#eab308"
         action={
@@ -192,7 +192,7 @@ export default function FixedAssetDepreciationTagStickers() {
         }
       >
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <GlassCard label="Tagged FA Item Codes" value={isLoading ? "—" : list.length} icon={Boxes} accentColor="#eab308" />
+          <GlassCard label="Registered FA Item Codes" value={isLoading ? "—" : list.length} icon={Boxes} accentColor="#eab308" />
           <GlassCard label="Selected" value={selected.size} icon={Check} accentColor="#10b981" />
         </div>
 
@@ -286,7 +286,7 @@ export default function FixedAssetDepreciationTagStickers() {
           <CardHeader className="pb-3 border-b border-border flex-row items-center justify-between">
             <div>
               <CardTitle className="text-base font-semibold">Completed Depreciation Tags</CardTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">Only assets with Depreciation Tag = Tagged and a valid FA Item Code — always available for sticker reprint</p>
+              <p className="text-xs text-muted-foreground mt-0.5">FA Item Codes that are Tagged and have a Fixed Asset Record from the Asset Register — always available for sticker reprint</p>
             </div>
             {list.length > 0 && (
               <button onClick={toggleAll}
@@ -300,7 +300,7 @@ export default function FixedAssetDepreciationTagStickers() {
               <div className="py-16 text-center text-sm text-muted-foreground">Loading FA Item Codes…</div>
             ) : list.length === 0 ? (
               <div className="py-16 text-center text-sm text-muted-foreground">
-                No tagged FA Item Codes{hasFilters ? " match these filters" : " yet"}.
+No FA Item Codes with a completed Asset Register{hasFilters ? " match these filters" : " yet"}.
               </div>
             ) : (
               <>

@@ -121,6 +121,8 @@ export interface TaggedFAItemCode {
   TagId: number;
   FAItemCode: string;
   ItemName: string | null;
+  AssetId: number;
+  AssetCode: string | null;
   DocNo: string | null;
   DocDate: string | null;
   FinYear: string | null;
@@ -129,7 +131,7 @@ export interface TaggedFAItemCode {
   CompanyName: string | null;
   ProjectId: number | null;
   ProjectName: string | null;
-  HasRecord: 0 | 1;
+  HasRecord: 1;
 }
 
 export const getTaggedFAItemCodes = async (params?: {

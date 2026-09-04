@@ -358,12 +358,15 @@ export const getFixedAssetTaggings = (params?: {
 export const getFixedAssetTagging = (id: number): Promise<TaggingDetail> =>
   getJson(`/api/fixed-asset-tagging/${id}`, "Failed to load tagging entry");
 
-// Depreciation Tag Stickers — assets that completed the Depreciation Tag
-// process (Status = Tagged AND FAItemCode exists). Nothing pending/untagged.
+// Depreciation Tag Stickers — assets whose Fixed Asset Depreciation Tag
+// (Asset Register) process is complete: Status = Tagged, FAItemCode exists,
+// AND a Fixed Asset Record was created from the tag. Nothing pending.
 export interface TaggedFAItemCode {
   TagId: number;
   FAItemCode: string;
   ItemName: string | null;
+  AssetId: number;
+  AssetCode: string | null;
   DocNo: string | null;
   DocDate: string | null;
   FinYear: string | null;
@@ -372,7 +375,7 @@ export interface TaggedFAItemCode {
   CompanyName: string | null;
   ProjectId: number | null;
   ProjectName: string | null;
-  HasRecord: 0 | 1;
+  HasRecord: 1;
 }
 
 export const getTaggedFAItemCodes = (params?: {

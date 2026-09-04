@@ -111,42 +111,54 @@ router.get("/unassigned-codes", requirePageRight("fixed-asset-record", "view"), 
   }
 });
 
-// ── GET /tagged-codes — every valid FA Item Code minted by the Depreciation
-// Tag workflow, for the sticker-print page. Hard rule: Status = 'Tagged' AND
-// FAItemCode IS NOT NULL — nothing pending / untagged / code-less appears.
-// One row per tagged unit; stays listed forever (even after a Fixed Asset
-// Record is cut) so stickers can be reprinted. Filters: company, financial
-// year, tagging-date range, FA-Item-Code search, Item-Name search. ──────────
+// ── GET /tagged-codes — FA Item Codes whose Fixed Asset Depreciation Tag
+// (Asset Register) process is COMPLETE, for the sticker-print page. Hard
+// rule: the tag is Status='Tagged', carries an FAItemCode, AND a live
+// Fixed Asset Record has been created from it (fr.SourceTagId = t.TagId).
+// Codes stay listed forever once that record exists, so stickers can be
+// reprinted. Filters: company, financial year, tagging-date range,
+// FA-Item-Code search, Item-Name search. ───────────────────────────────────
 router.get("/tagged-codes", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
-    const where = ["t.Status = 'Tagged'", "t.FAItemCode IS NOT NULL AND LTRIM(RTRIM(t.FAItemCode)) <> ''"];
+    const where = [
+      "t.Status = 'Tagged'",
+      "t.FAItemCode IS NOT NULL AND LTRIM(RTRIM(t.FAItemCode)) <> ''",
+      // Asset Register process done: a non-deleted Fixed Asset Record links back to this tag.
+      "fr.AssetId IS NOT NULL",
+    ];
 
-    if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("t.CompanyId = @CompanyId"); }
+    if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("ISNULL(fr.CompanyId, t.CompanyId) = @CompanyId"); }
     if (req.query.finYear)   { request.input("FinYear",   sql.NVarChar(20), req.query.finYear);        where.push("t.FinYear = @FinYear"); }
     if (req.query.fromDate)  { request.input("FromDate",  sql.Date, req.query.fromDate);                where.push("t.DocDate >= @FromDate"); }
     if (req.query.toDate)    { request.input("ToDate",    sql.Date, req.query.toDate);                  where.push("t.DocDate <= @ToDate"); }
     if (req.query.faCode)    { request.input("FaCode",    sql.NVarChar(200), `%${String(req.query.faCode).trim()}%`);   where.push("t.FAItemCode LIKE @FaCode"); }
-    if (req.query.itemName)  { request.input("ItemName",  sql.NVarChar(200), `%${String(req.query.itemName).trim()}%`); where.push("im.M_Name LIKE @ItemName"); }
+    if (req.query.itemName)  { request.input("ItemName",  sql.NVarChar(200), `%${String(req.query.itemName).trim()}%`); where.push("ISNULL(fr.AssetName, im.M_Name) LIKE @ItemName"); }
     if (req.query.search) {
       request.input("Search", sql.NVarChar(200), `%${String(req.query.search).trim()}%`);
-      where.push("(t.FAItemCode LIKE @Search OR im.M_Name LIKE @Search)");
+      where.push("(t.FAItemCode LIKE @Search OR ISNULL(fr.AssetName, im.M_Name) LIKE @Search)");
     }
 
     const result = await request.query(`
       SELECT
-        t.TagId, t.FAItemCode, im.M_Name AS ItemName,
+        t.TagId, t.FAItemCode,
+        ISNULL(fr.AssetName, im.M_Name) AS ItemName,
+        fr.AssetId, fr.AssetCode,
         t.DocNo, t.DocDate, t.FinYear, t.Status,
-        t.CompanyId, co.name AS CompanyName,
-        t.ProjectId, pr.name AS ProjectName,
-        CASE WHEN EXISTS (
-          SELECT 1 FROM dbo.FixedAssetRecord fr WHERE fr.SourceTagId = t.TagId AND fr.Status <> 'Deleted'
-        ) THEN 1 ELSE 0 END AS HasRecord
+        ISNULL(fr.CompanyId, t.CompanyId) AS CompanyId,
+        ISNULL(frco.name, co.name) AS CompanyName,
+        ISNULL(fr.ProjectId, t.ProjectId) AS ProjectId,
+        ISNULL(frpr.name, pr.name) AS ProjectName,
+        1 AS HasRecord
       FROM dbo.FixedAssetTagging t
+      INNER JOIN dbo.FixedAssetRecord fr
+        ON fr.SourceTagId = t.TagId AND fr.Status <> 'Deleted' AND fr.AssetCode IS NOT NULL
       LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
-      LEFT JOIN dbo.enterprise co ON co.id = t.CompanyId
-      LEFT JOIN dbo.enterprise pr ON pr.id = t.ProjectId
+      LEFT JOIN dbo.enterprise co   ON co.id   = t.CompanyId
+      LEFT JOIN dbo.enterprise pr   ON pr.id   = t.ProjectId
+      LEFT JOIN dbo.enterprise frco ON frco.id = fr.CompanyId
+      LEFT JOIN dbo.enterprise frpr ON frpr.id = fr.ProjectId
       WHERE ${where.join(" AND ")}
       ORDER BY t.FAItemCode
     `);
