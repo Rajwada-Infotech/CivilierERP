@@ -1,3 +1,5 @@
+# Verifying the Docker layer cache added in 60be80a8 actually hits on a
+# second run (the first run only populates it) — see commit history.
 name: CI
 
 on:
