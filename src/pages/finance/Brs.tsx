@@ -1073,16 +1073,23 @@ export default function Brs() {
                         </span>
                         <ClearBadge cleared={cleared} bounced={bounced} cancelled={cancelled} />
                         {bounced && <BounceDetailPanel entry={entry} />}
-                        {cleared && (entry.BankClearingDate || entry.ClearingDate) && (
+                        {cleared && (entry.BankClearingDate || entry.ClearedBy || entry.ClearingDate) && (
                           <div className="text-right">
-                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                              {entry.BankClearingDate ? fmt(entry.BankClearingDate) : fmtDT(entry.ClearingDate).date}
-                              {fmtDT(entry.ClearingDate).time && (
-                                <span className="text-muted-foreground/70 font-normal"> · {fmtDT(entry.ClearingDate).time}</span>
-                              )}
-                            </p>
+                            {/* Bank Clearance (passbook date) vs Cleared On
+                                (when it was ticked in the app) — genuinely
+                                separate dates, never merged. */}
+                            {entry.BankClearingDate && (
+                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                                {fmt(entry.BankClearingDate)} <span className="text-muted-foreground/70 font-normal">(bank)</span>
+                              </p>
+                            )}
                             {entry.ClearedBy && (
                               <p className="text-[10px] text-muted-foreground truncate max-w-[110px]">{entry.ClearedBy}</p>
+                            )}
+                            {entry.ClearingDate && (
+                              <p className="text-[10px] text-muted-foreground/70 tabular-nums">
+                                {fmtDT(entry.ClearingDate).date}{fmtDT(entry.ClearingDate).time ? `, ${fmtDT(entry.ClearingDate).time}` : ""}
+                              </p>
                             )}
                           </div>
                         )}
@@ -1146,8 +1153,9 @@ export default function Brs() {
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[110px]">Mode / Cheque</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[82px]">Status</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">BRS</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[110px] hidden xl:table-cell">Bank Clearance</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px] hidden xl:table-cell">Bank Clearance</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[110px] hidden xl:table-cell">Cleared By</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[130px] hidden xl:table-cell">Cleared On</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[140px]">Action</th>
                 </tr>
               </thead>
@@ -1250,21 +1258,15 @@ export default function Brs() {
                           {bounced && <BounceDetailPanel entry={entry} />}
                         </div>
                       </td>
+                      {/* Bank Clearance — the date the bank itself cleared it
+                          (passbook date), as typed in the clear popup. Distinct
+                          from Cleared On below, which is when this was ticked
+                          in the app — the two can genuinely differ by days. */}
                       <td className="px-3 py-4 hidden xl:table-cell align-middle">
-                        {cleared && (entry.BankClearingDate || entry.ClearingDate) ? (
-                          <>
-                            <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                              {entry.BankClearingDate ? fmt(entry.BankClearingDate) : fmtDT(entry.ClearingDate).date}
-                            </p>
-                            {/* BankClearingDate is a plain date (no time) — the
-                                only clock-time we actually have is when the
-                                entry was marked clear in the app. */}
-                            {fmtDT(entry.ClearingDate).time && (
-                              <p className="text-[10px] text-muted-foreground/70 tabular-nums">
-                                at {fmtDT(entry.ClearingDate).time}
-                              </p>
-                            )}
-                          </>
+                        {cleared && entry.BankClearingDate ? (
+                          <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                            {fmt(entry.BankClearingDate)}
+                          </p>
                         ) : (
                           <span className="text-[10px] text-muted-foreground">—</span>
                         )}
@@ -1272,6 +1274,20 @@ export default function Brs() {
                       <td className="px-3 py-4 hidden xl:table-cell align-middle">
                         {cleared && entry.ClearedBy ? (
                           <p className="text-xs text-foreground truncate max-w-[110px]" title={entry.ClearedBy}>{entry.ClearedBy}</p>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      {/* Cleared On — when the entry was actually ticked clear
+                          in the app (system timestamp), date + time. */}
+                      <td className="px-3 py-4 hidden xl:table-cell align-middle">
+                        {cleared && entry.ClearingDate ? (
+                          <>
+                            <p className="text-xs text-foreground">{fmtDT(entry.ClearingDate).date}</p>
+                            {fmtDT(entry.ClearingDate).time && (
+                              <p className="text-[10px] text-muted-foreground/70 tabular-nums">{fmtDT(entry.ClearingDate).time}</p>
+                            )}
+                          </>
                         ) : (
                           <span className="text-[10px] text-muted-foreground">—</span>
                         )}
