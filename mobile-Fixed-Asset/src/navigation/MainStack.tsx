@@ -12,9 +12,6 @@ import MenuScreen from "@/screens/menu/MenuScreen";
 import TaggingScreen from "@/screens/tagging/TaggingScreen";
 import TaggingDetailScreen from "@/screens/tagging/TaggingDetailScreen";
 import TaggingFormScreen from "@/screens/tagging/TaggingFormScreen";
-import InventoryImportScreen from "@/screens/inventoryImport/InventoryImportScreen";
-import InventoryImportDetailScreen from "@/screens/inventoryImport/InventoryImportDetailScreen";
-import InventoryImportFormScreen from "@/screens/inventoryImport/InventoryImportFormScreen";
 import AssignmentScreen from "@/screens/assignment/AssignmentScreen";
 import AssignmentDetailScreen from "@/screens/assignment/AssignmentDetailScreen";
 import AssignmentFormScreen from "@/screens/assignment/AssignmentFormScreen";
@@ -32,7 +29,6 @@ export type MainStackParamList = {
   AssetRegister: undefined;
   Maintenance: undefined;
   Tagging: undefined;
-  InventoryImport: undefined;
   Assignment: undefined;
   AssetTransfer: undefined;
   QualityCheck: undefined;
@@ -42,8 +38,6 @@ export type MainStackParamList = {
   AssetForm: { id?: number } | undefined;
   TaggingDetail: { id: number };
   TaggingForm: { id?: number } | undefined;
-  InventoryImportDetail: { id: number };
-  InventoryImportForm: undefined;
   AssignmentDetail: { id: number };
   AssignmentForm: { id?: number } | undefined;
   AssetTransferDetail: { id: number };
@@ -73,9 +67,6 @@ export default function MainStack() {
       <Stack.Screen name="Tagging" component={TaggingScreen} options={{ title: "FA Inventory" }} />
       <Stack.Screen name="TaggingDetail" component={TaggingDetailScreen} options={{ title: "Tagging Entry" }} />
       <Stack.Screen name="TaggingForm" component={TaggingFormScreen} options={{ title: "FA Inventory" }} />
-      <Stack.Screen name="InventoryImport" component={InventoryImportScreen} options={{ title: "Inventory Import" }} />
-      <Stack.Screen name="InventoryImportDetail" component={InventoryImportDetailScreen} options={{ title: "Import" }} />
-      <Stack.Screen name="InventoryImportForm" component={InventoryImportFormScreen} options={{ title: "Inventory Import" }} />
       <Stack.Screen name="Assignment" component={AssignmentScreen} options={{ title: "Assignment" }} />
       <Stack.Screen name="AssignmentDetail" component={AssignmentDetailScreen} options={{ title: "Assignment" }} />
       <Stack.Screen name="AssignmentForm" component={AssignmentFormScreen} options={{ title: "Assignment" }} />

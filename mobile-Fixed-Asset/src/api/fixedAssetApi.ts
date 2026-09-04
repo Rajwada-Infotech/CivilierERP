@@ -379,49 +379,6 @@ export const updateFixedAssetTagging = (id: number, data: { docDate?: string; re
 export const deleteFixedAssetTagging = (id: number): Promise<{ ok: true }> =>
   mutate(`/api/fixed-asset-tagging/${id}`, "DELETE", undefined, "Failed to cancel tagging entry");
 
-// ── Inventory Import ────────────────────────────────────────────────────────
-export interface InventoryImportListItem {
-  ImportId: number;
-  DocNo: string | null;
-  DocDate: string | null;
-  Quantity: number;
-  Rate: number | null;
-  Remarks: string | null;
-  Status: "Active" | "Reversed";
-  CreatedBy: string | null;
-  CreatedAt: string;
-  CompanyName: string | null;
-  ProjectName: string | null;
-  GodownName: string | null;
-  ItemId: string;
-  ItemName: string | null;
-  AssetCategory: string | null;
-}
-
-export const getInventoryImports = (params?: {
-  companyId?: number; projectId?: number; godownId?: number;
-}): Promise<InventoryImportListItem[]> => {
-  const qs = new URLSearchParams();
-  if (params?.companyId) qs.set("companyId", String(params.companyId));
-  if (params?.projectId) qs.set("projectId", String(params.projectId));
-  if (params?.godownId) qs.set("godownId", String(params.godownId));
-  return getJson(`/api/fixed-asset-inventory-import${qs.toString() ? `?${qs}` : ""}`, "Failed to load inventory imports");
-};
-
-export const getInventoryImport = (id: number): Promise<InventoryImportListItem & { ResolvedItemName: string | null }> =>
-  getJson(`/api/fixed-asset-inventory-import/${id}`, "Failed to load import");
-
-export const createInventoryImport = (data: {
-  docDate: string; companyId?: number | null; projectId?: number | null; godownId: number; itemId: string; quantity: number; rate?: number | null; remarks?: string;
-}): Promise<{ importId: number; assetId: number; docNo: string; tagged: number }> =>
-  mutate("/api/fixed-asset-inventory-import", "POST", data, "Failed to create inventory import");
-
-export const getInventoryImportReversalPlan = (id: number): Promise<ReversalPlan> =>
-  getJson(`/api/fixed-asset-inventory-import/${id}/can-reverse`, "Failed to check reversal eligibility");
-
-export const reverseInventoryImport = (id: number): Promise<{ ok: true }> =>
-  mutate(`/api/fixed-asset-inventory-import/${id}`, "DELETE", undefined, "Failed to reverse this import");
-
 // ── Assignment ─────────────────────────────────────────────────────────────
 export interface AssignmentListItem {
   AssignmentId: number;

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Boxes, TrendingDown, Wrench, IndianRupee, ChevronRight, Tag, DownloadCloud, UserCheck, ArrowLeftRight, ShieldCheck,
+  Boxes, TrendingDown, Wrench, IndianRupee, ChevronRight, Tag, UserCheck, ArrowLeftRight, ShieldCheck,
 } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
@@ -46,7 +46,6 @@ function StatCard({
 const LINKS: { label: string; desc: string; route: keyof MainStackParamList; icon: React.ComponentType<{ size?: number; color?: string }>; pageKey: string }[] = [
   { label: "Asset Register", desc: "Fixed Asset records & depreciation", route: "AssetRegister", icon: Boxes, pageKey: "fixed-asset-record" },
   { label: "FA Inventory", desc: "Tag received stock", route: "Tagging", icon: Tag, pageKey: "fixed-asset-tagging" },
-  { label: "Inventory Import", desc: "Opening-stock imports", route: "InventoryImport", icon: DownloadCloud, pageKey: "fixed-asset-inventory-import" },
   { label: "Assignment", desc: "Who holds each asset", route: "Assignment", icon: UserCheck, pageKey: "fixed-asset-assignment" },
   { label: "User-Wise Asset Transfer", desc: "Move custody between users", route: "AssetTransfer", icon: ArrowLeftRight, pageKey: "asset-transfer" },
   { label: "Owner & Quality Checking", desc: "Condition checks & follow-ups", route: "QualityCheck", icon: ShieldCheck, pageKey: "fixed-asset-quality-check" },

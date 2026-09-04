@@ -90,7 +90,6 @@ export default function AssetDetailScreen() {
       toast.success(r.grnDeleted ? "Reversed — GRN & inventory removed" : "Reversed — inventory removed");
       qc.invalidateQueries({ queryKey: ["fa-assets"] });
       qc.invalidateQueries({ queryKey: ["fa-tagging"] });
-      qc.invalidateQueries({ queryKey: ["fa-inv-import"] });
       setConfirm(null);
       nav.goBack();
     },
