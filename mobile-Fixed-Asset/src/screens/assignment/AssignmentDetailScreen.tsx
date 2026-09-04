@@ -1,14 +1,16 @@
 // One assignment — detail + edit / delete. Delete is blocked for
 // transfer-sourced rows (the route rejects it).
 import { useState } from "react";
-import { Image, View } from "react-native";
+import { Image, Text, View } from "react-native";
 import type { RouteProp } from "@react-navigation/native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Trash2 } from "lucide-react-native";
 import { colors } from "@/theme/colors";
+import { fonts } from "@/theme/fonts";
 import { navigate } from "@/navigation/navigationRef";
 import { toast } from "@/components/Toast";
+import { Avatar } from "@/components/Avatar";
 import { ConfirmSheet } from "@/components/ConfirmSheet";
 import { DetailScaffold, DetailSection, DetailRow, ActionButton } from "@/components/detail/DetailScaffold";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -66,14 +68,19 @@ export default function AssignmentDetailScreen() {
           <>
             {d.UserImage ? (
               <View style={{ alignItems: "flex-start", marginBottom: 12 }}>
-                <Image source={{ uri: d.UserImage }} style={{ width: 90, height: 90, borderRadius: 12, borderWidth: 1, borderColor: colors.border }} />
+                <Image source={{ uri: d.UserImage }} style={{ width: 110, height: 110, borderRadius: 14, borderWidth: 1, borderColor: colors.border }} />
+                <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.regular, marginTop: 4 }}>Holder photo</Text>
               </View>
             ) : null}
+            <DetailSection title="People">
+              <PersonRow label="Holder" name={d.UserName} url={d.UserAvatar} id={d.UserId} />
+              {d.ResponsibleUserName ? (
+                <PersonRow label="Responsible" name={d.ResponsibleUserName} url={d.ResponsibleUserAvatar} id={d.ResponsibleUserId ?? 0} last />
+              ) : null}
+            </DetailSection>
             <DetailSection title="Assignment">
               <DetailRow label="Asset" value={d.AssetName} />
               <DetailRow label="Category" value={d.AssetCategory} />
-              <DetailRow label="Holder" value={d.UserName} />
-              <DetailRow label="Responsible" value={d.ResponsibleUserName} />
               <DetailRow label="Source Transfer" value={d.SourceTransferDocNo} />
             </DetailSection>
             <DetailSection title="Context">
@@ -97,5 +104,22 @@ export default function AssignmentDetailScreen() {
         onClose={() => setConfirm(false)}
       />
     </>
+  );
+}
+
+function PersonRow({
+  label, name, url, id, last,
+}: { label: string; name: string | null; url?: string | null; id: number; last?: boolean }) {
+  return (
+    <View
+      className="flex-row items-center gap-3"
+      style={{ paddingVertical: 8, borderBottomWidth: last ? 0 : 1, borderBottomColor: `${colors.border}80` }}
+    >
+      <Avatar name={name} url={url} id={id} size={34} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.body.semibold }}>{name || "—"}</Text>
+        <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular }}>{label}</Text>
+      </View>
+    </View>
   );
 }
