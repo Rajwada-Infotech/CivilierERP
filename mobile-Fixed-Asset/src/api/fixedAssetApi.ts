@@ -31,33 +31,77 @@ export interface FixedAssetListItem {
   Location: string | null;
   Department: string | null;
   Custodian: string | null;
+  CustodianUserId: number | null;
   DepreciationType: string | null;
   DepreciationRate: number | null;
   AssetStatus: "Pending" | "Active" | "Sold" | "Scrapped" | "Under Maintenance";
+  SellingPrice: number | null;
   Status: string;
   CompanyId: number | null;
   CompanyName: string | null;
   ProjectId: number | null;
   ProjectName: string | null;
+  SupplierId: number | null;
   SupplierName: string | null;
+  GodownID: number | null;
+  GodownName: string | null;
+  SourceTagId: number | null;
   FAItemCode: string | null;
   RepairType: string | null;
 }
 
 export interface FixedAssetDetail extends FixedAssetListItem {
+  DepreciationSetupId: number | null;
   UsefulLife: number | null;
-  SellingPrice: number | null;
   SaleDate: string | null;
   BuyerName: string | null;
+  SaleRemarks: string | null;
   Remarks: string | null;
   PurchaseInvoiceRef: string | null;
   PictureBase64: string | null;
+  SupplierCode: string | null;
   CreatedBy: string | null;
   CreatedAt: string;
 }
 
+export interface FixedAssetPayload {
+  docDate?: string;
+  companyId?: number | null;
+  projectId?: number | null;
+  finYear?: string;
+  assetName?: string;
+  assetCategory: string;
+  sourceTagId?: number | null;
+  brand?: string;
+  model?: string;
+  serialNumber?: string;
+  purchaseDate?: string;
+  activationDate?: string;
+  purchaseInvoiceRef?: string;
+  supplierId?: number | null;
+  purchaseCost?: number;
+  quantity?: number;
+  location?: string;
+  department?: string;
+  custodianUserId?: number | null;
+  depreciationSetupId?: number | null;
+  depreciationType?: string;
+  depreciationRate?: number | null;
+  usefulLife?: number | null;
+  assetStatus?: string;
+  sellingPrice?: number | null;
+  saleDate?: string;
+  buyerName?: string;
+  saleRemarks?: string;
+  remarks?: string;
+  status?: string;
+  pictureBase64?: string | null;
+  repairType?: string | null;
+}
+
 export const getFixedAssets = (params?: {
-  companyId?: number; projectId?: number; category?: string; assetStatus?: string; finYear?: string;
+  companyId?: number; projectId?: number; category?: string; assetStatus?: string;
+  finYear?: string; fromDate?: string; toDate?: string;
 }): Promise<FixedAssetListItem[]> => {
   const qs = new URLSearchParams();
   if (params?.companyId) qs.set("companyId", String(params.companyId));
@@ -65,11 +109,71 @@ export const getFixedAssets = (params?: {
   if (params?.category) qs.set("category", params.category);
   if (params?.assetStatus) qs.set("assetStatus", params.assetStatus);
   if (params?.finYear) qs.set("finYear", params.finYear);
+  if (params?.fromDate) qs.set("fromDate", params.fromDate);
+  if (params?.toDate) qs.set("toDate", params.toDate);
   return getJson(`/api/fixed-assets${qs.toString() ? `?${qs}` : ""}`, "Failed to load fixed assets");
 };
 
 export const getFixedAsset = (id: number): Promise<FixedAssetDetail> =>
   getJson(`/api/fixed-assets/${id}`, "Failed to load asset");
+
+async function mutate<T>(url: string, method: string, body: unknown, fallback: string): Promise<T> {
+  const res = await fetchWithAuth(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { error?: string }).error || fallback);
+  }
+  return res.json().catch(() => ({} as T));
+}
+
+export const createFixedAsset = (data: FixedAssetPayload): Promise<{ assetId: number; docNo: string; assetCode: string }> =>
+  mutate("/api/fixed-assets", "POST", data, "Failed to create fixed asset");
+
+export const updateFixedAsset = (id: number, data: Partial<FixedAssetPayload>): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-assets/${id}`, "PUT", data, "Failed to update fixed asset");
+
+export const deleteFixedAsset = (id: number): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-assets/${id}`, "DELETE", undefined, "Failed to delete fixed asset");
+
+// ── Delete & Reverse GRN / Import ──────────────────────────────────────────
+export interface ReversalPlan {
+  reversible: boolean;
+  reason?: string;
+  message: string;
+  sourceType?: "GRN" | "IMPORT";
+  grnDocNo?: string | null;
+  unitCount?: number;
+  taggedCount?: number;
+  units?: { assetId: number; assetName: string; faItemCode: string | null }[];
+}
+
+export const getFixedAssetReversalPlan = (id: number): Promise<ReversalPlan> =>
+  getJson(`/api/fixed-assets/${id}/can-reverse`, "Failed to check reversal eligibility");
+
+export const reverseFixedAsset = (id: number): Promise<{ ok: true; grnDeleted: boolean; unitsRemoved: number; tagsRemoved: number }> =>
+  mutate(`/api/fixed-assets/${id}/reverse`, "POST", undefined, "Failed to reverse this asset");
+
+// Unassigned generated FA Item Codes — the Fixed Asset Record create picker.
+export interface UnassignedFAItemCode {
+  TagId: number;
+  FAItemCode: string;
+  DocNo: string | null;
+  ItemId: string | null;
+  ItemName: string | null;
+  CompanyId: number | null;
+  CompanyName: string | null;
+  ProjectId: number | null;
+  ProjectName: string | null;
+  GodownId: number | null;
+  GodownName: string | null;
+}
+
+export const getUnassignedFAItemCodes = (): Promise<UnassignedFAItemCode[]> =>
+  getJson("/api/fixed-asset-tagging/unassigned-codes", "Failed to load unassigned FA Item Codes");
 
 // ── Depreciation ────────────────────────────────────────────────────────────
 export interface DepreciationEntry {
@@ -107,6 +211,12 @@ export interface DepreciationResponse {
 
 export const getAssetDepreciation = (id: number, year: number, month: number): Promise<DepreciationResponse> =>
   getJson(`/api/fixed-assets/${id}/depreciation?year=${year}&month=${month}`, "Failed to load depreciation");
+
+export const postAssetDepreciation = (id: number, year: number, month: number): Promise<{ ok: true; voucherNo: string; entryId: number }> =>
+  mutate(`/api/fixed-assets/${id}/depreciation/post`, "POST", { year, month }, "Failed to post depreciation");
+
+export const reverseAssetDepreciation = (id: number, entryId: number): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-assets/${id}/depreciation/${entryId}/reverse`, "POST", undefined, "Failed to reverse depreciation");
 
 // ── Maintenance & Repair ────────────────────────────────────────────────────
 export interface MaintenanceItem {

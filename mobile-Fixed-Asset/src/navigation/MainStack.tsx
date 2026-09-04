@@ -3,6 +3,7 @@ import DashboardScreen from "@/screens/dashboard/DashboardScreen";
 import ProfileScreen from "@/screens/dashboard/ProfileScreen";
 import AssetRegisterScreen from "@/screens/assets/AssetRegisterScreen";
 import AssetDetailScreen from "@/screens/assets/AssetDetailScreen";
+import AssetFormScreen from "@/screens/assets/AssetFormScreen";
 import MaintenanceScreen from "@/screens/maintenance/MaintenanceScreen";
 import NotificationsScreen from "@/screens/notifications/NotificationsScreen";
 import MenuScreen from "@/screens/menu/MenuScreen";
@@ -26,6 +27,7 @@ export type MainStackParamList = {
   Profile: undefined;
   Notifications: undefined;
   AssetDetail: { id: number };
+  AssetForm: { id?: number } | undefined;
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -49,6 +51,7 @@ export default function MainStack() {
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
       <Stack.Screen name="AssetDetail" component={AssetDetailScreen} options={{ title: "Asset" }} />
+      <Stack.Screen name="AssetForm" component={AssetFormScreen} options={{ title: "Fixed Asset" }} />
     </Stack.Navigator>
   );
 }
