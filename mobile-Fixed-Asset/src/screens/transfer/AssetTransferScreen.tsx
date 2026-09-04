@@ -1,22 +1,28 @@
 // User-Wise Asset Transfer — custody moves from one user to another
 // (/api/asset-transfer). Read-only; transfers are raised on web.
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { Card, DataList, Line } from "@/components/list/DataList";
+import { Fab } from "@/components/Fab";
+import { usePageRights } from "@/hooks/usePageRights";
+import { navigate } from "@/navigation/navigationRef";
 import { getAssetTransfers, type TransferListItem } from "@/api/fixedAssetApi";
 
 export default function AssetTransferScreen() {
-  const query = useQuery({ queryKey: ["fa-transfer"], queryFn: getAssetTransfers });
+  const rights = usePageRights("asset-transfer");
+  const query = useQuery({ queryKey: ["fa-transfer"], queryFn: () => getAssetTransfers() });
 
   return (
     <DataList<TransferListItem>
       query={query}
       keyOf={(t) => String(t.Id)}
       emptyText="No asset transfers."
+      footer={rights.canCreate ? <Fab label="Transfer" onPress={() => navigate("AssetTransferForm")} /> : null}
       renderCard={(item) => (
+        <Pressable onPress={() => navigate("AssetTransferDetail", { id: item.Id })}>
         <Card>
           <View className="flex-row items-center justify-between">
             <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
@@ -43,6 +49,7 @@ export default function AssetTransferScreen() {
             )}
           </View>
         </Card>
+        </Pressable>
       )}
     />
   );

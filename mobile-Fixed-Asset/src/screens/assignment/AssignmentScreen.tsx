@@ -1,18 +1,22 @@
 // Assignment — which user currently holds each fixed asset
 // (/api/fixed-asset-assignment). Read-only; assigning is done on web.
 import { useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { Card, DataList, Line, Pill } from "@/components/list/DataList";
+import { Fab } from "@/components/Fab";
+import { usePageRights } from "@/hooks/usePageRights";
+import { navigate } from "@/navigation/navigationRef";
 import { getAssignments, type AssignmentListItem } from "@/api/fixedAssetApi";
 
 const FILTERS = ["Current", "All"] as const;
 
 export default function AssignmentScreen() {
   const [filter, setFilter] = useState<string>("Current");
-  const query = useQuery({ queryKey: ["fa-assignment"], queryFn: getAssignments });
+  const rights = usePageRights("fixed-asset-assignment");
+  const query = useQuery({ queryKey: ["fa-assignment"], queryFn: () => getAssignments() });
 
   const filtered = useMemo(() => {
     const list = query.data ?? [];
@@ -28,7 +32,9 @@ export default function AssignmentScreen() {
       activeFilter={filter}
       onFilter={setFilter}
       emptyText="No assignments."
+      footer={rights.canCreate ? <Fab label="Assign" onPress={() => navigate("AssignmentForm")} /> : null}
       renderCard={(item) => (
+        <Pressable onPress={() => navigate("AssignmentDetail", { id: item.AssignmentId })}>
         <Card>
           <View className="flex-row items-center justify-between">
             <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
@@ -52,6 +58,7 @@ export default function AssignmentScreen() {
             )}
           </View>
         </Card>
+        </Pressable>
       )}
     />
   );

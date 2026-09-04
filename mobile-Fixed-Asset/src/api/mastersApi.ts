@@ -114,6 +114,21 @@ export interface Vendor {
 export const getVendors = (): Promise<Vendor[]> =>
   getJson("/api/fixed-asset-maintenance/vendors", "Failed to load vendors");
 
+// ── Fixed-Asset-category items (item master) — Inventory Import picker ─────
+export interface FixedAssetItem {
+  M_Id: string;
+  M_Name: string;
+  M_Group: string | null;
+  M_code: string | null;
+}
+
+export const getFixedAssetItems = async (): Promise<FixedAssetItem[]> => {
+  const rows = await getJson<FixedAssetItem[] & { M_Type?: string }[]>("/api/item-master", "Failed to load items");
+  return (Array.isArray(rows) ? rows : []).filter(
+    (r) => (r as { M_Type?: string }).M_Type === "Fixed Asset",
+  );
+};
+
 // ── Financial years (unlocked + active) ───────────────────────────────────
 export interface FinYearRow {
   FId: number;

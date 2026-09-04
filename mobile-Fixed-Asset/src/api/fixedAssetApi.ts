@@ -225,8 +225,12 @@ export interface MaintenanceItem {
   DocDate: string | null;
   CompanyName: string | null;
   ProjectName: string | null;
+  CompanyId: number | null;
+  ProjectId: number | null;
+  AssetId: number;
   FAItemCode: string | null;
   ItemName: string | null;
+  VendorId: number | null;
   VendorName: string | null;
   RepairExpenseType: "Direct" | "Indirect";
   Amount: number;
@@ -235,8 +239,11 @@ export interface MaintenanceItem {
   TaxableAmount: number | null;
   GstAmount: number | null;
   TotalAmount: number | null;
+  Remarks: string | null;
   Status: "Draft" | "Posted" | "Cancelled";
   VoucherNo: string | null;
+  FinYear: string | null;
+  CreatedBy: string | null;
   CreatedAt: string;
   posting?: {
     voucherNo: string;
@@ -246,13 +253,55 @@ export interface MaintenanceItem {
   } | null;
 }
 
-export const getMaintenanceList = (params?: { status?: string }): Promise<MaintenanceItem[]> => {
-  const qs = params?.status ? `?status=${encodeURIComponent(params.status)}` : "";
-  return getJson(`/api/fixed-asset-maintenance${qs}`, "Failed to load maintenance records");
+export interface MaintenanceAsset {
+  AssetId: number; FAItemCode: string; AssetName: string; AssetCategory: string | null;
+  CompanyId: number | null; ProjectId: number | null; FinYear: string | null;
+  SacCode: string | null; SacDescription: string | null; GstRatePct: number | null;
+}
+
+export const getMaintenanceList = (params?: { status?: string; companyId?: number; projectId?: number; assetId?: number }): Promise<MaintenanceItem[]> => {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.companyId) qs.set("companyId", String(params.companyId));
+  if (params?.projectId) qs.set("projectId", String(params.projectId));
+  if (params?.assetId) qs.set("assetId", String(params.assetId));
+  return getJson(`/api/fixed-asset-maintenance${qs.toString() ? `?${qs}` : ""}`, "Failed to load maintenance records");
 };
 
 export const getMaintenance = (id: number): Promise<MaintenanceItem> =>
   getJson(`/api/fixed-asset-maintenance/${id}`, "Failed to load record");
+
+export const getMaintenanceAssets = (params: { companyId?: number; projectId?: number }): Promise<MaintenanceAsset[]> => {
+  const qs = new URLSearchParams();
+  if (params.companyId) qs.set("companyId", String(params.companyId));
+  if (params.projectId) qs.set("projectId", String(params.projectId));
+  return getJson(`/api/fixed-asset-maintenance/assets${qs.toString() ? `?${qs}` : ""}`, "Failed to load assets");
+};
+
+export const getMaintenanceFaItemCodes = (params: { itemName: string; companyId?: number; projectId?: number }): Promise<MaintenanceAsset[]> => {
+  const qs = new URLSearchParams({ itemName: params.itemName });
+  if (params.companyId) qs.set("companyId", String(params.companyId));
+  if (params.projectId) qs.set("projectId", String(params.projectId));
+  return getJson(`/api/fixed-asset-maintenance/fa-item-codes?${qs}`, "Failed to load FA Item Codes");
+};
+
+export interface MaintenancePayload {
+  docDate: string; companyId: number; projectId: number;
+  itemName: string; assetId: number; vendorId: number;
+  repairExpenseType: "Direct" | "Indirect"; amount: number; remarks?: string; finYear?: string;
+}
+
+export const createMaintenance = (data: MaintenancePayload): Promise<{ maintenanceId: number; docNo: string }> =>
+  mutate("/api/fixed-asset-maintenance", "POST", data, "Failed to create maintenance record");
+
+export const updateMaintenance = (id: number, data: MaintenancePayload): Promise<{ ok: true; wasPosted: boolean }> =>
+  mutate(`/api/fixed-asset-maintenance/${id}`, "PUT", data, "Failed to update maintenance record");
+
+export const postMaintenance = (id: number): Promise<{ ok: true; voucherNo: string }> =>
+  mutate(`/api/fixed-asset-maintenance/${id}/post`, "POST", undefined, "Failed to post maintenance voucher");
+
+export const deleteMaintenance = (id: number): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-asset-maintenance/${id}`, "DELETE", undefined, "Failed to cancel maintenance record");
 
 // ── FA Inventory (tagging) ──────────────────────────────────────────────────
 // Mirrors the web app's src/api/fixedAssetTaggingApi.ts list shape.
@@ -277,8 +326,58 @@ export interface TaggingListItem {
   RecordStatus: "Pending" | "Done" | null;
 }
 
-export const getFixedAssetTaggings = (): Promise<TaggingListItem[]> =>
-  getJson("/api/fixed-asset-tagging", "Failed to load FA inventory");
+export interface TaggingDetail extends TaggingListItem {
+  ItemId: string | null;
+  BatchQuantity: number;
+  UpdatedBy: string | null;
+  UpdatedAt: string | null;
+}
+
+export interface EligibleAssetItem {
+  ItemId: string;
+  ItemName: string | null;
+  AssetCategory: string | null;
+  AvailableQty: number;
+  TaggedQty: number;
+  UntaggedQty: number;
+}
+
+export const getFixedAssetTaggings = (params?: {
+  companyId?: number; projectId?: number; finYear?: string; godownId?: number; fromDate?: string; toDate?: string;
+}): Promise<TaggingListItem[]> => {
+  const qs = new URLSearchParams();
+  if (params?.companyId) qs.set("companyId", String(params.companyId));
+  if (params?.projectId) qs.set("projectId", String(params.projectId));
+  if (params?.finYear) qs.set("finYear", params.finYear);
+  if (params?.godownId) qs.set("godownId", String(params.godownId));
+  if (params?.fromDate) qs.set("fromDate", params.fromDate);
+  if (params?.toDate) qs.set("toDate", params.toDate);
+  return getJson(`/api/fixed-asset-tagging${qs.toString() ? `?${qs}` : ""}`, "Failed to load FA inventory");
+};
+
+export const getFixedAssetTagging = (id: number): Promise<TaggingDetail> =>
+  getJson(`/api/fixed-asset-tagging/${id}`, "Failed to load tagging entry");
+
+export const getEligibleAssetItems = (params: {
+  godownId: number; companyId?: number; projectId?: number; finYear?: string;
+}): Promise<EligibleAssetItem[]> => {
+  const qs = new URLSearchParams({ godownId: String(params.godownId) });
+  if (params.companyId) qs.set("companyId", String(params.companyId));
+  if (params.projectId) qs.set("projectId", String(params.projectId));
+  if (params.finYear) qs.set("finYear", params.finYear);
+  return getJson(`/api/fixed-asset-tagging/eligible-items?${qs}`, "Failed to load eligible items");
+};
+
+export const createFixedAssetTagging = (data: {
+  docDate: string; companyId?: number | null; projectId: number; godownId: number; itemId: string; numberOfItems: number; remarks?: string;
+}): Promise<{ tagId: number; docNo: string; codes: string[] }> =>
+  mutate("/api/fixed-asset-tagging", "POST", data, "Failed to generate FA Item Codes");
+
+export const updateFixedAssetTagging = (id: number, data: { docDate?: string; remarks?: string }): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-asset-tagging/${id}`, "PUT", data, "Failed to update tagging entry");
+
+export const deleteFixedAssetTagging = (id: number): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-asset-tagging/${id}`, "DELETE", undefined, "Failed to cancel tagging entry");
 
 // ── Inventory Import ────────────────────────────────────────────────────────
 export interface InventoryImportListItem {
@@ -299,8 +398,29 @@ export interface InventoryImportListItem {
   AssetCategory: string | null;
 }
 
-export const getInventoryImports = (): Promise<InventoryImportListItem[]> =>
-  getJson("/api/fixed-asset-inventory-import", "Failed to load inventory imports");
+export const getInventoryImports = (params?: {
+  companyId?: number; projectId?: number; godownId?: number;
+}): Promise<InventoryImportListItem[]> => {
+  const qs = new URLSearchParams();
+  if (params?.companyId) qs.set("companyId", String(params.companyId));
+  if (params?.projectId) qs.set("projectId", String(params.projectId));
+  if (params?.godownId) qs.set("godownId", String(params.godownId));
+  return getJson(`/api/fixed-asset-inventory-import${qs.toString() ? `?${qs}` : ""}`, "Failed to load inventory imports");
+};
+
+export const getInventoryImport = (id: number): Promise<InventoryImportListItem & { ResolvedItemName: string | null }> =>
+  getJson(`/api/fixed-asset-inventory-import/${id}`, "Failed to load import");
+
+export const createInventoryImport = (data: {
+  docDate: string; companyId?: number | null; projectId?: number | null; godownId: number; itemId: string; quantity: number; rate?: number | null; remarks?: string;
+}): Promise<{ importId: number; assetId: number; docNo: string; tagged: number }> =>
+  mutate("/api/fixed-asset-inventory-import", "POST", data, "Failed to create inventory import");
+
+export const getInventoryImportReversalPlan = (id: number): Promise<ReversalPlan> =>
+  getJson(`/api/fixed-asset-inventory-import/${id}/can-reverse`, "Failed to check reversal eligibility");
+
+export const reverseInventoryImport = (id: number): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-asset-inventory-import/${id}`, "DELETE", undefined, "Failed to reverse this import");
 
 // ── Assignment ─────────────────────────────────────────────────────────────
 export interface AssignmentListItem {
@@ -326,8 +446,51 @@ export interface AssignmentListItem {
   IsCurrent: boolean;
 }
 
-export const getAssignments = (): Promise<AssignmentListItem[]> =>
-  getJson("/api/fixed-asset-assignment", "Failed to load assignments");
+export type AssignmentDetail = AssignmentListItem & { UserImage: string | null; ResponsibleUserAvatar: string | null; UserAvatar: string | null };
+
+export interface AssignableAsset {
+  AssetId: number;
+  FAItemCode: string;
+  AssetName: string;
+  AssetCategory: string | null;
+  CompanyId: number | null;
+  CompanyName: string | null;
+  ProjectId: number | null;
+  ProjectName: string | null;
+  CustodianUserId: number | null;
+  CurrentCustodianName: string | null;
+}
+
+export const getAssignments = (params?: { companyId?: number; projectId?: number; assetId?: number; userId?: number }): Promise<AssignmentListItem[]> => {
+  const qs = new URLSearchParams();
+  if (params?.companyId) qs.set("companyId", String(params.companyId));
+  if (params?.projectId) qs.set("projectId", String(params.projectId));
+  if (params?.assetId) qs.set("assetId", String(params.assetId));
+  if (params?.userId) qs.set("userId", String(params.userId));
+  return getJson(`/api/fixed-asset-assignment${qs.toString() ? `?${qs}` : ""}`, "Failed to load assignments");
+};
+
+export const getAssignment = (id: number): Promise<AssignmentDetail> =>
+  getJson(`/api/fixed-asset-assignment/${id}`, "Failed to load assignment");
+
+export const getAssignableAssets = (): Promise<AssignableAsset[]> =>
+  getJson("/api/fixed-asset-assignment/fa-item-codes", "Failed to load FA Item Codes");
+
+export interface AssignmentPayload {
+  docDate: string; companyId: number; projectId: number; finYear: string;
+  assetId: number; userId: number; responsibleUserId: number; userImage?: string | null; remarks?: string;
+}
+
+export const createAssignment = (data: AssignmentPayload): Promise<{ assignmentId: number; docNo: string }> =>
+  mutate("/api/fixed-asset-assignment", "POST", data, "Failed to create assignment");
+
+export const updateAssignment = (id: number, data: {
+  docDate: string; finYear: string; userId: number; responsibleUserId: number; userImage?: string | null; remarks?: string;
+}): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-asset-assignment/${id}`, "PUT", data, "Failed to update assignment");
+
+export const deleteAssignment = (id: number): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-asset-assignment/${id}`, "DELETE", undefined, "Failed to delete assignment");
 
 // ── User-Wise Asset Transfer ───────────────────────────────────────────────
 export interface TransferListItem {
@@ -353,8 +516,54 @@ export interface TransferListItem {
   DepartmentName: string | null;
 }
 
-export const getAssetTransfers = (): Promise<TransferListItem[]> =>
-  getJson("/api/asset-transfer", "Failed to load asset transfers");
+export interface TransferableAsset {
+  AssetId: number;
+  AssetName: string;
+  AssetCode: string | null;
+  AssetCategory: string;
+  FAItemCode: string | null;
+  CompanyId: number | null;
+  ProjectId: number | null;
+  FinYear: string | null;
+  PictureBase64: string | null;
+  CustodianUserId: number | null;
+  CustodianName: string | null;
+}
+
+export const getAssetTransfers = (params?: {
+  companyId?: number; projectId?: number; finYear?: string; assetId?: number;
+  fromUserId?: number; toUserId?: number; fromDate?: string; toDate?: string;
+}): Promise<TransferListItem[]> => {
+  const qs = new URLSearchParams();
+  Object.entries(params ?? {}).forEach(([k, v]) => { if (v != null && v !== "") qs.set(k, String(v)); });
+  return getJson(`/api/asset-transfer${qs.toString() ? `?${qs}` : ""}`, "Failed to load asset transfers");
+};
+
+export const getAssetTransfer = (id: number): Promise<TransferListItem & { DepartmentId: number | null; CompanyId: number | null; ProjectId: number | null }> =>
+  getJson(`/api/asset-transfer/${id}`, "Failed to load transfer");
+
+export const getTransferableAssets = (params: { projectId?: number; companyId?: number; finYear?: string }): Promise<TransferableAsset[]> => {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => { if (v != null && v !== "") qs.set(k, String(v)); });
+  return getJson(`/api/asset-transfer/transferable-assets${qs.toString() ? `?${qs}` : ""}`, "Failed to load transferable assets");
+};
+
+export interface TransferPayload {
+  docDate?: string; transferDate?: string; companyId?: number | null; projectId: number; finYear?: string;
+  assetId: number; fromUserId: number; toUserId: number; departmentId: number; remarks: string;
+}
+
+export const createAssetTransfer = (data: TransferPayload): Promise<{ id: number; docNo: string }> =>
+  mutate("/api/asset-transfer", "POST", data, "Failed to create asset transfer");
+
+export const updateAssetTransfer = (id: number, data: TransferPayload): Promise<{ ok: true }> =>
+  mutate(`/api/asset-transfer/${id}`, "PUT", data, "Failed to update asset transfer");
+
+export const deleteAssetTransfer = (id: number): Promise<{ ok: true }> =>
+  mutate(`/api/asset-transfer/${id}`, "DELETE", undefined, "Failed to delete asset transfer");
+
+export const setAssetPicture = (assetId: number, pictureBase64: string | null): Promise<{ ok: true }> =>
+  mutate(`/api/asset-transfer/asset-picture/${assetId}`, "PUT", { pictureBase64 }, "Failed to save item picture");
 
 // ── Owner & Quality Checking ───────────────────────────────────────────────
 export type QualityStatus = "Good" | "Average" | "Defective" | "Repairing";
@@ -381,7 +590,71 @@ export interface QualityCheckItem {
   CreatedBy: string | null;
   CreatedAt: string;
   IsOverdue: 0 | 1;
+  ItemPicture: string | null;
+  UserPhoto: string | null;
+  CurrentUserAvatar: string | null;
+  ResponsibleUserAvatar: string | null;
+  FollowUpRemarks: string | null;
+  LastFollowUpDate: string | null;
+  NextActionNotes: string | null;
+  CompletedBy: string | null;
+  CompletedAt: string | null;
 }
 
-export const getQualityChecks = (): Promise<QualityCheckItem[]> =>
-  getJson("/api/fixed-asset-quality-check", "Failed to load quality checks");
+export interface QCAsset {
+  AssetId: number; FAItemCode: string; AssetName: string; AssetCategory: string | null;
+  CompanyId: number | null; ProjectId: number | null; FinYear: string | null;
+}
+
+export interface QCAssetContext {
+  assetId: number; faItemCode: string | null; itemName: string | null;
+  companyId: number | null; projectId: number | null; finYear: string | null;
+  itemPicture: string | null; itemPictureFromDocNo: string | null; itemPictureFromDate: string | null;
+  currentUserId: number | null; currentUserName: string | null; currentUserAvatar: string | null;
+  userPhoto: string | null; hasAssignment: boolean; assignmentId: number | null;
+  responsibleUserId: number | null; responsibleUserName: string | null; responsibleUserAvatar: string | null;
+}
+
+export const getQualityChecks = (params?: {
+  companyId?: number; projectId?: number; assetId?: number; followUpStatus?: FollowUpStatus; overdue?: boolean;
+}): Promise<QualityCheckItem[]> => {
+  const qs = new URLSearchParams();
+  if (params?.companyId) qs.set("companyId", String(params.companyId));
+  if (params?.projectId) qs.set("projectId", String(params.projectId));
+  if (params?.assetId) qs.set("assetId", String(params.assetId));
+  if (params?.followUpStatus) qs.set("followUpStatus", params.followUpStatus);
+  if (params?.overdue) qs.set("overdue", "1");
+  return getJson(`/api/fixed-asset-quality-check${qs.toString() ? `?${qs}` : ""}`, "Failed to load quality checks");
+};
+
+export const getQualityCheck = (id: number): Promise<QualityCheckItem> =>
+  getJson(`/api/fixed-asset-quality-check/${id}`, "Failed to load quality check");
+
+export const getQCAssets = (params: { companyId?: number; projectId?: number }): Promise<QCAsset[]> => {
+  const qs = new URLSearchParams();
+  if (params.companyId) qs.set("companyId", String(params.companyId));
+  if (params.projectId) qs.set("projectId", String(params.projectId));
+  return getJson(`/api/fixed-asset-quality-check/assets${qs.toString() ? `?${qs}` : ""}`, "Failed to load assets");
+};
+
+export const getQCAssetContext = (assetId: number): Promise<QCAssetContext> =>
+  getJson(`/api/fixed-asset-quality-check/asset-context/${assetId}`, "Failed to load asset details");
+
+export interface QualityCheckPayload {
+  docDate?: string; companyId?: number | null; projectId?: number | null;
+  assetId: number; qualityStatus: QualityStatus; remarks?: string; itemPicture?: string | null;
+  nextFollowUpDate: string; followUpType?: string; followUpRemarks?: string;
+  followUpStatus?: FollowUpStatus; lastFollowUpDate?: string; nextActionNotes?: string;
+}
+
+export const createQualityCheck = (data: QualityCheckPayload): Promise<{ qualityCheckId: number; docNo: string }> =>
+  mutate("/api/fixed-asset-quality-check", "POST", data, "Failed to create quality check");
+
+export const updateQualityCheck = (id: number, data: QualityCheckPayload): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-asset-quality-check/${id}`, "PUT", data, "Failed to update quality check");
+
+export const setFollowUpStatus = (id: number, status: FollowUpStatus): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-asset-quality-check/${id}/follow-up-status`, "PATCH", { status }, "Failed to update follow-up status");
+
+export const deleteQualityCheck = (id: number): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-asset-quality-check/${id}`, "DELETE", undefined, "Failed to delete quality check");

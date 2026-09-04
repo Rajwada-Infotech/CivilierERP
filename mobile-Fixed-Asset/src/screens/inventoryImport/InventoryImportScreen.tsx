@@ -1,19 +1,23 @@
 // Inventory Import — opening-stock imports that mint fixed assets
 // (/api/fixed-asset-inventory-import). Read-only; importing is done on web.
 import { useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
 import { Card, DataList, Line, Pill } from "@/components/list/DataList";
+import { Fab } from "@/components/Fab";
+import { usePageRights } from "@/hooks/usePageRights";
+import { navigate } from "@/navigation/navigationRef";
 import { getInventoryImports, type InventoryImportListItem } from "@/api/fixedAssetApi";
 
 const FILTERS = ["All", "Active", "Reversed"] as const;
 
 export default function InventoryImportScreen() {
   const [filter, setFilter] = useState<string>("All");
-  const query = useQuery({ queryKey: ["fa-inv-import"], queryFn: getInventoryImports });
+  const rights = usePageRights("fixed-asset-inventory-import");
+  const query = useQuery({ queryKey: ["fa-inv-import"], queryFn: () => getInventoryImports() });
 
   const filtered = useMemo(() => {
     const list = query.data ?? [];
@@ -29,7 +33,9 @@ export default function InventoryImportScreen() {
       activeFilter={filter}
       onFilter={setFilter}
       emptyText="No inventory imports."
+      footer={rights.canCreate ? <Fab label="Import" onPress={() => navigate("InventoryImportForm")} /> : null}
       renderCard={(item) => (
+        <Pressable onPress={() => navigate("InventoryImportDetail", { id: item.ImportId })}>
         <Card>
           <View className="flex-row items-center justify-between">
             <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
@@ -48,6 +54,7 @@ export default function InventoryImportScreen() {
             </Text>
           </View>
         </Card>
+        </Pressable>
       )}
     />
   );
