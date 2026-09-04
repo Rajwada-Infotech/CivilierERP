@@ -116,7 +116,9 @@ router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res
   try {
     const pool = getPool();
     const request = pool.request();
-    let where = [];
+    // Cancelled tags are soft-kept in the DB for FA Item Code / stock audit,
+    // but never surface in the Tagging Transaction History list on any client.
+    let where = ["t.Status <> 'Cancelled'"];
 
     if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("t.CompanyId = @CompanyId"); }
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("t.ProjectId = @ProjectId"); }

@@ -8,7 +8,7 @@ import { Card, DataList, Line, Pill } from "@/components/list/DataList";
 import { navigate } from "@/navigation/navigationRef";
 import { getFixedAssetTaggings, type TaggingListItem } from "@/api/fixedAssetApi";
 
-const FILTERS = ["All", "Tagged", "Cancelled", "Record: Pending", "Record: Done"] as const;
+const FILTERS = ["All", "Record: Pending", "Record: Done"] as const;
 
 export default function TaggingScreen() {
   const [filter, setFilter] = useState<string>("All");
@@ -16,10 +16,9 @@ export default function TaggingScreen() {
 
   const filtered = useMemo(() => {
     const list = query.data ?? [];
-    if (filter === "All") return list;
     if (filter === "Record: Pending") return list.filter((t) => t.RecordStatus === "Pending");
     if (filter === "Record: Done") return list.filter((t) => t.RecordStatus === "Done");
-    return list.filter((t) => t.Status === filter);
+    return list;
   }, [query.data, filter]);
 
   return (
