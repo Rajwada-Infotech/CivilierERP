@@ -13,7 +13,7 @@ import { formatINR } from "@/utils/formatCurrency";
 import {
   Plus, CheckCircle2, AlertTriangle, XCircle, ExternalLink, Lock,
   Pencil, ScrollText, RotateCcw, UserCircle2, Circle, ChevronDown, ChevronUp,
-  FileText, Upload, File as FileIcon, Download, Check, History, RefreshCw, Send, FileImage, FileSpreadsheet, X, Search, AlertCircle, Info, ArrowRight, ShieldAlert
+  FileText, Upload, File as FileIcon, Download, Check, History, RefreshCw, Send, FileImage, FileSpreadsheet, X, Search, AlertCircle, Info, ArrowRight, ShieldAlert, Eye, Loader2
 } from "lucide-react";
 import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import {
@@ -46,7 +46,18 @@ const DOC_STATUS_COLOR: Record<string, string> = {
   Requested: 'text-amber-600 bg-amber-50 border-amber-200',
   Uploaded:  'text-blue-600 bg-blue-50 border-blue-200',
   Verified:  'text-emerald-600 bg-emerald-50 border-emerald-200',
+  Rejected:  'text-red-600 bg-red-50 border-red-200',
 };
+
+// Plain-language description of what staff should do next for a given
+// document row — the old layout left people guessing what "Requested" vs
+// "Uploaded" vs a Mandatory badge actually meant for them right now.
+function docNextStep(doc: any): string {
+  if (doc.Status === 'Verified') return 'Checked and accepted.';
+  if (doc.Status === 'Rejected') return 'Rejected — attach a corrected file.';
+  if (doc.Status === 'Uploaded') return 'Uploaded — awaiting staff review.';
+  return doc.IsMandatory ? 'Required — attach a file to proceed.' : 'Requested — attach a file.';
+}
 
 const LOG_ACTION_CFG: Record<string, { label: string; color: string }> = {
   SeniorApprove:   { label: 'Senior Approved',     color: 'text-emerald-600' },
@@ -105,25 +116,51 @@ function deedStepStates(d: any, documents: any[] | undefined, context: any): { l
   const docs = deedDocumentProgress(documents);
   const docsDone = docs.required > 0 && docs.percent === 100;
   const senior = d?.SeniorApprovalStatus === "Approved";
-  const sent = !!d?.SentToCustomerAt;
   const custApproved = d?.CustomerApprovalStatus === "Approved";
   const dirApproved = d?.DirectorApprovalStatus === "Approved";
   const qpConfirmed = context?.queryPaymentStatus === "Confirmed";
-  const regDone = context?.registryStatus === "Completed";
   const executed = !!d?.ExecutedBy;
   const registered = !!d?.RegistrationNo;
-  
-  return [
-    { label: "Draft Setup", state: "done", tab: "Overview" },
-    { label: "Legal Assigned", state: (legalAssigned ? "done" : "current") as StepState, tab: "Legal & Approval" },
-    { label: `Draft Docs${docs.required > 0 ? ` (${docs.percent}%)` : ""}`, state: (docsDone ? "done" : legalAssigned ? "current" : "upcoming") as StepState, tab: "Documents" },
-    { label: "Senior Approve", state: (senior ? "done" : docsDone ? "current" : "upcoming") as StepState, tab: "Legal & Approval" },
-    { label: "Customer Review", state: (custApproved ? "done" : senior ? "current" : "upcoming") as StepState, tab: "Legal & Approval" },
-    { label: "Director Approve", state: (dirApproved ? "done" : custApproved ? "current" : "upcoming") as StepState, tab: "Legal & Approval" },
-    { label: "Stamp Duty", state: (qpConfirmed ? "done" : dirApproved ? "current" : "upcoming") as StepState, tab: "Registration" },
-    { label: "Execution", state: (executed ? "done" : qpConfirmed ? "current" : "upcoming") as StepState, tab: "Registration" },
-    { label: "Registered", state: (registered ? "done" : executed ? "current" : "upcoming") as StepState, tab: "Registration" }
+
+  // Each step used to read its own "done" flag straight off the record and
+  // its "current" flag off just the PRECEDING step's flag, independently —
+  // so if the underlying data was ever out of sequence (e.g. a legacy/bad
+  // row where CustomerApprovalStatus and DirectorApprovalStatus were
+  // Approved despite SeniorApprovalStatus never being set — a combination
+  // the real gates added to this page now make impossible to reach honestly,
+  // but which can still exist as leftover data), the stepper showed
+  // contradictory checkmarks out of order AND two steps marked "current" at
+  // once. A step's true position in this chain is never independent of the
+  // ones before it — an approval that could only ever legitimately happen
+  // after an earlier gate can't meaningfully be "done" while that gate isn't.
+  // Single sequential pass instead: a step is "done" only if its own flag is
+  // true AND every step before it is also done; the first not-done step is
+  // the one and only "current" step; everything after that is "upcoming".
+  const raw: { label: string; done: boolean; tab: DeedTab }[] = [
+    { label: "Draft Setup", done: true, tab: "Overview" },
+    { label: "Legal Assigned", done: legalAssigned, tab: "Legal & Approval" },
+    { label: `Draft Docs${docs.required > 0 ? ` (${docs.percent}%)` : ""}`, done: docsDone, tab: "Documents" },
+    { label: "Senior Approve", done: senior, tab: "Legal & Approval" },
+    { label: "Customer Review", done: custApproved, tab: "Legal & Approval" },
+    { label: "Director Approve", done: dirApproved, tab: "Legal & Approval" },
+    { label: "Stamp Duty", done: qpConfirmed, tab: "Registration" },
+    { label: "Execution", done: executed, tab: "Registration" },
+    { label: "Registered", done: registered, tab: "Registration" },
   ];
+
+  let blocked = false;
+  return raw.map((s) => {
+    let state: StepState;
+    if (!blocked && s.done) {
+      state = "done";
+    } else if (!blocked) {
+      state = "current";
+      blocked = true;
+    } else {
+      state = "upcoming";
+    }
+    return { label: s.label, state, tab: s.tab };
+  });
 }
 
 function DeedStepper({ steps, activeTab, onStepClick }: { steps: { label: string; state: StepState; tab: DeedTab }[]; activeTab: DeedTab; onStepClick: (t: DeedTab) => void }) {
@@ -499,8 +536,49 @@ const CrmSalesDeed: React.FC = () => {
   const [assigningLegal, setAssigningLegal] = useState(false);
   const [selectedLegalExec, setSelectedLegalExec] = useState('');
   const [uploadingDoc, setUploadingDoc] = useState(false);
-  const [newDocType, setNewDocType] = useState('DeedDraft');
+  const [newDocType, setNewDocType] = useState('ExecutedDeed');
   const [newDocLabel, setNewDocLabel] = useState('');
+  const [requestingDoc, setRequestingDoc] = useState(false);
+  // The old "Download" link was the ONLY way to look at an attached
+  // document — it forces a save-to-disk (Content-Disposition: attachment)
+  // instead of letting staff actually view the file, so verifying a doc
+  // meant downloading it first every single time. This opens an in-page
+  // preview (image/PDF) fetched with the same auth as everything else on
+  // this page — window.open() with a bare URL can't carry the bearer
+  // token, so we fetch a blob and preview that instead.
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; mime: string; name: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<number | null>(null);
+  const handlePreviewDoc = async (doc: any) => {
+    setPreviewLoading(doc.Id);
+    try {
+      const res = await fetchWithAuth(`${API}/documents/file/${doc.Id}`);
+      if (!res.ok) throw new Error("Could not load file");
+      const blob = await res.blob();
+      setPreviewDoc({ url: URL.createObjectURL(blob), mime: doc.MimeType, name: doc.FileName || doc.DocumentType });
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setPreviewLoading(null); }
+  };
+  const closePreview = () => {
+    if (previewDoc) URL.revokeObjectURL(previewDoc.url);
+    setPreviewDoc(null);
+  };
+  // Same root cause as the preview above: this route sits behind
+  // authMiddleware with no query-token fallback, so the previous plain
+  // `window.open(url, '_blank')` always 401'd — "Download" never actually
+  // worked. Fetch with the real auth header this page already uses
+  // everywhere else, then trigger the save via a throwaway anchor.
+  const handleDownloadDoc = async (doc: any) => {
+    try {
+      const res = await fetchWithAuth(`${API}/documents/file/${doc.Id}`);
+      if (!res.ok) throw new Error("Could not download file");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = doc.FileName || doc.DocumentType || 'document';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: any) { toast.error(translateError(e.message)); }
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: deeds = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
@@ -769,6 +847,28 @@ const CrmSalesDeed: React.FC = () => {
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setUploadingDoc(false); }
+  };
+
+  // Requests a mandatory document requirement dynamically — the recovery
+  // path for the "no mandatory documents requested yet" dead end: previously
+  // the ONLY mandatory doc a deed could ever have was the single 'DeedDraft'
+  // row auto-seeded at creation, with no way to ask for another if that one
+  // was ever consumed by something else, or a rejection needed a genuinely
+  // fresh copy.
+  const handleRequestDoc = async (documentType: string, label?: string) => {
+    if (!detailId) return;
+    setRequestingDoc(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${detailId}/documents/request`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ DocumentType: documentType, Label: label, IsMandatory: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Mandatory document requested");
+      invalidateDetail();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setRequestingDoc(false); }
   };
 
   const handleResubmit = async () => {
@@ -1220,7 +1320,24 @@ const CrmSalesDeed: React.FC = () => {
                           const status = detail.SeniorApprovalStatus;
                           const done = status === 'Approved';
                           const rejected = status === 'Rejected';
-                          const pending = status === 'Pending' || status === null;
+                          // A deed that has never been submitted (status is
+                          // still NULL) is NOT the same state as one that's
+                          // actually awaiting a senior's decision — the two
+                          // used to be conflated (both displayed as
+                          // "Pending" with live Approve/Reject buttons),
+                          // which let an approver click Approve/Reject on a
+                          // deed that was never submitted and get a bare
+                          // 400 ("Cannot reject from status \"null\"") with
+                          // no explanation, because the backend's real state
+                          // machine — correctly — requires the explicit
+                          // /submit transition first. Only a genuine Pending
+                          // counts as submitted; NULL gets its own Submit
+                          // control below instead of borrowing Pending's UI.
+                          const notSubmitted = status === null || status === undefined;
+                          const submitted = status === 'Pending';
+                          const pending = submitted;
+                          const docs = deedDocumentProgress(deedDetail?.documents);
+                          const docsReady = docs.required > 0 && docs.percent === 100;
                           return (
                             <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${done ? "bg-green-500/[0.04]" : rejected ? "bg-red-500/[0.04]" : ""}`}>
                               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5 ${done ? "bg-green-500 text-white" : rejected ? "bg-red-500 text-white" : pending ? "bg-primary text-primary-foreground" : "border-2 border-border text-muted-foreground"}`}>
@@ -1232,8 +1349,9 @@ const CrmSalesDeed: React.FC = () => {
                                   <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${
                                     done ? "text-green-600 bg-green-50 border-green-200"
                                     : rejected ? "text-red-600 bg-red-50 border-red-200"
+                                    : notSubmitted ? "text-muted-foreground bg-muted border-border"
                                     : "text-amber-600 bg-amber-50 border-amber-200"
-                                  }`}>{status || "Pending"}</span>
+                                  }`}>{notSubmitted ? "Not Submitted" : status}</span>
                                 </div>
                                 <p className="text-xs text-muted-foreground">
                                   An admin or super-admin approves this deed before it's shared with the customer.
@@ -1249,10 +1367,27 @@ const CrmSalesDeed: React.FC = () => {
                                     <strong>Rejection reason:</strong> {detail.SeniorApprovalRemarks}
                                   </div>
                                 )}
-                                {detail.BookingStatus !== 'Cancelled' && !done && (
+                                {notSubmitted && detail.BookingStatus !== 'Cancelled' && (
+                                  <div className="pt-0.5">
+                                    <button
+                                      onClick={handleResubmit}
+                                      disabled={!docsReady}
+                                      title={!docsReady ? `${docs.uploaded}/${docs.required} mandatory documents verified — all must be Verified first` : undefined}
+                                      className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      Submit for Senior Approval
+                                    </button>
+                                    {!docsReady && (
+                                      <p className="text-xs text-muted-foreground mt-1">
+                                        {docs.required === 0 ? "Request a mandatory document from the Documents tab first." : `${docs.uploaded}/${docs.required} mandatory documents verified.`}
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+                                {submitted && detail.BookingStatus !== 'Cancelled' && !done && (
                                   <div className="flex items-center gap-2 flex-wrap pt-0.5">
                                     <ApprovalActions
-                                      status={status || "Pending"}
+                                      status={status}
                                       recordId={detail.Id}
                                       endpoint={API}
                                       actionPathSuffix=""
@@ -1589,64 +1724,119 @@ const CrmSalesDeed: React.FC = () => {
                     </div>
                   )}
 
-                  {activeTab === 'Documents' && (
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        {deedDetail?.documents?.map((doc: any) => (
-                          <div key={doc.Id} className="border border-border rounded-lg p-3 text-sm flex items-start gap-3 bg-card">
-                            <div className="mt-1">{mimeIcon(doc.MimeType)}</div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="font-medium">{doc.DocumentType}</span>
-                                {doc.IsMandatory && <span className="text-[9px] uppercase tracking-wider font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">Mandatory</span>}
-                                <span className={cn("text-[10px] px-2 py-0.5 rounded-full border", DOC_STATUS_COLOR[doc.Status] || "bg-muted border-border text-muted-foreground")}>{doc.Status}</span>
-                              </div>
-                              {doc.HasFile ? (
-                                <p className="text-xs text-muted-foreground truncate">{doc.FileName} · {fmtBytes(doc.FileSize)}</p>
-                              ) : (
-                                <p className="text-xs text-muted-foreground italic">No file attached</p>
-                              )}
-                              {doc.Status === 'Rejected' && doc.Remarks && (
-                                <p className="text-xs text-red-600 mt-0.5">Rejected: {doc.Remarks}</p>
-                              )}
+                  {activeTab === 'Documents' && (() => {
+                    const allDocs = deedDetail?.documents || [];
+                    const required = allDocs.filter((d: any) => d.IsMandatory);
+                    const supporting = allDocs.filter((d: any) => !d.IsMandatory);
+                    const verifiedCount = required.filter((d: any) => d.Status === 'Verified').length;
+
+                    const DocRow = ({ doc }: { doc: any }) => (
+                      <div className="border border-border rounded-lg p-3 text-sm bg-card">
+                        <div className="flex items-start gap-3">
+                          <div className="mt-0.5">{mimeIcon(doc.MimeType)}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                              <span className="font-medium">{doc.Label || doc.DocumentType}</span>
+                              <span className={cn("text-[10px] px-2 py-0.5 rounded-full border font-medium", DOC_STATUS_COLOR[doc.Status] || "bg-muted border-border text-muted-foreground")}>{doc.Status}</span>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              {doc.HasFile && (
-                                <button onClick={() => window.open(`${API}/documents/file/${doc.Id}`, '_blank')} className="text-xs text-primary hover:underline flex items-center gap-1">
-                                  <Download size={12}/> Download
-                                </button>
-                              )}
-                              {(!doc.HasFile || doc.Status === 'Rejected') && ['Requested', 'Rejected'].includes(doc.Status) && !progressLocked && (
-                                <>
-                                  <input type="file" className="hidden" id={`doc-attach-${doc.Id}`} onChange={e => e.target.files?.[0] && handleAttachDoc(doc.Id, e.target.files[0])} />
-                                  <button onClick={() => document.getElementById(`doc-attach-${doc.Id}`)?.click()} className="text-xs border border-border px-2 py-1 rounded hover:bg-muted">
-                                    {doc.Status === 'Rejected' ? 'Re-attach File' : 'Attach File'}
-                                  </button>
-                                </>
-                              )}
-                              {doc.HasFile && doc.Status === 'Uploaded' && !progressLocked && (
-                                <>
-                                  <button onClick={() => handleVerifyDoc(doc.Id)} className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-1 rounded hover:bg-green-100">Verify</button>
-                                  <button onClick={() => handleRejectDoc(doc.Id)} className="text-xs bg-red-50 text-red-700 border border-red-200 px-2 py-1 rounded hover:bg-red-100">Reject</button>
-                                </>
-                              )}
-                            </div>
+                            <p className="text-xs text-muted-foreground">{docNextStep(doc)}</p>
+                            {doc.HasFile && (
+                              <p className="text-xs text-muted-foreground/80 truncate mt-0.5">{doc.FileName} · {fmtBytes(doc.FileSize)}</p>
+                            )}
+                            {doc.Status === 'Rejected' && doc.Remarks && (
+                              <p className="text-xs text-red-600 mt-1 bg-red-50 border border-red-200 rounded px-2 py-1">"{doc.Remarks}"</p>
+                            )}
                           </div>
-                        ))}
-                        {(!deedDetail?.documents || deedDetail.documents.length === 0) && (
-                          <div className="text-center py-8 text-xs text-muted-foreground">No documents found.</div>
+                        </div>
+                        <div className="flex items-center gap-2 mt-2 pl-7">
+                          {doc.HasFile && (doc.MimeType?.startsWith('image/') || doc.MimeType === 'application/pdf') && (
+                            <button onClick={() => handlePreviewDoc(doc)} disabled={previewLoading === doc.Id} className="text-xs text-primary hover:underline flex items-center gap-1 disabled:opacity-50">
+                              {previewLoading === doc.Id ? <Loader2 size={12} className="animate-spin"/> : <Eye size={12}/>} Preview
+                            </button>
+                          )}
+                          {doc.HasFile && (
+                            <button onClick={() => handleDownloadDoc(doc)} className="text-xs text-primary hover:underline flex items-center gap-1">
+                              <Download size={12}/> Download
+                            </button>
+                          )}
+                          {['Requested', 'Rejected'].includes(doc.Status) && !progressLocked && (
+                            <>
+                              <input type="file" className="hidden" id={`doc-attach-${doc.Id}`} onChange={e => e.target.files?.[0] && handleAttachDoc(doc.Id, e.target.files[0])} />
+                              <button onClick={() => document.getElementById(`doc-attach-${doc.Id}`)?.click()} className="text-xs bg-primary text-primary-foreground px-2.5 py-1 rounded font-medium hover:bg-primary/90">
+                                {doc.Status === 'Rejected' ? 'Re-attach File' : 'Attach File'}
+                              </button>
+                            </>
+                          )}
+                          {doc.HasFile && doc.Status === 'Uploaded' && !progressLocked && (
+                            <>
+                              <button onClick={() => handleVerifyDoc(doc.Id)} className="text-xs bg-green-50 text-green-700 border border-green-200 px-2.5 py-1 rounded hover:bg-green-100 font-medium">Verify</button>
+                              <button onClick={() => handleRejectDoc(doc.Id)} className="text-xs bg-red-50 text-red-700 border border-red-200 px-2.5 py-1 rounded hover:bg-red-100 font-medium">Reject</button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+
+                    return (
+                    <div className="space-y-5">
+                      {/* Required Documents — the ones Senior Approval actually gates on.
+                          Separated from supporting docs so "what's blocking approval"
+                          is never mixed in with reference material. */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-xs font-semibold text-foreground uppercase tracking-wide">Required for Senior Approval</h4>
+                          {required.length > 0 && (
+                            <span className={cn("text-[11px] font-semibold", verifiedCount === required.length ? "text-emerald-600" : "text-amber-600")}>
+                              {verifiedCount}/{required.length} verified
+                            </span>
+                          )}
+                        </div>
+                        {required.length === 0 ? (
+                          <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 flex items-center justify-between gap-3">
+                            <p className="text-xs text-amber-800">
+                              <span className="font-semibold">No mandatory document requested yet.</span> Approval is blocked until one is requested and verified.
+                            </p>
+                            {!progressLocked && (
+                              <button
+                                onClick={() => handleRequestDoc('DeedDraft', 'Sale Deed Draft (Physical Legal Document)')}
+                                disabled={requestingDoc}
+                                className="shrink-0 text-xs bg-amber-600 text-white px-3 py-1.5 rounded hover:bg-amber-700 disabled:opacity-50 font-medium"
+                              >
+                                {requestingDoc ? "Requesting..." : "Request Deed Draft"}
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {required.map((doc: any) => <DocRow key={doc.Id} doc={doc} />)}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Supporting Documents — reference material with no bearing on
+                          the approval gate (e.g. a scanned executed copy kept for
+                          record). Kept visually distinct from Required above so
+                          nobody mistakes one for the other. */}
+                      <div>
+                        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Supporting Documents</h4>
+                        {supporting.length > 0 ? (
+                          <div className="space-y-2">
+                            {supporting.map((doc: any) => <DocRow key={doc.Id} doc={doc} />)}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground italic">None added.</p>
                         )}
                       </div>
 
                       {!progressLocked && (
                         <div className="border border-dashed border-border rounded-lg p-4 bg-muted/20">
-                          <p className="text-xs font-semibold mb-2 text-foreground">Add Document</p>
+                          <p className="text-xs font-semibold mb-0.5 text-foreground">Add a Supporting Document</p>
+                          <p className="text-xs text-muted-foreground mb-2">For reference material only — use "Request Deed Draft" above for anything Senior Approval needs to check.</p>
                           <div className="flex items-end gap-2">
                             <div className="flex-1 space-y-1">
                               <label className="text-[10px] font-medium text-muted-foreground">Type</label>
                               <select value={newDocType} onChange={e => setNewDocType(e.target.value)} className="w-full h-8 text-xs border border-border rounded px-2 bg-background">
-                                <option value="DeedDraft">Deed Draft</option>
-                                <option value="ExecutedDeed">Executed Deed</option>
+                                <option value="ExecutedDeed">Executed Deed Copy</option>
                                 <option value="Other">Other</option>
                               </select>
                             </div>
@@ -1666,7 +1856,8 @@ const CrmSalesDeed: React.FC = () => {
                         </div>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {activeTab === 'History' && (
                     <div className="space-y-0">
@@ -1698,6 +1889,21 @@ const CrmSalesDeed: React.FC = () => {
             )}
           </div>
         </div>
+
+        <Dialog open={!!previewDoc} onOpenChange={(o) => { if (!o) closePreview(); }}>
+          <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
+            <DialogHeader className="px-4 py-2.5 border-b border-border">
+              <DialogTitle className="text-sm truncate">{previewDoc?.name}</DialogTitle>
+            </DialogHeader>
+            <div className="bg-muted/30 flex items-center justify-center" style={{ height: '75vh' }}>
+              {previewDoc?.mime === 'application/pdf' ? (
+                <iframe src={previewDoc.url} title={previewDoc.name} className="w-full h-full border-0" />
+              ) : previewDoc ? (
+                <img src={previewDoc.url} alt={previewDoc.name} className="max-w-full max-h-full object-contain" />
+              ) : null}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Keep the New Deed creation Dialog and Proxy Dialogs below everything */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>

@@ -126,7 +126,16 @@ export function ApprovalActions({
   async function handleAction(action: "submit" | "approve" | "reject") {
     setLoading(action);
     try {
-      const body = action === "reject" ? { note: rejectNote } : undefined;
+      // Send both field spellings the various backend reject routes read —
+      // most (crmSalesDeed, crmAgreements, crmNoc, etc.) read `Remarks`,
+      // some older ones read `note`. This component is shared across every
+      // module's approval inbox, so a single field name here silently
+      // breaks rejection wherever the backend expects the other one: typing
+      // a reason and confirming would 400 with "remarks are required" no
+      // matter what was entered. Sending both is harmless — every route
+      // destructures only the one key it actually reads.
+      const body =
+        action === "reject" ? { note: rejectNote, Remarks: rejectNote } : undefined;
       const path = actionPathSuffix
         ? `${endpoint}/${recordId}/${actionPathSuffix}/${action}`
         : `${endpoint}/${recordId}/${action}`;

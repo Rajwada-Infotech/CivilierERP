@@ -623,12 +623,11 @@ const CrmAfsQueryPayment: React.FC = () => {
           </div>
         );
       } },
-    { id: "actions", header: "", size: 90, enableSorting: false,
+    { id: "actions", header: "", size: 60, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
         return (
           <div className="flex items-center justify-end gap-1">
-            <button onClick={() => setSelectedId(r.Id)} className="text-xs text-amber-600 dark:text-amber-400 hover:underline font-medium">Open</button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="p-1 rounded-md hover:bg-muted text-muted-foreground" title="More actions">

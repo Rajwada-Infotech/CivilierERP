@@ -457,6 +457,22 @@ router.put("/:id/reject", requirePageRight("crm-sales-deed", "edit"), async (req
       WHERE Id = @id
     `);
 
+    // A rejection must actually send the deed back to the legal preparer to
+    // reprepare and reupload — not just flip a status flag while every
+    // mandatory document sits there still marked Verified/Uploaded, which
+    // would let staff resubmit unchanged work and loop forever without ever
+    // fixing what the senior flagged. Reset every mandatory document back to
+    // Requested (clearing the file) so the same Attach-File control the
+    // Documents tab already shows for a fresh request reappears here too,
+    // and Senior Approval's own document-progress gate naturally blocks
+    // resubmission until they're genuinely reworked.
+    await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).query(`
+      UPDATE dbo.CrmSalesDeedDocument SET
+        Status = 'Requested', FileBase64 = NULL, FileName = NULL, MimeType = NULL, FileSize = NULL,
+        UploadedByType = NULL, UploadedAt = NULL, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+      WHERE SalesDeedId = @id AND IsMandatory = 1
+    `);
+
     await logDeedApprovalHistory(id, 'SeniorReject', remarks, actorId(req), 'Staff');
     res.json({ success: true, status: transitionResult.newStatus });
   } catch (e) {
@@ -763,8 +779,14 @@ router.post("/:id/documents/upload", requirePageRight("crm-sales-deed", "edit"),
         .input("did", sql.Int, id)
         .input("dt", sql.NVarChar(50), DocumentType)
         .query("SELECT TOP 1 Id FROM dbo.CrmSalesDeedDocument WHERE SalesDeedId = @did AND DocumentType = @dt AND Status = 'Requested' AND IsMandatory = 1 ORDER BY CreatedAt ASC");
-      
-      if (reqCheck.recordset.length > 0 && DocumentType === 'DeedDraft') {
+
+      // Fulfilling any pending mandatory request for this DocumentType, not
+      // just a hardcoded 'DeedDraft' — the old check meant a mandatory
+      // request for e.g. NOC or PowerOfAttorney (or a second DeedDraft
+      // request after rejection) could never actually be fulfilled by this
+      // endpoint; it would silently create an unrelated non-mandatory row
+      // instead, permanently orphaning the real requirement.
+      if (reqCheck.recordset.length > 0) {
         const reqDocId = reqCheck.recordset[0].Id;
         await pool.request()
           .input("docid", sql.Int, reqDocId)
@@ -803,6 +825,52 @@ router.post("/:id/documents/upload", requirePageRight("crm-sales-deed", "edit"),
           `);
       }
     }
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 14b. POST /:id/documents/request
+// Creates a mandatory (or, if explicitly false, optional) document
+// requirement dynamically — the one thing this module was missing. Until
+// now the ONLY mandatory document a deed could ever have was the single
+// 'DeedDraft' row auto-seeded at creation (see POST / below); if that row
+// was ever consumed some other way, or a second/different mandatory
+// document became necessary (a rejection needing a fresh copy, a NOC, a
+// Power of Attorney), there was no way to ask for one — Senior Approval
+// would permanently report "no mandatory documents requested yet" with no
+// recovery path in the UI. Mirrors Agreement's own document-request flow.
+router.post("/:id/documents/request", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const { DocumentType, Label, IsMandatory = true } = req.body;
+    if (!DocumentType?.trim()) return res.status(400).json({ error: "DocumentType is required" });
+
+    const lock = await getDeedBookingLockReason(pool, id);
+    if (lock) return res.status(400).json({ error: `Cannot request documents because ${lock}` });
+
+    const deed = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!deed.recordset.length) return res.status(404).json({ error: "Deed not found" });
+    if (['Registered', 'Cancelled'].includes(deed.recordset[0].Status)) {
+      return res.status(400).json({ error: "Cannot request documents for a registered or cancelled deed" });
+    }
+
+    const dup = await pool.request().input("did", sql.Int, id).input("dt", sql.NVarChar(50), DocumentType.trim())
+      .query("SELECT TOP 1 Id FROM dbo.CrmSalesDeedDocument WHERE SalesDeedId = @did AND DocumentType = @dt AND Status IN ('Requested', 'Uploaded')");
+    if (dup.recordset.length) return res.status(409).json({ error: `A ${DocumentType} request is already open for this deed` });
+
+    await pool.request()
+      .input('did', sql.Int, id)
+      .input('dt', sql.NVarChar(50), DocumentType.trim())
+      .input('lbl', sql.NVarChar(255), Label?.trim() || DocumentType.trim())
+      .input('ism', sql.Bit, IsMandatory ? 1 : 0)
+      .input('cb', sql.Int, actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmSalesDeedDocument (SalesDeedId, DocumentType, Label, IsMandatory, Status, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
+        VALUES (@did, @dt, @lbl, @ism, 'Requested', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
+      `);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
