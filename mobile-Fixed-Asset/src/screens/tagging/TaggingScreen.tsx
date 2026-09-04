@@ -43,7 +43,25 @@ export default function TaggingScreen() {
             </View>
           </View>
           <Line>{item.AssetName || "—"}{item.AssetCategory ? ` · ${item.AssetCategory}` : ""}</Line>
-          <Line>{item.FAItemCode || "—"} · {item.GodownName || "no godown"}</Line>
+          {item.FAItemCode ? (
+            <View
+              style={{
+                alignSelf: "flex-start",
+                marginTop: 6,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 7,
+                backgroundColor: "rgba(234,179,8,0.14)",
+                borderWidth: 1,
+                borderColor: "rgba(234,179,8,0.35)",
+              }}
+            >
+              <Text style={{ color: "#fde047", fontSize: 11, fontFamily: fonts.heading.bold, letterSpacing: 0.2 }}>
+                {item.FAItemCode}
+              </Text>
+            </View>
+          ) : null}
+          <Line>{item.GodownName || "no godown"}</Line>
           <Line>
             Record: {item.RecordStatus ?? "—"}
             {item.RecordStatus === "Done" ? " (Fixed Asset Record created)" : item.RecordStatus === "Pending" ? " (awaiting record)" : ""}
