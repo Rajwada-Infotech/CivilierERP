@@ -5,8 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { Card, DataList, Line, Pill } from "@/components/list/DataList";
-import { Fab } from "@/components/Fab";
-import { usePageRights } from "@/hooks/usePageRights";
 import { navigate } from "@/navigation/navigationRef";
 import { getFixedAssetTaggings, type TaggingListItem } from "@/api/fixedAssetApi";
 
@@ -14,7 +12,6 @@ const FILTERS = ["All", "Tagged", "Cancelled", "Record: Pending", "Record: Done"
 
 export default function TaggingScreen() {
   const [filter, setFilter] = useState<string>("All");
-  const rights = usePageRights("fixed-asset-tagging");
   const query = useQuery({ queryKey: ["fa-tagging"], queryFn: () => getFixedAssetTaggings() });
 
   const filtered = useMemo(() => {
@@ -34,7 +31,6 @@ export default function TaggingScreen() {
       activeFilter={filter}
       onFilter={setFilter}
       emptyText="No FA inventory tagging entries."
-      footer={rights.canCreate ? <Fab label="Tag Items" onPress={() => navigate("TaggingForm")} /> : null}
       renderCard={(item) => (
         <Pressable onPress={() => navigate("TaggingDetail", { id: item.TagId })}>
         <Card>
