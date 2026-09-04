@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { Card, DataList, Line, Pill } from "@/components/list/DataList";
+import { useRefetchOnFocus } from "@/hooks/useRefetchOnFocus";
 import { navigate } from "@/navigation/navigationRef";
 import { getFixedAssetTaggings, type TaggingListItem } from "@/api/fixedAssetApi";
 
@@ -13,6 +14,7 @@ const FILTERS = ["All", "Record: Pending", "Record: Done"] as const;
 export default function TaggingScreen() {
   const [filter, setFilter] = useState<string>("All");
   const query = useQuery({ queryKey: ["fa-tagging"], queryFn: () => getFixedAssetTaggings() });
+  useRefetchOnFocus(query.refetch);
 
   const filtered = useMemo(() => {
     const list = query.data ?? [];

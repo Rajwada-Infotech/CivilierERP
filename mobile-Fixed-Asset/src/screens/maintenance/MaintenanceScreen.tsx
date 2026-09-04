@@ -8,6 +8,7 @@ import { formatINR } from "@/utils/formatCurrency";
 import { StatusPill } from "@/components/StatusPill";
 import { Fab } from "@/components/Fab";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useRefetchOnFocus } from "@/hooks/useRefetchOnFocus";
 import { navigate } from "@/navigation/navigationRef";
 import { getMaintenanceList, type MaintenanceItem } from "@/api/fixedAssetApi";
 
@@ -22,6 +23,7 @@ export default function MaintenanceScreen() {
     queryKey: ["fa-maint"],
     queryFn: () => getMaintenanceList(),
   });
+  useRefetchOnFocus(refetch);
 
   const rows = useMemo(() => {
     const list = data ?? [];

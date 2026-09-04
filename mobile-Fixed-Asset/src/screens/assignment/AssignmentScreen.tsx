@@ -1,5 +1,6 @@
-// Assignment — which user currently holds each fixed asset
-// (/api/fixed-asset-assignment). Read-only; assigning is done on web.
+// Assignment — every fixed-asset custody assignment (/api/fixed-asset-
+// assignment). Rows created on web (or auto-created by a transfer) show up
+// here; the list refetches whenever the screen regains focus.
 import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
@@ -8,15 +9,17 @@ import { fonts } from "@/theme/fonts";
 import { Card, DataList, Line, Pill } from "@/components/list/DataList";
 import { Fab } from "@/components/Fab";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useRefetchOnFocus } from "@/hooks/useRefetchOnFocus";
 import { navigate } from "@/navigation/navigationRef";
 import { getAssignments, type AssignmentListItem } from "@/api/fixedAssetApi";
 
-const FILTERS = ["Current", "All"] as const;
+const FILTERS = ["All", "Current"] as const;
 
 export default function AssignmentScreen() {
-  const [filter, setFilter] = useState<string>("Current");
+  const [filter, setFilter] = useState<string>("All");
   const rights = usePageRights("fixed-asset-assignment");
-  const query = useQuery({ queryKey: ["fa-assignment"], queryFn: () => getAssignments() });
+  const query = useQuery({ queryKey: ["fa-assignment"], queryFn: () => getAssignments(), staleTime: 0 });
+  useRefetchOnFocus(query.refetch);
 
   const filtered = useMemo(() => {
     const list = query.data ?? [];

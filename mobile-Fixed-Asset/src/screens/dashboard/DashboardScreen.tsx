@@ -1,6 +1,6 @@
 // Fixed Asset overview — KPIs, book-value-by-category, and quick links into
 // every module. Mirrors the web FixedAssetDashboard.
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -14,6 +14,7 @@ import { SectionLabel } from "@/components/home/SectionLabel";
 import { navigate } from "@/navigation/navigationRef";
 import { useAuth } from "@/auth/AuthContext";
 import { PRIVILEGED_ROLES } from "@/auth/permissions";
+import { useRefetchOnFocus } from "@/hooks/useRefetchOnFocus";
 import { getFixedAssets, getMaintenanceList } from "@/api/fixedAssetApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 
@@ -59,6 +60,7 @@ export default function DashboardScreen() {
 
   const assetsQ = useQuery({ queryKey: ["fa-assets"], queryFn: () => getFixedAssets() });
   const maintQ = useQuery({ queryKey: ["fa-maint"], queryFn: () => getMaintenanceList() });
+  useRefetchOnFocus(useCallback(() => { assetsQ.refetch(); maintQ.refetch(); }, [assetsQ.refetch, maintQ.refetch]));
 
   const stats = useMemo(() => {
     const assets = (assetsQ.data ?? []).filter((a) => a.Status !== "Deleted");

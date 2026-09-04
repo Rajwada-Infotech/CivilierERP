@@ -17,6 +17,7 @@ import { PickerField } from "@/components/form/PickerField";
 import { DateField } from "@/components/form/DateField";
 import { useActiveFinYear } from "@/hooks/useActiveFinYear";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useRefetchOnFocus } from "@/hooks/useRefetchOnFocus";
 import { getCompanies } from "@/api/mastersApi";
 import { getTaggedFAItemCodes, type TaggedFAItemCode } from "@/api/fixedAssetApi";
 
@@ -84,6 +85,7 @@ export default function StickerScreen() {
       itemName: applied.itemName || undefined,
     }),
   });
+  useRefetchOnFocus(query.refetch);
 
   const list = query.data ?? [];
   const companyOpts = useMemo(() => (companiesQ.data ?? []).map((c) => ({ key: String(c.id), label: c.label })), [companiesQ.data]);

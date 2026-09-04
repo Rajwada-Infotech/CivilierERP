@@ -11,6 +11,7 @@ import { bookValueOf } from "@/utils/depreciation";
 import { navigate } from "@/navigation/navigationRef";
 import { getFixedAssets, type FixedAssetListItem } from "@/api/fixedAssetApi";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useRefetchOnFocus } from "@/hooks/useRefetchOnFocus";
 import { Fab } from "@/components/Fab";
 import { StatusPill } from "@/components/StatusPill";
 
@@ -27,6 +28,7 @@ export default function AssetRegisterScreen() {
     queryKey: ["fa-assets"],
     queryFn: () => getFixedAssets(),
   });
+  useRefetchOnFocus(refetch);
 
   const live = useMemo(() => (data ?? []).filter((a) => a.Status !== "Deleted"), [data]);
 

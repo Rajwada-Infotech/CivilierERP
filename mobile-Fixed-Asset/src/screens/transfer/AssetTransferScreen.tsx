@@ -8,12 +8,14 @@ import { fonts } from "@/theme/fonts";
 import { Card, DataList, Line } from "@/components/list/DataList";
 import { Fab } from "@/components/Fab";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useRefetchOnFocus } from "@/hooks/useRefetchOnFocus";
 import { navigate } from "@/navigation/navigationRef";
 import { getAssetTransfers, type TransferListItem } from "@/api/fixedAssetApi";
 
 export default function AssetTransferScreen() {
   const rights = usePageRights("asset-transfer");
   const query = useQuery({ queryKey: ["fa-transfer"], queryFn: () => getAssetTransfers() });
+  useRefetchOnFocus(query.refetch);
 
   return (
     <DataList<TransferListItem>

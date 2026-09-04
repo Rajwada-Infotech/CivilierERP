@@ -8,6 +8,7 @@ import { fonts } from "@/theme/fonts";
 import { Card, DataList, Line, Pill } from "@/components/list/DataList";
 import { Fab } from "@/components/Fab";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useRefetchOnFocus } from "@/hooks/useRefetchOnFocus";
 import { navigate } from "@/navigation/navigationRef";
 import { getQualityChecks, type QualityCheckItem } from "@/api/fixedAssetApi";
 
@@ -17,6 +18,7 @@ export default function QualityCheckScreen() {
   const [filter, setFilter] = useState<string>("All");
   const rights = usePageRights("fixed-asset-quality-check");
   const query = useQuery({ queryKey: ["fa-quality"], queryFn: () => getQualityChecks() });
+  useRefetchOnFocus(query.refetch);
 
   const filtered = useMemo(() => {
     const list = query.data ?? [];
