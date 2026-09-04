@@ -535,34 +535,15 @@ export default function LoanSanctionPage() {
       .finally(() => setLoanPostingLoading(false));
   }, [tab, viewingLoan?.LoanId]);
 
-  // Auto-post the moment the preview has loaded and isn't already posted —
-  // no manual "Post to GL" click, same as GRN's Posting tab. Inter-Company
-  // is excluded: its disbursement is now a deliberate action from Finance
-  // > Payment's "Loan Disbursement" picker, not something that should fire
-  // just because someone opened this tab to look at the loan.
-  useEffect(() => {
-    if (
-      tab !== "posting" ||
-      loanPostingLoading ||
-      !loanPostingData ||
-      loanPostingData.isPosted ||
-      loanPosting ||
-      !viewingLoan?.LoanId ||
-      viewingLoan?.LoanType === "Inter-Company"
-    )
-      return;
-    setLoanPosting(true);
-    setLoanPostingError(null);
-    fetchWithAuth(`/api/loan-sanction/${viewingLoan.LoanId}/post-to-gl`, { method: "POST" })
-      .then(async (r) => {
-        const body = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(body?.error ?? "Posting failed");
-        setLoanPostingData((prev: any) => ({ ...prev, isPosted: true, jvNo: body.voucherNo }));
-      })
-      .catch((err: any) => setLoanPostingError(err.message ?? "Posting failed"))
-      .finally(() => setLoanPosting(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, loanPostingLoading, loanPostingData, viewingLoan?.LoanId]);
+  // No auto-post for ANY loan type — disbursement is always a deliberate
+  // action now: Inter-Company from Finance > Payment's "Loan Disbursement"
+  // picker (POST /:id/post-to-gl), Customer Loan from the same picker
+  // (POST /:id/disburse backing a real NewPayment), Bank Loan from
+  // Received Payment's "Disburse a Bank Loan" picker (POST /:id/disburse
+  // backing a real ReceivedPayment). This used to auto-fire for Bank
+  // Loan/Customer Loan the moment anyone opened this tab, silently posting
+  // the loan-ledger side with no real bank-side record behind it — see
+  // migration 401's writeup for the resulting data-integrity gap it fixed.
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -2369,11 +2350,11 @@ export default function LoanSanctionPage() {
                       <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/10 text-red-600 border border-red-500/20">
                         <AlertCircle size={10} /> {loanPostingError}
                       </span>
-                    ) : viewingLoan?.LoanType === "Inter-Company" ? (
+                    ) : (
                       <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/20">
                         <AlertCircle size={10} /> Not disbursed
                       </span>
-                    ) : null
+                    )
                   )}
                 </div>
                 {readOnly && (loanPostingData?.postings?.length ?? 0) > 1 ? (
@@ -2475,14 +2456,16 @@ export default function LoanSanctionPage() {
                       <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
                       <p className="text-xs text-muted-foreground">Posting to General Ledger…</p>
                     </div>
-                  ) : viewingLoan?.LoanType === "Inter-Company" ? (
+                  ) : (
                     <div className="flex items-center gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
                       <AlertCircle size={13} className="text-amber-600 flex-shrink-0" />
                       <p className="text-xs text-amber-700 dark:text-amber-400">
-                        Not yet disbursed — go to Finance &gt; Payment's "Loan Disbursement" picker to post this to GL.
+                        {viewingLoan?.LoanType === "Bank Loan"
+                          ? <>Not yet disbursed — go to Finance &gt; Received Payment's "Disburse a Bank Loan" picker to record it.</>
+                          : <>Not yet disbursed — go to Finance &gt; Payment's "Loan Disbursement" picker to record it.</>}
                       </p>
                     </div>
-                  ) : null
+                  )
                 )}
                 {!readOnly && (
                   <p className="text-xs text-muted-foreground">Save the loan to generate this posting.</p>

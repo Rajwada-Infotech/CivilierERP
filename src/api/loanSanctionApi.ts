@@ -287,26 +287,59 @@ export const getPayableEmis = (companyId: number) =>
 export interface UndisbursedLoan {
   LoanId: number;
   LoanNo: string;
+  LoanType: "Inter-Company" | "Customer Loan";
   LoanDate: string;
   Amount: number;
   LenderBankAccountId: number | null;
   BorrowerBankAccountId: number | null;
+  BorrowerCustomerId: number | null;
+  BorrowerCustomerSource: "CRM" | "AH" | null;
   BorrowerCompanyName: string | null;
+  BorrowerCustomerName: string | null;
 }
 
-// Sanctioned Inter-Company loans this (lender) company hasn't disbursed to
-// GL yet — feeds Finance > Payment's "Loan Disbursement" picker.
+export interface UndisbursedIncomingLoan {
+  LoanId: number;
+  LoanNo: string;
+  LoanType: "Bank Loan";
+  LoanDate: string;
+  Amount: number;
+  LenderBankId: number | null;
+  LenderBankName: string | null;
+}
+
+// Sanctioned loans this (lender) company hasn't disbursed yet — Inter-
+// Company and Customer Loan, both "money OUT of our bank". Feeds Finance >
+// Payment's "Loan Disbursement" picker.
 export const getUndisbursedLoans = (companyId: number) =>
   fetchWithAuth(`${BASE}/undisbursed?companyId=${companyId}`).then((r) => handle<UndisbursedLoan[]>(r));
 
-// Posts a Sanctioned loan's disbursement to GL — the deliberate action
-// that used to happen automatically at sanction time for Inter-Company
-// loans (see POST / above). Same endpoint the loan's own "Post to GL"
-// action already used.
+// Sanctioned Bank Loans this (borrower) company hasn't disbursed yet —
+// "money IN from an external bank". Feeds Received Payment's "Disburse a
+// Bank Loan" picker.
+export const getUndisbursedIncomingLoans = (companyId: number) =>
+  fetchWithAuth(`${BASE}/undisbursed-incoming?companyId=${companyId}`).then((r) => handle<UndisbursedIncomingLoan[]>(r));
+
+// Posts a Sanctioned Inter-Company loan's disbursement to GL — the
+// deliberate action that used to happen automatically at sanction time
+// (see POST / above). Same endpoint the loan's own "Post to GL" action
+// already used.
 export const postLoanToGL = (loanId: number) =>
   fetchWithAuth(`${BASE}/${loanId}/post-to-gl`, { method: "POST" }).then((r) =>
     handle<{ voucherNo: string; message: string }>(r),
   );
+
+// Links a Bank Loan/Customer Loan's disbursement to a real payment already
+// created through the normal Payment/Received Payment form (so a real
+// bank/cheque/reference gets captured), then posts the loan-ledger side.
+// Customer Loan (money out) passes newPaymentId; Bank Loan (money in)
+// passes receivedPaymentId.
+export const disburseLoan = (loanId: number, payload: { newPaymentId?: number; receivedPaymentId?: number }) =>
+  fetchWithAuth(`${BASE}/${loanId}/disburse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).then((r) => handle<{ voucherNo: string; message: string }>(r));
 
 export const getLoanPayments = (loanId: number) =>
   fetchWithAuth(`${BASE}/${loanId}/payments`).then((r) => handle<LoanPayment[]>(r));
