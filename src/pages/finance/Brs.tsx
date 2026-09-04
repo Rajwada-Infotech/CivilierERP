@@ -1077,6 +1077,9 @@ export default function Brs() {
                           <div className="text-right">
                             <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
                               {entry.BankClearingDate ? fmt(entry.BankClearingDate) : fmtDT(entry.ClearingDate).date}
+                              {fmtDT(entry.ClearingDate).time && (
+                                <span className="text-muted-foreground/70 font-normal"> · {fmtDT(entry.ClearingDate).time}</span>
+                              )}
                             </p>
                             {entry.ClearedBy && (
                               <p className="text-[10px] text-muted-foreground truncate max-w-[110px]">{entry.ClearedBy}</p>
@@ -1143,8 +1146,8 @@ export default function Brs() {
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[110px]">Mode / Cheque</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[82px]">Status</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">BRS</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px] hidden xl:table-cell">Clearance Date</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[110px] hidden xl:table-cell">Bank Clearance</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[110px] hidden xl:table-cell">Cleared By</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[140px]">Action</th>
                 </tr>
               </thead>
@@ -1249,9 +1252,19 @@ export default function Brs() {
                       </td>
                       <td className="px-3 py-4 hidden xl:table-cell align-middle">
                         {cleared && (entry.BankClearingDate || entry.ClearingDate) ? (
-                          <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                            {entry.BankClearingDate ? fmt(entry.BankClearingDate) : fmtDT(entry.ClearingDate).date}
-                          </p>
+                          <>
+                            <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                              {entry.BankClearingDate ? fmt(entry.BankClearingDate) : fmtDT(entry.ClearingDate).date}
+                            </p>
+                            {/* BankClearingDate is a plain date (no time) — the
+                                only clock-time we actually have is when the
+                                entry was marked clear in the app. */}
+                            {fmtDT(entry.ClearingDate).time && (
+                              <p className="text-[10px] text-muted-foreground/70 tabular-nums">
+                                at {fmtDT(entry.ClearingDate).time}
+                              </p>
+                            )}
+                          </>
                         ) : (
                           <span className="text-[10px] text-muted-foreground">—</span>
                         )}
