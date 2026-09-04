@@ -652,6 +652,17 @@ async function transition(
     } catch {
       /* rollback best-effort — original error is what propagates */
     }
+    // UQ_CrmBooking_UnitId_Approved (migration 389) is the DB-level backstop
+    // for two Pending bookings on the same Unit both reaching Approved —
+    // the same race crmHoldService.placeHold() already guards for holds.
+    // Translate the raw constraint violation into the same clean, expected
+    // message a caller would get from the hold path, instead of a bare SQL
+    // "Cannot insert duplicate key" surfacing to the approver.
+    if (module === "crm-bookings" && /UQ_CrmBooking_UnitId_Approved/i.test(err.message || "")) {
+      const conflictErr = new Error("This unit was just approved on another booking — refresh and re-check availability.");
+      conflictErr.status = 409;
+      throw conflictErr;
+    }
     throw err;
   }
 

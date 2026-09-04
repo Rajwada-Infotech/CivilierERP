@@ -4,10 +4,13 @@ const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { validateBody } = require("../middleware/validateRequest");
+const { crmMutationCreateSchema, crmMutationApproveSchema } = require("../validation/crmMutationSchemas");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { logCrmAudit } = require("../services/crmAudit");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const multer = require("multer");
 
 router.use(authMiddleware);
@@ -77,7 +80,7 @@ router.get("/", requirePageRight("crm-mutation", "view"), async (req, res) => {
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-mutation] GET error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -90,7 +93,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-mutation", "view"), asyn
     res.json(result.recordset[0] || null);
   } catch (e) {
     console.error("[crm-mutation] GET /booking/:id error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -114,7 +117,7 @@ router.get("/eligible-bookings", requirePageRight("crm-mutation", "view"), async
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-mutation] eligible-bookings error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -142,12 +145,12 @@ router.get("/:id", requirePageRight("crm-mutation", "view"), async (req, res) =>
     res.json({ mutation: mutRes.recordset[0], documents: docRes.recordset, history: logRes.recordset });
   } catch (e) {
     console.error("[crm-mutation] GET /:id error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
 // POST / — start mutation tracking. Gate: Sale Deed Registry must be Completed.
-router.post("/", requirePageRight("crm-mutation", "create"), async (req, res) => {
+router.post("/", requirePageRight("crm-mutation", "create"), validateBody(crmMutationCreateSchema), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
@@ -224,7 +227,7 @@ router.post("/", requirePageRight("crm-mutation", "create"), async (req, res) =>
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
       return res.status(409).json({ error: "Mutation tracking already started for this booking" });
     console.error("[crm-mutation] POST error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -274,7 +277,7 @@ router.put("/:id", requirePageRight("crm-mutation", "edit"), async (req, res) =>
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-mutation] PUT error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -303,20 +306,26 @@ router.put("/:id/query", requirePageRight("crm-mutation", "edit"), async (req, r
 
     // Only reset staff-uploaded documents (not the ones synced automatically
     // from Registry) — a query is about what the applicant/staff submitted,
-    // not about the registration itself.
+    // not about the registration itself. NULL Remarks is the NORMAL case for
+    // any document nobody has rejected yet — `Remarks NOT LIKE '...'` alone
+    // evaluates to NULL (not TRUE) for a NULL Remarks row in SQL Server, so
+    // that condition silently excluded exactly the common case from ever
+    // being reset, leaving the mandatory document sitting there Verified
+    // through an entire query-raised cycle. Confirmed live: a document with
+    // no Remarks stayed Verified after a query was raised on it.
     await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).query(`
       UPDATE dbo.CrmMutationDocument SET
         Status = 'Requested', FileBase64 = NULL, FileName = NULL, MimeType = NULL, FileSize = NULL,
         UploadedByType = NULL, UploadedAt = NULL, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
       WHERE MutationId = @id AND IsMandatory = 1
-        AND Remarks NOT LIKE 'Synced automatically%'
+        AND (Remarks IS NULL OR Remarks NOT LIKE 'Synced automatically%')
     `);
 
     await logMutationHistory(id, 'QueryRaised', remarks.trim(), actorId(req));
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-mutation] PUT /:id/query error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -349,12 +358,12 @@ router.put("/:id/resubmit", requirePageRight("crm-mutation", "edit"), async (req
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-mutation] PUT /:id/resubmit error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
 // PUT /:id/approve — advance from Applied → Approved. One-way; cannot be reversed.
-router.put("/:id/approve", requirePageRight("crm-mutation", "edit"), async (req, res) => {
+router.put("/:id/approve", requirePageRight("crm-mutation", "edit"), validateBody(crmMutationApproveSchema), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
@@ -406,7 +415,7 @@ router.put("/:id/approve", requirePageRight("crm-mutation", "edit"), async (req,
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-mutation] PUT /:id/approve error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -420,6 +429,14 @@ router.post("/:id/documents/upload", requirePageRight("crm-mutation", "edit"), u
     const mut = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmMutation WHERE Id = @id");
     if (!mut.recordset.length) return res.status(404).json({ error: "Mutation not found" });
     if (mut.recordset[0].Status === "Approved") return res.status(400).json({ error: "Cannot modify documents for an approved mutation" });
+
+    // Validate every file's actual bytes before writing any of them — a
+    // signature failure on a later file must not leave earlier ones already
+    // committed while the request as a whole reports an error.
+    for (const file of req.files || []) {
+      const sigErr = verifyFileMatchesDeclaredType(file);
+      if (sigErr) return res.status(400).json({ error: `${file.originalname}: ${sigErr}` });
+    }
 
     for (const file of req.files || []) {
       const b64 = file.buffer.toString('base64');
@@ -468,7 +485,7 @@ router.post("/:id/documents/upload", requirePageRight("crm-mutation", "edit"), u
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-mutation] documents/upload error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -500,7 +517,8 @@ router.post("/:id/documents/request", requirePageRight("crm-mutation", "edit"), 
       `);
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -528,12 +546,17 @@ router.put("/:id/documents/:docId", requirePageRight("crm-mutation", "edit"), as
       `);
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
 // GET /documents/file/:docId
-router.get("/documents/file/:docId", async (req, res) => {
+// Route-audit finding: had no permission gate beyond the blanket
+// router.use(authMiddleware) — any authenticated user, any role, could
+// iterate docId and download any Mutation document. Now requires the same
+// "view" right every other GET route in this file already does.
+router.get("/documents/file/:docId", requirePageRight("crm-mutation", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const doc = await pool.request().input("docid", sql.Int, parseInt(req.params.docId, 10)).query(`

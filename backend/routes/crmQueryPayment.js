@@ -10,6 +10,7 @@ const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const uploadQP = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 } });
 
 router.use(authMiddleware);
@@ -30,7 +31,14 @@ function decodeBase64File(f, label) {
   const buffer = Buffer.from(f.base64, "base64");
   if (!buffer.length) throw new Error(`${label}: file is empty`);
   if (buffer.length > MAX_FILE_BYTES) throw new Error(`${label}: ${f.fileName} is too large (max ${(MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB)`);
-  return { fileName: f.fileName, mimeType: f.mimeType || "application/octet-stream", buffer };
+  const mimeType = f.mimeType || "application/octet-stream";
+  // Client-declared mimeType, same spoofing risk as a multipart
+  // Content-Type header (Findings #7) — verified against the actual bytes
+  // for the types we have a signature for; anything else passes through
+  // unchanged, same as before.
+  const sigErr = verifyFileMatchesDeclaredType({ buffer, mimetype: mimeType });
+  if (sigErr) throw new Error(`${label}: ${sigErr}`);
+  return { fileName: f.fileName, mimeType, buffer };
 }
 
 // Amount is never stored on this table — it's read live from the Sales
@@ -341,6 +349,15 @@ router.post("/:id/proxy-proof",
       const { ProxyMethod, ProxyRemarks } = req.body;
 
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      // This endpoint has no multer fileFilter at all (any mimetype is
+      // accepted, only size-limited) — leaving that as-is rather than
+      // introducing a new allowlist restriction that isn't what Finding #7
+      // asked for. This check is still worth adding: for the types it does
+      // recognize (pdf/jpeg/png/webp/office docs) it catches a spoofed
+      // Content-Type; anything else passes through unchanged, exactly as
+      // before.
+      const sigErr = verifyFileMatchesDeclaredType(req.file);
+      if (sigErr) return res.status(400).json({ error: sigErr });
       if (!ProxyMethod || !PROXY_METHODS_QP.includes(ProxyMethod)) {
         return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_QP.join(", ")}` });
       }

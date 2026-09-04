@@ -9,6 +9,7 @@ const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -20,7 +21,10 @@ function decodeBase64File(f, label) {
   const buffer = Buffer.from(f.base64, "base64");
   if (!buffer.length) throw new Error(`${label}: file is empty`);
   if (buffer.length > MAX_FILE_BYTES) throw new Error(`${label}: ${f.fileName} is too large (max ${(MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB)`);
-  return { fileName: f.fileName, mimeType: f.mimeType || "application/octet-stream", buffer };
+  const mimeType = f.mimeType || "application/octet-stream";
+  const sigErr = verifyFileMatchesDeclaredType({ buffer, mimetype: mimeType });
+  if (sigErr) throw new Error(`${label}: ${sigErr}`);
+  return { fileName: f.fileName, mimeType, buffer };
 }
 
 // Amount (StampDuty + RegistrationFee) is stored on this record — unlike the

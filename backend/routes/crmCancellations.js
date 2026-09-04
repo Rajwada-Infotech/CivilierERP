@@ -5,6 +5,8 @@ const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { validateBody } = require("../middleware/validateRequest");
+const { crmCancellationCreateSchema } = require("../validation/crmCancellationSchemas");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 
 const { getNextDocNumber } = require("../services/docNumber");
@@ -131,7 +133,7 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
     return res.json({ DeductionPercent: fallbackPct, daysSinceBooking: daysSince, source: "default" });
   } catch (e) {
     console.error("[crm-cancellations] GET /policy error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -149,7 +151,7 @@ router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) 
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-cancellations] GET error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -160,7 +162,7 @@ router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) 
 // correct instrument (that needs a formal deed-cancellation/deed-of-
 // rescission process, not this flow). Blocked here rather than silently
 // letting staff "cancel" a booking whose title has already legally passed.
-router.post("/", requirePageRight("crm-cancellations", "create"), async (req, res) => {
+router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(crmCancellationCreateSchema), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
@@ -260,7 +262,7 @@ router.post("/", requirePageRight("crm-cancellations", "create"), async (req, re
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
       return res.status(409).json({ error: "A cancellation request already exists for this booking" });
     console.error("[crm-cancellations] POST error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -287,7 +289,7 @@ router.put("/:id", requirePageRight("crm-cancellations", "edit"), async (req, re
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-cancellations] PUT error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -621,7 +623,7 @@ router.put("/:id/finance-approve", requirePageRight("crm-cancellations", "edit")
     res.json({ success: true, status: CrmStatus.APPROVED });
   } catch (e) {
     console.error("[crm-cancellations] finance-approve error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -659,7 +661,7 @@ router.put("/:id/finance-reject", requirePageRight("crm-cancellations", "edit"),
     res.json({ success: true, status: CrmStatus.PENDING });
   } catch (e) {
     console.error("[crm-cancellations] finance-reject error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -722,7 +724,7 @@ router.put("/:id/mark-refunded", requirePageRight("crm-cancellations", "edit"), 
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-cancellations] mark-refunded error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -771,7 +773,7 @@ router.put("/:id/settle", requirePageRight("crm-cancellations", "edit"), async (
     res.json({ success: true, message: "Cancellation marked as settled" });
   } catch (e) {
     console.error("[crm-cancellations] settle error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 

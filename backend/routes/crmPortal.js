@@ -14,6 +14,8 @@ const { getInvoicePdfBuffer } = require("../services/invoicePdf");
 const { getMoneyReceiptPdfBuffer } = require("../services/moneyReceiptPdf");
 const { getAllotmentLetterPdfBufferByBookingId } = require("../services/allotmentLetterPdf");
 const { getAgreementBookingLockReason, agreementExecutedLockReason } = require("./crmAgreements");
+const { redisGet, redisSet, redisDel } = require("../redis");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 
 // Categories a customer is allowed to raise themselves — same vocabulary as
 // the staff-side Service Ticket module (crmServiceTickets.js), so every
@@ -23,6 +25,26 @@ const TICKET_SLA_HOURS = 96; // customer-raised tickets always start Normal prio
 
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false, message: { error: "Too many requests, please try again later." } }));
+
+// Per-account brute-force lockout — mirrors the staff login's own protection
+// in routes/users.js exactly (same Redis keys shape, same 10/15min policy).
+// Before this, /login had ONLY the router-wide 200-req/15min-per-IP limiter
+// above: that bounds request volume, not credential-stuffing against one
+// customer account (200 guesses against a single email in 15 minutes is a
+// real brute-force budget), and staff accounts already get this exact
+// protection — customer portal accounts, which also expose payment history
+// and identity documents, did not.
+const PORTAL_MAX_LOGIN_ATTEMPTS = process.env.NODE_ENV === "development" ? 50 : 10;
+const PORTAL_LOCKOUT_SECONDS = 15 * 60;
+async function incrementPortalLoginAttempts(attemptsKey, lockKey) {
+  try {
+    const attempts = parseInt((await redisGet(attemptsKey)) || "0") + 1;
+    await redisSet(attemptsKey, String(attempts), PORTAL_LOCKOUT_SECONDS);
+    if (attempts >= PORTAL_MAX_LOGIN_ATTEMPTS) {
+      await redisSet(lockKey, "1", PORTAL_LOCKOUT_SECONDS);
+    }
+  } catch { /* Redis down — never let a cache failure block login */ }
+}
 
 // POST /login — email + password (mobile number initially, forced reset on first
 // login — unchanged). Identity anchor is CustomerId (migration 254); email is
@@ -34,11 +56,20 @@ router.post("/login", async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
 
+    const normalizedEmail = email.trim().toLowerCase();
+    const lockKey = `portal-login:lock:${normalizedEmail}`;
+    const attemptsKey = `portal-login:attempts:${normalizedEmail}`;
+
+    try {
+      const locked = await redisGet(lockKey);
+      if (locked) return res.status(429).json({ error: "Too many attempts. Try again later." });
+    } catch { /* Redis down — skip lockout check, proceed to DB auth */ }
+
     const pool = getPool();
 
     // Resolve Email → CrmCustomer → CrmCustomerPortalUser
     const result = await pool.request()
-      .input("em", sql.NVarChar(200), email.trim().toLowerCase())
+      .input("em", sql.NVarChar(200), normalizedEmail)
       .query(`
         SELECT pu.Id AS PortalUserId, pu.CustomerId, pu.PasswordHash,
                pu.MustChangePassword, pu.IsActive, pu.Email
@@ -53,11 +84,13 @@ router.post("/login", async (req, res) => {
       });
     }
     const user = result.recordset[0];
-    if (!user) return res.status(401).json({ error: "Invalid email or password" });
+    if (!user) { await incrementPortalLoginAttempts(attemptsKey, lockKey); return res.status(401).json({ error: "Invalid email or password" }); }
     if (!user.IsActive) return res.status(401).json({ error: "This portal account has been deactivated" });
 
     const ok = await bcrypt.compare(password, user.PasswordHash);
-    if (!ok) return res.status(401).json({ error: "Invalid email or password" });
+    if (!ok) { await incrementPortalLoginAttempts(attemptsKey, lockKey); return res.status(401).json({ error: "Invalid email or password" }); }
+
+    try { await redisDel(attemptsKey); await redisDel(lockKey); } catch {}
 
     await pool.request().input("id", sql.Int, user.PortalUserId)
       .query("UPDATE dbo.CrmCustomerPortalUser SET LastLoginAt = SYSDATETIME() WHERE Id = @id");
@@ -517,6 +550,12 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
   portalDocUpload.single("file")(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    // multer's fileFilter only ever checked the client-declared Content-Type
+    // (Findings #7) — a renamed executable with a spoofed "application/pdf"
+    // header sailed straight through. This is the customer-facing upload
+    // endpoint, so it gets the check first.
+    const sigErr = verifyFileMatchesDeclaredType(req.file);
+    if (sigErr) return res.status(400).json({ error: sigErr });
     try {
       const pool = getPool();
       const appId = await resolveAndAssertApplication(pool, req, res);

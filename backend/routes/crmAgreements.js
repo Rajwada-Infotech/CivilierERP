@@ -12,6 +12,7 @@ const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
 const { validateAgreementPreparationPrerequisites, maybeAutoCreateLegalMilestone, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep, syncLegalMilestoneFromDocument, maybeUnlockBrokerageOnAgreementExecuted } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 // Senior approval is gated to admin/super_admin/dba via this shared engine —
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
 // able to self-approve on this page.
@@ -165,7 +166,7 @@ router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => 
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-agreements] GET error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -202,7 +203,7 @@ router.get("/eligible-bookings", requirePageRight("crm-agreements", "create"), a
     res.json(eligible);
   } catch (e) {
     console.error("[crm-agreements] GET /eligible-bookings error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -246,7 +247,7 @@ router.get("/:id", requirePageRight("crm-agreements", "view"), async (req, res) 
     });
   } catch (e) {
     console.error("[crm-agreements] GET /:id error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -266,7 +267,7 @@ router.get("/:id/revisions", requirePageRight("crm-agreements", "view"), async (
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-agreements] GET /:id/revisions error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -398,7 +399,7 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
       return res.status(409).json({ error: "An agreement already exists for this booking" });
     console.error("[crm-agreements] POST error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -479,52 +480,88 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
     // mandatory below, since that field-name mismatch would then hard-block
     // every real reject even when staff DID type a reason.
     const remarks = req.body?.note || null;
+    // approvalTransition owns its own transaction/locking on `pool` and must
+    // run and commit before we open ours below — nesting two separate mssql
+    // Transactions over the same row on the same pool deadlocks rather than
+    // composes (same established pattern as crmCancellations.js/approve and
+    // crmSalesDeed.js/approve).
     const result = await approvalTransition("crm-agreements", id, CrmStatus.APPROVED, userEmail, req.user?.role, remarks, actorId(req));
+
+    let sentToCustomerNow = false;
+    let notifyRow = null;
     if (result.newStatus === CrmStatus.APPROVED) {
       const pool = getPool();
-      await pool.request()
-        .input("id", sql.Int, id)
-        .input("aid", sql.Int, actorId(req))
-        .input("rem", sql.NVarChar(sql.MAX), remarks)
-        .query(`
-          UPDATE dbo.CrmAgreement SET
-            SeniorApprovedBy = @aid,
-            SeniorApprovedAt = SYSDATETIME(),
-            SeniorApprovalRemarks = @rem,
-            UpdatedAt = SYSDATETIME()
-          WHERE Id = @id
-        `);
 
-      const agBooking = await pool.request().input("id", sql.Int, id)
-        .query("SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id");
-      const bookingIdForSync = agBooking.recordset[0]?.BookingId;
-      if (bookingIdForSync) {
-        await syncLegalMilestoneStep(pool, bookingIdForSync, "InternalApproval", actorId(req));
-      }
-
-      // Auto-flow: "SENIOR APPROVAL -> SHOW AGREEMENT TO THE CUSTOMER" is
-      // meant to happen the instant senior approval lands, not wait on
-      // staff remembering a separate "Send to Customer Portal" click. Only
-      // gated on at least one document already being attached — there's
-      // nothing to show the customer otherwise, and staff can still use the
-      // manual send button once they've uploaded one.
-      const docCount = await pool.request().input("id", sql.Int, id)
-        .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmAgreementDocument WHERE AgreementId = @id");
-      if (docCount.recordset[0].Cnt > 0) {
-        const already = await pool.request().input("id", sql.Int, id)
-          .query("SELECT SentToCustomerAt FROM dbo.CrmAgreement WHERE Id = @id");
-        if (!already.recordset[0].SentToCustomerAt) {
-          await pool.request().input("id", sql.Int, id).query(`
+      // ── BEGIN ATOMIC SECTION ───────────────────────────────────────────
+      // Senior-approval fields, the legal-milestone sync, and (when a
+      // document already exists) the auto-send-to-customer fields + its own
+      // log entry all have to land together — a failure partway through
+      // previously could leave an agreement marked senior-approved with the
+      // legal milestone still un-synced, or "sent to customer" without the
+      // matching audit-log row, neither of which self-heals.
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await tx.request()
+          .input("id", sql.Int, id)
+          .input("aid", sql.Int, actorId(req))
+          .input("rem", sql.NVarChar(sql.MAX), remarks)
+          .query(`
             UPDATE dbo.CrmAgreement SET
-              SentToCustomerAt = SYSDATETIME(), CustomerApprovalStatus = '${CrmStatus.PENDING}', CustomerApprovedAt = NULL
+              SeniorApprovedBy = @aid,
+              SeniorApprovedAt = SYSDATETIME(),
+              SeniorApprovalRemarks = @rem,
+              UpdatedAt = SYSDATETIME()
             WHERE Id = @id
           `);
-          await pool.request().input("agid", sql.Int, id).query(`
-            INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, ActorType, CreatedAt)
-            VALUES (@agid, 'SendToCustomer', 'System', SYSDATETIME())
-          `);
-          await syncLegalMilestoneStep(pool, bookingIdForSync, "DocShared", actorId(req));
 
+        const agBooking = await tx.request().input("id", sql.Int, id)
+          .query("SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id");
+        const bookingIdForSync = agBooking.recordset[0]?.BookingId;
+        if (bookingIdForSync) {
+          await syncLegalMilestoneStep(tx, bookingIdForSync, "InternalApproval", actorId(req));
+        }
+
+        // Auto-flow: "SENIOR APPROVAL -> SHOW AGREEMENT TO THE CUSTOMER" is
+        // meant to happen the instant senior approval lands, not wait on
+        // staff remembering a separate "Send to Customer Portal" click. Only
+        // gated on at least one document already being attached — there's
+        // nothing to show the customer otherwise, and staff can still use the
+        // manual send button once they've uploaded one.
+        const docCount = await tx.request().input("id", sql.Int, id)
+          .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmAgreementDocument WHERE AgreementId = @id");
+        if (docCount.recordset[0].Cnt > 0) {
+          const already = await tx.request().input("id", sql.Int, id)
+            .query("SELECT SentToCustomerAt FROM dbo.CrmAgreement WHERE Id = @id");
+          if (!already.recordset[0].SentToCustomerAt) {
+            await tx.request().input("id", sql.Int, id).query(`
+              UPDATE dbo.CrmAgreement SET
+                SentToCustomerAt = SYSDATETIME(), CustomerApprovalStatus = '${CrmStatus.PENDING}', CustomerApprovedAt = NULL
+              WHERE Id = @id
+            `);
+            await tx.request().input("agid", sql.Int, id).query(`
+              INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, ActorType, CreatedAt)
+              VALUES (@agid, 'SendToCustomer', 'System', SYSDATETIME())
+            `);
+            await syncLegalMilestoneStep(tx, bookingIdForSync, "DocShared", actorId(req));
+            sentToCustomerNow = true;
+          }
+        }
+
+        // Only log the audit entry once ALL approval levels are satisfied —
+        // partial multi-level approvals should not appear as "SeniorApprove" in the trail.
+        await logApprovalHistory(id, "SeniorApprove", remarks, actorId(req), tx);
+
+        await tx.commit();
+      } catch (err) {
+        await tx.rollback().catch(() => {});
+        throw err;
+      }
+
+      // Side effects only, run after commit — never allowed to undo the
+      // approval that already landed above.
+      if (sentToCustomerNow) {
+        try {
           const info = await pool.request().input("id", sql.Int, id).query(`
             SELECT ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
             FROM dbo.CrmAgreement ag
@@ -532,27 +569,21 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
             JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
             WHERE ag.Id = @id
           `);
-          const row = info.recordset[0];
-          if (row?.AssignedTo) {
-            await emitNotification(pool, row.AssignedTo, "crm_agreement_sent_to_customer",
+          notifyRow = info.recordset[0];
+          if (notifyRow?.AssignedTo) {
+            await emitNotification(pool, notifyRow.AssignedTo, "crm_agreement_sent_to_customer",
               "Agreement Sent to Customer",
-              `${row.AgreementNo} (${row.BookingNo}) is now visible to ${row.ApplicantName} in their portal, awaiting their approval.`,
+              `${notifyRow.AgreementNo} (${notifyRow.BookingNo}) is now visible to ${notifyRow.ApplicantName} in their portal, awaiting their approval.`,
               id, "crm_agreement");
           }
           await logCommunication(pool, {
-            bookingId: row?.BookingId, direction: "Outbound",
-            subject: `Agreement ${row?.AgreementNo} sent to customer`,
+            bookingId: notifyRow?.BookingId, direction: "Outbound",
+            subject: `Agreement ${notifyRow?.AgreementNo} sent to customer`,
             summary: "Agreement shared with the customer via portal, awaiting their approval.",
             createdBy: actorId(req),
           });
-        }
+        } catch (sideErr) { console.error("[crm-agreements] approve send-to-customer side effects failed:", sideErr.message); }
       }
-    }
-
-    // Only log the audit entry once ALL approval levels are satisfied —
-    // partial multi-level approvals should not appear as "SeniorApprove" in the trail.
-    if (result.newStatus === CrmStatus.APPROVED) {
-      await logApprovalHistory(id, "SeniorApprove", remarks, actorId(req));
     }
     // Forward the full transition() result (not just `status`) — when this
     // is one level of several (see migration 169's 2-level workflow),
@@ -586,6 +617,9 @@ router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req
     const oldRow = (await pool.request().input("id", sql.Int, id)
       .query("SELECT VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes FROM dbo.CrmAgreement WHERE Id = @id")).recordset[0];
 
+    // approvalTransition owns its own transaction/locking on `pool` and must
+    // run and commit before we open ours below (same established pattern as
+    // /approve above and crmCancellations.js/crmSalesDeed.js's equivalents).
     const result = await approvalTransition("crm-agreements", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks);
     // Check if customer had already approved before resetting — log it so the
     // reset is traceable and not a silent discard.
@@ -593,47 +627,63 @@ router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req
       .query("SELECT CustomerApprovalStatus, CustomerApprovedAt FROM dbo.CrmAgreement WHERE Id = @id")).recordset[0];
     const customerHadApproved = priorCustomer?.CustomerApprovalStatus === CrmStatus.APPROVED;
 
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("rem", sql.NVarChar(sql.MAX), remarks)
-      .query(`
-        UPDATE dbo.CrmAgreement SET
-          SeniorApprovedBy = NULL,
-          SeniorApprovedAt = NULL,
-          SeniorApprovalRemarks = @rem,
-          SentToCustomerAt = NULL,
-          CustomerApprovalStatus = '${CrmStatus.PENDING}',
-          CustomerApprovedAt = NULL,
-          UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-    if (customerHadApproved) {
-      await pool.request().input("agid", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), remarks).query(`
-        INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, Remarks, ActorType, CreatedAt)
-        VALUES (@agid, 'CustomerApprovalVoided', @rem, 'System', SYSDATETIME())
-      `);
-    }
-
-    if (oldRow) {
-      await pool.request()
-        .input("agid", sql.Int, id)
-        .input("ver",  sql.Int, oldRow.VersionNo)
-        .input("adt",  sql.Date, oldRow.AgreementDate)
-        .input("lname",sql.NVarChar(300), oldRow.LegalName)
-        .input("laddr",sql.NVarChar(sql.MAX), oldRow.LegalAddress)
-        .input("pan",  sql.NVarChar(20), oldRow.PanNo)
-        .input("aadh", sql.NVarChar(20), oldRow.AadhaarNo)
-        .input("note", sql.NVarChar(sql.MAX), oldRow.Notes)
-        .input("reason", sql.NVarChar(500), `Senior rejection${remarks ? `: ${remarks}` : ""}`)
-        .input("cb",   sql.Int, actorId(req))
+    // ── BEGIN ATOMIC SECTION ─────────────────────────────────────────────
+    // The status reset, the customer-approval-voided log (when applicable),
+    // the revision snapshot, and the rejection log entry all have to land
+    // together — a mid-sequence failure previously could leave an agreement
+    // reset to Rejected with no revision snapshot of what was rejected, or
+    // with a customer's prior approval silently voided with no audit trail
+    // of why.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("rem", sql.NVarChar(sql.MAX), remarks)
         .query(`
-          INSERT INTO dbo.CrmAgreementRevision
-            (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
-          VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, @cb, SYSDATETIME())
+          UPDATE dbo.CrmAgreement SET
+            SeniorApprovedBy = NULL,
+            SeniorApprovedAt = NULL,
+            SeniorApprovalRemarks = @rem,
+            SentToCustomerAt = NULL,
+            CustomerApprovalStatus = '${CrmStatus.PENDING}',
+            CustomerApprovedAt = NULL,
+            UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
         `);
+      if (customerHadApproved) {
+        await tx.request().input("agid", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), remarks).query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, Remarks, ActorType, CreatedAt)
+          VALUES (@agid, 'CustomerApprovalVoided', @rem, 'System', SYSDATETIME())
+        `);
+      }
+
+      if (oldRow) {
+        await tx.request()
+          .input("agid", sql.Int, id)
+          .input("ver",  sql.Int, oldRow.VersionNo)
+          .input("adt",  sql.Date, oldRow.AgreementDate)
+          .input("lname",sql.NVarChar(300), oldRow.LegalName)
+          .input("laddr",sql.NVarChar(sql.MAX), oldRow.LegalAddress)
+          .input("pan",  sql.NVarChar(20), oldRow.PanNo)
+          .input("aadh", sql.NVarChar(20), oldRow.AadhaarNo)
+          .input("note", sql.NVarChar(sql.MAX), oldRow.Notes)
+          .input("reason", sql.NVarChar(500), `Senior rejection${remarks ? `: ${remarks}` : ""}`)
+          .input("cb",   sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmAgreementRevision
+              (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
+            VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, @cb, SYSDATETIME())
+          `);
+      }
+
+      await logApprovalHistory(id, "SeniorReject", remarks, actorId(req), tx);
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback().catch(() => {});
+      throw err;
     }
 
-    await logApprovalHistory(id, "SeniorReject", remarks, actorId(req));
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-agreements] reject error:", e.message);
@@ -744,8 +794,11 @@ router.put("/:id/date/reject", requirePageRight("crm-agreements", "edit"), async
 // CRM-specific friendly approval history (SendToCustomer/CustomerApprove/
 // CustomerRecheck live here too) — separate from, and in addition to, the
 // generic ApprovalAuditLog the engine above writes for security purposes.
-async function logApprovalHistory(agreementId, action, remarks, actorIdVal) {
-  const pool = getPool();
+// `dbConn` lets a caller pass an in-flight transaction (tx.request() has the
+// same shape as pool.request() in mssql) so this write commits atomically
+// with whatever else that transaction is doing.
+async function logApprovalHistory(agreementId, action, remarks, actorIdVal, dbConn = null) {
+  const pool = dbConn || getPool();
   await pool.request()
     .input("agid", sql.Int, agreementId)
     .input("act",  sql.NVarChar(30), action)
@@ -830,7 +883,7 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-agreements] PUT /:id/send-to-customer error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -920,7 +973,7 @@ router.get("/:id/date-history", requirePageRight("crm-agreements", "view"), asyn
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-agreements] GET /:id/date-history error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1031,7 +1084,7 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
     res.json({ success: true, versionBumped: touchesLegalContent });
   } catch (e) {
     console.error("[crm-agreements] PUT error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1079,7 +1132,7 @@ router.put("/:id/assign-legal", requirePageRight("crm-agreements", "edit"), asyn
     res.json({ success: true, LegalExecutiveId: newId });
   } catch (e) {
     console.error("[crm-agreements] PUT /:id/assign-legal error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1130,29 +1183,46 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     const lockReason = await getAgreementBookingLockReason(pool, id);
     if (lockReason) return res.status(409).json({ error: `Cannot mark executed — ${lockReason}. Cancel the agreement instead.` });
 
-    await pool.request()
-      .input("id",  sql.Int, id)
-      .input("ub",  sql.Int, actor)
-      .query(`
-        UPDATE dbo.CrmAgreement SET
-          Status = '${CrmStatus.EXECUTED}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
+    // ── BEGIN ATOMIC SECTION ─────────────────────────────────────────────
+    // The status flip, the audit entry, the legal-milestone sync, and the
+    // brokerage-tranche unlock all have to land together. Of everything in
+    // this file, a partial failure here is the highest-stakes: the
+    // brokerage unlock is real money — a broker's tranche staying silently
+    // locked because this step died right after the Agreement flipped to
+    // Executed is not a self-healing gap, it's a stuck payment nobody would
+    // know to go looking for.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",  sql.Int, id)
+        .input("ub",  sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmAgreement SET
+            Status = '${CrmStatus.EXECUTED}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
 
-    await logCrmAudit(pool, "Agreement", id, actor, [
-      { field: "Status", oldVal: CrmStatus.DRAFT, newVal: CrmStatus.EXECUTED },
-    ]);
+      await logCrmAudit(tx, "Agreement", id, actor, [
+        { field: "Status", oldVal: CrmStatus.DRAFT, newVal: CrmStatus.EXECUTED },
+      ]);
 
-    await syncLegalMilestoneStep(pool, row.BookingId, "FinalExecution", actor);
-    // Releases any brokerage tranche waiting on Agreement Executed — TwoPart's
-    // second half, or AgreementOnly's single tranche. No-op for OneTime
-    // bookings or ones with no broker.
-    await maybeUnlockBrokerageOnAgreementExecuted(pool, row.BookingId);
+      await syncLegalMilestoneStep(tx, row.BookingId, "FinalExecution", actor);
+      // Releases any brokerage tranche waiting on Agreement Executed — TwoPart's
+      // second half, or AgreementOnly's single tranche. No-op for OneTime
+      // bookings or ones with no broker.
+      await maybeUnlockBrokerageOnAgreementExecuted(tx, row.BookingId);
+
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback().catch(() => {});
+      throw err;
+    }
 
     res.json({ success: true, status: CrmStatus.EXECUTED });
   } catch (e) {
     console.error("[crm-agreements] mark-executed error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1205,25 +1275,6 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
     const afsStamp = AfsStampDuty != null && AfsStampDuty !== "" ? parseFloat(AfsStampDuty) : null;
     const afsRegFee = AfsRegistrationFee != null && AfsRegistrationFee !== "" ? parseFloat(AfsRegistrationFee) : null;
 
-    await pool.request()
-      .input("id",       sql.Int,           id)
-      .input("ub",       sql.Int,           actor)
-      .input("regNo",    sql.NVarChar(100), regNo)
-      .input("regDt",    sql.Date,          regDate)
-      .input("afsStamp", sql.Decimal(18,2), afsStamp)
-      .input("afsRegFee",sql.Decimal(18,2), afsRegFee)
-      .query(`
-        UPDATE dbo.CrmAgreement SET
-          Status              = '${CrmStatus.REGISTERED}',
-          AfsRegistrationNo   = @regNo,
-          AfsRegistrationDate = @regDt,
-          AfsStampDuty        = @afsStamp,
-          AfsRegistrationFee  = @afsRegFee,
-          UpdatedBy           = @ub,
-          UpdatedAt           = SYSDATETIME()
-        WHERE Id = @id
-      `);
-
     const auditFields = [
       { field: "Status",              oldVal: CrmStatus.EXECUTED, newVal: CrmStatus.REGISTERED },
       { field: "AfsRegistrationNo",   oldVal: null,               newVal: regNo },
@@ -1231,12 +1282,39 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
     ];
     if (afsStamp != null)  auditFields.push({ field: "AfsStampDuty",       oldVal: null, newVal: afsStamp });
     if (afsRegFee != null) auditFields.push({ field: "AfsRegistrationFee", oldVal: null, newVal: afsRegFee });
-    await logCrmAudit(pool, "Agreement", id, actor, auditFields);
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",       sql.Int,           id)
+        .input("ub",       sql.Int,           actor)
+        .input("regNo",    sql.NVarChar(100), regNo)
+        .input("regDt",    sql.Date,          regDate)
+        .input("afsStamp", sql.Decimal(18,2), afsStamp)
+        .input("afsRegFee",sql.Decimal(18,2), afsRegFee)
+        .query(`
+          UPDATE dbo.CrmAgreement SET
+            Status              = '${CrmStatus.REGISTERED}',
+            AfsRegistrationNo   = @regNo,
+            AfsRegistrationDate = @regDt,
+            AfsStampDuty        = @afsStamp,
+            AfsRegistrationFee  = @afsRegFee,
+            UpdatedBy           = @ub,
+            UpdatedAt           = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      await logCrmAudit(tx, "Agreement", id, actor, auditFields);
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback().catch(() => {});
+      throw err;
+    }
 
     res.json({ success: true, status: CrmStatus.REGISTERED });
   } catch (e) {
     console.error("[crm-agreements] mark-registered error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1272,7 +1350,7 @@ router.put("/:id/cancel", requirePageRight("crm-agreements", "edit"), async (req
     res.json({ success: true, status: CrmStatus.CANCELLED });
   } catch (e) {
     console.error("[crm-agreements] cancel error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1319,7 +1397,7 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
     res.status(201).json({ success: true, version: nextVersion });
   } catch (e) {
     console.error("[crm-agreements] POST documents error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1390,7 +1468,7 @@ router.post("/:id/documents/request", requirePageRight("crm-documents", "create"
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
     console.error("[crm-agreements] POST documents/request error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1407,6 +1485,10 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
       const DOC_TYPES = ["SaleAgreement","AllotmentLetter","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
       if (!DOC_TYPES.includes(docType)) return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
+      for (const file of req.files) {
+        const sigErr = verifyFileMatchesDeclaredType(file);
+        if (sigErr) return res.status(400).json({ error: `${file.originalname}: ${sigErr}` });
+      }
 
       const lockReason = await getAgreementBookingLockReason(pool, agreementId);
       if (lockReason) {
@@ -1447,7 +1529,7 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
       res.status(201).json({ success: true, ids: inserted, count: inserted.length });
     } catch (e) {
       console.error("[crm-agreements] upload documents error:", e.message);
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: "An internal error occurred. Please try again later." });
     }
   });
 });
@@ -1464,6 +1546,8 @@ router.post("/:id/documents/:docId/attach", requirePageRight("crm-documents", "c
   upload.single("file")(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    const sigErr = verifyFileMatchesDeclaredType(req.file);
+    if (sigErr) return res.status(400).json({ error: sigErr });
     try {
       const pool = getPool();
       const agreementId = parseInt(req.params.id);
@@ -1500,7 +1584,7 @@ router.post("/:id/documents/:docId/attach", requirePageRight("crm-documents", "c
       res.json({ success: true });
     } catch (e) {
       console.error("[crm-agreements] attach document error:", e.message);
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: "An internal error occurred. Please try again later." });
     }
   });
 });
@@ -1548,7 +1632,7 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-agreements] GET documents/all error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1566,7 +1650,7 @@ router.get("/documents/file/:docId", requirePageRight("crm-documents", "view"), 
     res.send(Buffer.from(doc.FileBase64, "base64"));
   } catch (e) {
     console.error("[crm-agreements] file GET error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1638,7 +1722,7 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-agreements] PUT document error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1723,7 +1807,7 @@ router.put("/:id/proxy-customer-approve", requirePageRight("crm-agreements", "ed
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-agreements] proxy-customer-approve error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1785,7 +1869,7 @@ router.put("/:id/proxy-date-accept", requirePageRight("crm-agreements", "edit"),
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-agreements] proxy-date-accept error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1857,7 +1941,7 @@ router.put("/:id/proxy-customer-recheck", requirePageRight("crm-agreements", "ed
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-agreements] proxy-customer-recheck error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1910,7 +1994,7 @@ router.put("/:id/proxy-propose-date", requirePageRight("crm-agreements", "edit")
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-agreements] proxy-propose-date error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1931,6 +2015,8 @@ router.post("/:id/documents/:docId/proxy-attach",
       const { ProxyMethod, ProxyRemarks } = req.body;
 
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      const sigErr = verifyFileMatchesDeclaredType(req.file);
+      if (sigErr) return res.status(400).json({ error: sigErr });
       if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
         return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
       }
@@ -1972,7 +2058,7 @@ router.post("/:id/documents/:docId/proxy-attach",
       res.json({ success: true });
     } catch (e) {
       console.error("[crm-agreements] proxy-attach error:", e.message);
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: "An internal error occurred. Please try again later." });
     }
   }
 );
@@ -2022,7 +2108,7 @@ router.get("/documents/:docId/audit", requirePageRight("crm-documents", "view"),
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-agreements] GET documents/:docId/audit error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -2081,7 +2167,7 @@ router.put("/documents/bulk-review", requirePageRight("crm-documents", "edit"), 
     res.json(results);
   } catch (e) {
     console.error("[crm-agreements] PUT documents/bulk-review error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -2097,7 +2183,7 @@ router.put("/:id/portal/deactivate", requirePageRight("crm-agreements", "edit"),
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-agreements] portal deactivate error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -2113,7 +2199,7 @@ router.put("/:id/portal/reactivate", requirePageRight("crm-agreements", "edit"),
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-agreements] portal reactivate error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 

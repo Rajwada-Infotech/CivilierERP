@@ -7,6 +7,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -113,6 +114,10 @@ router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", 
       const docType = req.body?.DocumentType?.trim();
       if (!docType) return res.status(400).json({ error: "DocumentType is required" });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
+      for (const file of req.files) {
+        const sigErr = verifyFileMatchesDeclaredType(file);
+        if (sigErr) return res.status(400).json({ error: `${file.originalname}: ${sigErr}` });
+      }
 
       // Same gate as POST /booking/:bookingId above — see its comment.
       const activeErr = await requireApprovedBooking(pool, bookingId);
@@ -183,6 +188,10 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
       const docType = req.body?.DocumentType?.trim();
       if (!docType) return res.status(400).json({ error: "DocumentType is required" });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
+      for (const file of req.files) {
+        const sigErr = verifyFileMatchesDeclaredType(file);
+        if (sigErr) return res.status(400).json({ error: `${file.originalname}: ${sigErr}` });
+      }
       const booking = await pool.request().input("aid", sql.Int, applicationId)
         .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1 ORDER BY Id DESC");
       const bookingId = booking.recordset[0]?.Id || null;

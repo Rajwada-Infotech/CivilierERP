@@ -4,10 +4,13 @@ const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { validateBody } = require("../middleware/validateRequest");
+const { crmRegistryCreateSchema } = require("../validation/crmRegistrySchemas");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const multer = require("multer");
 
 router.use(authMiddleware);
@@ -81,7 +84,7 @@ router.get("/", requirePageRight("crm-registry", "view"), async (req, res) => {
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-registry] GET error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -94,7 +97,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-registry", "view"), asyn
     res.json(result.recordset[0] || null);
   } catch (e) {
     console.error("[crm-registry] GET /booking/:id error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -118,7 +121,7 @@ router.get("/eligible-bookings", requirePageRight("crm-registry", "view"), async
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-registry] eligible-bookings error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -146,14 +149,14 @@ router.get("/:id", requirePageRight("crm-registry", "view"), async (req, res) =>
     res.json({ registry: regRes.recordset[0], documents: docRes.recordset, history: logRes.recordset });
   } catch (e) {
     console.error("[crm-registry] GET /:id error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
 // POST / — start Registry tracking for a booking. Gated on Query Payment
 // being Confirmed — the customer must have actually paid the government
 // before the deed can go to the Sub-Registrar Office for registration.
-router.post("/", requirePageRight("crm-registry", "create"), async (req, res) => {
+router.post("/", requirePageRight("crm-registry", "create"), validateBody(crmRegistryCreateSchema), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
@@ -237,7 +240,7 @@ router.post("/", requirePageRight("crm-registry", "create"), async (req, res) =>
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
       return res.status(409).json({ error: "Registry tracking already started for this booking" });
     console.error("[crm-registry] POST error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -276,7 +279,7 @@ router.put("/:id/schedule", requirePageRight("crm-registry", "edit"), async (req
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-registry] PUT /:id/schedule error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -315,7 +318,7 @@ router.put("/:id/reschedule", requirePageRight("crm-registry", "edit"), async (r
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-registry] PUT /:id/reschedule error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -414,7 +417,7 @@ router.put("/:id/complete", requirePageRight("crm-registry", "edit"), async (req
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-registry] PUT /:id/complete error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -447,7 +450,7 @@ router.put("/:id/cancel", requirePageRight("crm-registry", "edit"), async (req, 
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-registry] PUT /:id/cancel error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -465,6 +468,14 @@ router.post("/:id/documents/upload", requirePageRight("crm-registry", "edit"), u
     if (!reg.recordset.length) return res.status(404).json({ error: "Registry not found" });
     if (["Completed", "Cancelled"].includes(reg.recordset[0].Status)) {
       return res.status(400).json({ error: "Cannot modify documents for a completed or cancelled registry" });
+    }
+
+    // Validate every file's actual bytes before writing any of them — a
+    // signature failure on a later file must not leave earlier ones already
+    // committed while the request as a whole reports an error.
+    for (const file of req.files || []) {
+      const sigErr = verifyFileMatchesDeclaredType(file);
+      if (sigErr) return res.status(400).json({ error: `${file.originalname}: ${sigErr}` });
     }
 
     for (const file of req.files || []) {
@@ -514,7 +525,7 @@ router.post("/:id/documents/upload", requirePageRight("crm-registry", "edit"), u
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-registry] documents/upload error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -550,7 +561,8 @@ router.post("/:id/documents/request", requirePageRight("crm-registry", "edit"), 
       `);
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -578,14 +590,19 @@ router.put("/:id/documents/:docId", requirePageRight("crm-registry", "edit"), as
       `);
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
 // GET /documents/file/:docId — same access pattern as crmSalesDeed.js;
 // the frontend fetches this with an auth header and previews/downloads the
 // blob client-side rather than navigating to it directly.
-router.get("/documents/file/:docId", async (req, res) => {
+// Route-audit finding: had no permission gate beyond the blanket
+// router.use(authMiddleware) — any authenticated user, any role, could
+// iterate docId and download any Registry document. Now requires the same
+// "view" right every other GET route in this file already does.
+router.get("/documents/file/:docId", requirePageRight("crm-registry", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const doc = await pool.request().input("docid", sql.Int, parseInt(req.params.docId, 10)).query(`
