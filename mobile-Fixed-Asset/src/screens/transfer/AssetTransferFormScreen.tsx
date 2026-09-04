@@ -3,7 +3,7 @@
 // payload + validation as POST/PUT /api/asset-transfer. The From User is the
 // asset's current custodian; To User auto-fills Department; Remarks required.
 import { useEffect, useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { Image, Text, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { RouteProp } from "@react-navigation/native";
 import { useNavigation, useRoute } from "@react-navigation/native";
@@ -16,7 +16,7 @@ import { FormScaffold, FormSection, RemarksField, PickerField, DateField, ImageC
 import { useActiveFinYear } from "@/hooks/useActiveFinYear";
 import { getCompanies, getProjects, getUsers, getDepartments } from "@/api/mastersApi";
 import {
-  getTransferableAssets, getAssetTransfer, createAssetTransfer, updateAssetTransfer, setAssetPicture,
+  getTransferableAssets, getAssetTransfer, getFixedAsset, createAssetTransfer, updateAssetTransfer, setAssetPicture,
 } from "@/api/fixedAssetApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 
@@ -56,6 +56,9 @@ export default function AssetTransferFormScreen() {
     enabled: !editingId && !!projectId,
   });
   const detailQ = useQuery({ queryKey: ["fa-transfer", editingId], queryFn: () => getAssetTransfer(editingId!), enabled: !!editingId });
+  // On edit, the transfer row has no picture — pull it from the asset record.
+  const editAssetId = editingId ? detailQ.data?.AssetId : undefined;
+  const assetQ = useQuery({ queryKey: ["fa-asset", editAssetId], queryFn: () => getFixedAsset(editAssetId!), enabled: !!editAssetId });
 
   useEffect(() => {
     if (!editingId || !detailQ.data || hydrated) return;
@@ -96,7 +99,9 @@ export default function AssetTransferFormScreen() {
   );
 
   const selectedAsset = (assetsQ.data ?? []).find((a) => String(a.AssetId) === assetId);
-  const assetPicture = localPicture !== null ? localPicture : (selectedAsset?.PictureBase64 || "");
+  const assetPicture = localPicture !== null
+    ? localPicture
+    : (selectedAsset?.PictureBase64 || assetQ.data?.PictureBase64 || "");
   const fromUser = findUser(fromUserId);
   const toUser = findUser(toUserId ? Number(toUserId) : null);
 
@@ -198,31 +203,32 @@ export default function AssetTransferFormScreen() {
           </Text>
         )}
 
-        {!editingId && (
-          <ImageCaptureField label="Item Picture" value={assetPicture} onChange={onPickPicture}
-            hint={assetId ? "Saved to the asset record · JPG, PNG or WEBP · max 4 MB" : "Select an FA Item Code first"} />
-        )}
+        <ImageCaptureField label="Item Picture" value={assetPicture} onChange={onPickPicture}
+          hint={assetId ? "Saved to the asset record · JPG, PNG or WEBP · max 4 MB" : "Select an FA Item Code first"} />
 
         <FieldLabel label="From User" />
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80`, marginBottom: 14 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 46, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.card}80`, marginBottom: 14 }}>
           {fromUser ? (
             <>
-              <Avatar name={fromUser.name} url={fromUser.avatar_url} id={fromUser.id} size={26} />
+              <Avatar name={fromUser.name} url={fromUser.avatar_url} id={fromUser.id} size={28} />
               <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.body.medium }}>{fromUser.name}</Text>
             </>
           ) : (
-            <Text style={{ color: `${colors.mutedForeground}99`, fontSize: 13, fontFamily: fonts.body.regular }}>
-              {assetId ? "No current holder" : "Select an asset first"}
-            </Text>
+            <>
+              <Avatar name="?" id={0} size={28} />
+              <Text style={{ color: `${colors.mutedForeground}99`, fontSize: 13, fontFamily: fonts.body.regular }}>
+                {assetId ? "No current holder" : "Select an asset first"}
+              </Text>
+            </>
           )}
         </View>
 
         <PickerField label="To User" value={toUserId} options={toUserOpts} required loading={usersQ.isLoading}
           disabled={!fromUserId} placeholder={fromUserId ? "Select the To User" : "Select an asset first"} onSelect={onPickToUser} />
         {toUser && (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: -6, marginBottom: 12 }}>
-            <Avatar name={toUser.name} url={toUser.avatar_url} id={toUser.id} size={22} />
-            <Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular }}>{toUser.name}</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: -4, marginBottom: 12 }}>
+            <Avatar name={toUser.name} url={toUser.avatar_url} id={toUser.id} size={24} />
+            <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.body.medium }}>{toUser.name}</Text>
           </View>
         )}
 
@@ -239,12 +245,19 @@ export default function AssetTransferFormScreen() {
           <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.heading.bold, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>
             Preview
           </Text>
-          <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.body.semibold }}>
-            {selectedAsset?.AssetName || detailQ.data?.AssetName || "—"}
-          </Text>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            {assetPicture ? (
+              <Image source={{ uri: assetPicture }} style={{ width: 46, height: 46, borderRadius: 10, borderWidth: 1, borderColor: colors.border }} />
+            ) : null}
+            <Text style={{ flex: 1, color: colors.foreground, fontSize: 13, fontFamily: fonts.body.semibold }}>
+              {selectedAsset?.AssetName || detailQ.data?.AssetName || "—"}
+            </Text>
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 }}>
+            <Avatar name={fromUser?.name} url={fromUser?.avatar_url} id={fromUser?.id ?? 0} size={22} />
             <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.body.medium }}>{fromUser?.name || "—"}</Text>
             <ArrowRight size={13} color="#eab308" />
+            <Avatar name={toUser?.name} url={toUser?.avatar_url} id={toUser?.id ?? 0} size={22} />
             <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.body.semibold }}>{toUser?.name || "—"}</Text>
           </View>
           <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular, marginTop: 6 }}>
