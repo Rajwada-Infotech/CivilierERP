@@ -2707,14 +2707,14 @@ export default function LoanSanctionPage() {
             <div className="flex justify-end gap-3 px-7 sm:px-8 pb-7 sm:pb-8 pt-2">
               <button
                 onClick={closeForm}
-                className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+                className="px-3.5 py-1.5 rounded-lg border border-border text-xs hover:bg-muted transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-emerald-500 to-green-400 text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                className="px-3.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
               >
                 {saving ? "Sanctioning…" : "Sanction Loan"}
               </button>
