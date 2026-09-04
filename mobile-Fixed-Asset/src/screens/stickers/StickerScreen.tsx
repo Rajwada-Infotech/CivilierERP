@@ -22,8 +22,8 @@ import { getTaggedFAItemCodes, type TaggedFAItemCode } from "@/api/fixedAssetApi
 
 const ACCENT = "#eab308";
 
-interface Filters { companyId: string; fromDate: string; toDate: string; finYear: string; search: string }
-const EMPTY: Filters = { companyId: "", fromDate: "", toDate: "", finYear: "", search: "" };
+interface Filters { companyId: string; fromDate: string; toDate: string; finYear: string; faCode: string; itemName: string }
+const EMPTY: Filters = { companyId: "", fromDate: "", toDate: "", finYear: "", faCode: "", itemName: "" };
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
@@ -80,7 +80,8 @@ export default function StickerScreen() {
       finYear: applied.finYear || undefined,
       fromDate: applied.fromDate || undefined,
       toDate: applied.toDate || undefined,
-      search: applied.search || undefined,
+      faCode: applied.faCode || undefined,
+      itemName: applied.itemName || undefined,
     }),
   });
 
@@ -146,6 +147,9 @@ export default function StickerScreen() {
           <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.body.medium, marginTop: 5 }}>
             {item.ItemName || "—"}
           </Text>
+          <View style={{ alignSelf: "flex-start", marginTop: 5, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: "rgba(16,185,129,0.14)" }}>
+            <Text style={{ color: "#10b981", fontSize: 9, fontFamily: fonts.heading.bold }}>TAGGED</Text>
+          </View>
         </View>
       </Pressable>
     );
@@ -161,15 +165,16 @@ export default function StickerScreen() {
         }}>
           <Search size={15} color="#5c6270" />
           <TextInput
-            value={draft.search}
-            onChangeText={(v) => setDraft((p) => ({ ...p, search: v }))}
+            value={draft.faCode}
+            onChangeText={(v) => setDraft((p) => ({ ...p, faCode: v }))}
             onSubmitEditing={apply}
-            placeholder="FA Item Code / Item Name…"
+            placeholder="Search FA Item Code…"
             placeholderTextColor="#5c6270"
+            autoCapitalize="characters"
             style={{ flex: 1, color: colors.foreground, fontSize: 13, fontFamily: fonts.body.regular }}
           />
-          {draft.search ? (
-            <Pressable onPress={() => setDraft((p) => ({ ...p, search: "" }))} hitSlop={8}>
+          {draft.faCode ? (
+            <Pressable onPress={() => { setDraft((p) => ({ ...p, faCode: "" })); setApplied((p) => ({ ...p, faCode: "" })); }} hitSlop={8}>
               <X size={14} color="#5c6270" />
             </Pressable>
           ) : null}
@@ -211,6 +216,14 @@ export default function StickerScreen() {
         {showFilters && (
           <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
             <View style={{ backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 4 }}>
+              <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.body.medium, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 5 }}>Item Name</Text>
+              <TextInput
+                value={draft.itemName}
+                onChangeText={(v) => setDraft((p) => ({ ...p, itemName: v }))}
+                placeholder="Search Item Name…"
+                placeholderTextColor={`${colors.mutedForeground}99`}
+                style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.background}`, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, minHeight: 44, color: colors.foreground, fontSize: 13.5, fontFamily: fonts.body.regular, marginBottom: 14 }}
+              />
               <PickerField label="Company" value={draft.companyId} options={companyOpts} clearable
                 loading={companiesQ.isLoading} onSelect={(v) => setDraft((p) => ({ ...p, companyId: v }))} />
               <PickerField label="Financial Year" value={draft.finYear} options={finYearOpts} searchable={false} clearable
@@ -270,8 +283,8 @@ export default function StickerScreen() {
             ) : (
               <>
                 <Printer size={16} color="#1a1a1a" />
-                <Text style={{ color: "#1a1a1a", fontSize: 13.5, fontFamily: fonts.heading.bold }}>
-                  Sticker Print ({selectedRows.length})
+                <Text style={{ color: "#1a1a1a", fontSize: 13, fontFamily: fonts.heading.bold }}>
+                  Print Depreciation Tag Stickers ({selectedRows.length})
                 </Text>
               </>
             )}

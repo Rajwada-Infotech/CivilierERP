@@ -112,19 +112,23 @@ router.get("/unassigned-codes", requirePageRight("fixed-asset-record", "view"), 
 });
 
 // ── GET /tagged-codes — every valid FA Item Code minted by the Depreciation
-// Tag workflow, for the sticker-print page. One row per tagged unit; stays
-// listed forever (even after a Fixed Asset Record is cut) so stickers can be
-// reprinted. Filters: company, financial year, tagging-date range, search. ──
+// Tag workflow, for the sticker-print page. Hard rule: Status = 'Tagged' AND
+// FAItemCode IS NOT NULL — nothing pending / untagged / code-less appears.
+// One row per tagged unit; stays listed forever (even after a Fixed Asset
+// Record is cut) so stickers can be reprinted. Filters: company, financial
+// year, tagging-date range, FA-Item-Code search, Item-Name search. ──────────
 router.get("/tagged-codes", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
-    const where = ["t.Status = 'Tagged'", "t.FAItemCode IS NOT NULL"];
+    const where = ["t.Status = 'Tagged'", "t.FAItemCode IS NOT NULL AND LTRIM(RTRIM(t.FAItemCode)) <> ''"];
 
     if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("t.CompanyId = @CompanyId"); }
     if (req.query.finYear)   { request.input("FinYear",   sql.NVarChar(20), req.query.finYear);        where.push("t.FinYear = @FinYear"); }
     if (req.query.fromDate)  { request.input("FromDate",  sql.Date, req.query.fromDate);                where.push("t.DocDate >= @FromDate"); }
     if (req.query.toDate)    { request.input("ToDate",    sql.Date, req.query.toDate);                  where.push("t.DocDate <= @ToDate"); }
+    if (req.query.faCode)    { request.input("FaCode",    sql.NVarChar(200), `%${String(req.query.faCode).trim()}%`);   where.push("t.FAItemCode LIKE @FaCode"); }
+    if (req.query.itemName)  { request.input("ItemName",  sql.NVarChar(200), `%${String(req.query.itemName).trim()}%`); where.push("im.M_Name LIKE @ItemName"); }
     if (req.query.search) {
       request.input("Search", sql.NVarChar(200), `%${String(req.query.search).trim()}%`);
       where.push("(t.FAItemCode LIKE @Search OR im.M_Name LIKE @Search)");
@@ -133,7 +137,7 @@ router.get("/tagged-codes", requirePageRight("fixed-asset-tagging", "view"), asy
     const result = await request.query(`
       SELECT
         t.TagId, t.FAItemCode, im.M_Name AS ItemName,
-        t.DocDate, t.FinYear,
+        t.DocNo, t.DocDate, t.FinYear, t.Status,
         t.CompanyId, co.name AS CompanyName,
         t.ProjectId, pr.name AS ProjectName,
         CASE WHEN EXISTS (

@@ -28,9 +28,10 @@ interface FilterState {
   fromDate: string;
   toDate: string;
   finYear: string;
-  search: string;
+  faCode: string;
+  itemName: string;
 }
-const EMPTY: FilterState = { companyId: "", fromDate: "", toDate: "", finYear: "", search: "" };
+const EMPTY: FilterState = { companyId: "", fromDate: "", toDate: "", finYear: "", faCode: "", itemName: "" };
 
 // ── Sticker sheet HTML (opened in a new window and printed) ──────────────────
 function buildStickerHtml(rows: TaggedFAItemCode[]): string {
@@ -145,7 +146,8 @@ export default function FixedAssetDepreciationTagStickers() {
       finYear: applied.finYear || undefined,
       fromDate: applied.fromDate || undefined,
       toDate: applied.toDate || undefined,
-      search: applied.search || undefined,
+      faCode: applied.faCode || undefined,
+      itemName: applied.itemName || undefined,
     }),
   });
 
@@ -185,7 +187,7 @@ export default function FixedAssetDepreciationTagStickers() {
             onClick={() => (selectedRows.length ? setPrintOpen(true) : toast.error("Select at least one FA Item Code"))}
             className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all"
           >
-            <Printer size={13} /> Sticker Print{selectedRows.length ? ` (${selectedRows.length})` : ""}
+            <Printer size={13} /> Print Depreciation Tag Stickers{selectedRows.length ? ` (${selectedRows.length})` : ""}
           </button>
         }
       >
@@ -197,19 +199,37 @@ export default function FixedAssetDepreciationTagStickers() {
         {/* ── Filters ── */}
         <Card className="border-border shadow-sm mt-4 mb-5">
           <CardContent className="p-4 space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-              <div className="lg:col-span-1">
-                <label className={labelCls}><Search size={11} /> Search</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div>
+                <label className={labelCls}><Search size={11} /> FA Item Code</label>
                 <div className="relative">
                   <input
-                    value={draft.search}
-                    onChange={(e) => setDraft((p) => ({ ...p, search: e.target.value }))}
+                    value={draft.faCode}
+                    onChange={(e) => setDraft((p) => ({ ...p, faCode: e.target.value }))}
                     onKeyDown={(e) => e.key === "Enter" && apply()}
-                    placeholder="FA Item Code / Item Name…"
+                    placeholder="Search FA Item Code…"
                     className={inputCls}
                   />
-                  {draft.search && (
-                    <button onClick={() => setDraft((p) => ({ ...p, search: "" }))}
+                  {draft.faCode && (
+                    <button onClick={() => setDraft((p) => ({ ...p, faCode: "" }))}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}><Search size={11} /> Item Name</label>
+                <div className="relative">
+                  <input
+                    value={draft.itemName}
+                    onChange={(e) => setDraft((p) => ({ ...p, itemName: e.target.value }))}
+                    onKeyDown={(e) => e.key === "Enter" && apply()}
+                    placeholder="Search Item Name…"
+                    className={inputCls}
+                  />
+                  {draft.itemName && (
+                    <button onClick={() => setDraft((p) => ({ ...p, itemName: "" }))}
                       className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                       <X size={13} />
                     </button>
@@ -265,8 +285,8 @@ export default function FixedAssetDepreciationTagStickers() {
         <Card className="border-border shadow-sm">
           <CardHeader className="pb-3 border-b border-border flex-row items-center justify-between">
             <div>
-              <CardTitle className="text-base font-semibold">FA Item Codes</CardTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">Every code minted by the Depreciation Tag process — available for sticker reprint</p>
+              <CardTitle className="text-base font-semibold">Completed Depreciation Tags</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">Only assets with Depreciation Tag = Tagged and a valid FA Item Code — always available for sticker reprint</p>
             </div>
             {list.length > 0 && (
               <button onClick={toggleAll}
@@ -289,9 +309,10 @@ export default function FixedAssetDepreciationTagStickers() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
-                        <th className="px-4 py-3 w-10"></th>
+                        <th className="px-4 py-3 w-16 text-left">Select</th>
                         <th className="px-4 py-3 text-left">FA Item Code</th>
                         <th className="px-4 py-3 text-left">Item Name</th>
+                        <th className="px-4 py-3 text-left w-28">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
@@ -303,6 +324,11 @@ export default function FixedAssetDepreciationTagStickers() {
                           </td>
                           <td className="px-4 py-2.5 font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400">{r.FAItemCode}</td>
                           <td className="px-4 py-2.5">{r.ItemName || "—"}</td>
+                          <td className="px-4 py-2.5">
+                            <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                              Tagged
+                            </span>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -316,9 +342,12 @@ export default function FixedAssetDepreciationTagStickers() {
                       className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/30 transition-colors">
                       <input type="checkbox" checked={selected.has(r.TagId)} onChange={() => toggleOne(r.TagId)} onClick={(e) => e.stopPropagation()}
                         className="h-4 w-4 mt-0.5 rounded border-border accent-yellow-500 shrink-0" />
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <p className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 break-all">{r.FAItemCode}</p>
                         <p className="text-sm mt-0.5">{r.ItemName || "—"}</p>
+                        <span className="inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                          Tagged
+                        </span>
                       </div>
                     </button>
                   ))}
@@ -333,7 +362,7 @@ export default function FixedAssetDepreciationTagStickers() {
       <Dialog open={printOpen} onOpenChange={setPrintOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Print {selectedRows.length} Sticker{selectedRows.length === 1 ? "" : "s"}</DialogTitle>
+            <DialogTitle>Print Preview — {selectedRows.length} Depreciation Tag Sticker{selectedRows.length === 1 ? "" : "s"}</DialogTitle>
           </DialogHeader>
           <div className="max-h-[55vh] overflow-y-auto flex flex-wrap gap-3 p-1">
             {selectedRows.map((r) => <StickerPreview key={r.TagId} row={r} />)}
@@ -347,7 +376,7 @@ export default function FixedAssetDepreciationTagStickers() {
               onClick={() => { printStickers(selectedRows); setPrintOpen(false); }}
               className="inline-flex items-center gap-1.5 text-xs font-heading font-semibold text-white px-4 py-2 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all"
             >
-              <Printer size={13} /> Print Stickers
+              <Printer size={13} /> Print {selectedRows.length} Sticker{selectedRows.length === 1 ? "" : "s"}
             </button>
           </DialogFooter>
         </DialogContent>

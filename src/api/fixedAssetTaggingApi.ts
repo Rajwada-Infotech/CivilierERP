@@ -121,8 +121,10 @@ export interface TaggedFAItemCode {
   TagId: number;
   FAItemCode: string;
   ItemName: string | null;
+  DocNo: string | null;
   DocDate: string | null;
   FinYear: string | null;
+  Status: "Tagged";
   CompanyId: number | null;
   CompanyName: string | null;
   ProjectId: number | null;
@@ -135,14 +137,16 @@ export const getTaggedFAItemCodes = async (params?: {
   finYear?: string;
   fromDate?: string;
   toDate?: string;
-  search?: string;
+  faCode?: string;
+  itemName?: string;
 }): Promise<TaggedFAItemCode[]> => {
   const qs = new URLSearchParams();
   if (params?.companyId) qs.set("companyId", String(params.companyId));
   if (params?.finYear)   qs.set("finYear",   params.finYear);
   if (params?.fromDate)  qs.set("fromDate",  params.fromDate);
   if (params?.toDate)    qs.set("toDate",    params.toDate);
-  if (params?.search)    qs.set("search",    params.search);
+  if (params?.faCode)    qs.set("faCode",    params.faCode);
+  if (params?.itemName)  qs.set("itemName",  params.itemName);
   const res = await fetchWithAuth(`${BASE}/tagged-codes${qs.toString() ? `?${qs}` : ""}`);
   if (!res.ok) await handleError(res, "Failed to fetch tagged FA Item Codes");
   return res.json();
