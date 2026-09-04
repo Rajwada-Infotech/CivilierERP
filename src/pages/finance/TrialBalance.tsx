@@ -998,7 +998,7 @@ export default function TrialBalance() {
         navigate(`/received-payments?view=${t.sourceId}`); break;
       case "PURCHASE_ORDER":
       case "PO":
-        navigate(`/purchase-orders?view=${t.sourceId}`); break;
+        navigate(`/material/purchase-order?view=${t.sourceId}`); break;
       case "GRN":
       case "GRNPOSTING":
         navigate(`/material/grn?view=${t.sourceId}`); break;

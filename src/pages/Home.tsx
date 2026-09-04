@@ -717,7 +717,7 @@ export default function HomePage() {
     access.followup && { severity: "med" as Sev, label: "Follow-ups due today", count: fol?.dueToday ?? 0, hint: "Scheduled for today", href: "/followup", icon: CalendarClock },
     access.crm && { severity: "med" as Sev, label: "CRM applications pending", count: crmPendingApps, hint: "Not yet processed", href: "/crm/dashboard", icon: HeartHandshake },
     access.ticket && { severity: "low" as Sev, label: "Tickets open", count: (tick?.pending ?? 0) + (tick?.inProgress ?? 0), hint: "Pending + in progress", href: "/ticket", icon: Ticket },
-    access.material && { severity: "low" as Sev, label: "Purchase orders open", count: mat?.purchaseOrders?.open ?? 0, hint: "Not yet closed / cancelled", href: "/purchase-orders", icon: Package },
+    access.material && { severity: "low" as Sev, label: "Purchase orders open", count: mat?.purchaseOrders?.open ?? 0, hint: "Not yet closed / cancelled", href: "/material/purchase-order", icon: Package },
   ];
   const sevRank: Record<Sev, number> = { high: 0, med: 1, low: 2 };
   const attention: Attention[] = (rawAttn.filter(Boolean) as Attention[])

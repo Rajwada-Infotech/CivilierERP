@@ -1556,6 +1556,9 @@ export default function LoanSanctionPage() {
                           <InfoCard label="Borrower Bank A/C" value={viewingLoan?.BorrowerBankAccountName || "—"} />
                         </>
                       )}
+                      {isCustomerLoanType && (
+                        <InfoCard label="Lender Bank A/C" value={viewingLoan?.LenderBankAccountName || "—"} />
+                      )}
                     </div>
 
                     {/* Terms */}
