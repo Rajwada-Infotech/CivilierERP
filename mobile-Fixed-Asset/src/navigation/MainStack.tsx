@@ -12,6 +12,7 @@ import MenuScreen from "@/screens/menu/MenuScreen";
 import TaggingScreen from "@/screens/tagging/TaggingScreen";
 import TaggingDetailScreen from "@/screens/tagging/TaggingDetailScreen";
 import TaggingFormScreen from "@/screens/tagging/TaggingFormScreen";
+import StickerScreen from "@/screens/stickers/StickerScreen";
 import AssignmentScreen from "@/screens/assignment/AssignmentScreen";
 import AssignmentDetailScreen from "@/screens/assignment/AssignmentDetailScreen";
 import AssignmentFormScreen from "@/screens/assignment/AssignmentFormScreen";
@@ -29,6 +30,7 @@ export type MainStackParamList = {
   AssetRegister: undefined;
   Maintenance: undefined;
   Tagging: undefined;
+  Stickers: undefined;
   Assignment: undefined;
   AssetTransfer: undefined;
   QualityCheck: undefined;
@@ -67,6 +69,7 @@ export default function MainStack() {
       <Stack.Screen name="Tagging" component={TaggingScreen} options={{ title: "FA Inventory" }} />
       <Stack.Screen name="TaggingDetail" component={TaggingDetailScreen} options={{ title: "Tagging Entry" }} />
       <Stack.Screen name="TaggingForm" component={TaggingFormScreen} options={{ title: "FA Inventory" }} />
+      <Stack.Screen name="Stickers" component={StickerScreen} options={{ title: "Depreciation Tag Stickers" }} />
       <Stack.Screen name="Assignment" component={AssignmentScreen} options={{ title: "Assignment" }} />
       <Stack.Screen name="AssignmentDetail" component={AssignmentDetailScreen} options={{ title: "Assignment" }} />
       <Stack.Screen name="AssignmentForm" component={AssignmentFormScreen} options={{ title: "Assignment" }} />

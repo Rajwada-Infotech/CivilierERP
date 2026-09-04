@@ -111,6 +111,48 @@ router.get("/unassigned-codes", requirePageRight("fixed-asset-record", "view"), 
   }
 });
 
+// ── GET /tagged-codes — every valid FA Item Code minted by the Depreciation
+// Tag workflow, for the sticker-print page. One row per tagged unit; stays
+// listed forever (even after a Fixed Asset Record is cut) so stickers can be
+// reprinted. Filters: company, financial year, tagging-date range, search. ──
+router.get("/tagged-codes", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    const where = ["t.Status = 'Tagged'", "t.FAItemCode IS NOT NULL"];
+
+    if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("t.CompanyId = @CompanyId"); }
+    if (req.query.finYear)   { request.input("FinYear",   sql.NVarChar(20), req.query.finYear);        where.push("t.FinYear = @FinYear"); }
+    if (req.query.fromDate)  { request.input("FromDate",  sql.Date, req.query.fromDate);                where.push("t.DocDate >= @FromDate"); }
+    if (req.query.toDate)    { request.input("ToDate",    sql.Date, req.query.toDate);                  where.push("t.DocDate <= @ToDate"); }
+    if (req.query.search) {
+      request.input("Search", sql.NVarChar(200), `%${String(req.query.search).trim()}%`);
+      where.push("(t.FAItemCode LIKE @Search OR im.M_Name LIKE @Search)");
+    }
+
+    const result = await request.query(`
+      SELECT
+        t.TagId, t.FAItemCode, im.M_Name AS ItemName,
+        t.DocDate, t.FinYear,
+        t.CompanyId, co.name AS CompanyName,
+        t.ProjectId, pr.name AS ProjectName,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM dbo.FixedAssetRecord fr WHERE fr.SourceTagId = t.TagId AND fr.Status <> 'Deleted'
+        ) THEN 1 ELSE 0 END AS HasRecord
+      FROM dbo.FixedAssetTagging t
+      LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
+      LEFT JOIN dbo.enterprise co ON co.id = t.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = t.ProjectId
+      WHERE ${where.join(" AND ")}
+      ORDER BY t.FAItemCode
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[fixedAssetTagging] GET /tagged-codes:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET / — list tagging transactions (audit trail) ──────────────────────────
 router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
   try {

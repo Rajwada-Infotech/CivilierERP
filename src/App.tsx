@@ -208,6 +208,7 @@ const GRN = lazy(() => import("./pages/material/GRN"));
 const FixedAssetDashboard = lazy(() => import("./pages/fixedAsset/FixedAssetDashboard"));
 const FixedAssetRecord = lazy(() => import("./pages/fixedAsset/FixedAssetRecord"));
 const FixedAssetTagging = lazy(() => import("./pages/fixedAsset/FixedAssetTagging"));
+const FixedAssetDepreciationTagStickers = lazy(() => import("./pages/fixedAsset/FixedAssetDepreciationTagStickers"));
 const FixedAssetInventoryImport = lazy(() => import("./pages/fixedAsset/FixedAssetInventoryImport"));
 const FixedAssetAssignment = lazy(() => import("./pages/fixedAsset/FixedAssetAssignment"));
 const AssetTransfer = lazy(() => import("./pages/fixedAsset/AssetTransfer"));
@@ -1169,6 +1170,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="fixed-asset-tagging">
             <FixedAssetTagging />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/depreciation-tag-stickers"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-tagging">
+            <FixedAssetDepreciationTagStickers />
           </ProtectedRoute>
         }
       />

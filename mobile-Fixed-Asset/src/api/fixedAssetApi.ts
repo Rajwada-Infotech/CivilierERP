@@ -358,6 +358,32 @@ export const getFixedAssetTaggings = (params?: {
 export const getFixedAssetTagging = (id: number): Promise<TaggingDetail> =>
   getJson(`/api/fixed-asset-tagging/${id}`, "Failed to load tagging entry");
 
+// Depreciation Tag sticker page — every valid FA Item Code minted by tagging.
+export interface TaggedFAItemCode {
+  TagId: number;
+  FAItemCode: string;
+  ItemName: string | null;
+  DocDate: string | null;
+  FinYear: string | null;
+  CompanyId: number | null;
+  CompanyName: string | null;
+  ProjectId: number | null;
+  ProjectName: string | null;
+  HasRecord: 0 | 1;
+}
+
+export const getTaggedFAItemCodes = (params?: {
+  companyId?: number; finYear?: string; fromDate?: string; toDate?: string; search?: string;
+}): Promise<TaggedFAItemCode[]> => {
+  const qs = new URLSearchParams();
+  if (params?.companyId) qs.set("companyId", String(params.companyId));
+  if (params?.finYear) qs.set("finYear", params.finYear);
+  if (params?.fromDate) qs.set("fromDate", params.fromDate);
+  if (params?.toDate) qs.set("toDate", params.toDate);
+  if (params?.search) qs.set("search", params.search);
+  return getJson(`/api/fixed-asset-tagging/tagged-codes${qs.toString() ? `?${qs}` : ""}`, "Failed to load FA Item Codes");
+};
+
 export const getEligibleAssetItems = (params: {
   godownId: number; companyId?: number; projectId?: number; finYear?: string;
 }): Promise<EligibleAssetItem[]> => {
