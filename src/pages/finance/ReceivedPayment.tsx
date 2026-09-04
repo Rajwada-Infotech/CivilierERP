@@ -2,6 +2,7 @@ import React from "react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
+import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
@@ -203,46 +204,6 @@ const normalizeCompanyName = (value: string | null | undefined) =>
     .replace(/\s+/g, " ")
     .toLowerCase();
 
-// Customer Bank Name was a free-text field — switched to a picker of common
-// Indian banks (grouped Major/Other) so entries stay consistent for
-// reporting, while still allowing any bank via "Other" for names not listed.
-const MAJOR_BANKS = [
-  "State Bank of India",
-  "HDFC Bank",
-  "ICICI Bank",
-  "Axis Bank",
-  "Kotak Mahindra Bank",
-  "Punjab National Bank",
-  "Bank of Baroda",
-  "Canara Bank",
-  "Union Bank of India",
-  "IndusInd Bank",
-  "IDBI Bank",
-  "Yes Bank",
-  "Bank of India",
-  "Indian Bank",
-  "Central Bank of India",
-];
-const MINOR_BANKS = [
-  "IDFC FIRST Bank",
-  "Federal Bank",
-  "South Indian Bank",
-  "Karnataka Bank",
-  "RBL Bank",
-  "Bandhan Bank",
-  "City Union Bank",
-  "DCB Bank",
-  "Karur Vysya Bank",
-  "Tamilnad Mercantile Bank",
-  "Bank of Maharashtra",
-  "UCO Bank",
-  "Punjab & Sind Bank",
-  "AU Small Finance Bank",
-  "Equitas Small Finance Bank",
-  "Ujjivan Small Finance Bank",
-];
-const OTHER_BANK_VALUE = "__other__";
-
 const modeIcon = (mode: string) => {
   if (mode === "Cash")
     return <Banknote size={13} className="text-emerald-500" />;
@@ -436,6 +397,11 @@ export default function ReceivedPaymentPage() {
   const [summary, setSummary] = useState({ totalAmount: 0, approvedCount: 0, draftCount: 0, pendingCount: 0, rejectedCount: 0 });
   const [apiLoading, setApiLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Bumped on every reset/add/edit so BankNamePicker remounts fresh —
+  // editingId alone repeats "null" across successive Add clicks and
+  // wouldn't force a remount, leaving a previously-typed "Other" bank name
+  // stuck in the picker's own internal state.
+  const [bankPickerKey, setBankPickerKey] = useState(0);
   const [actionLoading, setActionLoading] = useState(false);
   const [viewingPayment, setViewingPayment] = useState<ReceivedPayment | null>(
     null,
@@ -486,13 +452,6 @@ export default function ReceivedPaymentPage() {
   const [form, setForm] = useDraftForm("received-payment", EMPTY_FORM, {
     skip: editingId !== null,
   });
-  // Customer Bank Name's free-text fallback only activates once "Other" is
-  // explicitly picked from the dropdown — not by default, and not just
-  // because form.bankName happens to be empty (which is also the initial,
-  // nothing-selected state).
-  const [customBank, setCustomBank] = useState(
-    !!form.bankName && !MAJOR_BANKS.includes(form.bankName) && !MINOR_BANKS.includes(form.bankName),
-  );
 
   // ── Loan Repayment (every loan type) ────────────────────────────────────
   // Repayment of every loan type — Customer Loan, Inter-Company, Bank Loan
@@ -783,7 +742,7 @@ export default function ReceivedPaymentPage() {
 
   const handleReset = () => {
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
-    setCustomBank(false);
+    setBankPickerKey((k) => k + 1);
     setDate(new Date());
     setDocNoPreview("");
   };
@@ -792,14 +751,14 @@ export default function ReceivedPaymentPage() {
     setView("list");
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
-    setCustomBank(false);
+    setBankPickerKey((k) => k + 1);
   };
 
   // ── Open add form ─────────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
-    setCustomBank(false);
+    setBankPickerKey((k) => k + 1);
     setDate(new Date());
     setDocNoPreview("");
     setView("form");
@@ -828,9 +787,7 @@ export default function ReceivedPaymentPage() {
       remarks: p.remarks ?? "",
       contractId: String((p as { ContractId?: number }).ContractId ?? ""),
     });
-    setCustomBank(
-      !!p.bankName && !MAJOR_BANKS.includes(p.bankName) && !MINOR_BANKS.includes(p.bankName),
-    );
+    setBankPickerKey((k) => k + 1);
     setDate(p.docDate ? new Date(p.docDate) : new Date());
     setDocNoPreview(p.docNo);
     setView("form");
@@ -1973,52 +1930,13 @@ export default function ReceivedPaymentPage() {
                     )}
                     <div>
                       <FieldLabel>Customer Bank Name</FieldLabel>
-                      <Select
-                        value={
-                          customBank
-                            ? OTHER_BANK_VALUE
-                            : MAJOR_BANKS.includes(form.bankName) || MINOR_BANKS.includes(form.bankName)
-                              ? form.bankName
-                              : ""
-                        }
-                        onValueChange={(v) => {
-                          if (v === OTHER_BANK_VALUE) {
-                            setCustomBank(true);
-                            setField("bankName", "");
-                          } else {
-                            setCustomBank(false);
-                            setField("bankName", v);
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="h-9 text-sm">
-                          <SelectValue placeholder="Select customer's bank…" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            <SelectLabel>Major Banks</SelectLabel>
-                            {MAJOR_BANKS.map((b) => (
-                              <SelectItem key={b} value={b}>{b}</SelectItem>
-                            ))}
-                          </SelectGroup>
-                          <SelectGroup>
-                            <SelectLabel>Other Banks</SelectLabel>
-                            {MINOR_BANKS.map((b) => (
-                              <SelectItem key={b} value={b}>{b}</SelectItem>
-                            ))}
-                          </SelectGroup>
-                          <SelectItem value={OTHER_BANK_VALUE}>Other (type below)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {customBank && (
-                        <Input
-                          className="h-9 text-sm mt-1.5"
-                          placeholder="Bank of customer"
-                          value={form.bankName}
-                          onChange={(e) => setField("bankName", e.target.value)}
-                          autoFocus
-                        />
-                      )}
+                      <BankNamePicker
+                        key={bankPickerKey}
+                        value={form.bankName}
+                        onChange={(v) => setField("bankName", v)}
+                        placeholder="Select customer's bank…"
+                        otherPlaceholder="Bank of customer"
+                      />
                     </div>
                   </div>
                 )}

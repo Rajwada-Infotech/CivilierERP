@@ -55,6 +55,13 @@ import { fetchChequeLots, fetchChequeNumbers, deductChequeFromLot } from "@/page
 import { PAYMENT_MODES } from "@/pages/finance/payment/types";
 import type { ChequeLot } from "@/pages/finance/payment/types";
 import { MODE_STYLE } from "@/pages/finance/payment/constants";
+import { BankNamePicker } from "@/components/finance/BankNamePicker";
+
+// A Bank Loan is disbursed by an external bank, not paid out through any of
+// our own cash-handling modes — scoped down from the full PAYMENT_MODES
+// list (which includes Cash/UPI/Card/IMPS, none of which make sense for a
+// bank-to-company loan) to just the modes a bank would actually use.
+const LOAN_BANK_PAYMENT_MODES = ["NEFT", "RTGS", "Demand Draft", "Cheque"] as const;
 import {
   getLoanSanctions,
   getLoanSchedule,
@@ -62,7 +69,6 @@ import {
   updateLoanSanction,
   deleteLoanSanction,
   getCustomerOptions,
-  getBankOptions,
   getCompanyExposure,
   getLoanPayments,
   uploadLoanNoc,
@@ -73,7 +79,6 @@ import {
   type LoanType,
   type InterestCalcType,
   type CustomerOption,
-  type BankOption,
   type CompanyExposure,
   type LoanPayment,
 } from "@/api/loanSanctionApi";
@@ -109,10 +114,15 @@ const EMPTY_FORM = {
   loanType: "Inter-Company" as LoanType,
   loanDocNo: "",
   lenderCompanyId: "",
-  lenderBankId: "",
+  // Bank Loan only — the external lending bank's name (free-typed, or
+  // picked from the Major/Minor list — same picker Received Payment uses
+  // for a customer's bank). Not one of OUR OWN registered bank accounts;
+  // the lender can be any bank, whether or not we happen to also have an
+  // account there.
+  lenderBankName: "",
   // Inter-Company only — which specific bank account of the lender/borrower
-  // company the funds moved between (distinct from lenderBankId, which is
-  // only for the Bank Loan type where the lender IS the bank).
+  // company the funds moved between (distinct from lenderBankName, which is
+  // only for the Bank Loan type where the lender IS an external bank).
   lenderBankAccountId: "",
   borrowerCompanyId: "",
   borrowerCustomerId: "",
@@ -447,12 +457,6 @@ export default function LoanSanctionPage() {
     staleTime: 5 * 60_000,
   });
 
-  const { data: banks = [] } = useQuery({
-    queryKey: ["bank-options-loan"],
-    queryFn: getBankOptions,
-    staleTime: 5 * 60_000,
-  });
-
   // Full bank records (with each bank's own company tag) — used to scope
   // the Inter-Company Lender/Borrower Bank A/C pickers to only that party's
   // own banks, instead of every bank in the system.
@@ -552,8 +556,6 @@ export default function LoanSanctionPage() {
     companies.find((c: CompanyOption) => String(c.id) === id)?.label ?? "";
   const customerName = (id: string) =>
     customers.find((c: CustomerOption) => String(c.id) === id)?.label ?? "";
-  const bankName = (id: string) =>
-    banks.find((b: BankOption) => String(b.id) === id)?.label ?? "";
 
   const openCreate = () => {
     setViewingLoan(null);
@@ -677,7 +679,7 @@ export default function LoanSanctionPage() {
   const handleSave = async () => {
     const isCustomerLoan = form.loanType === "Customer Loan";
     const isBankLoan = form.loanType === "Bank Loan";
-    if (isBankLoan && !form.lenderBankId) return toast.error("Select the lender bank");
+    if (isBankLoan && !form.lenderBankName.trim()) return toast.error("Select or enter the lender bank");
     if (!isBankLoan && !form.lenderCompanyId) return toast.error("Select the lender company");
     if (isCustomerLoan && !form.borrowerCustomerId) return toast.error("Select the borrower customer");
     if (!isCustomerLoan && !form.borrowerCompanyId) return toast.error("Select the borrower company");
@@ -690,7 +692,7 @@ export default function LoanSanctionPage() {
         loanType: form.loanType,
         loanDocNo: form.loanDocNo || null,
         lenderCompanyId: isBankLoan ? null : form.lenderCompanyId,
-        lenderBankId: isBankLoan ? form.lenderBankId : null,
+        lenderBankName: isBankLoan ? form.lenderBankName.trim() : null,
         lenderBankAccountId: (isInterCompanyType || isCustomerLoan) ? form.lenderBankAccountId || null : null,
         borrowerCompanyId: isCustomerLoan ? null : form.borrowerCompanyId,
         borrowerCustomerId: isCustomerLoan ? form.borrowerCustomerId : null,
@@ -936,7 +938,7 @@ export default function LoanSanctionPage() {
   const displayLender = readOnly
     ? viewingLoan?.LenderCompanyName ?? viewingLoan?.LenderBankName ?? ""
     : isBankLoan
-      ? bankName(form.lenderBankId)
+      ? form.lenderBankName
       : companyName(form.lenderCompanyId);
   const displayBorrower = readOnly
     ? viewingLoan?.BorrowerCompanyName ?? viewingLoan?.BorrowerCustomerName ?? ""
@@ -1225,6 +1227,15 @@ export default function LoanSanctionPage() {
                                 set("hasInterest", false);
                               } else if (form.loanType === "Inter-Company") {
                                 set("hasInterest", true);
+                              }
+                              // Bank Loan's payment mode is scoped to
+                              // LOAN_BANK_PAYMENT_MODES (NEFT/RTGS/Demand
+                              // Draft/Cheque) — "Cash" (the form's overall
+                              // default) isn't one of them, so switching
+                              // into Bank Loan without resetting would leave
+                              // every mode button unselected.
+                              if (lt === "Bank Loan" && !(LOAN_BANK_PAYMENT_MODES as readonly string[]).includes(form.paymentMode)) {
+                                set("paymentMode", "NEFT");
                               }
                             }}
                             className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
@@ -1662,18 +1673,21 @@ export default function LoanSanctionPage() {
                           Lender {isBankLoan ? "Bank" : "Company"} <span className="text-red-500">*</span>
                         </label>
                         {isBankLoan ? (
-                          <select
+                          // Any bank the loan is actually from — not
+                          // restricted to one of our own registered
+                          // company-linked bank accounts (those are a
+                          // different thing entirely: where WE bank, not
+                          // who lent US money). Same Major/Minor bank
+                          // picker Received Payment uses for a customer's
+                          // bank, since this is exactly the same kind of
+                          // field — a bank identified by name only.
+                          <BankNamePicker
+                            value={form.lenderBankName}
+                            onChange={(v) => set("lenderBankName", v)}
+                            placeholder="Select the lending bank…"
+                            otherPlaceholder="Lending bank's name"
                             className={inputCls}
-                            value={form.lenderBankId}
-                            onChange={(e) => set("lenderBankId", e.target.value)}
-                          >
-                            <option value="">— Select —</option>
-                            {banks.map((b: BankOption) => (
-                              <option key={b.id} value={b.id}>
-                                {b.label}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         ) : (
                           <select
                             className={inputCls}
@@ -1887,7 +1901,7 @@ export default function LoanSanctionPage() {
                     <div className="space-y-2">
                       <label className={labelCls}>Payment Mode</label>
                       <div className="flex flex-wrap gap-2">
-                        {PAYMENT_MODES.map((m) => {
+                        {(isBankLoan ? LOAN_BANK_PAYMENT_MODES : PAYMENT_MODES).map((m) => {
                           const s = MODE_STYLE[m] ?? { ring: "ring-border bg-muted", text: "text-muted-foreground", dot: "bg-muted-foreground" };
                           const active = form.paymentMode === m;
                           return (
@@ -1923,22 +1937,53 @@ export default function LoanSanctionPage() {
 
                     {(() => {
                       const isChequeMode = form.paymentMode === "Cheque" || form.paymentMode === "Post-Dated Cheque";
-                      // Bank Loan: the lender IS the bank. Otherwise: the
-                      // lender company's own tagged bank A/C (which bank the
-                      // funds actually left from) — cheque lots are scoped
-                      // to that specific bank, not shown at all until it's
-                      // picked.
+                      // Inter-Company/Customer Loan only: the lender
+                      // company's own tagged bank A/C (which bank the funds
+                      // actually left from) — cheque lots are scoped to
+                      // that specific bank, not shown at all until it's
+                      // picked. A Bank Loan's cheque doesn't come from any
+                      // lot of ours at all (see the isBankLoan branch
+                      // below) — the external bank issues it, not us.
                       const chequeLotBankId = isBankLoan
-                        ? (form.lenderBankId ? Number(form.lenderBankId) : null)
+                        ? null
                         : (form.lenderBankAccountId ? Number(form.lenderBankAccountId) : null);
-                      // Nothing to show for Cash, and nothing to show for
-                      // Cheque mode until a bank is actually picked (the
-                      // picker itself renders null until then) — skip the
-                      // grid entirely rather than leaving an empty gap.
-                      if (form.paymentMode === "Cash" || (isChequeMode && !chequeLotBankId)) return null;
+                      // Nothing to show for Cash, and (for Inter-Company/
+                      // Customer Loan) nothing to show for Cheque mode
+                      // until a bank is actually picked — skip the grid
+                      // entirely rather than leaving an empty gap. Bank
+                      // Loan's cheque fields don't need a bank picked first
+                      // (they're free-typed), so this guard doesn't apply
+                      // to it.
+                      if (form.paymentMode === "Cash" || (isChequeMode && !isBankLoan && !chequeLotBankId)) return null;
                       return (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      {isChequeMode && (
+                      {isChequeMode && isBankLoan && (
+                        // A cheque disbursed BY an external bank isn't
+                        // drawn from any cheque lot of ours — free-typed
+                        // fields, same as the Reference Number field below
+                        // handles NEFT/RTGS/DD.
+                        <>
+                          <div className="space-y-2">
+                            <label className={labelCls}>Cheque Number</label>
+                            <input
+                              className={inputCls}
+                              placeholder="Cheque number"
+                              value={form.chequeNo}
+                              onChange={(e) => set("chequeNo", e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className={labelCls}>Cheque Date</label>
+                            <input
+                              type="date"
+                              className={inputCls}
+                              value={form.chequeDate}
+                              onChange={(e) => set("chequeDate", e.target.value)}
+                            />
+                          </div>
+                        </>
+                      )}
+                      {isChequeMode && !isBankLoan && (
                         <LoanChequePicker
                           bankId={chequeLotBankId}
                           chequeLotId={form.chequeLotId}

@@ -77,7 +77,12 @@ export interface LoanSanctionPayload {
   loanType: LoanType;
   loanDocNo?: string | null;
   lenderCompanyId?: number | string | null;
-  lenderBankId?: number | string | null;
+  // Bank Loan only — the external lending bank's name, free-typed or picked
+  // from the Major/Minor list (BankNamePicker). Not an AccountHeadMaster id
+  // — the backend get-or-creates that bank's own shadow ledger head from
+  // this name (see ensureBankLoanLenderHead), since the lender isn't
+  // necessarily one of our own registered bank accounts.
+  lenderBankName?: string | null;
   lenderBankAccountId?: number | string | null;
   borrowerCompanyId?: number | string | null;
   borrowerCustomerId?: number | string | null;

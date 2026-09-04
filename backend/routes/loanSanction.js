@@ -66,6 +66,67 @@ async function ensureLoanLedgerHead(pool, keyPrefix, counterpartyId, counterpart
   return inserted.recordset[0].LHeadId;
 }
 
+// Get-or-create the ledger head that represents a Bank Loan's lender — an
+// EXTERNAL bank (SBI, HDFC, whichever), not necessarily one we already have
+// an account with. Previously a Bank Loan's "lender" was required to
+// already exist as one of OUR OWN registered bank accounts
+// (AccountHeadMaster LHeadType='B', scoped to a company) — wrong for any
+// loan from a bank we don't otherwise bank with, and wrong classification-
+// wise even when it happened to match: crediting a Bank-type (asset) head
+// for what's actually a liability misrepresents it on the Balance Sheet.
+// Mirrors ensureLoanLedgerHead's shadow-account pattern (same
+// 'LOANS AND ADVANCES' group, LHeadType='LN' — correct liability
+// classification, and already flows through Trial Balance/Balance Sheet
+// the same way Inter-Company/Customer Loan counterparties do) but keyed by
+// the bank's NAME rather than a numeric company/customer id, since an
+// external bank has no id of its own in this system. Named as the bank
+// itself (not "Loan - <name>") so it reads naturally in an account list —
+// context (the Loans & Advances group) already makes clear it's a payable.
+async function ensureBankLoanLenderHead(pool, bankName, createdBy) {
+  const name = String(bankName || "").trim();
+  if (!name) throw Object.assign(new Error("Lender bank name is required"), { status: 400 });
+
+  const existing = await pool
+    .request()
+    .input("Name", sql.NVarChar(200), name)
+    .query("SELECT LHeadId FROM dbo.AccountHeadMaster WHERE LHeadType = 'LN' AND LHeadName = @Name");
+  if (existing.recordset.length) return existing.recordset[0].LHeadId;
+
+  const group = await pool
+    .request()
+    .query("SELECT AGId FROM dbo.AccountGroup WHERE Name = 'LOANS AND ADVANCES'");
+  const groupId = group.recordset[0]?.AGId ?? null;
+
+  const inserted = await pool
+    .request()
+    .input("LHeadName", sql.NVarChar(200), name)
+    .input("LHeadAddress", sql.VarChar(300), "N/A")
+    .input("LHeadContactPerson", sql.VarChar(100), "N/A")
+    .input("LHeadType", sql.VarChar(50), "LN")
+    .input("LHeadStatus", sql.Bit, 1)
+    .input("LBelongsTo", sql.Int, groupId)
+    .input("Status", sql.NVarChar(20), "Approved")
+    .input("ApprovedBy", sql.NVarChar(100), createdBy)
+    .input("CreatedBy", sql.NVarChar(100), createdBy).query(`
+      INSERT INTO dbo.AccountHeadMaster
+        (LHeadName, LHeadAddress, LHeadContactPerson, LHeadType, LHeadStatus, LBelongsTo, Status, ApprovedBy, ApprovedAt, CreatedBy, CreatedAt)
+      OUTPUT INSERTED.LHeadId
+      VALUES
+        (@LHeadName, @LHeadAddress, @LHeadContactPerson, @LHeadType, @LHeadStatus, @LBelongsTo, @Status, @ApprovedBy, SYSDATETIME(), @CreatedBy, SYSDATETIME())
+    `);
+  const newId = inserted.recordset[0].LHeadId;
+  // Dedup here is by name (a bank has no numeric id to key a code off of
+  // the way ensureLoanLedgerHead does) — but every other head still gets a
+  // real, unique code, since some reports/exports expect one.
+  await pool
+    .request()
+    .input("LHeadId", sql.Int, newId)
+    .input("LHeadCode", sql.NVarChar(20), `LNBANK${newId}`)
+    .query("UPDATE dbo.AccountHeadMaster SET LHeadCode = @LHeadCode WHERE LHeadId = @LHeadId");
+  await bumpCacheVersion("account-head-master");
+  return newId;
+}
+
 // Builds the EMI schedule. Three modes:
 //   - No interest (hasInterest=false or rate<=0): flat principal-only split.
 //   - Simple Interest (SI): interest = P x r x (months/12), split evenly
@@ -635,6 +696,13 @@ async function createLoanSanctionInternal(payload, createdBy) {
     loanDocNo,
     lenderCompanyId,
     lenderBankId,
+    // Free-text bank name (e.g. from the Major/Minor bank picker) — a Bank
+    // Loan's lender is an external bank, which has no id of its own in this
+    // system. lenderBankId is kept accepted too, purely for backward
+    // compatibility with any existing caller still sending an
+    // AccountHeadMaster id directly (none do as of this change, but nothing
+    // stops a future internal caller from doing so).
+    lenderBankName,
     lenderBankAccountId,
     borrowerCompanyId,
     borrowerCustomerId,
@@ -667,7 +735,9 @@ async function createLoanSanctionInternal(payload, createdBy) {
   const useInterest = hasInterest !== false && hasInterest !== "false";
   const iType = INTEREST_TYPES.includes(interestType) ? interestType : "CI";
 
-  if (isBankLoan && !lenderBankId) throw Object.assign(new Error("Lender bank is required"), { status: 400 });
+  if (isBankLoan && !lenderBankId && !String(lenderBankName || "").trim()) {
+    throw Object.assign(new Error("Lender bank name is required"), { status: 400 });
+  }
   if (!isBankLoan && !lenderCompanyId) throw Object.assign(new Error("Lender company is required"), { status: 400 });
   if (isCustomerLoan && !borrowerCustomerId) {
     throw Object.assign(new Error("Borrower customer is required"), { status: 400 });
@@ -699,11 +769,22 @@ async function createLoanSanctionInternal(payload, createdBy) {
     let lenderCompany = null;
     let lenderBank = null;
     if (isBankLoan) {
-      const bankRes = await new sql.Request(tx)
-        .input("bankId", sql.Int, parseInt(lenderBankId, 10))
-        .query("SELECT LHeadId AS id, LHeadName AS name FROM dbo.AccountHeadMaster WHERE LHeadId = @bankId AND LHeadType = 'B'");
-      lenderBank = bankRes.recordset[0];
-      if (!lenderBank) throw Object.assign(new Error("Lender bank not found"), { status: 400 });
+      const trimmedBankName = String(lenderBankName || "").trim();
+      if (trimmedBankName) {
+        // The normal path — a free-typed/picked bank name, no pre-existing
+        // account required. { id: null } here; the real GL head gets
+        // resolved further down via ensureBankLoanLenderHead once we're
+        // inside the transaction proper (that helper does its own lookups).
+        lenderBank = { id: null, name: trimmedBankName };
+      } else {
+        // Back-compat only: an internal caller passing an existing
+        // AccountHeadMaster id directly instead of a name.
+        const bankRes = await new sql.Request(tx)
+          .input("bankId", sql.Int, parseInt(lenderBankId, 10))
+          .query("SELECT LHeadId AS id, LHeadName AS name FROM dbo.AccountHeadMaster WHERE LHeadId = @bankId");
+        lenderBank = bankRes.recordset[0];
+        if (!lenderBank) throw Object.assign(new Error("Lender bank not found"), { status: 400 });
+      }
     } else {
       const lenderRes = await new sql.Request(tx)
         .input("lenderId", sql.Int, parseInt(lenderCompanyId, 10))
@@ -781,11 +862,13 @@ async function createLoanSanctionInternal(payload, createdBy) {
     const borrowerKeyPrefix = borrowerCompany ? "C" : custSource === "CRM" ? "CRMCUST" : "CUST";
     const borrowerKeyId = borrowerCompany ? borrowerCompany.id : borrowerCustomer.custId;
 
-    // Bank Loan: the bank already has its own real ledger head — reuse it
-    // directly as the lender GL account instead of spawning a "Loan - Bank"
-    // shadow account for something that already has a proper one.
+    // Bank Loan: get-or-create the external bank's own shadow liability
+    // head (see ensureBankLoanLenderHead) — it has no pre-existing account
+    // of its own the way one of our own registered banks would. Back-compat
+    // path (lenderBank.id already set) skips straight to reusing that id,
+    // for the rare internal caller still passing one directly.
     const lenderLHeadId = isBankLoan
-      ? lenderBank.id
+      ? lenderBank.id ?? await ensureBankLoanLenderHead(pool, lenderBank.name, createdBy)
       : await ensureLoanLedgerHead(pool, "C", lenderCompany.id, lenderCompany.name, createdBy);
     const borrowerLHeadId = await ensureLoanLedgerHead(pool, borrowerKeyPrefix, borrowerKeyId, borrowerName, createdBy);
 
@@ -793,9 +876,16 @@ async function createLoanSanctionInternal(payload, createdBy) {
       .input("LoanId", sql.Int, loanId)
       .input("LoanNo", sql.NVarChar(50), loanNo)
       .input("LenderLHeadId", sql.Int, lenderLHeadId)
-      .input("BorrowerLHeadId", sql.Int, borrowerLHeadId).query(`
+      .input("BorrowerLHeadId", sql.Int, borrowerLHeadId)
+      // LenderBankId was only ever set at INSERT time for the back-compat
+      // (pre-existing account) path — for a fresh free-text bank name it's
+      // still null at this point, so backfill it here now that the shadow
+      // head exists. Harmless no-op for the non-Bank-Loan types (already
+      // NULL, stays NULL).
+      .input("LenderBankId", sql.Int, isBankLoan ? lenderLHeadId : null).query(`
         UPDATE dbo.LoanSanction
-        SET LoanNo = @LoanNo, LenderLHeadId = @LenderLHeadId, BorrowerLHeadId = @BorrowerLHeadId
+        SET LoanNo = @LoanNo, LenderLHeadId = @LenderLHeadId, BorrowerLHeadId = @BorrowerLHeadId,
+            LenderBankId = COALESCE(LenderBankId, @LenderBankId)
         WHERE LoanId = @LoanId
       `);
 
