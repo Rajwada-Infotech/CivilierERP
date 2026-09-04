@@ -23,6 +23,11 @@ export interface LoanSanction {
   BorrowerCustomerName?: string | null;
   BorrowerBankAccountId?: number | null;
   BorrowerBankAccountName?: string | null;
+  // Customer Loan's "Customer to Company" direction (migration 402).
+  LenderCustomerId?: number | null;
+  LenderCustomerSource?: "AH" | "CRM" | null;
+  LenderCustomerName?: string | null;
+  LenderCustomerBankName?: string | null;
   LoanDate: string;
   Amount: number;
   HasInterest?: boolean;
@@ -41,6 +46,8 @@ export interface LoanSanction {
   ChequeDate?: string | null;
   IsPostDated?: boolean;
   DigitalRefNumber?: string | null;
+  DemandDraftNo?: string | null;
+  DemandDraftDate?: string | null;
   CreatedBy?: string | null;
   CreatedAt?: string | null;
   TotalEMIs?: number;
@@ -77,7 +84,19 @@ export interface LoanSanctionPayload {
   loanType: LoanType;
   loanDocNo?: string | null;
   lenderCompanyId?: number | string | null;
-  lenderBankId?: number | string | null;
+  // Bank Loan only — the external lending bank's name, free-typed or picked
+  // from the Major/Minor list (BankNamePicker). Not an AccountHeadMaster id
+  // — the backend get-or-creates that bank's own shadow ledger head from
+  // this name (see ensureBankLoanLenderHead), since the lender isn't
+  // necessarily one of our own registered bank accounts.
+  lenderBankName?: string | null;
+  // Customer Loan's "Customer to Company" direction (migration 402) — a
+  // customer as LENDER instead of borrower. lenderCustomerBankName is
+  // descriptive only (which bank the money came from), same role as
+  // lenderBankName above.
+  lenderCustomerId?: number | string | null;
+  lenderCustomerSource?: "AH" | "CRM" | null;
+  lenderCustomerBankName?: string | null;
   lenderBankAccountId?: number | string | null;
   borrowerCompanyId?: number | string | null;
   borrowerCustomerId?: number | string | null;
@@ -102,6 +121,10 @@ export interface LoanSanctionPayload {
   chequeDate?: string | null;
   isPostDated?: boolean;
   digitalRefNumber?: string | null;
+  // Demand Draft carries its own ref number + date, same as Cheque has
+  // chequeNo/chequeDate, rather than sharing digitalRefNumber.
+  demandDraftNo?: string | null;
+  demandDraftDate?: string | null;
 }
 
 export interface LoanEMI {
@@ -301,11 +324,18 @@ export interface UndisbursedLoan {
 export interface UndisbursedIncomingLoan {
   LoanId: number;
   LoanNo: string;
-  LoanType: "Bank Loan";
+  // Bank Loan, or a Customer Loan sanctioned in the "Customer to Company"
+  // direction (migration 402) — both are "external lender, money comes IN".
+  LoanType: "Bank Loan" | "Customer Loan";
   LoanDate: string;
   Amount: number;
   LenderBankId: number | null;
   LenderBankName: string | null;
+  LenderCustomerId: number | null;
+  LenderCustomerSource: "AH" | "CRM" | null;
+  // The lender's display name regardless of loan type — bank name for a
+  // Bank Loan, customer name for a Customer-to-Company Customer Loan.
+  LenderName: string | null;
 }
 
 // Sanctioned loans this (lender) company hasn't disbursed yet — Inter-

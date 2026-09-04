@@ -621,6 +621,62 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   const projectId = parseInt(payment.PProject, 10);
   const docNo = payment.DocNo || `PMT-${paymentId}`;
 
+  // Loan disbursement (Customer Loan's original "Company to Customer"
+  // direction — we lend TO a customer, money goes OUT via NewPayment) —
+  // this Payment IS the loan's own real bank-side leg. Debit the loan's
+  // own BorrowerLHeadId (the customer's shadow ledger head, e.g.
+  // "Loan - <CustomerName>") directly instead of falling through to
+  // resolvePaymentSupplierHeadId below, which would land on PPartyId — the
+  // customer's ORDINARY head (the same one used for regular sales/AR), a
+  // different account entirely, silently orphaning this entry from the
+  // loan's own bookkeeping instead of the two tying together into one
+  // trail. Mirrors postReceivedPaymentApproval's identical fix for the
+  // opposite (money coming in) direction.
+  const loanDisbursementRes = await pool
+    .request()
+    .input("PaymentId", sql.Int, paymentId)
+    .query(`
+      SELECT LoanId, LoanNo, BorrowerLHeadId FROM dbo.LoanSanction
+      WHERE DisbursementPaymentType = 'NewPayment' AND DisbursementPaymentId = @PaymentId
+    `);
+  if (loanDisbursementRes.recordset.length) {
+    const loan = loanDisbursementRes.recordset[0];
+    if (!loan.BorrowerLHeadId) {
+      return { posted: false, reason: `Loan ${loan.LoanNo} has no BorrowerLHeadId — cannot post this disbursement.` };
+    }
+    await postVoucher(pool, {
+      voucherNo: docNo,
+      voucherDate: payment.PDate,
+      sourceType: "NewPayment",
+      sourceId: paymentId,
+      companyId: Number.isFinite(companyId) ? companyId : null,
+      projectId: Number.isFinite(projectId) ? projectId : null,
+      createdBy: userEmail,
+      legs: [
+        { lHeadId: loan.BorrowerLHeadId, debit: amount, narration: `${docNo} — loan disbursement sent (${loan.LoanNo})` },
+        { lHeadId: bankId, credit: amount, narration: `${docNo} — loan disbursement sent (${loan.LoanNo})` },
+      ],
+    });
+    return { posted: true };
+  }
+
+  // Loan repayment via NewPayment — not exercised by any current caller
+  // (every loan type's repayment goes through Received Payment instead,
+  // see postReceivedPaymentApproval's matching guard), but the /:id/pay
+  // route does accept newPaymentId, so guard it the same way in case that
+  // ever changes: the loan's own repayment posting (SourceType=
+  // 'LoanRepayment') would already cover it completely.
+  const loanRepaymentRes = await pool
+    .request()
+    .input("PaymentId", sql.Int, paymentId)
+    .query(`SELECT TOP 1 LoanId FROM dbo.LoanPayment WHERE NewPaymentId = @PaymentId`);
+  if (loanRepaymentRes.recordset.length) {
+    return {
+      posted: false,
+      reason: `This Payment settles LoanId ${loanRepaymentRes.recordset[0].LoanId}'s repayment — already posted via the loan's own repayment GL entry (see the loan's Posting tab), not posted again here.`,
+    };
+  }
+
   // TDS (migration 304) — when set, the credit side splits into Bank (net
   // of TDS) + TDS Payable; every debit-side branch below (Expense Head
   // allocations, standalone advance, or a normal supplier payment) keeps
@@ -964,6 +1020,67 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
   if (amount <= 0)
     return { posted: false, reason: `ReceivedPayment ${rpId} amount is ${amount} (<= 0)` };
 
+  const docNo = rp.DocNo || `RCV-${rpId}`;
+
+  // Loan disbursement (Bank Loan, or Customer Loan's "Customer to Company"
+  // direction — migration 402) — this ReceivedPayment IS the loan's own
+  // real bank-side leg. Credit the loan's own LenderLHeadId (the external
+  // lender's shadow ledger head, e.g. "Loan - <CustomerName>") directly
+  // instead of falling through to the generic name/invoice-based customer
+  // resolution below — that would land on the party's ORDINARY head (the
+  // same one used for regular sales/AR), a different account entirely,
+  // silently orphaning this entry from the loan's own bookkeeping instead
+  // of the two tying together into one trail.
+  const loanDisbursementRes = await pool
+    .request()
+    .input("RpId", sql.Int, rpId)
+    .query(`
+      SELECT LoanId, LoanNo, LenderLHeadId FROM dbo.LoanSanction
+      WHERE DisbursementPaymentType = 'ReceivedPayment' AND DisbursementPaymentId = @RpId
+    `);
+  if (loanDisbursementRes.recordset.length) {
+    const loan = loanDisbursementRes.recordset[0];
+    if (!loan.LenderLHeadId) {
+      return { posted: false, reason: `Loan ${loan.LoanNo} has no LenderLHeadId — cannot post this disbursement.` };
+    }
+    await postVoucher(pool, {
+      voucherNo: docNo,
+      voucherDate: rp.RPDocDate,
+      sourceType: "ReceivedPayment",
+      sourceId: rpId,
+      companyId: rp.RPCompanyId ?? null,
+      projectId: rp.RPProjectId ?? null,
+      createdBy: userEmail,
+      legs: [
+        { lHeadId: rp.RPDepositBankId, debit: amount, narration: `${docNo} — loan disbursement received (${loan.LoanNo})` },
+        { lHeadId: loan.LenderLHeadId, credit: amount, narration: `${docNo} — loan disbursement received (${loan.LoanNo})` },
+      ],
+    });
+    return { posted: true };
+  }
+
+  // Loan repayment via Received Payment — every loan type's repayment is
+  // recorded here (see LoanSanction.tsx's own comment on this), including
+  // the "we're the borrower paying an external party back" shapes (Bank
+  // Loan, Customer-to-Company). The loan's own repayment posting
+  // (postCustomerLoanRepayment / postBankLoanRepayment below, SourceType=
+  // 'LoanRepayment') already posts the complete, correct voucher — bank
+  // leg AND loan-ledger leg together, in the right direction either way —
+  // the moment POST /:id/pay runs, which happens at Received Payment
+  // CREATION time, before this approval step. Posting again here under
+  // SourceType='ReceivedPayment' would double-count the same bank
+  // movement against the wrong (regular, not shadow) head. Skip entirely.
+  const loanRepaymentRes = await pool
+    .request()
+    .input("RpId", sql.Int, rpId)
+    .query(`SELECT TOP 1 LoanId FROM dbo.LoanPayment WHERE ReceivedPaymentId = @RpId`);
+  if (loanRepaymentRes.recordset.length) {
+    return {
+      posted: false,
+      reason: `This Received Payment settles LoanId ${loanRepaymentRes.recordset[0].LoanId}'s repayment — already posted via the loan's own repayment GL entry (see the loan's Posting tab), not posted again here.`,
+    };
+  }
+
   let customerHeadId = null;
   if (rp.SourceSaleInvoiceId) {
     const siResult = await pool
@@ -983,8 +1100,6 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
       posted: false,
       reason: `ReceivedPayment ${rpId}: could not resolve customer (invoice ${rp.SourceSaleInvoiceId ?? "none"}, name "${rp.RPCustomerName || rp.RPReceivedFrom}")`,
     };
-
-  const docNo = rp.DocNo || `RCV-${rpId}`;
 
   await postVoucher(pool, {
     voucherNo: docNo,
