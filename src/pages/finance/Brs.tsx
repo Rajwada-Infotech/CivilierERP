@@ -716,16 +716,16 @@ export default function Brs() {
       if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
       return e.BankClearingDate ? fmt(e.BankClearingDate) : "—";
     }},
-    { header: "Cleared By", accessor: (r) => {
-      const e = r as unknown as BrsEntry;
-      if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
-      return e.ClearedBy ?? "—";
-    }},
     { header: "Cleared On", accessor: (r) => {
       const e = r as unknown as BrsEntry;
       if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
       const { date, time } = fmtDT(e.ClearingDate);
       return time ? `${date}, ${time}` : date;
+    }},
+    { header: "Cleared By", accessor: (r) => {
+      const e = r as unknown as BrsEntry;
+      if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
+      return e.ClearedBy ?? "—";
     }},
     { header: "Bounce Date",   accessor: (r) => fmt((r as unknown as BrsEntry).BounceDate) },
     { header: "Bounce Reason", accessor: (r) => (r as unknown as BrsEntry).BounceReason ?? "—" },
@@ -1083,13 +1083,13 @@ export default function Brs() {
                                 {fmt(entry.BankClearingDate)} <span className="text-muted-foreground/70 font-normal">(bank)</span>
                               </p>
                             )}
-                            {entry.ClearedBy && (
-                              <p className="text-[10px] text-muted-foreground truncate max-w-[110px]">{entry.ClearedBy}</p>
-                            )}
                             {entry.ClearingDate && (
                               <p className="text-[10px] text-muted-foreground/70 tabular-nums">
                                 {fmtDT(entry.ClearingDate).date}{fmtDT(entry.ClearingDate).time ? `, ${fmtDT(entry.ClearingDate).time}` : ""}
                               </p>
+                            )}
+                            {entry.ClearedBy && (
+                              <p className="text-[10px] text-muted-foreground truncate max-w-[110px]">{entry.ClearedBy}</p>
                             )}
                           </div>
                         )}
@@ -1154,8 +1154,8 @@ export default function Brs() {
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[82px]">Status</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">BRS</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px] hidden xl:table-cell">Bank Clearance</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[110px] hidden xl:table-cell">Cleared By</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[130px] hidden xl:table-cell">Cleared On</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[110px] hidden xl:table-cell">Cleared By</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[140px]">Action</th>
                 </tr>
               </thead>
@@ -1271,13 +1271,6 @@ export default function Brs() {
                           <span className="text-[10px] text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-4 hidden xl:table-cell align-middle">
-                        {cleared && entry.ClearedBy ? (
-                          <p className="text-xs text-foreground truncate max-w-[110px]" title={entry.ClearedBy}>{entry.ClearedBy}</p>
-                        ) : (
-                          <span className="text-[10px] text-muted-foreground">—</span>
-                        )}
-                      </td>
                       {/* Cleared On — when the entry was actually ticked clear
                           in the app (system timestamp), date + time. */}
                       <td className="px-3 py-4 hidden xl:table-cell align-middle">
@@ -1288,6 +1281,13 @@ export default function Brs() {
                               <p className="text-[10px] text-muted-foreground/70 tabular-nums">{fmtDT(entry.ClearingDate).time}</p>
                             )}
                           </>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-4 hidden xl:table-cell align-middle">
+                        {cleared && entry.ClearedBy ? (
+                          <p className="text-xs text-foreground truncate max-w-[110px]" title={entry.ClearedBy}>{entry.ClearedBy}</p>
                         ) : (
                           <span className="text-[10px] text-muted-foreground">—</span>
                         )}
