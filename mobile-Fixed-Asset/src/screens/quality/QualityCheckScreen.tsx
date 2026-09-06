@@ -1,18 +1,24 @@
 // Owner & Quality Checking — periodic condition checks + follow-ups
 // (/api/fixed-asset-quality-check). Read-only; checks are recorded on web.
 import { useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { Card, DataList, Line, Pill } from "@/components/list/DataList";
+import { Fab } from "@/components/Fab";
+import { usePageRights } from "@/hooks/usePageRights";
+import { useRefetchOnFocus } from "@/hooks/useRefetchOnFocus";
+import { navigate } from "@/navigation/navigationRef";
 import { getQualityChecks, type QualityCheckItem } from "@/api/fixedAssetApi";
 
 const FILTERS = ["All", "Pending", "Overdue", "Completed"] as const;
 
 export default function QualityCheckScreen() {
   const [filter, setFilter] = useState<string>("All");
-  const query = useQuery({ queryKey: ["fa-quality"], queryFn: getQualityChecks });
+  const rights = usePageRights("fixed-asset-quality-check");
+  const query = useQuery({ queryKey: ["fa-quality"], queryFn: () => getQualityChecks() });
+  useRefetchOnFocus(query.refetch);
 
   const filtered = useMemo(() => {
     const list = query.data ?? [];
@@ -30,9 +36,11 @@ export default function QualityCheckScreen() {
       activeFilter={filter}
       onFilter={setFilter}
       emptyText="No quality checks."
+      footer={rights.canCreate ? <Fab label="Check" onPress={() => navigate("QualityCheckForm")} /> : null}
       renderCard={(item) => {
         const overdue = item.IsOverdue === 1 && item.FollowUpStatus === "Pending";
         return (
+          <Pressable onPress={() => navigate("QualityCheckDetail", { id: item.QualityCheckId })}>
           <Card>
             <View className="flex-row items-center justify-between">
               <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
@@ -54,6 +62,7 @@ export default function QualityCheckScreen() {
               </Text>
             </View>
           </Card>
+          </Pressable>
         );
       }}
     />

@@ -72,6 +72,8 @@ interface DataListProps<T> {
   activeFilter?: string;
   onFilter?: (f: string) => void;
   emptyText?: string;
+  header?: React.ReactNode;
+  footer?: React.ReactNode;
 }
 
 export function DataList<T>({
@@ -82,6 +84,8 @@ export function DataList<T>({
   filters,
   activeFilter,
   onFilter,
+  header,
+  footer,
   emptyText = "Nothing to show.",
 }: DataListProps<T>) {
   const [refreshing, setRefreshing] = useState(false);
@@ -93,6 +97,7 @@ export function DataList<T>({
 
   return (
     <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      {header}
       {filters && filters.length > 0 && (
         <View className="flex-row flex-wrap gap-2" style={{ padding: 16, paddingBottom: 8 }}>
           {filters.map((f) => {
@@ -141,6 +146,7 @@ export function DataList<T>({
           }
         />
       )}
+      {footer}
     </View>
   );
 }

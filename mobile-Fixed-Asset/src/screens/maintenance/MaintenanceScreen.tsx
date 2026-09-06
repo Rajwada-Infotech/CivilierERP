@@ -1,25 +1,29 @@
-// FA Maintenance & Repair records (/api/fixed-asset-maintenance). Read-only
-// list with the posting summary; creating / posting is done on web.
+// FA Maintenance & Repair records (/api/fixed-asset-maintenance).
 import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
+import { StatusPill } from "@/components/StatusPill";
+import { Fab } from "@/components/Fab";
+import { usePageRights } from "@/hooks/usePageRights";
+import { useRefetchOnFocus } from "@/hooks/useRefetchOnFocus";
+import { navigate } from "@/navigation/navigationRef";
 import { getMaintenanceList, type MaintenanceItem } from "@/api/fixedAssetApi";
 
 const ACCENT = "#eab308";
 const FILTERS = ["All", "Draft", "Posted"] as const;
 
-const STATUS_COLOR: Record<string, string> = { Draft: "#f59e0b", Posted: "#10b981", Cancelled: "#818898" };
-
 export default function MaintenanceScreen() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
   const [refreshing, setRefreshing] = useState(false);
+  const rights = usePageRights("fixed-asset-maintenance");
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["fa-maint"],
     queryFn: () => getMaintenanceList(),
   });
+  useRefetchOnFocus(refetch);
 
   const rows = useMemo(() => {
     const list = data ?? [];
@@ -33,12 +37,13 @@ export default function MaintenanceScreen() {
   };
 
   const renderItem = ({ item }: { item: MaintenanceItem }) => (
-    <View style={{ backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8 }}>
+    <Pressable
+      onPress={() => navigate("MaintenanceDetail", { id: item.MaintenanceId })}
+      style={{ backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8 }}
+    >
       <View className="flex-row items-center justify-between">
         <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>{item.DocNo}</Text>
-        <View style={{ backgroundColor: `${STATUS_COLOR[item.Status] || "#818898"}1f`, paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 999 }}>
-          <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: STATUS_COLOR[item.Status] || "#818898" }}>{item.Status}</Text>
-        </View>
+        <StatusPill label={item.Status} />
       </View>
       <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular, marginTop: 3 }}>
         {item.ItemName || "—"} · {item.FAItemCode || "—"}
@@ -55,7 +60,7 @@ export default function MaintenanceScreen() {
           {formatINR(item.TotalAmount ?? item.Amount, { decimals: 2 })}
         </Text>
       </View>
-    </View>
+    </Pressable>
   );
 
   return (
@@ -99,6 +104,7 @@ export default function MaintenanceScreen() {
           }
         />
       )}
+      {rights.canCreate && <Fab label="New Repair" onPress={() => navigate("MaintenanceForm")} />}
     </View>
   );
 }
