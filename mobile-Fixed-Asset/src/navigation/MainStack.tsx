@@ -22,6 +22,9 @@ import AssetTransferFormScreen from "@/screens/transfer/AssetTransferFormScreen"
 import QualityCheckScreen from "@/screens/quality/QualityCheckScreen";
 import QualityCheckDetailScreen from "@/screens/quality/QualityCheckDetailScreen";
 import QualityCheckFormScreen from "@/screens/quality/QualityCheckFormScreen";
+import ReportsScreen from "@/screens/reports/ReportsScreen";
+import ReportViewScreen from "@/screens/reports/ReportViewScreen";
+import type { ReportKey } from "@/screens/reports/reportConfig";
 import { TopHeader } from "./TopHeader";
 
 export type MainStackParamList = {
@@ -34,6 +37,8 @@ export type MainStackParamList = {
   Assignment: undefined;
   AssetTransfer: undefined;
   QualityCheck: undefined;
+  Reports: undefined;
+  ReportView: { report: ReportKey };
   Profile: undefined;
   Notifications: undefined;
   AssetDetail: { id: number };
@@ -79,6 +84,8 @@ export default function MainStack() {
       <Stack.Screen name="QualityCheck" component={QualityCheckScreen} options={{ title: "Owner & Quality Checking" }} />
       <Stack.Screen name="QualityCheckDetail" component={QualityCheckDetailScreen} options={{ title: "Quality Check" }} />
       <Stack.Screen name="QualityCheckForm" component={QualityCheckFormScreen} options={{ title: "Quality Check" }} />
+      <Stack.Screen name="Reports" component={ReportsScreen} options={{ title: "Reports" }} />
+      <Stack.Screen name="ReportView" component={ReportViewScreen} options={{ title: "Report" }} />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
     </Stack.Navigator>
