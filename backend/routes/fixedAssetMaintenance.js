@@ -195,6 +195,9 @@ router.get("/", requirePageRight(PAGE, "view"), async (req, res) => {
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("m.ProjectId = @ProjectId"); }
     if (req.query.assetId)   { request.input("AssetId", sql.Int, parseInt(req.query.assetId, 10)); where.push("m.AssetId = @AssetId"); }
     if (req.query.status)    { request.input("Status", sql.NVarChar(20), req.query.status); where.push("m.Status = @Status"); }
+    if (req.query.finYear)   { request.input("FinYear", sql.NVarChar(20), String(req.query.finYear)); where.push("m.FinYear = COALESCE((SELECT FName FROM dbo.FinYear WHERE FId = TRY_CONVERT(int, @FinYear)), @FinYear)"); }
+    if (req.query.fromDate)  { request.input("FromDate", sql.Date, req.query.fromDate); where.push("m.DocDate >= @FromDate"); }
+    if (req.query.toDate)    { request.input("ToDate", sql.Date, req.query.toDate); where.push("m.DocDate <= @ToDate"); }
     const result = await request.query(`${LIST_SELECT} WHERE ${where.join(" AND ")} ORDER BY m.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (err) {
