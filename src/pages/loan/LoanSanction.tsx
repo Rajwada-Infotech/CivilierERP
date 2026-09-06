@@ -44,6 +44,10 @@ import {
   X as XIcon,
   Search,
   Filter,
+  Calendar,
+  Hash,
+  ListChecks,
+  CreditCard,
 } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 import { MoneyRecive } from "iconsax-react";
@@ -1543,35 +1547,39 @@ export default function LoanSanctionPage() {
                     <SectionLabel icon={Building2} label="Parties" />
                     <div className="grid grid-cols-2 gap-3">
                       <InfoCard
+                        icon={Building2}
                         label={isBankLoanType ? "Lender (Bank)" : isCustomerToCompanyType ? "Lender (Customer)" : "Lender"}
                         value={displayLender || "—"}
                       />
                       <InfoCard
+                        icon={Building2}
                         label={isCustomerLoanType && !isCustomerToCompanyType ? "Borrower (Customer)" : "Borrower (Company)"}
                         value={displayBorrower || "—"}
                       />
                       {isInterCompanyType && (
                         <>
-                          <InfoCard label="Lender Bank A/C" value={viewingLoan?.LenderBankAccountName || "—"} />
-                          <InfoCard label="Borrower Bank A/C" value={viewingLoan?.BorrowerBankAccountName || "—"} />
+                          <InfoCard icon={Landmark} label="Lender Bank A/C" value={viewingLoan?.LenderBankAccountName || "—"} />
+                          <InfoCard icon={Landmark} label="Borrower Bank A/C" value={viewingLoan?.BorrowerBankAccountName || "—"} />
                         </>
                       )}
                       {isCustomerLoanType && (
-                        <InfoCard label="Lender Bank A/C" value={viewingLoan?.LenderBankAccountName || "—"} />
+                        <InfoCard icon={Landmark} label="Lender Bank A/C" value={viewingLoan?.LenderBankAccountName || "—"} />
                       )}
                     </div>
 
                     {/* Terms */}
                     <SectionLabel icon={MoneyRecive as any} label="Loan Terms" />
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <InfoCard label="Amount" value={fmt(displayAmount)} accent />
-                      <InfoCard label="Loan Date" value={fmtDate(viewingLoan?.LoanDate)} />
-                      <InfoCard label="Loan Doc No." value={viewingLoan?.LoanDocNo || "—"} />
+                      <InfoCard icon={Wallet} label="Amount" value={fmt(displayAmount)} accent />
+                      <InfoCard icon={Calendar} label="Loan Date" value={fmtDate(viewingLoan?.LoanDate)} />
+                      <InfoCard icon={Hash} label="Loan Doc No." value={viewingLoan?.LoanDocNo || "—"} />
                       <InfoCard
+                        icon={Clock}
                         label="Tenure"
                         value={viewingLoan?.TenureMonths != null ? `${viewingLoan.TenureMonths} months` : "—"}
                       />
                       <InfoCard
+                        icon={Percent}
                         label="Interest"
                         value={
                           displayHasInterest
@@ -1580,16 +1588,19 @@ export default function LoanSanctionPage() {
                         }
                       />
                       <InfoCard
+                        icon={TrendingUp}
                         label="Total Interest"
                         value={fmt(schedule.reduce((s, e) => s + Number(e.InterestComponent), 0))}
                       />
                       <InfoCard
+                        icon={Receipt}
                         label="Total Repayable"
                         value={fmt(schedule.reduce((s, e) => s + Number(e.EMIAmount), 0))}
                         accent
                       />
                       {viewingLoan?.PaymentMode && (
                         <InfoCard
+                          icon={CreditCard}
                           label="Disbursed Via"
                           value={
                             viewingLoan.PaymentMode === "Cheque" || viewingLoan.PaymentMode === "Post-Dated Cheque"
@@ -1610,20 +1621,24 @@ export default function LoanSanctionPage() {
                         <SectionLabel icon={Receipt} label="Repayment Status" />
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                           <InfoCard
+                            icon={CheckCircle2}
                             label="Amount Paid"
                             value={fmt(paidAmount)}
                             accent={paidAmount > 0}
                           />
                           <InfoCard
+                            icon={AlertCircle}
                             label="Outstanding"
                             value={fmt(outstandingAmount)}
                             accent={outstandingAmount > 0}
                           />
                           <InfoCard
+                            icon={ListChecks}
                             label="EMIs Paid"
                             value={totalEmis ? `${paidEmis} / ${totalEmis}` : "—"}
                           />
                           <InfoCard
+                            icon={CalendarClock}
                             label="Next Due"
                             value={
                               viewingLoan?.Status === "Closed"
@@ -1637,22 +1652,23 @@ export default function LoanSanctionPage() {
                           />
                         </div>
                         {/* Amount progress bar */}
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <div className="rounded-xl border border-border bg-muted/10 px-4 py-3.5 space-y-2">
+                          <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground">
                             <span>Repayment progress</span>
-                            <span>
+                            <span className="font-heading font-bold text-foreground tabular-nums">
                               {totalScheduledAmount > 0
                                 ? `${Math.min(100, Math.round((paidAmount / totalScheduledAmount) * 100))}%`
                                 : "—"}
                             </span>
                           </div>
-                          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div className="h-2 rounded-full bg-muted overflow-hidden">
                             <div
                               className="h-full bg-gradient-to-r from-emerald-500 to-green-400 rounded-full transition-all duration-500"
                               style={{
                                 width: `${totalScheduledAmount > 0
                                   ? Math.min(100, (paidAmount / totalScheduledAmount) * 100)
                                   : 0}%`,
+                                boxShadow: "0 0 8px rgba(16,185,129,0.5)",
                               }}
                             />
                           </div>
@@ -1742,8 +1758,8 @@ export default function LoanSanctionPage() {
                       <>
                         <SectionLabel icon={StickyNote} label="Notes" />
                         <div className="grid grid-cols-2 gap-3">
-                          <InfoCard label="Purpose" value={viewingLoan?.Purpose || "—"} />
-                          <InfoCard label="Remarks" value={viewingLoan?.Remarks || "—"} />
+                          <InfoCard icon={FileText} label="Purpose" value={viewingLoan?.Purpose || "—"} />
+                          <InfoCard icon={StickyNote} label="Remarks" value={viewingLoan?.Remarks || "—"} />
                         </div>
                       </>
                     )}
@@ -2212,9 +2228,10 @@ export default function LoanSanctionPage() {
                           <p className="text-xs text-muted-foreground">Loading…</p>
                         ) : (
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                            <InfoCard label="Total Lent (all loans)" value={fmt(lenderExposure?.asLender.totalLent ?? 0)} accent />
-                            <InfoCard label="Currently Outstanding" value={fmt(lenderExposure?.asLender.totalOutstanding ?? 0)} />
+                            <InfoCard icon={Wallet} label="Total Lent (all loans)" value={fmt(lenderExposure?.asLender.totalLent ?? 0)} accent />
+                            <InfoCard icon={AlertCircle} label="Currently Outstanding" value={fmt(lenderExposure?.asLender.totalOutstanding ?? 0)} />
                             <InfoCard
+                              icon={CalendarClock}
                               label="Next EMI Receivable"
                               value={
                                 lenderExposure?.asLender.nextDue
@@ -2234,9 +2251,10 @@ export default function LoanSanctionPage() {
                           <p className="text-xs text-muted-foreground">Loading…</p>
                         ) : (
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                            <InfoCard label="Total Borrowed (all loans)" value={fmt(borrowerExposure?.asBorrower.totalBorrowed ?? 0)} accent />
-                            <InfoCard label="Currently Owed" value={fmt(borrowerExposure?.asBorrower.totalOutstanding ?? 0)} />
+                            <InfoCard icon={Wallet} label="Total Borrowed (all loans)" value={fmt(borrowerExposure?.asBorrower.totalBorrowed ?? 0)} accent />
+                            <InfoCard icon={AlertCircle} label="Currently Owed" value={fmt(borrowerExposure?.asBorrower.totalOutstanding ?? 0)} />
                             <InfoCard
+                              icon={CalendarClock}
                               label="Next EMI Payable"
                               value={
                                 borrowerExposure?.asBorrower.nextDue
@@ -2765,7 +2783,9 @@ export default function LoanSanctionPage() {
 function SectionLabel({ icon: Icon, label }: { icon: typeof FileText; label: string }) {
   return (
     <div className="flex items-center gap-2 -mb-2">
-      <Icon size={12} className="text-emerald-600 dark:text-emerald-400" />
+      <div className="w-5 h-5 rounded-md bg-emerald-500/10 flex items-center justify-center shrink-0">
+        <Icon size={11} className="text-emerald-600 dark:text-emerald-400" />
+      </div>
       <span className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">
         {label}
       </span>
@@ -2774,11 +2794,53 @@ function SectionLabel({ icon: Icon, label }: { icon: typeof FileText; label: str
   );
 }
 
-function InfoCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function InfoCard({
+  label,
+  value,
+  accent,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+  icon?: typeof FileText;
+}) {
   return (
-    <div className="rounded-xl border border-border bg-muted/20 px-3.5 py-3">
-      <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground mb-1">{label}</p>
-      <p className={`text-sm ${accent ? "font-bold text-emerald-600 dark:text-emerald-400 text-base" : "font-medium text-foreground"}`}>
+    <div
+      className={`relative overflow-hidden rounded-xl border px-4 py-3.5 transition-colors ${
+        accent
+          ? "border-emerald-500/25 bg-emerald-500/[0.05]"
+          : "border-border bg-muted/10 hover:bg-muted/[0.15]"
+      }`}
+    >
+      {accent && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.10) 0%, transparent 65%)" }}
+        />
+      )}
+      <div className="relative flex items-start justify-between gap-2 mb-1.5">
+        <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground leading-tight">
+          {label}
+        </p>
+        {Icon && (
+          <div
+            className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${
+              accent ? "bg-emerald-500/15" : "bg-muted"
+            }`}
+          >
+            <Icon size={10} className={accent ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"} />
+          </div>
+        )}
+      </div>
+      <p
+        className={`relative truncate ${
+          accent
+            ? "text-base font-bold text-emerald-600 dark:text-emerald-400"
+            : "text-sm font-semibold text-foreground"
+        }`}
+        title={value}
+      >
         {value}
       </p>
     </div>
