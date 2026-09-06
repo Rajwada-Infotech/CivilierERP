@@ -39,7 +39,7 @@ const APPS = [
   },
   {
     key: "fixed-asset",
-    title: "CivilierERP Fixed Asset",
+    title: "Civilier Fixed Asset",
     description:
       "For asset custodians — scan or download to install the Fixed Asset tagging & tracking app on your device.",
     apkPath: "/downloads/CivilierERPFixedAsset.apk",
