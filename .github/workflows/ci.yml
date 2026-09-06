@@ -77,6 +77,12 @@ jobs:
         # across runs, so an unchanged dependency set becomes a cache hit
         # instead of a full reinstall.
         uses: docker/build-push-action@v6
+        env:
+          # buildx auto-uploads a small "<org>~<repo>~<id>.dockerbuild" build
+          # record artifact on every run by default — just build metadata,
+          # not the image, but it clutters the Artifacts list next to the
+          # actual source-zip release. Opt out.
+          DOCKER_BUILD_SUMMARY: false
         with:
           context: ./backend
           push: false
