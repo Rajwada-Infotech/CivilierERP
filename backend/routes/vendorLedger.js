@@ -204,7 +204,12 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
 
     const from = req.query.from ? String(req.query.from) : null;
     const to = req.query.to ? String(req.query.to) : null;
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 500, 1), 2000);
+    // This route pulls every matching GL row for the head unconditionally
+    // (no SQL-level TOP below) — `limit` only slices the already-fetched,
+    // already-sorted array just before responding, so raising it costs
+    // nothing extra in DB work. 100000 is effectively "no cap" for a single
+    // party's ledger, closing the "export only got what was on screen" gap.
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 500, 1), 100000);
 
     const openingResult = await pool
       .request()
@@ -313,7 +318,12 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
     const pool = getPool();
     const from = req.query.from ? String(req.query.from) : null;
     const to = req.query.to ? String(req.query.to) : null;
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 500, 1), 2000);
+    // Unlike /:headId/transactions, this query does have a SQL-level TOP
+    // below (it scans every party at once), so the ceiling stays bounded —
+    // raised from 2000 to 10000 to cover realistic export sizes without an
+    // unbounded whole-company scan. Narrowing by date range is still the
+    // right move for anything larger than that.
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 500, 1), 10000);
 
     const result = await pool
       .request()
