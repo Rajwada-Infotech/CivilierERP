@@ -176,9 +176,9 @@ export default function FixedAssetDepreciationTagStickers() {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Fixed Asset", "Depreciation Tag Stickers"]} />
+      <Breadcrumbs items={["Dashboard", "Fixed Asset", "FA Code Stickers"]} />
       <GlassShell
-        title="Depreciation Tag Stickers"
+        title="FA Code Stickers"
         subtitle="View, filter & print stickers for FA Item Codes whose Fixed Asset Depreciation Tag (Asset Register) process is complete"
         icon={TagIcon}
         accentColor="#eab308"
@@ -187,7 +187,7 @@ export default function FixedAssetDepreciationTagStickers() {
             onClick={() => (selectedRows.length ? setPrintOpen(true) : toast.error("Select at least one FA Item Code"))}
             className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all"
           >
-            <Printer size={13} /> Print Depreciation Tag Stickers{selectedRows.length ? ` (${selectedRows.length})` : ""}
+            <Printer size={13} /> Print FA Code Stickers{selectedRows.length ? ` (${selectedRows.length})` : ""}
           </button>
         }
       >
@@ -362,7 +362,7 @@ No FA Item Codes with a completed Asset Register{hasFilters ? " match these filt
       <Dialog open={printOpen} onOpenChange={setPrintOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Print Preview — {selectedRows.length} Depreciation Tag Sticker{selectedRows.length === 1 ? "" : "s"}</DialogTitle>
+            <DialogTitle>Print Preview — {selectedRows.length} FA Code Sticker{selectedRows.length === 1 ? "" : "s"}</DialogTitle>
           </DialogHeader>
           <div className="max-h-[55vh] overflow-y-auto flex flex-wrap gap-3 p-1">
             {selectedRows.map((r) => <StickerPreview key={r.TagId} row={r} />)}
