@@ -355,7 +355,7 @@ const ALL_REPORTS: ReportDef[] = [
       { header: "Vendor", accessor: (r) => (r.ESupplierName ?? "—") as string },
       { header: "Company", accessor: (r) => (r.ECompanyName ?? "—") as string },
       { header: "Project", accessor: (r) => (r.EProjectDisplayName ?? "—") as string },
-      { header: "Expense Head", accessor: (r) => (r.EGLAccountName ?? "—") as string },
+      { header: "Expense Head", accessor: (r) => (r.EExpenseHeadNames ?? r.EGLAccountName ?? "—") as string },
       { header: "Basic Amount", accessor: (r) => fmt(Number(r.EAmount) || 0) },
       {
         header: "GST %",

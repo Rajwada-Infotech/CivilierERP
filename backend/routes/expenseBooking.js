@@ -1106,8 +1106,20 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
       totalBookedAmount += parseFloat(row.totalAmount) || 0;
     }
 
+    // Direct/DINV bookings record their Expense Head(s) via the multi-head
+    // ExpenseHeadAllocation table (migration 303), not the legacy single
+    // EGLAccountId column — this list route never attached that data before,
+    // so every row's "Expense Head" always came back empty even for bookings
+    // that do have one. Batch-fetched (one query for the whole page) rather
+    // than per-row to avoid an N+1.
+    const allocMap = await getAllocationsForMany(pool, sql, "ExpenseBooking", rows.map((r) => r.Eid));
+    const rowsWithExpenseHead = rows.map((r) => ({
+      ...r,
+      EExpenseHeadNames: (allocMap.get(r.Eid) || []).map((a) => a.lHeadName).join(", ") || null,
+    }));
+
     res.json({
-      data: rows.map(({ _total, ...r }) => r),
+      data: rowsWithExpenseHead.map(({ _total, ...r }) => r),
       page,
       limit,
       total,
