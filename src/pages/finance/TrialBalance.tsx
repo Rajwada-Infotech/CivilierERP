@@ -85,6 +85,13 @@ interface TBTransaction {
   invoiceNo: string | null;
   payment: { id: number; docNo: string | null; mode: string | null; status: string | null } | null;
   costCenter: { id: number; code: string | null; name: string | null } | null;
+  fixedAsset: {
+    assetId: number;
+    assetCode: string | null;
+    assetName: string | null;
+    faItemCode: string | null;
+    finYear: string | null;
+  } | null;
 }
 
 interface TBTransactionsResponse {
@@ -441,6 +448,7 @@ function TBRow({
                       <th className="px-3 py-2">Source / Entry</th>
                       <th className="px-3 py-2">Invoice No.</th>
                       <th className="px-3 py-2">Mode</th>
+                      <th className="px-3 py-2">Fixed Asset</th>
                       <th className="px-3 py-2">Cost Centre</th>
                       <th className="px-3 py-2 text-right">Debit</th>
                       <th className="px-3 py-2 text-right">Credit</th>
@@ -493,6 +501,24 @@ function TBRow({
                           </td>
                           <td className="px-3 py-1.5 text-[11px]">{t.invoiceNo || "—"}</td>
                           <td className="px-3 py-1.5 text-[11px]">{(t as any).mode || t.payment?.mode || "—"}</td>
+                          <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
+                            {t.fixedAsset ? (
+                              <span
+                                title={[
+                                  t.fixedAsset.assetCode,
+                                  t.fixedAsset.assetName,
+                                  t.fixedAsset.finYear,
+                                ].filter(Boolean).join(" · ")}
+                              >
+                                {t.fixedAsset.faItemCode || t.fixedAsset.assetCode || `Asset #${t.fixedAsset.assetId}`}
+                                {t.fixedAsset.finYear ? (
+                                  <span className="text-muted-foreground/60"> · {t.fixedAsset.finYear}</span>
+                                ) : null}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
                           <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
                             {t.costCenter
                               ? `${t.costCenter.code ?? ""}${t.costCenter.code ? " - " : ""}${t.costCenter.name ?? ""}`

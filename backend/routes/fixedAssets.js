@@ -88,7 +88,7 @@ router.get("/", async (req, res) => {
     if (req.query.projectId)  { request.input("ProjectId",  sql.Int,          parseInt(req.query.projectId, 10)); where.push("fa.ProjectId = @ProjectId"); }
     if (req.query.category)   { request.input("Category",   sql.NVarChar(100), req.query.category);               where.push("fa.AssetCategory = @Category"); }
     if (req.query.assetStatus){ request.input("AssetStatus",sql.NVarChar(30),  req.query.assetStatus);             where.push("fa.AssetStatus = @AssetStatus"); }
-    if (req.query.finYear)    { request.input("FinYear",    sql.NVarChar(20),  req.query.finYear);                 where.push("fa.FinYear = @FinYear"); }
+    if (req.query.finYear)    { request.input("FinYear",    sql.NVarChar(20),  String(req.query.finYear));         where.push("fa.FinYear = COALESCE((SELECT FName FROM dbo.FinYear WHERE FId = TRY_CONVERT(int, @FinYear)), @FinYear)"); }
     if (req.query.fromDate)   { request.input("FromDate",   sql.Date,          req.query.fromDate);                where.push("fa.PurchaseDate >= @FromDate"); }
     if (req.query.toDate)     { request.input("ToDate",     sql.Date,          req.query.toDate);                  where.push("fa.PurchaseDate <= @ToDate"); }
 
@@ -119,6 +119,59 @@ router.get("/", async (req, res) => {
     `);
     res.json(result.recordset);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /depreciation-summary — posted depreciation rolled up per FA Item Code ─
+// One row per asset: total posted (non-reversed) depreciation, accumulated
+// depreciation and current book value, from dbo.FixedAssetDepreciationEntry.
+// Filters: companyId, finYear (entry FinYear), fromDate/toDate (on the
+// depreciation period month). Powers the "Total Depreciation (FA Item Code
+// wise)" report.
+router.get("/depreciation-summary", requirePageRight("fixed-asset-record", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    const where = ["e.Status <> 'Reversed'", "fa.AssetCode IS NOT NULL"];
+
+    if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }
+    if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("fa.ProjectId = @ProjectId"); }
+    if (req.query.finYear)   { request.input("FinYear", sql.NVarChar(20), String(req.query.finYear)); where.push("e.FinYear = COALESCE((SELECT FName FROM dbo.FinYear WHERE FId = TRY_CONVERT(int, @FinYear)), @FinYear)"); }
+    if (req.query.fromDate)  { request.input("FromDate", sql.Date, req.query.fromDate); where.push("DATEFROMPARTS(e.PeriodYear, e.PeriodMonth, 1) >= @FromDate"); }
+    if (req.query.toDate)    { request.input("ToDate", sql.Date, req.query.toDate); where.push("DATEFROMPARTS(e.PeriodYear, e.PeriodMonth, 1) <= @ToDate"); }
+
+    const result = await request.query(`
+      SELECT
+        fa.AssetId,
+        fa.FAItemCode,
+        fa.AssetName,
+        fa.AssetCode,
+        fa.AssetCategory,
+        co.name AS CompanyName,
+        pr.name AS ProjectName,
+        fa.DepreciationType,
+        fa.DepreciationRate,
+        fa.PurchaseCost,
+        COUNT(*)                                   AS MonthsPosted,
+        SUM(e.DepreciationAmount)                  AS TotalDepreciation,
+        MAX(e.ClosingBookValue)                    AS LatestClosingBV,
+        fa.PurchaseCost - SUM(e.DepreciationAmount) AS BookValue,
+        MIN(DATEFROMPARTS(e.PeriodYear, e.PeriodMonth, 1)) AS FirstPeriod,
+        MAX(DATEFROMPARTS(e.PeriodYear, e.PeriodMonth, 1)) AS LastPeriod
+      FROM dbo.FixedAssetDepreciationEntry e
+      JOIN dbo.FixedAssetRecord fa ON fa.AssetId = e.AssetId
+      LEFT JOIN dbo.enterprise co ON co.id = fa.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = fa.ProjectId
+      WHERE ${where.join(" AND ")}
+      GROUP BY
+        fa.AssetId, fa.FAItemCode, fa.AssetName, fa.AssetCode, fa.AssetCategory,
+        co.name, pr.name, fa.DepreciationType, fa.DepreciationRate, fa.PurchaseCost
+      ORDER BY fa.FAItemCode
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[fixedAssets] GET /depreciation-summary:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -99,13 +99,20 @@ router.get("/assets", requirePageRight(PAGE, "view"), async (req, res) => {
 });
 
 // ── GET /vendors — active ledger heads usable as a vendor ───────────────────
+// A repair/maintenance bill is payable to an external party — a Supplier,
+// Contractor or (for a direct payment) a Bank. GL heads are deliberately
+// excluded: they are the P&L / balance-sheet control accounts (Accumulated
+// Depreciation A/c, Purchase A/c, GST ledgers, share capital, …), never a
+// payee. resolveVendorHead() enforces the same restriction server-side.
+const VENDOR_HEAD_TYPES = ["S", "C", "CN", "B"];
 router.get("/vendors", requirePageRight(PAGE, "view"), async (_req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT LHeadId AS id, ISNULL(DisplayName, LHeadName) AS label, LHeadCode AS code, LHeadType AS type
       FROM dbo.AccountHeadMaster
-      WHERE ISNULL(LHeadStatus, 1) = 1 AND LHeadType IN ('S', 'C', 'CN', 'B', 'GL')
+      WHERE ISNULL(LHeadStatus, 1) = 1
+        AND LHeadType IN (${VENDOR_HEAD_TYPES.map((t) => `'${t}'`).join(", ")})
       ORDER BY label
     `);
     res.json(result.recordset);
@@ -188,6 +195,9 @@ router.get("/", requirePageRight(PAGE, "view"), async (req, res) => {
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("m.ProjectId = @ProjectId"); }
     if (req.query.assetId)   { request.input("AssetId", sql.Int, parseInt(req.query.assetId, 10)); where.push("m.AssetId = @AssetId"); }
     if (req.query.status)    { request.input("Status", sql.NVarChar(20), req.query.status); where.push("m.Status = @Status"); }
+    if (req.query.finYear)   { request.input("FinYear", sql.NVarChar(20), String(req.query.finYear)); where.push("m.FinYear = COALESCE((SELECT FName FROM dbo.FinYear WHERE FId = TRY_CONVERT(int, @FinYear)), @FinYear)"); }
+    if (req.query.fromDate)  { request.input("FromDate", sql.Date, req.query.fromDate); where.push("m.DocDate >= @FromDate"); }
+    if (req.query.toDate)    { request.input("ToDate", sql.Date, req.query.toDate); where.push("m.DocDate <= @ToDate"); }
     const result = await request.query(`${LIST_SELECT} WHERE ${where.join(" AND ")} ORDER BY m.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (err) {

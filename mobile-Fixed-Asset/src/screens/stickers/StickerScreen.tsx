@@ -1,4 +1,4 @@
-// Depreciation Tag Stickers — view / filter / multi-select FA Item Codes
+// FA Code Stickers — view / filter / multi-select FA Item Codes
 // whose Fixed Asset Depreciation Tag (Asset Register) process is complete,
 // and print asset stickers (FA Item Code + Item Name + Code 128 barcode)
 // via the OS print dialog. Read-only: no FA Item Code is generated here.
@@ -286,7 +286,7 @@ No FA Item Codes with a completed Asset Register{hasFilters ? " match these filt
               <>
                 <Printer size={16} color="#1a1a1a" />
                 <Text style={{ color: "#1a1a1a", fontSize: 13, fontFamily: fonts.heading.bold }}>
-                  Print Depreciation Tag Stickers ({selectedRows.length})
+                  Print FA Code Stickers ({selectedRows.length})
                 </Text>
               </>
             )}

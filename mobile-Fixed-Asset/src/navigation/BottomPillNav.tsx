@@ -4,7 +4,7 @@
 // prop from RootNavigator (driven by NavigationContainer's onStateChange).
 import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LayoutGrid, Boxes, Wrench } from "lucide-react-native";
+import { LayoutGrid, Boxes, Wrench, BarChart3 } from "lucide-react-native";
 import { fonts } from "@/theme/fonts";
 import { navigationRef } from "./navigationRef";
 import type { MainStackParamList } from "./MainStack";
@@ -19,7 +19,8 @@ const TABS: {
 }[] = [
   { route: "Dashboard", label: "Overview", icon: LayoutGrid },
   { route: "AssetRegister", label: "Assets", icon: Boxes },
-  { route: "Maintenance", label: "Maintenance", icon: Wrench },
+  { route: "Maintenance", label: "Repairs", icon: Wrench },
+  { route: "Reports", label: "Reports", icon: BarChart3 },
 ];
 
 export function BottomPillNav({ activeRoute }: { activeRoute: string }) {
@@ -57,9 +58,9 @@ export function BottomPillNav({ activeRoute }: { activeRoute: string }) {
               style={{
                 flexDirection: "row",
                 alignItems: "center",
-                gap: 6,
+                gap: 5,
                 paddingVertical: 9,
-                paddingHorizontal: 14,
+                paddingHorizontal: 11,
                 borderRadius: 999,
                 backgroundColor: active ? "rgba(234,179,8,0.14)" : "transparent",
                 borderWidth: 1,
@@ -69,7 +70,7 @@ export function BottomPillNav({ activeRoute }: { activeRoute: string }) {
               <Icon size={14} color={active ? ACCENT_SOFT : "#818898"} />
               <Text
                 style={{
-                  fontSize: 12,
+                  fontSize: 11.5,
                   fontFamily: active ? fonts.heading.semibold : fonts.body.medium,
                   color: active ? ACCENT_SOFT : "#818898",
                 }}
