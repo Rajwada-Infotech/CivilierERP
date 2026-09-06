@@ -8,7 +8,7 @@ import {
   Eye, Pencil, Trash2, AlertTriangle, Image as ImageIcon,
   Bell, CalendarClock, CalendarPlus, CircleAlert, CheckCircle2, Ban, Camera as CameraIcon,
 } from "lucide-react";
-import { useCameraCapture } from "@/hooks/useCameraCapture";
+import { CameraCaptureModal } from "@/components/CameraCaptureModal";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -139,60 +139,6 @@ function FAItemCodeCombobox({
   );
 }
 
-// ── camera-first picture field ──────────────────────────────────────────────
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result || ""));
-    r.onerror = () => reject(new Error("read failed"));
-    r.readAsDataURL(blob);
-  });
-}
-
-function CameraModal({ onCapture, onClose }: { onCapture: (dataUrl: string) => void; onClose: () => void }) {
-  const cam = useCameraCapture();
-  const [starting, setStarting] = React.useState(true);
-  const [shooting, setShooting] = React.useState(false);
-
-  React.useEffect(() => {
-    let alive = true;
-    cam.start().then((ok) => { if (alive) { setStarting(false); if (!ok) toast.error("Camera unavailable on this device"); } });
-    return () => cam.stop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const shutter = async () => {
-    setShooting(true);
-    const blob = await cam.capture();
-    if (blob) { onCapture(await blobToDataUrl(blob)); cam.stop(); onClose(); }
-    else { setShooting(false); toast.error("Could not capture — try again"); }
-  };
-
-  return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => { cam.stop(); onClose(); }}>
-      <div className="absolute inset-0 bg-black/70" />
-      <div className="relative w-full max-w-md rounded-2xl overflow-hidden bg-black border border-border shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="relative bg-black min-h-[240px] flex items-center justify-center">
-          {(starting || cam.unsupported) && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/70 text-xs">
-              {cam.unsupported ? <><CameraIcon size={22} /> Camera not available</> : <><Loader2 size={20} className="animate-spin" /> Starting camera…</>}
-            </div>
-          )}
-          <video ref={cam.videoRef} playsInline muted className="w-full max-h-[60vh] object-contain" />
-          <button type="button" onClick={() => { cam.stop(); onClose(); }}
-            className="absolute right-3 top-3 w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-white"><X size={15} /></button>
-        </div>
-        <div className="flex items-center justify-center p-4 bg-black">
-          <button type="button" onClick={shutter} disabled={!cam.isActive || shooting}
-            className="w-16 h-16 rounded-full bg-white border-4 border-white/40 hover:border-white/70 transition-colors disabled:opacity-40 flex items-center justify-center">
-            {shooting ? <Loader2 size={20} className="animate-spin text-black" /> : <CameraIcon size={22} className="text-black" />}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
 
 // ── Item Picture: record-wise image, camera-only capture (no gallery) ───────
 // Shows the previous/latest image for reference until a new photo is captured;
@@ -234,7 +180,7 @@ function ItemPictureField({
           </button>
         </div>
       </div>
-      {camOpen && <CameraModal onCapture={onCapture} onClose={() => setCamOpen(false)} />}
+      {camOpen && <CameraCaptureModal onCapture={onCapture} onClose={() => setCamOpen(false)} />}
     </div>
   );
 }
