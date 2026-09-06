@@ -6,6 +6,10 @@ export interface MaintenanceBillListRow {
   Id: number;
   BillNo: string;
   BillDate: string | null;
+  DueDate: string | null;
+  PeriodFrom: string | null;
+  PeriodTo: string | null;
+  Notes: string | null;
   Subtotal: number;
   TotalTax: number;
   GrandTotal: number;
@@ -17,6 +21,13 @@ export interface MaintenanceBillListRow {
   BlockName: string | null;
   BookingId: number;
   BookingNo: string;
+  CompanyName: string | null;
+  CompanyAddress: string | null;
+  CompanyAddressLine2: string | null;
+  CompanyCity: string | null;
+  CompanyState: string | null;
+  CompanyPincode: string | null;
+  CompanyGstNo: string | null;
 }
 
 export interface MaintenanceBillItem {
@@ -43,6 +54,13 @@ export interface BillFilters {
   dateTo?: string;
 }
 
+export interface BillExtras {
+  dueDate?: string | null;
+  periodFrom?: string | null;
+  periodTo?: string | null;
+  notes?: string | null;
+}
+
 async function readError(res: Response, fallback: string): Promise<Error> {
   const body = await res.json().catch(() => null);
   return new Error(body?.error || body?.message || fallback);
@@ -63,21 +81,21 @@ export const getMaintenanceBill = async (id: number | string): Promise<Maintenan
   return res.json();
 };
 
-export const createMaintenanceBill = async (bookingId: number, chargeHeadIds: number[]) => {
+export const createMaintenanceBill = async (bookingId: number, chargeHeadIds: number[], extras: BillExtras = {}) => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ bookingId, chargeHeadIds }),
+    body: JSON.stringify({ bookingId, chargeHeadIds, ...extras }),
   });
   if (!res.ok) throw await readError(res, "Failed to create bill");
   return res.json();
 };
 
-export const updateMaintenanceBill = async (id: number | string, chargeHeadIds: number[]) => {
+export const updateMaintenanceBill = async (id: number | string, chargeHeadIds: number[], extras: BillExtras = {}) => {
   const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chargeHeadIds }),
+    body: JSON.stringify({ chargeHeadIds, ...extras }),
   });
   if (!res.ok) throw await readError(res, "Failed to update bill");
   return res.json();
