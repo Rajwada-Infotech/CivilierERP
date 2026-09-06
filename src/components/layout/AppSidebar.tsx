@@ -151,9 +151,9 @@ const MODULE_HEADER: Record<
   maintenance: {
     label: "Maintenance",
     icon: Wrench,
-    color: "#64748b",
-    from: "from-slate-500/30",
-    to: "to-slate-500/0",
+    color: "#65a30d",
+    from: "from-lime-500/30",
+    to: "to-lime-500/0",
   },
   admin: {
     label: "Admin",

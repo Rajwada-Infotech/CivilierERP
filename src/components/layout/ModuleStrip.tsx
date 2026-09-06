@@ -147,9 +147,9 @@ const MODULES = [
     icon: WrenchIcon,
     label: "Maintenance",
     desc: "Upkeep, repairs & servicing",
-    color: "#64748b",
-    bg: "rgba(100,116,139,0.22)",
-    ringRgb: "100,116,139",
+    color: "#65a30d",
+    bg: "rgba(101,163,13,0.22)",
+    ringRgb: "101,163,13",
   },
   // Records is always last — new modules get inserted above this entry
   {

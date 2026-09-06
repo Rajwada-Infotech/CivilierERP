@@ -123,6 +123,10 @@ const Records = lazy(() => import("./pages/records/Records"));
 const LoanDashboard = lazy(() => import("./pages/loan/LoanDashboard"));
 const LoanSanction = lazy(() => import("./pages/loan/LoanSanction"));
 const MaintenanceDashboard = lazy(() => import("./pages/maintenance/MaintenanceDashboard"));
+const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceDirectory"));
+const CustomerMaintenanceProfile = lazy(() => import("./pages/maintenance/CustomerMaintenanceProfile"));
+const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills"));
+const ChargeHeadMaster = lazy(() => import("./pages/masters/ChargeHeadMaster"));
 const CivilWorkDprDashboard = lazy(
   () => import("./pages/civilworkdpr/CivilWorkDprDashboard"),
 );
@@ -904,6 +908,38 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="maintenance-dashboard">
             <MaintenanceDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/directory"
+        element={
+          <ProtectedRoute pageKey="maintenance-directory">
+            <MaintenanceDirectory />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/customer/:bookingId"
+        element={
+          <ProtectedRoute pageKey="maintenance-directory">
+            <CustomerMaintenanceProfile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/bills"
+        element={
+          <ProtectedRoute pageKey="maintenance-bills">
+            <MaintenanceBills />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/charge-head"
+        element={
+          <ProtectedRoute pageKey="charge-head-master">
+            <ChargeHeadMaster />
           </ProtectedRoute>
         }
       />

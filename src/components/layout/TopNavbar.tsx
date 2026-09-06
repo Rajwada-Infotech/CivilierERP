@@ -144,6 +144,7 @@ const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
   civilworkdpr: { h: 192, s: 91, l: 36 }, // #0891b2 cyan/teal
   admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
   crm: { h: 199, s: 89, l: 48 }, // #0ea5e9 sky
+  maintenance: { h: 85, s: 85, l: 35 }, // #65a30d lime
 };
 
 function moduleColorVars(id: string): React.CSSProperties {
@@ -263,6 +264,16 @@ const financeSetupItems = [
     path: "/masters/customers",
     color: "text-violet-500",
     pageKey: "customer-master",
+  },
+];
+
+const maintenanceSetupItems = [
+  {
+    icon: Receipt,
+    label: "Charge Head",
+    path: "/masters/charge-head",
+    color: "text-slate-500",
+    pageKey: "charge-head-master",
   },
 ];
 
@@ -1084,6 +1095,13 @@ export const TopNavbar = () => {
         items: filterSetupItems(crmSetupItems),
         label: "CRM",
         colorStyle: makeColorStyle("crm"),
+        available: true,
+      };
+    if (activeModule === "maintenance")
+      return {
+        items: filterSetupItems(maintenanceSetupItems),
+        label: "Maintenance",
+        colorStyle: makeColorStyle("maintenance"),
         available: true,
       };
     return {

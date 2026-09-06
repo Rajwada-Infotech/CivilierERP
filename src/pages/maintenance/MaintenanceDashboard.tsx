@@ -1,24 +1,22 @@
-import { Wrench, ClipboardList, CalendarClock, CheckCircle2 } from "lucide-react";
-import { GlassShell, GlassCard, GlassSection } from "@/components/dashboard/GlassShell";
+import { useNavigate } from "react-router-dom";
+import { Wrench, ClipboardList, CalendarClock, CheckCircle2, Users, Receipt, ChevronRight } from "lucide-react";
+import { GlassCard, GlassSection } from "@/components/dashboard/GlassShell";
+import { MaintenanceShell, MAINTENANCE_ACCENT as ACCENT } from "@/components/maintenance/MaintenanceShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 
-const ACCENT = "#64748b";
-
-// Scaffold dashboard — the Maintenance module has no pages/data model yet
-// (this is step one: get it into the module strip + sidebar + routing).
-// Stat tiles stay at "—" rather than showing fake zeros, and the section
-// below says plainly that nothing's wired up yet, instead of pretending
-// there's real data behind an empty grid.
+// Requests/schedules/work-orders still have no data model — those tiles
+// stay at "—" rather than showing fake zeros. Customer Directory + Charge
+// Head master are real now (see src/pages/maintenance/MaintenanceDirectory.tsx).
 export default function MaintenanceDashboard() {
   usePageRights("maintenance-dashboard");
+  const navigate = useNavigate();
 
   return (
-    <GlassShell
+    <MaintenanceShell
       title="Maintenance"
       subtitle="Upkeep, repairs & servicing"
       icon={Wrench}
-      accentColor={ACCENT}
     >
       <Breadcrumbs items={["Dashboard", "Maintenance"]} />
 
@@ -29,21 +27,45 @@ export default function MaintenanceDashboard() {
         <GlassCard label="Overdue" value="—" icon={Wrench} accentColor="#ef4444" />
       </div>
 
-      <GlassSection title="Getting Started" icon={Wrench} accentColor={ACCENT}>
-        <div className="rounded-xl border border-dashed border-border py-10 flex flex-col items-center gap-2.5 text-center px-6">
+      <GlassSection title="Quick Actions" icon={Wrench} accentColor={ACCENT}>
+        <button
+          onClick={() => navigate("/maintenance/directory")}
+          className="w-full flex items-center gap-3 rounded-xl border border-border bg-muted/10 hover:bg-muted/20 transition-colors px-4 py-3.5 text-left"
+        >
           <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center"
-            style={{ background: `${ACCENT}14`, border: `1px solid ${ACCENT}28` }}
+            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: `${ACCENT}18`, border: `1px solid ${ACCENT}30` }}
           >
-            <Wrench size={17} style={{ color: ACCENT }} />
+            <Users size={16} style={{ color: ACCENT }} />
           </div>
-          <p className="text-sm font-medium text-foreground">Maintenance module scaffolded</p>
-          <p className="text-xs text-muted-foreground max-w-sm">
-            This is the starting shell — module strip entry, sidebar, and this dashboard.
-            Real pages (maintenance requests, schedules, work orders) get added here next.
-          </p>
-        </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">Customer Directory</p>
+            <p className="text-xs text-muted-foreground">
+              Confirmed CRM bookings — view profiles and apply maintenance charges.
+            </p>
+          </div>
+          <ChevronRight size={16} className="text-muted-foreground shrink-0" />
+        </button>
+
+        <button
+          onClick={() => navigate("/maintenance/bills")}
+          className="w-full flex items-center gap-3 rounded-xl border border-border bg-muted/10 hover:bg-muted/20 transition-colors px-4 py-3.5 text-left mt-2"
+        >
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: `${ACCENT}18`, border: `1px solid ${ACCENT}30` }}
+          >
+            <Receipt size={16} style={{ color: ACCENT }} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">Bills</p>
+            <p className="text-xs text-muted-foreground">
+              Create and manage maintenance bills for customers/units.
+            </p>
+          </div>
+          <ChevronRight size={16} className="text-muted-foreground shrink-0" />
+        </button>
       </GlassSection>
-    </GlassShell>
+    </MaintenanceShell>
   );
 }

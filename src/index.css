@@ -272,6 +272,13 @@
         background: linear-gradient(135deg, #ea6c0a, #f97316);
         box-shadow: 0 4px 14px rgba(249,115,22,0.35);
     }
+    .gradient-maintenance {
+        background: linear-gradient(135deg, #65a30d, #84cc16);
+    }
+    .gradient-maintenance:hover {
+        background: linear-gradient(135deg, #4d7c0f, #65a30d);
+        box-shadow: 0 4px 14px rgba(101,163,13,0.35);
+    }
     .gradient-accent-hover {
         background: linear-gradient(
             135deg,
