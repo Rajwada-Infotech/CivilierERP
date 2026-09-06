@@ -116,9 +116,18 @@ import { ChequePanel } from "./payment/components/ChequePanel";
 import { DigitalRefPanel } from "./payment/components/DigitalRefPanel";
 import { CardPanel } from "./payment/components/CardPanel";
 import { ExpenseHeadAllocationEditor } from "@/pages/material/ExpenseBooking/ExpenseHeadAllocationEditor";
-import { getUndisbursedLoans, postLoanToGL, type UndisbursedLoan } from "@/api/loanSanctionApi";
+import { getUndisbursedLoans, postLoanToGL, disburseLoan, type UndisbursedLoan } from "@/api/loanSanctionApi";
 import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
 import { previewOAAdjustment } from "@/api/onAccountAdjustment";
+
+// Same helper ReceivedPayment.tsx uses to compare company names for the
+// bank-company scoping filter below — tolerant of casing/whitespace so
+// "ABC Test Company " and "abc test company" still match.
+const normalizeCompanyName = (value: string | null | undefined) =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -750,6 +759,22 @@ const Payment: React.FC = () => {
     queryFn: fetchBankOptions,
   });
 
+  // ── Banks scoped to the selected company ────────────────────────────────
+  // Same convention ReceivedPayment.tsx already uses: a bank with no
+  // company tagged is shared across every company, so it stays in the
+  // list regardless; one tagged to a DIFFERENT company is hidden. Falls
+  // back to the full list if the filter would otherwise leave nothing to
+  // pick — better an unscoped dropdown than a dead end.
+  const filteredBanks = useMemo(() => {
+    if (!form.company) return banks;
+    const selected = normalizeCompanyName(form.company);
+    const matched = banks.filter((b) => {
+      const bankCompany = normalizeCompanyName(b.companyName);
+      return !bankCompany || bankCompany === selected;
+    });
+    return matched.length > 0 ? matched : banks;
+  }, [banks, form.company]);
+
   const { data: enterprises = [] } = useQuery<{ id: number; label: string }[]>({
     queryKey: ["company-options-payment-filter"],
     queryFn: fetchCompanyOptions,
@@ -1037,6 +1062,41 @@ const Payment: React.FC = () => {
     } finally {
       setDisbursingLoanId(null);
     }
+  };
+
+  // Customer Loan disbursement — unlike Inter-Company (a real bank account
+  // on both sides, so one click posts a voucher directly with no separate
+  // document), the other side here is a customer, not one of our own
+  // companies — a real NewPayment is needed as the bank-side record (bank/
+  // cheque/reference the user actually picks), same as loan repayment
+  // already requires. Selecting one just pre-fills the party + amount on
+  // THIS form; the rest (bank, mode, project, date) is filled normally,
+  // and POST /:id/disburse links the two once the payment is saved below.
+  const [disbursingCustomerLoan, setDisbursingCustomerLoan] = useState<UndisbursedLoan | null>(null);
+  const handleSelectCustomerLoanDisbursement = (loan: UndisbursedLoan) => {
+    if (loan.BorrowerCustomerSource === "CRM") {
+      toast.error(`${loan.LoanNo}'s borrower is a CRM customer — record this disbursement manually for now.`);
+      return;
+    }
+    if (!loan.BorrowerCustomerId) {
+      toast.error(`${loan.LoanNo} has no borrower customer on file.`);
+      return;
+    }
+    setDisbursingCustomerLoan(loan);
+    setForm((f) => ({
+      ...f,
+      // Company wasn't being pre-filled — the picker itself is scoped by
+      // company (bookingFilters.company, same label form.company expects),
+      // but nothing carried it onto the form. Left empty, the Bank field
+      // below has no company to scope its options by, so every mode
+      // (Cheque included) looked "locked" — there was simply nothing to
+      // pick from, not an actual disabled control.
+      company: bookingFilters.company || f.company,
+      partyId: loan.BorrowerCustomerId,
+      amount: loan.Amount,
+      paymentName: f.paymentName || `Loan disbursement — ${loan.LoanNo}`,
+    }));
+    toast.success(`${loan.LoanNo} selected — fill in the bank/mode below, then save to disburse.`);
   };
 
 
@@ -1944,11 +2004,28 @@ const Payment: React.FC = () => {
         await updatePayment(editingId, payload);
         toast.success("Payment updated.");
       } else {
-        await addPayment(payload);
+        const created = await addPayment(payload);
         toast.success(reissueCtx ? "Re-issue payment saved. Linked to original." : "Payment saved.");
+
+        // This payment IS a Customer Loan disbursement — link it back to
+        // the loan (migration 401), the same way loan repayment already
+        // does, so the loan's ledger side posts and DisbursedAt reflects a
+        // real bank-side record instead of never being set.
+        if (disbursingCustomerLoan) {
+          try {
+            const res = await disburseLoan(disbursingCustomerLoan.LoanId, { newPaymentId: created.PPaymentID });
+            toast.success(`${disbursingCustomerLoan.LoanNo} disbursed — JV ${res.voucherNo}`);
+            refetchUndisbursedLoans();
+          } catch (loanErr: any) {
+            toast.error(
+              `Payment was recorded, but linking it to the loan failed: ${loanErr.message}. Post it manually from Loan Sanction.`,
+            );
+          }
+        }
       }
       queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+      setDisbursingCustomerLoan(null);
       cancelForm();
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
@@ -2259,36 +2336,63 @@ const Payment: React.FC = () => {
                         {!!loanDisbursementCompanyId && (undisbursedLoansLoading || undisbursedLoans.length > 0) && (
                           <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
                             <p className="text-xs font-heading font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                              Loan Disbursement — Inter-Company loans not yet posted to GL
+                              Loan Disbursement — loans not yet posted to GL
                             </p>
                             {undisbursedLoansLoading ? (
                               <p className="text-[11px] text-muted-foreground">Checking for undisbursed loans…</p>
                             ) : (
                               <div className="space-y-1.5">
-                                {undisbursedLoans.map((loan) => (
-                                  <div
-                                    key={loan.LoanId}
-                                    className="flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-md bg-background border border-border"
-                                  >
-                                    <div className="min-w-0">
-                                      <p className="font-mono text-xs font-semibold text-foreground truncate">
-                                        {loan.LoanNo}{loan.BorrowerCompanyName ? ` — to ${loan.BorrowerCompanyName}` : ""}
-                                      </p>
-                                      <p className="text-[11px] text-muted-foreground">
-                                        {formatINR(loan.Amount)} · sanctioned {new Date(loan.LoanDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
-                                      </p>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      disabled={disbursingLoanId === loan.LoanId}
-                                      onClick={() => handleDisburseLoan(loan)}
-                                      className="shrink-0 px-3 py-1 rounded-md text-[11px] font-heading font-semibold bg-amber-600 text-white hover:bg-amber-600/90 transition-colors disabled:opacity-50"
+                                {undisbursedLoans.map((loan) => {
+                                  const isInterCompany = loan.LoanType === "Inter-Company";
+                                  const selected = disbursingCustomerLoan?.LoanId === loan.LoanId;
+                                  return (
+                                    <div
+                                      key={loan.LoanId}
+                                      className={`flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-md bg-background border ${selected ? "border-amber-500" : "border-border"}`}
                                     >
-                                      {disbursingLoanId === loan.LoanId ? "Disbursing…" : "Disburse"}
-                                    </button>
-                                  </div>
-                                ))}
+                                      <div className="min-w-0">
+                                        <p className="font-mono text-xs font-semibold text-foreground truncate">
+                                          {loan.LoanNo}{" "}
+                                          {isInterCompany
+                                            ? loan.BorrowerCompanyName ? `— to ${loan.BorrowerCompanyName}` : ""
+                                            : loan.BorrowerCustomerName ? `— to ${loan.BorrowerCustomerName}` : ""}
+                                        </p>
+                                        <p className="text-[11px] text-muted-foreground">
+                                          {formatINR(loan.Amount)} · sanctioned {new Date(loan.LoanDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                                          {!isInterCompany && " · Customer Loan"}
+                                        </p>
+                                      </div>
+                                      {isInterCompany ? (
+                                        <button
+                                          type="button"
+                                          disabled={disbursingLoanId === loan.LoanId}
+                                          onClick={() => handleDisburseLoan(loan)}
+                                          className="shrink-0 px-3 py-1 rounded-md text-[11px] font-heading font-semibold bg-amber-600 text-white hover:bg-amber-600/90 transition-colors disabled:opacity-50"
+                                        >
+                                          {disbursingLoanId === loan.LoanId ? "Disbursing…" : "Disburse"}
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSelectCustomerLoanDisbursement(loan)}
+                                          className={`shrink-0 px-3 py-1 rounded-md text-[11px] font-heading font-semibold transition-colors ${
+                                            selected
+                                              ? "bg-amber-600/20 text-amber-700 dark:text-amber-400 border border-amber-500"
+                                              : "bg-amber-600 text-white hover:bg-amber-600/90"
+                                          }`}
+                                        >
+                                          {selected ? "Selected ✓" : "Select"}
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
+                            )}
+                            {disbursingCustomerLoan && (
+                              <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                                Disbursing <span className="font-semibold">{disbursingCustomerLoan.LoanNo}</span> — party and amount pre-filled below. Pick the bank/mode, then Save.
+                              </p>
                             )}
                           </div>
                         )}
@@ -3850,7 +3954,7 @@ const Payment: React.FC = () => {
                       className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed"
                     >
                       <option value="">— Select bank account —</option>
-                      {banks.map((b) => (
+                      {filteredBanks.map((b) => (
                         <option key={b.id} value={String(b.id)}>
                           {b.label}
                         </option>

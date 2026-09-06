@@ -31,6 +31,7 @@ import {
   markBounced,
   type BrsEntry,
   type BrsFilterOption,
+  type BrsSourceType,
 } from "@/api/brsApi";
 import { useQuery } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -49,6 +50,8 @@ import {
   ChevronRight,
   ArrowDownLeft,
   ArrowUpRight,
+  ArrowLeftRight,
+  Banknote,
   CalendarDays,
   ShieldCheck,
   AlertTriangle,
@@ -95,19 +98,51 @@ function isCancelled(e: BrsEntry): boolean {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function TypePill({ type }: { type: "PAYMENT" | "RECEIVED" }) {
-  if (type === "RECEIVED") {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-        <ArrowDownLeft size={9} strokeWidth={2.5} />
-        Received
-      </span>
-    );
-  }
+const TYPE_PILL_META: Record<BrsSourceType, { label: string; icon: React.ElementType; className: string }> = {
+  RECEIVED: {
+    label: "Received",
+    icon: ArrowDownLeft,
+    className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+  },
+  CRM_RECEIVED: {
+    label: "Received",
+    icon: ArrowDownLeft,
+    className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+  },
+  PAYMENT: {
+    label: "Payment",
+    icon: ArrowUpRight,
+    className: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
+  },
+  FUND_TRANSFER_OUT: {
+    label: "Transfer Out",
+    icon: ArrowLeftRight,
+    className: "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
+  },
+  FUND_TRANSFER_IN: {
+    label: "Transfer In",
+    icon: ArrowLeftRight,
+    className: "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
+  },
+  LOAN_DISBURSED: {
+    label: "Loan Given",
+    icon: Banknote,
+    className: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+  },
+  LOAN_RECEIVED: {
+    label: "Loan Received",
+    icon: Banknote,
+    className: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+  },
+};
+
+function TypePill({ type }: { type: BrsSourceType }) {
+  const meta = TYPE_PILL_META[type] ?? TYPE_PILL_META.PAYMENT;
+  const Icon = meta.icon;
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-      <ArrowUpRight size={9} strokeWidth={2.5} />
-      Payment
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${meta.className}`}>
+      <Icon size={9} strokeWidth={2.5} />
+      {meta.label}
     </span>
   );
 }
@@ -657,7 +692,7 @@ export default function Brs() {
   const exportData = useMemo(() => filtered as unknown as Record<string, unknown>[], [filtered]);
 
   const EXPORT_COLUMNS: ExportColumn[] = useMemo(() => [
-    { header: "Type",       accessor: (r) => (r.SourceType === "RECEIVED" ? "Received" : "Payment") },
+    { header: "Type",       accessor: (r) => TYPE_PILL_META[r.SourceType as BrsSourceType]?.label ?? String(r.SourceType) },
     { header: "Company",    accessor: "CompanyName" },
     { header: "Bank", accessor: (r) => {
       const bank = allBanks.find((b) => b.name === r.BankName);
@@ -681,16 +716,16 @@ export default function Brs() {
       if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
       return e.BankClearingDate ? fmt(e.BankClearingDate) : "—";
     }},
-    { header: "Cleared By", accessor: (r) => {
-      const e = r as unknown as BrsEntry;
-      if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
-      return e.ClearedBy ?? "—";
-    }},
     { header: "Cleared On", accessor: (r) => {
       const e = r as unknown as BrsEntry;
       if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
       const { date, time } = fmtDT(e.ClearingDate);
       return time ? `${date}, ${time}` : date;
+    }},
+    { header: "Cleared By", accessor: (r) => {
+      const e = r as unknown as BrsEntry;
+      if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
+      return e.ClearedBy ?? "—";
     }},
     { header: "Bounce Date",   accessor: (r) => fmt((r as unknown as BrsEntry).BounceDate) },
     { header: "Bounce Reason", accessor: (r) => (r as unknown as BrsEntry).BounceReason ?? "—" },
@@ -1038,11 +1073,21 @@ export default function Brs() {
                         </span>
                         <ClearBadge cleared={cleared} bounced={bounced} cancelled={cancelled} />
                         {bounced && <BounceDetailPanel entry={entry} />}
-                        {cleared && (entry.BankClearingDate || entry.ClearingDate) && (
+                        {cleared && (entry.BankClearingDate || entry.ClearedBy || entry.ClearingDate) && (
                           <div className="text-right">
-                            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                              {entry.BankClearingDate ? fmt(entry.BankClearingDate) : fmtDT(entry.ClearingDate).date}
-                            </p>
+                            {/* Bank Clearance (passbook date) vs Cleared On
+                                (when it was ticked in the app) — genuinely
+                                separate dates, never merged. */}
+                            {entry.BankClearingDate && (
+                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                                {fmt(entry.BankClearingDate)} <span className="text-muted-foreground/70 font-normal">(bank)</span>
+                              </p>
+                            )}
+                            {entry.ClearingDate && (
+                              <p className="text-[10px] text-muted-foreground/70 tabular-nums">
+                                {fmtDT(entry.ClearingDate).date}{fmtDT(entry.ClearingDate).time ? `, ${fmtDT(entry.ClearingDate).time}` : ""}
+                              </p>
+                            )}
                             {entry.ClearedBy && (
                               <p className="text-[10px] text-muted-foreground truncate max-w-[110px]">{entry.ClearedBy}</p>
                             )}
@@ -1108,7 +1153,9 @@ export default function Brs() {
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[110px]">Mode / Cheque</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[82px]">Status</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">BRS</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[110px] hidden xl:table-cell">Cleared On</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px] hidden xl:table-cell">Bank Clearance</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[130px] hidden xl:table-cell">Cleared On</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[110px] hidden xl:table-cell">Cleared By</th>
                   <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[140px]">Action</th>
                 </tr>
               </thead>
@@ -1116,7 +1163,7 @@ export default function Brs() {
               <tbody className="divide-y divide-border">
                 {!loading && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="px-5 py-14 text-center text-muted-foreground text-sm">
+                    <td colSpan={12} className="px-5 py-14 text-center text-muted-foreground text-sm">
                       No entries match your filters.
                     </td>
                   </tr>
@@ -1211,16 +1258,36 @@ export default function Brs() {
                           {bounced && <BounceDetailPanel entry={entry} />}
                         </div>
                       </td>
+                      {/* Bank Clearance — the date the bank itself cleared it
+                          (passbook date), as typed in the clear popup. Distinct
+                          from Cleared On below, which is when this was ticked
+                          in the app — the two can genuinely differ by days. */}
                       <td className="px-3 py-4 hidden xl:table-cell align-middle">
-                        {cleared && (entry.BankClearingDate || entry.ClearingDate) ? (
-                          <div>
-                            <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                              {entry.BankClearingDate ? fmt(entry.BankClearingDate) : fmtDT(entry.ClearingDate).date}
-                            </p>
-                            {entry.ClearedBy && (
-                              <p className="text-[10px] text-muted-foreground truncate max-w-[120px]">{entry.ClearedBy}</p>
+                        {cleared && entry.BankClearingDate ? (
+                          <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                            {fmt(entry.BankClearingDate)}
+                          </p>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      {/* Cleared On — when the entry was actually ticked clear
+                          in the app (system timestamp), date + time. */}
+                      <td className="px-3 py-4 hidden xl:table-cell align-middle">
+                        {cleared && entry.ClearingDate ? (
+                          <>
+                            <p className="text-xs text-foreground">{fmtDT(entry.ClearingDate).date}</p>
+                            {fmtDT(entry.ClearingDate).time && (
+                              <p className="text-[10px] text-muted-foreground/70 tabular-nums">{fmtDT(entry.ClearingDate).time}</p>
                             )}
-                          </div>
+                          </>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-4 hidden xl:table-cell align-middle">
+                        {cleared && entry.ClearedBy ? (
+                          <p className="text-xs text-foreground truncate max-w-[110px]" title={entry.ClearedBy}>{entry.ClearedBy}</p>
                         ) : (
                           <span className="text-[10px] text-muted-foreground">—</span>
                         )}

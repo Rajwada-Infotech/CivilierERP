@@ -2,6 +2,7 @@ import React from "react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
+import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
@@ -67,7 +68,14 @@ import {
   type ReceivedPaymentPosting,
 } from "@/api/receivedPaymentApi";
 import { useSearchParams } from "react-router-dom";
-import { getPayableEmis, payLoan, type PayableEmi } from "@/api/loanSanctionApi";
+import {
+  getPayableEmis,
+  payLoan,
+  getUndisbursedIncomingLoans,
+  disburseLoan,
+  type PayableEmi,
+  type UndisbursedIncomingLoan,
+} from "@/api/loanSanctionApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
 import { getContractOptions, type ContractOption } from "@/api/contractApi";
@@ -195,46 +203,6 @@ const normalizeCompanyName = (value: string | null | undefined) =>
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
-
-// Customer Bank Name was a free-text field — switched to a picker of common
-// Indian banks (grouped Major/Other) so entries stay consistent for
-// reporting, while still allowing any bank via "Other" for names not listed.
-const MAJOR_BANKS = [
-  "State Bank of India",
-  "HDFC Bank",
-  "ICICI Bank",
-  "Axis Bank",
-  "Kotak Mahindra Bank",
-  "Punjab National Bank",
-  "Bank of Baroda",
-  "Canara Bank",
-  "Union Bank of India",
-  "IndusInd Bank",
-  "IDBI Bank",
-  "Yes Bank",
-  "Bank of India",
-  "Indian Bank",
-  "Central Bank of India",
-];
-const MINOR_BANKS = [
-  "IDFC FIRST Bank",
-  "Federal Bank",
-  "South Indian Bank",
-  "Karnataka Bank",
-  "RBL Bank",
-  "Bandhan Bank",
-  "City Union Bank",
-  "DCB Bank",
-  "Karur Vysya Bank",
-  "Tamilnad Mercantile Bank",
-  "Bank of Maharashtra",
-  "UCO Bank",
-  "Punjab & Sind Bank",
-  "AU Small Finance Bank",
-  "Equitas Small Finance Bank",
-  "Ujjivan Small Finance Bank",
-];
-const OTHER_BANK_VALUE = "__other__";
 
 const modeIcon = (mode: string) => {
   if (mode === "Cash")
@@ -429,6 +397,11 @@ export default function ReceivedPaymentPage() {
   const [summary, setSummary] = useState({ totalAmount: 0, approvedCount: 0, draftCount: 0, pendingCount: 0, rejectedCount: 0 });
   const [apiLoading, setApiLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Bumped on every reset/add/edit so BankNamePicker remounts fresh —
+  // editingId alone repeats "null" across successive Add clicks and
+  // wouldn't force a remount, leaving a previously-typed "Other" bank name
+  // stuck in the picker's own internal state.
+  const [bankPickerKey, setBankPickerKey] = useState(0);
   const [actionLoading, setActionLoading] = useState(false);
   const [viewingPayment, setViewingPayment] = useState<ReceivedPayment | null>(
     null,
@@ -479,13 +452,6 @@ export default function ReceivedPaymentPage() {
   const [form, setForm] = useDraftForm("received-payment", EMPTY_FORM, {
     skip: editingId !== null,
   });
-  // Customer Bank Name's free-text fallback only activates once "Other" is
-  // explicitly picked from the dropdown — not by default, and not just
-  // because form.bankName happens to be empty (which is also the initial,
-  // nothing-selected state).
-  const [customBank, setCustomBank] = useState(
-    !!form.bankName && !MAJOR_BANKS.includes(form.bankName) && !MINOR_BANKS.includes(form.bankName),
-  );
 
   // ── Loan Repayment (every loan type) ────────────────────────────────────
   // Repayment of every loan type — Customer Loan, Inter-Company, Bank Loan
@@ -544,13 +510,19 @@ export default function ReceivedPaymentPage() {
     setLoanLateFee("");
     setLoanPaymentNotes("");
     // form.companyId (the page's own top-level company selector, already
-    // scoped server-side by /emi-payable) is left untouched — for Customer
-    // Loan/Inter-Company it's already the lender receiving repayment; for
-    // Bank Loan it's already the borrower (us) settling with the external
-    // bank. "Customer Name" here means "who this settlement is with," so
-    // it needs the OPPOSITE party for Bank Loan: the lender (the bank),
-    // not the borrower (us).
-    const counterpartyName = emi.LoanType === "Bank Loan" ? emi.LenderName : emi.BorrowerName;
+    // scoped server-side by /emi-payable) is left untouched — for the
+    // original Customer Loan direction/Inter-Company it's already the
+    // lender receiving repayment; for Bank Loan and the newer "Customer to
+    // Company" Customer Loan direction (migration 402) it's already the
+    // borrower (us) settling with the external party. "Customer Name" here
+    // means "who this settlement is with," so it needs the OPPOSITE party
+    // whenever we're the borrower: the lender (bank or customer), not us.
+    // Inter-Company rows in this list are always ones where we're the
+    // LENDER (the query only matches Inter-Company via LenderCompanyId —
+    // see /emi-payable), so BorrowerCompanyName being set doesn't mean
+    // "we're the borrower" there the way it does for Customer Loan.
+    const weAreBorrower = emi.LoanType === "Bank Loan" || (emi.LoanType === "Customer Loan" && !!emi.BorrowerCompanyName);
+    const counterpartyName = weAreBorrower ? emi.LenderName : emi.BorrowerName;
     setForm((prev) => ({
       ...prev,
       customerName: counterpartyName || prev.customerName,
@@ -567,6 +539,43 @@ export default function ReceivedPaymentPage() {
       setForm((f) => ({ ...f, amount: String(total) }));
       return next;
     });
+  };
+
+  // ── Bank Loan Disbursement — "we are the BORROWER, money comes IN from
+  // an external bank" ───────────────────────────────────────────────────
+  // The counterpart to Payment.tsx's "Loan Disbursement" picker (Inter-
+  // Company/Customer Loan, money OUT). Selecting one pre-fills the
+  // counterparty + amount here; the rest of the form (deposit bank, mode,
+  // date) is filled normally, and POST /:id/disburse links the two once
+  // this Received Payment is saved.
+  const [undisbursedBankLoans, setUndisbursedBankLoans] = useState<UndisbursedIncomingLoan[]>([]);
+  const [undisbursedBankLoansLoading, setUndisbursedBankLoansLoading] = useState(false);
+  const [disbursingBankLoan, setDisbursingBankLoan] = useState<UndisbursedIncomingLoan | null>(null);
+
+  const refetchUndisbursedBankLoans = useCallback(() => {
+    const companyId = Number(form.companyId) || null;
+    if (!companyId) {
+      setUndisbursedBankLoans([]);
+      return;
+    }
+    setUndisbursedBankLoansLoading(true);
+    getUndisbursedIncomingLoans(companyId)
+      .then(setUndisbursedBankLoans)
+      .catch(() => setUndisbursedBankLoans([]))
+      .finally(() => setUndisbursedBankLoansLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.companyId]);
+
+  useEffect(() => { refetchUndisbursedBankLoans(); }, [refetchUndisbursedBankLoans]);
+
+  const handleSelectBankLoanDisbursement = (loan: UndisbursedIncomingLoan) => {
+    setDisbursingBankLoan(loan);
+    setForm((prev) => ({
+      ...prev,
+      customerName: loan.LenderName || prev.customerName,
+      amount: String(Number(loan.Amount)),
+      remarks: `Loan disbursement — ${loan.LoanNo}`,
+    }));
   };
 
   // Only reopen on an actual browser reload, not a plain in-app navigation
@@ -739,7 +748,7 @@ export default function ReceivedPaymentPage() {
 
   const handleReset = () => {
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
-    setCustomBank(false);
+    setBankPickerKey((k) => k + 1);
     setDate(new Date());
     setDocNoPreview("");
   };
@@ -748,14 +757,14 @@ export default function ReceivedPaymentPage() {
     setView("list");
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
-    setCustomBank(false);
+    setBankPickerKey((k) => k + 1);
   };
 
   // ── Open add form ─────────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
-    setCustomBank(false);
+    setBankPickerKey((k) => k + 1);
     setDate(new Date());
     setDocNoPreview("");
     setView("form");
@@ -784,9 +793,7 @@ export default function ReceivedPaymentPage() {
       remarks: p.remarks ?? "",
       contractId: String((p as { ContractId?: number }).ContractId ?? ""),
     });
-    setCustomBank(
-      !!p.bankName && !MAJOR_BANKS.includes(p.bankName) && !MINOR_BANKS.includes(p.bankName),
-    );
+    setBankPickerKey((k) => k + 1);
     setDate(p.docDate ? new Date(p.docDate) : new Date());
     setDocNoPreview(p.docNo);
     setView("form");
@@ -881,7 +888,24 @@ export default function ReceivedPaymentPage() {
             );
           }
         }
+
+        // This Received Payment IS a Bank Loan disbursement — link it back
+        // to the loan (migration 401) the same way repayment above does,
+        // so the loan-ledger side posts and DisbursedAt reflects a real
+        // bank-side record.
+        if (disbursingBankLoan) {
+          try {
+            const res = await disburseLoan(disbursingBankLoan.LoanId, { receivedPaymentId: created.RPPaymentID });
+            toast.success(`${disbursingBankLoan.LoanNo} disbursed — JV ${res.voucherNo}`);
+            refetchUndisbursedBankLoans();
+          } catch (loanErr: any) {
+            toast.error(
+              `Payment was recorded, but linking it to the loan failed: ${loanErr.message}. Post it manually from Loan Sanction.`,
+            );
+          }
+        }
       }
+      setDisbursingBankLoan(null);
       clearLoanEmiLink();
       setView("list");
       setEditingId(null);
@@ -1542,7 +1566,7 @@ export default function ReceivedPaymentPage() {
                             )}
                           >
                             <Landmark size={11} />
-                            {emi.LoanNo} — {emi.LoanType === "Bank Loan" ? emi.LenderName : emi.BorrowerName}
+                            {emi.LoanNo} — {emi.LoanType === "Bank Loan" || (emi.LoanType === "Customer Loan" && !!emi.BorrowerCompanyName) ? emi.LenderName : emi.BorrowerName}
                           </button>
                         ))}
                       </div>
@@ -1572,6 +1596,58 @@ export default function ReceivedPaymentPage() {
                             Clear
                           </button>
                         </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Bank Loans / Customer-to-Company Customer Loans not yet
+                    disbursed — "we are the BORROWER, money comes IN from an
+                    external party" (a bank, or now a customer — migration
+                    402). Selecting one pre-fills counterparty + amount;
+                    POST /:id/disburse links it once this Received Payment
+                    is saved. */}
+                {form.companyId && !editingId && (undisbursedBankLoansLoading || undisbursedBankLoans.length > 0) && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                    <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-amber-600 dark:text-amber-400">
+                      Disburse a Loan
+                    </p>
+                    {undisbursedBankLoansLoading ? (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <Loader2 size={12} className="animate-spin" /> Checking for undisbursed loans…
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {undisbursedBankLoans.map((loan) => (
+                          <button
+                            key={loan.LoanId}
+                            type="button"
+                            onClick={() => handleSelectBankLoanDisbursement(loan)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                              disbursingBankLoan?.LoanId === loan.LoanId
+                                ? "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                                : "border-border bg-background text-muted-foreground hover:border-amber-500/40",
+                            )}
+                          >
+                            <Landmark size={11} />
+                            {loan.LoanNo} — {formatINR(loan.Amount)}{loan.LenderName ? ` from ${loan.LenderName}` : ""}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {disbursingBankLoan && (
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                          Disbursing <span className="font-semibold">{disbursingBankLoan.LoanNo}</span> — fill in the deposit bank/mode below, then Save.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setDisbursingBankLoan(null)}
+                          className="text-[11px] font-medium text-muted-foreground hover:text-destructive shrink-0"
+                        >
+                          Clear
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1862,52 +1938,13 @@ export default function ReceivedPaymentPage() {
                     )}
                     <div>
                       <FieldLabel>Customer Bank Name</FieldLabel>
-                      <Select
-                        value={
-                          customBank
-                            ? OTHER_BANK_VALUE
-                            : MAJOR_BANKS.includes(form.bankName) || MINOR_BANKS.includes(form.bankName)
-                              ? form.bankName
-                              : ""
-                        }
-                        onValueChange={(v) => {
-                          if (v === OTHER_BANK_VALUE) {
-                            setCustomBank(true);
-                            setField("bankName", "");
-                          } else {
-                            setCustomBank(false);
-                            setField("bankName", v);
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="h-9 text-sm">
-                          <SelectValue placeholder="Select customer's bank…" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            <SelectLabel>Major Banks</SelectLabel>
-                            {MAJOR_BANKS.map((b) => (
-                              <SelectItem key={b} value={b}>{b}</SelectItem>
-                            ))}
-                          </SelectGroup>
-                          <SelectGroup>
-                            <SelectLabel>Other Banks</SelectLabel>
-                            {MINOR_BANKS.map((b) => (
-                              <SelectItem key={b} value={b}>{b}</SelectItem>
-                            ))}
-                          </SelectGroup>
-                          <SelectItem value={OTHER_BANK_VALUE}>Other (type below)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {customBank && (
-                        <Input
-                          className="h-9 text-sm mt-1.5"
-                          placeholder="Bank of customer"
-                          value={form.bankName}
-                          onChange={(e) => setField("bankName", e.target.value)}
-                          autoFocus
-                        />
-                      )}
+                      <BankNamePicker
+                        key={bankPickerKey}
+                        value={form.bankName}
+                        onChange={(v) => setField("bankName", v)}
+                        placeholder="Select customer's bank…"
+                        otherPlaceholder="Bank of customer"
+                      />
                     </div>
                   </div>
                 )}
