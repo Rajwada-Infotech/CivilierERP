@@ -26,6 +26,7 @@ export const fetchBankOptions = async (): Promise<BankOption[]> => {
       ifscCode: b.BIfscCode,
       branch: b.BBranch,
       accountType: b.BAccountType,
+      companyName: b.BCompanyName,
     }));
 };
 

@@ -120,6 +120,15 @@ import { getUndisbursedLoans, postLoanToGL, disburseLoan, type UndisbursedLoan }
 import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
 import { previewOAAdjustment } from "@/api/onAccountAdjustment";
 
+// Same helper ReceivedPayment.tsx uses to compare company names for the
+// bank-company scoping filter below — tolerant of casing/whitespace so
+// "ABC Test Company " and "abc test company" still match.
+const normalizeCompanyName = (value: string | null | undefined) =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 const Payment: React.FC = () => {
@@ -750,6 +759,22 @@ const Payment: React.FC = () => {
     queryFn: fetchBankOptions,
   });
 
+  // ── Banks scoped to the selected company ────────────────────────────────
+  // Same convention ReceivedPayment.tsx already uses: a bank with no
+  // company tagged is shared across every company, so it stays in the
+  // list regardless; one tagged to a DIFFERENT company is hidden. Falls
+  // back to the full list if the filter would otherwise leave nothing to
+  // pick — better an unscoped dropdown than a dead end.
+  const filteredBanks = useMemo(() => {
+    if (!form.company) return banks;
+    const selected = normalizeCompanyName(form.company);
+    const matched = banks.filter((b) => {
+      const bankCompany = normalizeCompanyName(b.companyName);
+      return !bankCompany || bankCompany === selected;
+    });
+    return matched.length > 0 ? matched : banks;
+  }, [banks, form.company]);
+
   const { data: enterprises = [] } = useQuery<{ id: number; label: string }[]>({
     queryKey: ["company-options-payment-filter"],
     queryFn: fetchCompanyOptions,
@@ -1058,13 +1083,33 @@ const Payment: React.FC = () => {
       return;
     }
     setDisbursingCustomerLoan(loan);
+    const isChequeMode = loan.PaymentMode === "Cheque" || loan.PaymentMode === "Post-Dated Cheque";
     setForm((f) => ({
       ...f,
+      // Company wasn't being pre-filled — the picker itself is scoped by
+      // company (bookingFilters.company, same label form.company expects),
+      // but nothing carried it onto the form. Left empty, the Bank field
+      // below has no company to scope its options by, so every mode
+      // (Cheque included) looked "locked" — there was simply nothing to
+      // pick from, not an actual disabled control.
+      company: bookingFilters.company || f.company,
       partyId: loan.BorrowerCustomerId,
       amount: loan.Amount,
       paymentName: f.paymentName || `Loan disbursement — ${loan.LoanNo}`,
+      // The loan already recorded which bank/cheque it was disbursed
+      // through at sanction time — carry all of it over instead of leaving
+      // the Bank field on whatever was last selected (previously this left
+      // the wrong bank showing, and the cheque number blank/unpickable
+      // since it had already been deducted from the lot under this loan).
+      bankId: loan.LenderBankAccountId ?? f.bankId,
+      mode: loan.PaymentMode || f.mode,
+      chequeLotId: isChequeMode ? (loan.ChequeLotId ?? f.chequeLotId) : f.chequeLotId,
+      chequeLotNumber: isChequeMode ? (loan.ChequeLotNumber || f.chequeLotNumber) : f.chequeLotNumber,
+      chequeNo: isChequeMode ? (loan.ChequeNo || f.chequeNo) : f.chequeNo,
+      chequeDate: isChequeMode ? (loan.ChequeDate ? loan.ChequeDate.slice(0, 10) : f.chequeDate) : f.chequeDate,
+      isPostDated: isChequeMode ? !!loan.IsPostDated : f.isPostDated,
     }));
-    toast.success(`${loan.LoanNo} selected — fill in the bank/mode below, then save to disburse.`);
+    toast.success(`${loan.LoanNo} selected — bank/cheque carried over from the loan. Review and save to disburse.`);
   };
 
 
@@ -3922,7 +3967,7 @@ const Payment: React.FC = () => {
                       className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed"
                     >
                       <option value="">— Select bank account —</option>
-                      {banks.map((b) => (
+                      {filteredBanks.map((b) => (
                         <option key={b.id} value={String(b.id)}>
                           {b.label}
                         </option>

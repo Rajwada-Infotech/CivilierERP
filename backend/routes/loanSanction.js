@@ -470,7 +470,9 @@ router.get("/undisbursed", requirePageRight("loan-sanction", "view"), async (req
         ls.LenderBankAccountId, ls.BorrowerBankAccountId,
         ls.BorrowerCustomerId, ls.BorrowerCustomerSource,
         bc.name AS BorrowerCompanyName,
-        COALESCE(crmCust.CustomerName, ahmCust.LHeadName) AS BorrowerCustomerName
+        COALESCE(crmCust.CustomerName, ahmCust.LHeadName) AS BorrowerCustomerName,
+        ls.PaymentMode, ls.ChequeLotId, ls.ChequeLotNumber, ls.ChequeNo, ls.ChequeDate,
+        ls.IsPostDated, ls.DigitalRefNumber
       FROM dbo.LoanSanction ls
       LEFT JOIN dbo.enterprise bc ON bc.id = ls.BorrowerCompanyId AND bc.business_type = 'C'
       LEFT JOIN dbo.CrmCustomer crmCust ON ls.LoanType = 'Customer Loan' AND ls.BorrowerCustomerSource = 'CRM' AND crmCust.Id = ls.BorrowerCustomerId

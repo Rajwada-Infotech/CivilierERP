@@ -66,7 +66,29 @@ const LM_SELECT = `
       WHERE pm.BookingId = m.BookingId
         AND pm.Status NOT IN ('Paid', 'Waived')
         AND pm.AmountDue > ISNULL(pm.AmountPaid, 0)
-    ) THEN 1 ELSE 0 END AS HasOutstandingDues
+    ) THEN 1 ELSE 0 END AS HasOutstandingDues,
+    -- No Objection Certificate is a SINGLE step per booking, not two — the
+    -- bank's NOC and the developer's NOC serve the same purpose (clearing
+    -- the booking for Possession/Handover); a booking only ever needs one,
+    -- decided by how it's financed (see resolveNocType in
+    -- crmWorkflowGuards.js for the full precedence rules, mirrored here as
+    -- a single-query CASE for the list endpoint):
+    --   1. A real, non-Rejected CrmNoc row already on file settles it —
+    --      never contradict data that already exists.
+    --   2. Otherwise: loan-financed (FinancingType = 'LoanFinanced', or an
+    --      active CrmLoanDetail row — SanctionStatus NOT IN ('NotApplied',
+    --      'Rejected'), same convention as crmBookings.js's ActiveLoans
+    --      column) → Bank; otherwise → Organisation.
+    b.FinancingType,
+    CASE
+      WHEN bankNoc.Id IS NOT NULL AND bankNoc.Status <> 'Rejected' THEN 'Bank'
+      WHEN orgNoc.Id  IS NOT NULL AND orgNoc.Status  <> 'Rejected' THEN 'Organisation'
+      WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
+        SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
+          AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+      ) THEN 'Bank'
+      ELSE 'Organisation'
+    END AS NocResolvedType
   FROM dbo.CrmLegalMilestone m
   JOIN dbo.CrmBooking b ON b.Id = m.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -140,6 +162,35 @@ router.get("/", requirePageRight("crm-legal-milestones", "view"), async (req, re
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-legal-milestones] GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /eligible-bookings — bookings the "Start Workflow" dialog should offer.
+// Mirrors the real POST / gate exactly (requireApprovedBooking + an Agreement
+// on file + no tracker yet) so the dialog never lists a booking that then
+// fails on submit. A plain "all bookings minus already-tracked" client-side
+// filter drifted out of sync with the real gate — Expired/Cancelled/
+// not-yet-approved bookings, or ones with no Agreement yet, kept showing up
+// and 400ing on click.
+router.get("/eligible-bookings", requirePageRight("crm-legal-milestones", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      JOIN dbo.CrmAgreement agr ON agr.BookingId = b.Id
+      WHERE b.Status = 'Approved'
+        AND b.IsActive = 1
+        AND (b.IsFrozen = 0 OR (b.FreezeExpiresAt IS NOT NULL AND b.FreezeExpiresAt < SYSDATETIME()))
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmLegalMilestone WHERE BookingId = b.Id)
+      ORDER BY b.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-legal-milestones] GET /eligible-bookings error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

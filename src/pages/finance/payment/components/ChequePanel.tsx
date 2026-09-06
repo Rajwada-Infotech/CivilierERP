@@ -46,6 +46,16 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
           set("chequeAccountNumber", first.AccountNumber || "");
           set("chequeIfsc", first.IFSCCode || "");
           set("chequeNo", "");
+        } else if (form.chequeLotId && !form.chequeAccountNumber) {
+          // A lot (and cheque number) was carried in from elsewhere — e.g. a
+          // loan's own sanction entry — without its account/IFSC. Backfill
+          // those once this bank's lots load, without touching the cheque
+          // number itself.
+          const matched = fetched.find((l) => l.CId === form.chequeLotId);
+          if (matched) {
+            set("chequeAccountNumber", matched.AccountNumber || "");
+            set("chequeIfsc", matched.IFSCCode || "");
+          }
         }
       })
       .catch(() => setLots([]))

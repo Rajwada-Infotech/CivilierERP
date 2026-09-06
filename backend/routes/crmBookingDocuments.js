@@ -6,6 +6,8 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
+const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -61,10 +63,20 @@ router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"),
 // POST /booking/:bookingId — attach a document by pasting an external URL
 // (no file involved) — kept alongside the upload path below for links to
 // documents that live outside our own storage.
+//
+// Same gate as the rest of the Welcome-Call-onward workflow this document
+// collection is part of (crmWelcomeCalls.js POST / uses
+// requireApprovedBooking) — this route previously had NO booking-status
+// check at all, so a document could be attached to a Cancelled, Rejected,
+// or not-yet-Approved booking with zero restriction.
 router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId);
+
+    const activeErr = await requireApprovedBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
     const booking = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
     const applicationId = booking.recordset[0]?.ApplicationId || null;
@@ -102,6 +114,15 @@ router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", 
       const docType = req.body?.DocumentType?.trim();
       if (!docType) return res.status(400).json({ error: "DocumentType is required" });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
+      for (const file of req.files) {
+        const sigErr = verifyFileMatchesDeclaredType(file);
+        if (sigErr) return res.status(400).json({ error: `${file.originalname}: ${sigErr}` });
+      }
+
+      // Same gate as POST /booking/:bookingId above — see its comment.
+      const activeErr = await requireApprovedBooking(pool, bookingId);
+      if (activeErr) return res.status(400).json({ error: activeErr });
+
       const booking = await pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
       const applicationId = booking.recordset[0]?.ApplicationId || null;
@@ -167,6 +188,10 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
       const docType = req.body?.DocumentType?.trim();
       if (!docType) return res.status(400).json({ error: "DocumentType is required" });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
+      for (const file of req.files) {
+        const sigErr = verifyFileMatchesDeclaredType(file);
+        if (sigErr) return res.status(400).json({ error: `${file.originalname}: ${sigErr}` });
+      }
       const booking = await pool.request().input("aid", sql.Int, applicationId)
         .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1 ORDER BY Id DESC");
       const bookingId = booking.recordset[0]?.Id || null;
@@ -215,11 +240,23 @@ router.get("/file/:id", requireAnyPageRight(["crm-applications", "crm-welcome-ca
   }
 });
 
-// PUT /:id/verify — mark a document verified (or un-verify)
+// PUT /:id/verify — mark a document verified (or un-verify). Gated the same
+// way as the routes above, but only when this row actually belongs to a
+// Booking yet (BookingId set) — an Application-stage document (BookingId
+// still NULL, no booking exists) has no booking-status concept to gate on.
 router.put("/:id/verify", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
+
+    const docRow = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId FROM dbo.CrmBookingDocument WHERE Id = @id");
+    if (!docRow.recordset.length) return res.status(404).json({ error: "Document not found" });
+    if (docRow.recordset[0].BookingId) {
+      const activeErr = await requireApprovedBooking(pool, docRow.recordset[0].BookingId);
+      if (activeErr) return res.status(400).json({ error: activeErr });
+    }
+
     const verified = req.body?.IsVerified !== false;
     await pool.request()
       .input("id", sql.Int, id)
@@ -237,11 +274,20 @@ router.put("/:id/verify", requirePageRight("crm-welcome-calls", "edit"), async (
   }
 });
 
-// DELETE /:id
+// DELETE /:id — same booking-status gate as PUT /:id/verify above.
 router.delete("/:id", requireAnyPageRight(["crm-applications", "crm-welcome-calls"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
+
+    const docRow = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId FROM dbo.CrmBookingDocument WHERE Id = @id");
+    if (!docRow.recordset.length) return res.status(404).json({ error: "Document not found" });
+    if (docRow.recordset[0].BookingId) {
+      const activeErr = await requireApprovedBooking(pool, docRow.recordset[0].BookingId);
+      if (activeErr) return res.status(400).json({ error: activeErr });
+    }
+
     await pool.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmBookingDocument WHERE Id = @id");
     res.json({ success: true });
   } catch (e) {

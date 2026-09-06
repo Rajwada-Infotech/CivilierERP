@@ -16,6 +16,7 @@ const { CRM_APPROVER_ROLES } = require("../services/approvalService");
 const { emitNotification } = require("../services/notify");
 const extraChargesRouter = require("./crmExtraCharges");
 const parkingRouter = require("./crmParking");
+const coApplicantRouter = require("./crmCoApplicant");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -110,6 +111,11 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
       else if (reqRow.Action === "Edit") applyResult = await parkingRouter.applyEditParking(pool, reqRow.TargetId, proposedChange);
       else if (reqRow.Action === "Release") applyResult = await parkingRouter.applyReleaseParking(pool, reqRow.TargetId);
       else return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType ParkingAllotment` });
+    } else if (reqRow.ChangeType === "CoApplicant") {
+      if (reqRow.Action === "Add") applyResult = await coApplicantRouter.applyAddCoApplicant(pool, reqRow.BookingId, proposedChange, actor);
+      else if (reqRow.Action === "Edit") applyResult = await coApplicantRouter.applyEditCoApplicant(pool, reqRow.TargetId, proposedChange, actor);
+      else if (reqRow.Action === "Remove") applyResult = await coApplicantRouter.applyRemoveCoApplicant(pool, reqRow.TargetId);
+      else return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType CoApplicant` });
     } else {
       return res.status(400).json({ error: `Unknown ChangeType: ${reqRow.ChangeType}` });
     }

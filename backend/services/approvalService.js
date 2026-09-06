@@ -117,6 +117,15 @@ const MODULE_MAP = {
   // column, so this shares level-count history with any other gate on
   // CrmSalesDeed — harmless since this is single-level too.
   "crm-sales-deed-director": { table: "dbo.CrmSalesDeed", pk: "Id", status: "DirectorApprovalStatus" },
+  // Sale Deed's equivalent of crm-agreements' Senior Approval gate, same
+  // table as crm-sales-deed-director above (a different column, same
+  // single-level caveat applies). This entry was missing entirely — the
+  // ApprovalWorkflows config row for it (module "crm-sales-deed-senior")
+  // already existed, but transition()/getApprovalStatus() only ever consult
+  // this hardcoded map, so every PUT /:id/approve call 400'd with "Unknown
+  // module" and the entire Senior Approval step was unreachable regardless
+  // of who tried it.
+  "crm-sales-deed-senior": { table: "dbo.CrmSalesDeed", pk: "Id", status: "SeniorApprovalStatus" },
 };
 
 const MODULE_DOC_LINKS = {
@@ -172,6 +181,10 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   "crm-brokerage": CRM_APPROVER_ROLES,
   "crm-cancellations": CRM_APPROVER_ROLES,
   "crm-noc": CRM_APPROVER_ROLES,
+  // Same default CRM approver set as crm-brokerage/crm-cancellations/crm-noc
+  // — no legal_head carve-out here, that's specific to crm-agreements (see
+  // its comment above).
+  "crm-sales-deed-senior": CRM_APPROVER_ROLES,
 };
 
 async function validateApprovalModuleMap(log = console) {
@@ -646,6 +659,17 @@ async function transition(
       await tx.rollback();
     } catch {
       /* rollback best-effort — original error is what propagates */
+    }
+    // UQ_CrmBooking_UnitId_Approved (migration 389) is the DB-level backstop
+    // for two Pending bookings on the same Unit both reaching Approved —
+    // the same race crmHoldService.placeHold() already guards for holds.
+    // Translate the raw constraint violation into the same clean, expected
+    // message a caller would get from the hold path, instead of a bare SQL
+    // "Cannot insert duplicate key" surfacing to the approver.
+    if (module === "crm-bookings" && /UQ_CrmBooking_UnitId_Approved/i.test(err.message || "")) {
+      const conflictErr = new Error("This unit was just approved on another booking — refresh and re-check availability.");
+      conflictErr.status = 409;
+      throw conflictErr;
     }
     throw err;
   }

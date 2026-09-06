@@ -122,6 +122,11 @@ const ChequeCancellation = lazy(() => import("./pages/finance/ChequeCancellation
 const Records = lazy(() => import("./pages/records/Records"));
 const LoanDashboard = lazy(() => import("./pages/loan/LoanDashboard"));
 const LoanSanction = lazy(() => import("./pages/loan/LoanSanction"));
+const MaintenanceDashboard = lazy(() => import("./pages/maintenance/MaintenanceDashboard"));
+const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceDirectory"));
+const CustomerMaintenanceProfile = lazy(() => import("./pages/maintenance/CustomerMaintenanceProfile"));
+const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills"));
+const ChargeHeadMaster = lazy(() => import("./pages/masters/ChargeHeadMaster"));
 const CivilWorkDprDashboard = lazy(
   () => import("./pages/civilworkdpr/CivilWorkDprDashboard"),
 );
@@ -208,6 +213,7 @@ const GRN = lazy(() => import("./pages/material/GRN"));
 const FixedAssetDashboard = lazy(() => import("./pages/fixedAsset/FixedAssetDashboard"));
 const FixedAssetRecord = lazy(() => import("./pages/fixedAsset/FixedAssetRecord"));
 const FixedAssetTagging = lazy(() => import("./pages/fixedAsset/FixedAssetTagging"));
+const FixedAssetDepreciationTagStickers = lazy(() => import("./pages/fixedAsset/FixedAssetDepreciationTagStickers"));
 const FixedAssetInventoryImport = lazy(() => import("./pages/fixedAsset/FixedAssetInventoryImport"));
 const FixedAssetAssignment = lazy(() => import("./pages/fixedAsset/FixedAssetAssignment"));
 const AssetTransfer = lazy(() => import("./pages/fixedAsset/AssetTransfer"));
@@ -899,6 +905,46 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/maintenance"
+        element={
+          <ProtectedRoute pageKey="maintenance-dashboard">
+            <MaintenanceDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/directory"
+        element={
+          <ProtectedRoute pageKey="maintenance-directory">
+            <MaintenanceDirectory />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/customer/:bookingId"
+        element={
+          <ProtectedRoute pageKey="maintenance-directory">
+            <CustomerMaintenanceProfile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/bills"
+        element={
+          <ProtectedRoute pageKey="maintenance-bills">
+            <MaintenanceBills />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/charge-head"
+        element={
+          <ProtectedRoute pageKey="charge-head-master">
+            <ChargeHeadMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/civilworkdpr"
         element={
           <ProtectedRoute pageKey="civilworkdpr-dashboard">
@@ -1169,6 +1215,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="fixed-asset-tagging">
             <FixedAssetTagging />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/depreciation-tag-stickers"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-tagging">
+            <FixedAssetDepreciationTagStickers />
           </ProtectedRoute>
         }
       />

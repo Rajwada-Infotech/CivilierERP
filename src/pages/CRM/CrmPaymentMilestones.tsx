@@ -8,7 +8,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw, ArrowDownCircle, ArrowUpCircle, AlertTriangle, MessageSquare } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw, ArrowDownCircle, ArrowUpCircle, AlertTriangle, MessageSquare, Hourglass } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
@@ -67,6 +67,22 @@ async function fetchMilestones(bookingId: string): Promise<any> {
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+// Same call CrmBookingDetail.tsx's Payments tab already uses to drive its
+// token-payment transparency states — pulled in here too so a booking's
+// captured-but-not-yet-Finance-approved amount shows up on THIS page as
+// well, not just when staff happen to open the full Booking Details view.
+// Without this, a token entered at Application intake was invisible here
+// for the entire Data-Review-not-yet-complete window: Collected showed ₹0,
+// Pending Approval didn't exist yet (that only lights up once a Money
+// Receipt is APPROVED into a ReceivedPayment row), and Balance showed the
+// full amount in red as if nothing had been received at all.
+async function fetchMoneyReceipts(bookingId: string): Promise<any[]> {
+  if (!bookingId) return [];
+  try {
+    const r = await fetchWithAuth(`/api/crm/money-receipts?bookingId=${bookingId}`);
+    return r.ok ? r.json() : [];
+  } catch { return []; }
+}
 async function fetchOnAccount(bookingId: string): Promise<any> {
   if (!bookingId) return null;
   try {
@@ -120,6 +136,12 @@ const CrmPaymentMilestones: React.FC = () => {
   const { data: onAccountData } = useQuery({
     queryKey: ["crm-on-account", selectedBookingId],
     queryFn: () => fetchOnAccount(selectedBookingId),
+    enabled: !!selectedBookingId,
+    staleTime: 15_000,
+  });
+  const { data: moneyReceipts = [] } = useQuery({
+    queryKey: ["crm-money-receipts", selectedBookingId],
+    queryFn: () => fetchMoneyReceipts(selectedBookingId),
     enabled: !!selectedBookingId,
     staleTime: 15_000,
   });
@@ -694,6 +716,83 @@ const CrmPaymentMilestones: React.FC = () => {
                       </div>
                     </div>
                   </div>
+
+                  {/* Token payment transparency — mirrors CrmBookingDetail.tsx's
+                      Payments tab exactly (same four states, same copy) so a
+                      booking's payment status reads identically wherever staff
+                      look at it. Covers the window this page previously had no
+                      visibility into at all: a token captured at Application
+                      intake, before Data Review even creates the first Money
+                      Receipt — Collected showed ₹0 and Balance showed the full
+                      amount in red, as if nothing had been received. */}
+                  {Number(booking?.TokenValue) > 0 && (() => {
+                    const receipt = (moneyReceipts as any[])[0];
+                    const tokenAmt = Number(booking.TokenValue);
+                    const pmode = booking.PaymentMode || "—";
+
+                    if (receipt?.Status === "Bounced") {
+                      return (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30 px-3 py-2.5 text-xs">
+                          <AlertTriangle size={13} className="shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
+                          <div>
+                            <p className="font-semibold text-red-700 dark:text-red-300">Token Payment Bounced — {fmt(tokenAmt)}</p>
+                            <p className="text-red-600 dark:text-red-400 mt-0.5">
+                              {receipt.BouncedReason ? `Reason: ${receipt.BouncedReason}. ` : ""}
+                              A new Money Receipt must be submitted.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (receipt?.Status === CrmStatus.PENDING && receipt?.RPStatus === CrmStatus.PENDING) {
+                      return (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs">
+                          <Hourglass size={13} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-amber-800 dark:text-amber-300">
+                              {fmt(receipt.Amount || tokenAmt)} held — awaiting Finance approval
+                            </p>
+                            <p className="text-amber-700 dark:text-amber-400">
+                              Receipt {receipt.ReceiptNo} · {pmode} · submitted to Finance (Account's Head / Admin).
+                              This amount will count as paid once approved.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (receipt?.Status === CrmStatus.PENDING && !receipt?.RPStatus) {
+                      return (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs">
+                          <Clock size={13} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-amber-800 dark:text-amber-300">
+                              {fmt(receipt.Amount || tokenAmt)} on hold — Money Receipt pending Finance submission
+                            </p>
+                            <p className="text-amber-700 dark:text-amber-400">
+                              Receipt {receipt.ReceiptNo} · {pmode} · created but not yet sent to Finance for approval.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (!receipt) {
+                      return (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs">
+                          <Clock size={13} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-amber-800 dark:text-amber-300">
+                              Token Received &amp; On Hold — {fmt(tokenAmt)} via {pmode}
+                            </p>
+                            <p className="text-amber-700 dark:text-amber-400">
+                              Payment recorded but not yet processed. A Money Receipt is auto-generated when this booking is submitted for approval
+                              ("Verify &amp; Send for Approval"). Finance approves it — only then does it count as paid.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null; // Approved — already reflected in Collected above.
+                  })()}
                 </div>
               );
             })()}
