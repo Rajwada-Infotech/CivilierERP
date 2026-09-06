@@ -22,9 +22,13 @@ function toInt(val) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-// ── GET /fa-item-codes — every real Fixed Asset Record eligible for
-// assignment (not scoped to "currently unassigned" — an asset can be
-// re-assigned to a new user any number of times, each one a new history row) ─
+// ── GET /fa-item-codes — Fixed Asset Records available for a NEW assignment.
+// New Assignment is a one-time event per FA Item Code: the moment a code has
+// ANY FixedAssetAssignment row on record — current, superseded, or even
+// deleted, and whether created here or auto-created by a User-Wise Asset
+// Transfer — it is permanently off this list. After the first assignment the
+// asset moves between users through User-Wise Asset Transfer, not a second
+// New Assignment.
 router.get("/fa-item-codes", requirePageRight("fixed-asset-assignment", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -38,6 +42,9 @@ router.get("/fa-item-codes", requirePageRight("fixed-asset-assignment", "view"),
       LEFT JOIN dbo.enterprise co ON co.id = fa.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = fa.ProjectId
       WHERE fa.FAItemCode IS NOT NULL AND fa.AssetCode IS NOT NULL AND fa.Status <> 'Deleted'
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.FixedAssetAssignment a WHERE a.AssetId = fa.AssetId
+        )
       ORDER BY fa.FAItemCode
     `);
     res.json(result.recordset);
@@ -177,6 +184,27 @@ router.post("/", requirePageRight("fixed-asset-assignment", "create"), async (re
       if (!asset || !asset.FAItemCode || asset.Status === "Deleted") {
         await tx.rollback();
         return res.status(400).json({ error: "This FA Item Code does not exist or is no longer a valid Fixed Asset Record" });
+      }
+
+      // New Assignment is one-time per FA Item Code — the same rule the
+      // /fa-item-codes picker enforces, guarded here so a stale client or a
+      // crafted request can't slip a second one through. Any assignment row
+      // ever recorded (current, superseded or deleted) closes it off; use
+      // User-Wise Asset Transfer to move the asset after that.
+      const dupe = await tx.request().input("AssetId", sql.Int, assetIdVal).query(`
+        SELECT TOP 1 a.DocNo, a.Status, u.name AS UserName
+        FROM dbo.FixedAssetAssignment a
+        LEFT JOIN dbo.users u ON u.id = a.UserId
+        WHERE a.AssetId = @AssetId
+        ORDER BY a.AssignmentId DESC
+      `);
+      if (dupe.recordset[0]) {
+        await tx.rollback();
+        const d = dupe.recordset[0];
+        const ref = [d.DocNo, d.UserName].filter(Boolean).join(" · ");
+        return res.status(409).json({
+          error: `${asset.FAItemCode} has already been assigned${ref ? ` (${ref})` : ""}. It can't be assigned again — use a User-Wise Asset Transfer to move it.`,
+        });
       }
 
       const docTypeId = await resolveDocTypeId(pool, sql, "FAA");
