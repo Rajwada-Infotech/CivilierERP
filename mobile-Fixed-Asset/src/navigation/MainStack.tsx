@@ -69,7 +69,7 @@ export default function MainStack() {
       <Stack.Screen name="Tagging" component={TaggingScreen} options={{ title: "FA Inventory" }} />
       <Stack.Screen name="TaggingDetail" component={TaggingDetailScreen} options={{ title: "Tagging Entry" }} />
       <Stack.Screen name="TaggingForm" component={TaggingFormScreen} options={{ title: "FA Inventory" }} />
-      <Stack.Screen name="Stickers" component={StickerScreen} options={{ title: "Depreciation Tag Stickers" }} />
+      <Stack.Screen name="Stickers" component={StickerScreen} options={{ title: "FA Code Stickers" }} />
       <Stack.Screen name="Assignment" component={AssignmentScreen} options={{ title: "Assignment" }} />
       <Stack.Screen name="AssignmentDetail" component={AssignmentDetailScreen} options={{ title: "Assignment" }} />
       <Stack.Screen name="AssignmentForm" component={AssignmentFormScreen} options={{ title: "Assignment" }} />

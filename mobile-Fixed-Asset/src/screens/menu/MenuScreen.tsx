@@ -34,7 +34,7 @@ const ENTRIES: Entry[] = [
   { route: "Dashboard", label: "Dashboard", desc: "Live counts & book value", icon: LayoutGrid, pageKey: "fixed-asset-dashboard" },
   { route: "AssetRegister", label: "Fixed Asset Depreciation Tag", desc: "Asset register & depreciation", icon: Boxes, pageKey: "fixed-asset-record" },
   { route: "Tagging", label: "FA Inventory", desc: "Tagged asset batches", icon: Tag, pageKey: "fixed-asset-tagging" },
-  { route: "Stickers", label: "Depreciation Tag Stickers", desc: "Print FA Item Code stickers", icon: Barcode, pageKey: "fixed-asset-tagging" },
+  { route: "Stickers", label: "FA Code Stickers", desc: "Print FA Item Code stickers", icon: Barcode, pageKey: "fixed-asset-tagging" },
   { route: "Assignment", label: "Assignment", desc: "Who holds each asset", icon: UserCheck, pageKey: "fixed-asset-assignment" },
   { route: "AssetTransfer", label: "User-Wise Asset Transfer", desc: "Custody moves between users", icon: ArrowLeftRight, pageKey: "asset-transfer" },
   { route: "QualityCheck", label: "Owner & Quality Checking", desc: "Condition checks & follow-ups", icon: ShieldCheck, pageKey: "fixed-asset-quality-check" },
