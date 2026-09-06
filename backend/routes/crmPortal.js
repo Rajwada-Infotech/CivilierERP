@@ -14,6 +14,8 @@ const { getInvoicePdfBuffer } = require("../services/invoicePdf");
 const { getMoneyReceiptPdfBuffer } = require("../services/moneyReceiptPdf");
 const { getAllotmentLetterPdfBufferByBookingId } = require("../services/allotmentLetterPdf");
 const { getAgreementBookingLockReason, agreementExecutedLockReason } = require("./crmAgreements");
+const { redisGet, redisSet, redisDel } = require("../redis");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 
 // Categories a customer is allowed to raise themselves — same vocabulary as
 // the staff-side Service Ticket module (crmServiceTickets.js), so every
@@ -23,6 +25,26 @@ const TICKET_SLA_HOURS = 96; // customer-raised tickets always start Normal prio
 
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false, message: { error: "Too many requests, please try again later." } }));
+
+// Per-account brute-force lockout — mirrors the staff login's own protection
+// in routes/users.js exactly (same Redis keys shape, same 10/15min policy).
+// Before this, /login had ONLY the router-wide 200-req/15min-per-IP limiter
+// above: that bounds request volume, not credential-stuffing against one
+// customer account (200 guesses against a single email in 15 minutes is a
+// real brute-force budget), and staff accounts already get this exact
+// protection — customer portal accounts, which also expose payment history
+// and identity documents, did not.
+const PORTAL_MAX_LOGIN_ATTEMPTS = process.env.NODE_ENV === "development" ? 50 : 10;
+const PORTAL_LOCKOUT_SECONDS = 15 * 60;
+async function incrementPortalLoginAttempts(attemptsKey, lockKey) {
+  try {
+    const attempts = parseInt((await redisGet(attemptsKey)) || "0") + 1;
+    await redisSet(attemptsKey, String(attempts), PORTAL_LOCKOUT_SECONDS);
+    if (attempts >= PORTAL_MAX_LOGIN_ATTEMPTS) {
+      await redisSet(lockKey, "1", PORTAL_LOCKOUT_SECONDS);
+    }
+  } catch { /* Redis down — never let a cache failure block login */ }
+}
 
 // POST /login — email + password (mobile number initially, forced reset on first
 // login — unchanged). Identity anchor is CustomerId (migration 254); email is
@@ -34,11 +56,20 @@ router.post("/login", async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
 
+    const normalizedEmail = email.trim().toLowerCase();
+    const lockKey = `portal-login:lock:${normalizedEmail}`;
+    const attemptsKey = `portal-login:attempts:${normalizedEmail}`;
+
+    try {
+      const locked = await redisGet(lockKey);
+      if (locked) return res.status(429).json({ error: "Too many attempts. Try again later." });
+    } catch { /* Redis down — skip lockout check, proceed to DB auth */ }
+
     const pool = getPool();
 
     // Resolve Email → CrmCustomer → CrmCustomerPortalUser
     const result = await pool.request()
-      .input("em", sql.NVarChar(200), email.trim().toLowerCase())
+      .input("em", sql.NVarChar(200), normalizedEmail)
       .query(`
         SELECT pu.Id AS PortalUserId, pu.CustomerId, pu.PasswordHash,
                pu.MustChangePassword, pu.IsActive, pu.Email
@@ -53,11 +84,13 @@ router.post("/login", async (req, res) => {
       });
     }
     const user = result.recordset[0];
-    if (!user) return res.status(401).json({ error: "Invalid email or password" });
+    if (!user) { await incrementPortalLoginAttempts(attemptsKey, lockKey); return res.status(401).json({ error: "Invalid email or password" }); }
     if (!user.IsActive) return res.status(401).json({ error: "This portal account has been deactivated" });
 
     const ok = await bcrypt.compare(password, user.PasswordHash);
-    if (!ok) return res.status(401).json({ error: "Invalid email or password" });
+    if (!ok) { await incrementPortalLoginAttempts(attemptsKey, lockKey); return res.status(401).json({ error: "Invalid email or password" }); }
+
+    try { await redisDel(attemptsKey); await redisDel(lockKey); } catch {}
 
     await pool.request().input("id", sql.Int, user.PortalUserId)
       .query("UPDATE dbo.CrmCustomerPortalUser SET LastLoginAt = SYSDATETIME() WHERE Id = @id");
@@ -517,6 +550,12 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
   portalDocUpload.single("file")(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    // multer's fileFilter only ever checked the client-declared Content-Type
+    // (Findings #7) — a renamed executable with a spoofed "application/pdf"
+    // header sailed straight through. This is the customer-facing upload
+    // endpoint, so it gets the check first.
+    const sigErr = verifyFileMatchesDeclaredType(req.file);
+    if (sigErr) return res.status(400).json({ error: sigErr });
     try {
       const pool = getPool();
       const appId = await resolveAndAssertApplication(pool, req, res);
@@ -813,6 +852,79 @@ router.post("/agreement/date/accept", async (req, res) => {
   }
 });
 
+// GET /sales-deed — returns the sale deed sent to this customer (must be
+// sent: SentToCustomerAt IS NOT NULL) along with its uploaded documents.
+// Customer can only see documents that have a file — the 'Requested' placeholder
+// rows are internal prep state and not surfaced here.
+router.get("/sales-deed", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+
+    const deed = await pool.request().input("aid", sql.Int, appId).query(`
+      SELECT d.Id, d.DeedNo, d.BookingId, d.DeedValue, d.StampDuty, d.RegistrationFee,
+             d.StampDutyCredit, d.SubRegistrarOffice, d.DeedDate, d.Status,
+             d.CustomerApprovalStatus, d.CustomerApprovedAt, d.CustomerRecheckRemarks,
+             d.SentToCustomerAt, d.CreatedAt,
+             b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName
+      FROM dbo.CrmSalesDeed d
+      JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      WHERE b.ApplicationId = @aid AND d.SentToCustomerAt IS NOT NULL
+    `);
+    if (!deed.recordset.length) return res.json({ deed: null, documents: [] });
+
+    const deedRow = deed.recordset[0];
+    const docs = await pool.request().input("did", sql.Int, deedRow.Id).query(`
+      SELECT Id, DocumentType, Label, FileName, MimeType, FileSize, UploadedAt, Status, VersionNo,
+             CASE WHEN FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
+      FROM dbo.CrmSalesDeedDocument
+      WHERE SalesDeedId = @did AND FileBase64 IS NOT NULL
+      ORDER BY CreatedAt
+    `);
+    res.json({ deed: deedRow, documents: docs.recordset });
+  } catch (e) {
+    console.error("[crm-portal] GET /sales-deed error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /sales-deed/documents/:docId/download — serves a deed document file to
+// the customer (inline preview / download). Only returns the file if it
+// belongs to a deed that was sent to this customer's application.
+router.get("/sales-deed/documents/:docId/download", async (req, res) => {
+  try {
+    const pool = getPool();
+    const appId = await resolveAndAssertApplication(pool, req, res);
+    if (appId === null) return;
+    const docId = parseInt(req.params.docId);
+
+    const result = await pool.request()
+      .input("docId", sql.Int, docId)
+      .input("aid", sql.Int, appId)
+      .query(`
+        SELECT doc.FileName, doc.FileBase64, doc.MimeType
+        FROM dbo.CrmSalesDeedDocument doc
+        JOIN dbo.CrmSalesDeed d ON d.Id = doc.SalesDeedId
+        JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+        WHERE doc.Id = @docId
+          AND b.ApplicationId = @aid
+          AND d.SentToCustomerAt IS NOT NULL
+          AND doc.FileBase64 IS NOT NULL
+      `);
+    if (!result.recordset.length) return res.status(404).json({ error: "Document not found or not accessible" });
+    const doc = result.recordset[0];
+    res.setHeader("Content-Type", doc.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${doc.FileName || "deed-document"}"`);
+    res.send(Buffer.from(doc.FileBase64, "base64"));
+  } catch (e) {
+    console.error("[crm-portal] GET /sales-deed/documents/:docId/download error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 // POST /sales-deed/respond — requires ?applicationId=
 router.post("/sales-deed/respond", async (req, res) => {
   try {
@@ -879,7 +991,18 @@ router.post("/sales-deed/respond", async (req, res) => {
         : `${deedRow.ApplicantName} requested a recheck on ${deedRow.DeedNo}: ${remarks}`,
     });
 
+    // Record in the deed-specific approval audit log for the UI timeline
+    try {
+      await pool.request()
+        .input("did", sql.Int, deedRow.Id)
+        .input("act", sql.NVarChar(40), decision === "Approve" ? "CustomerApprove" : "CustomerRecheck")
+        .input("rem", sql.NVarChar(sql.MAX), remarks || null)
+        .query(`INSERT INTO dbo.CrmSalesDeedApprovalLog (SalesDeedId, Action, Remarks, ActorType, CreatedAt)
+                VALUES (@did, @act, @rem, 'Customer', SYSDATETIME())`);
+    } catch (_) { /* non-fatal — table may not exist on older installs */ }
+
     res.json({ success: true });
+
   } catch (e) {
     console.error("[crm-portal] POST /sales-deed/respond error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });

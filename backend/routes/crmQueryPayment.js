@@ -9,7 +9,8 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const uploadQP = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 } });
 
 router.use(authMiddleware);
@@ -30,7 +31,14 @@ function decodeBase64File(f, label) {
   const buffer = Buffer.from(f.base64, "base64");
   if (!buffer.length) throw new Error(`${label}: file is empty`);
   if (buffer.length > MAX_FILE_BYTES) throw new Error(`${label}: ${f.fileName} is too large (max ${(MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB)`);
-  return { fileName: f.fileName, mimeType: f.mimeType || "application/octet-stream", buffer };
+  const mimeType = f.mimeType || "application/octet-stream";
+  // Client-declared mimeType, same spoofing risk as a multipart
+  // Content-Type header (Findings #7) — verified against the actual bytes
+  // for the types we have a signature for; anything else passes through
+  // unchanged, same as before.
+  const sigErr = verifyFileMatchesDeclaredType({ buffer, mimetype: mimeType });
+  if (sigErr) throw new Error(`${label}: ${sigErr}`);
+  return { fileName: f.fileName, mimeType, buffer };
 }
 
 // Amount is never stored on this table — it's read live from the Sales
@@ -137,19 +145,34 @@ router.post("/", requirePageRight("crm-query-payment", "create"), async (req, re
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
 
-    const activeErr = await requireActiveBooking(pool, bookingId);
+    // Upgraded from requireActiveBooking (allowed Expired/Pending, anything
+    // not literally Cancelled/Rejected) to match the standard already
+    // applied session-wide to Welcome Call/Docs/Customer Bank/Co-Applicant —
+    // a booking this deep in the legal chain should still be Approved.
+    const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     // Stamp duty amount is locked only after Director Approval (both internal
     // and customer review complete). Communicating the amount before that risks
     // the customer paying the wrong figure.
     const deed = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT TOP 1 Id, DirectorApprovalStatus FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+      .query("SELECT TOP 1 Id, DirectorApprovalStatus, StampDuty, RegistrationFee FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC");
     if (!deed.recordset.length) {
       return res.status(400).json({ error: "Query Payment requires a Sales Deed to exist for this booking first (that's where the stamp duty / registration fee comes from)" });
     }
     if (deed.recordset[0].DirectorApprovalStatus !== "Approved") {
       return res.status(400).json({ error: "Query Payment can only be started after the Sales Deed is Director Approved — the stamp duty amount must be finalised before communicating it to the customer" });
+    }
+    // Director Approval was assumed to guarantee a real, finalised amount —
+    // it doesn't. A live, confirmed case: a Director-Approved deed with
+    // StampDuty/RegistrationFee both NULL produced a "₹0 Net Payable"
+    // tracker that looked like a real, resolved record instead of the
+    // missing-data problem it actually was. Check the actual numbers here
+    // too, rather than trusting the upstream approval to have implied them.
+    const stamp = Number(deed.recordset[0].StampDuty) || 0;
+    const regFee = Number(deed.recordset[0].RegistrationFee) || 0;
+    if (stamp + regFee <= 0) {
+      return res.status(400).json({ error: "This Sales Deed has no Stamp Duty or Registration Fee amount recorded — enter it on the Sale Deed before starting Query Payment tracking." });
     }
 
     const qpNo = await getNextDocNumber(pool, "QP", "QP");
@@ -184,7 +207,7 @@ router.post("/:id/info", requirePageRight("crm-query-payment", "edit"), async (r
       .query("SELECT BookingId, Status FROM dbo.CrmQueryPayment WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
     const row = cur.recordset[0];
-    const activeErr = await requireActiveBooking(pool, row.BookingId);
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const rawFiles = Array.isArray(req.body.files) ? req.body.files : [];
@@ -253,7 +276,7 @@ router.post("/:id/confirm", requirePageRight("crm-query-payment", "edit"), async
     if (row.Status !== "InfoSent") {
       return res.status(400).json({ error: "Payment details must be sent to the customer (InfoSent) before confirming — the customer must know what they paid and why" });
     }
-    const activeErr = await requireActiveBooking(pool, row.BookingId);
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     let proof = null;
@@ -326,6 +349,15 @@ router.post("/:id/proxy-proof",
       const { ProxyMethod, ProxyRemarks } = req.body;
 
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      // This endpoint has no multer fileFilter at all (any mimetype is
+      // accepted, only size-limited) — leaving that as-is rather than
+      // introducing a new allowlist restriction that isn't what Finding #7
+      // asked for. This check is still worth adding: for the types it does
+      // recognize (pdf/jpeg/png/webp/office docs) it catches a spoofed
+      // Content-Type; anything else passes through unchanged, exactly as
+      // before.
+      const sigErr = verifyFileMatchesDeclaredType(req.file);
+      if (sigErr) return res.status(400).json({ error: sigErr });
       if (!ProxyMethod || !PROXY_METHODS_QP.includes(ProxyMethod)) {
         return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_QP.join(", ")}` });
       }

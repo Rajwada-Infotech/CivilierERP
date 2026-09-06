@@ -1275,11 +1275,17 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
     if (!b.Reason) return res.status(400).json({ error: "Reason is required to waive a milestone" });
 
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status FROM dbo.CrmPaymentMilestone WHERE Id = @id");
+      .query("SELECT Status, BookingId FROM dbo.CrmPaymentMilestone WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Milestone not found" });
     if (cur.recordset[0].Status === CrmStatus.PAID) {
       return res.status(400).json({ error: "Cannot waive an already-paid milestone" });
     }
+    // Every other mutation endpoint in this file guards on this — waive was
+    // the one gap, letting a milestone on a Cancelled/inactive booking be
+    // waived after the fact (its balance is already being handled through
+    // the Cancellation/refund flow, not this one).
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
 
     const result = await pool.request()
       .input("id",  sql.Int, id)

@@ -11,7 +11,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 // engine — same mechanism BOQ/Purchase Orders/etc. use — instead of any
 // editor being able to self-approve a NOC on this page.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, resolveNocType } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -100,24 +100,28 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-noc", "view"), a
   }
 });
 
-// GET /eligible-bookings — bookings eligible for a new NOC of the given type.
-// Rule: one NOC per type per booking (a booking can have one Bank NOC + one
-// Organisation NOC, but never two of the same type). Gates: active booking,
-// AFS Registered, no existing non-Rejected NOC of the SAME type.
+// GET /eligible-bookings — bookings eligible for a new NOC. NOC is a single
+// step per booking (never both Bank and Organisation — see resolveNocType in
+// crmWorkflowGuards.js), so this returns each candidate along with its
+// resolved type; the frontend no longer offers a manual type choice.
+// The optional ?type= filter narrows to bookings whose resolved type
+// matches (kept for the page's Bank/Organisation filter tabs).
 router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const { type } = req.query; // "Bank" | "Organisation" | "" (= show all eligible)
-    const nocType  = NOC_TYPES.includes(type) ? type : null;
-    const req0 = pool.request();
-    if (nocType) req0.input("t", sql.NVarChar(30), nocType);
-    const candidates = await req0.query(`
+    const { type } = req.query; // "Bank" | "Organisation" | "" (= no filter)
+    const typeFilter = NOC_TYPES.includes(type) ? type : null;
+    const candidates = await pool.request().query(`
       SELECT b.Id, b.BookingNo,
              COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
              a.ApplicantName,
-             -- Detect loan so frontend can default NOC type to Bank when relevant
-             CASE WHEN EXISTS (
-               SELECT 1 FROM dbo.CrmLoanDetail hl WHERE hl.BookingId = b.Id
+             CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
+               SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
+                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+             ) THEN 'Bank' ELSE 'Organisation' END AS NocType,
+             CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
+               SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
+                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
              ) THEN 1 ELSE 0 END AS HasLoan
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -127,17 +131,14 @@ router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (r
         -- Agreement for Sale, registered at the Sub-Registrar, is mandatory
         -- for every booking regardless of project type — no exception.
         AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = '${CrmStatus.REGISTERED}')
-        ${nocType ? `AND NOT EXISTS (
-          SELECT 1 FROM dbo.CrmNoc n
-          WHERE n.BookingId = b.Id AND n.NocType = @t AND n.Status <> '${CrmStatus.REJECTED}'
-        )` : `AND (
-          NOT EXISTS (SELECT 1 FROM dbo.CrmNoc n WHERE n.BookingId = b.Id AND n.NocType = 'Bank'         AND n.Status <> '${CrmStatus.REJECTED}')
-          OR
-          NOT EXISTS (SELECT 1 FROM dbo.CrmNoc n WHERE n.BookingId = b.Id AND n.NocType = 'Organisation' AND n.Status <> '${CrmStatus.REJECTED}')
-        )`}
+        -- one NOC ever per booking, of whichever type applies
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmNoc n WHERE n.BookingId = b.Id AND n.Status <> '${CrmStatus.REJECTED}')
       ORDER BY b.BookingNo
     `);
-    res.json(candidates.recordset);
+    const filtered = typeFilter
+      ? candidates.recordset.filter((c) => c.NocType === typeFilter)
+      : candidates.recordset;
+    res.json(filtered);
   } catch (e) {
     console.error("[crm-noc] GET /eligible-bookings error:", e.message);
     res.status(500).json({ error: e.message });
@@ -177,10 +178,24 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
       return res.status(400).json({ error: "NOC can only be requested once the Agreement for Sale is registered at the Sub-Registrar's Office (current status: " + agrStatusVal + ")" });
     }
 
-    const nocType = NOC_TYPES.includes(b.NocType) ? b.NocType : "Organisation";
+    // NOC is a SINGLE step per booking, not a free choice of type — the
+    // bank's NOC and the developer's NOC serve the same purpose (clearing
+    // the booking to proceed), so a booking only ever gets one, decided by
+    // how it's financed (see resolveNocType in crmWorkflowGuards.js). The
+    // client is expected to send the resolved type (it reads it off
+    // /eligible-bookings' HasLoan flag), but this is re-derived and
+    // enforced server-side rather than trusted from the request body.
+    const requestedType = NOC_TYPES.includes(b.NocType) ? b.NocType : null;
+    const { nocType: resolvedType } = await resolveNocType(pool, bookingId);
+    if (requestedType && requestedType !== resolvedType) {
+      return res.status(400).json({
+        error: `This booking's NOC is ${resolvedType} (based on its financing) — a ${requestedType} NOC does not apply here.`,
+      });
+    }
+    const nocType = resolvedType;
 
-    // One NOC per type per booking. A booking can have a Bank NOC + an
-    // Organisation NOC, but never two of the same type.
+    // One NOC per type per booking — enforced above as one NOC per booking
+    // overall, this is just the underlying uniqueness guard.
     const existingOpen = await pool.request()
       .input("bid", sql.Int, bookingId)
       .input("t",   sql.NVarChar(30), nocType)

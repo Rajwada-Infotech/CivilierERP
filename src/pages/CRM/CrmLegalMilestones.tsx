@@ -12,7 +12,6 @@ import { Plus, CheckCircle2, Circle, ExternalLink, Lock, FileCheck, ChevronRight
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const API = "/api/crm/legal-milestones";
-const BKG_API = "/api/crm/bookings";
 
 // Agreement workflow — 8 steps, most auto-synced from Agreement page actions.
 // DirectorMeeting is the only manual step (an in-person meeting with no digital trace).
@@ -33,8 +32,8 @@ async function fetchAll(): Promise<any[]> {
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Failed to load legal workflows (HTTP ${r.status})`);
   return r.json();
 }
-async function fetchBookings(): Promise<any[]> {
-  const r = await fetchWithAuth(BKG_API);
+async function fetchEligibleBookings(): Promise<any[]> {
+  const r = await fetchWithAuth(`${API}/eligible-bookings`);
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Failed to load bookings (HTTP ${r.status})`);
   return r.json();
 }
@@ -51,6 +50,8 @@ interface Stage {
   isDone: boolean;
   isLocked: boolean;
   unlockedHint: string;
+  isApplicable?: boolean;         // false → renders as a dimmed "Not applicable" row instead of a normal action row
+  notApplicableReason?: string;
 }
 
 interface Phase {
@@ -101,6 +102,17 @@ function buildWorkflowModel(t: any): WorkflowModel {
   // The AFS-registration gate that everything downstream keys off.
   const afsRegistered = t.AgreementStatus === "Registered";
   const afsGate = afsRegistered;
+
+  // No Objection Certificate is a SINGLE step per booking — the bank's NOC
+  // and the developer's NOC serve the same purpose (clearing the booking for
+  // Possession/Handover); a booking only ever needs one, never both. Which
+  // one is resolved server-side (see resolveNocType in crmWorkflowGuards.js /
+  // the NocResolvedType column in LM_SELECT) and mirrored here as a single
+  // "noc" stage rather than two separate rows.
+  const nocType: "Bank" | "Organisation" = t.NocResolvedType === "Bank" ? "Bank" : "Organisation";
+  const isLoanFinanced = nocType === "Bank";
+  const nocNo     = nocType === "Bank" ? t.BankNocNo     : t.OrgNocNo;
+  const nocStatus = nocType === "Bank" ? t.BankNocStatus : t.OrgNocStatus;
 
   const deedStatus = t.DeedRegistrationNo ? "Registered"
     : t.DeedExecutedBy ? "Executed"
@@ -161,32 +173,25 @@ function buildWorkflowModel(t: any): WorkflowModel {
       ],
     },
 
-    // ── NOC ───────────────────────────────────────────────────────────────
+    // ── NOC — a single step; Bank or Organisation, never both ──────────────
     {
       key: "noc",
-      title: "No Objection Certificates",
+      title: "No Objection Certificate",
       isApplicable: true,
-      description: "Once the Agreement for Sale is registered, the legal team obtains No Objection Certificates from the bank (for loan-financed buyers, confirming the lender has no objection) and from the developer organisation (confirming no outstanding dues).",
+      description: isLoanFinanced
+        ? "Once the Agreement for Sale is registered, the legal team obtains a No Objection Certificate from the bank — confirming the lender has no objection, since this booking is loan-financed."
+        : "Once the Agreement for Sale is registered, the legal team obtains a No Objection Certificate from the developer organisation — confirming no outstanding dues, since this booking is self-funded.",
       stages: [
         {
-          key: "bankNoc",
-          label: "No Objection Certificate — Bank",
-          sublabel: "Bank confirms it has no objection to the AFS registration (loan-case NOC)",
-          path: "/crm/noc?nocType=Bank",
-          no: t.BankNocNo || null,
-          status: t.BankNocStatus || null,
-          isDone: t.BankNocStatus === "Issued",
-          isLocked: !afsGate,
-          unlockedHint: "Unlocks once the Agreement for Sale is registered (Visit 1 completed)",
-        },
-        {
-          key: "orgNoc",
-          label: "No Objection Certificate — Organisation",
-          sublabel: "Developer confirms no outstanding dues or objections",
-          path: "/crm/noc?nocType=Organisation",
-          no: t.OrgNocNo || null,
-          status: t.OrgNocStatus || null,
-          isDone: t.OrgNocStatus === "Issued",
+          key: "noc",
+          label: isLoanFinanced ? "No Objection Certificate — Bank" : "No Objection Certificate — Organisation",
+          sublabel: isLoanFinanced
+            ? "Bank confirms it has no objection to the AFS registration (loan-case NOC)"
+            : "Developer confirms no outstanding dues or objections (self-funded case NOC)",
+          path: `/crm/noc?nocType=${nocType}`,
+          no: nocNo || null,
+          status: nocStatus || null,
+          isDone: nocStatus === "Issued",
           isLocked: !afsGate,
           unlockedHint: "Unlocks once the Agreement for Sale is registered (Visit 1 completed)",
         },
@@ -237,8 +242,8 @@ function buildWorkflowModel(t: any): WorkflowModel {
           key: "handover",
           label: "Handover",
           sublabel: isPhysicallyComplete
-            ? "Physical key handover — all NOCs issued, no open snags, no outstanding dues. Project already complete, so this can happen same-day as Sale Deed registration."
-            : "Physical key handover — all NOCs issued, no open snags, no outstanding dues",
+            ? "Physical key handover — NOC issued, no open snags, no outstanding dues. Project already complete, so this can happen same-day as Sale Deed registration."
+            : "Physical key handover — NOC issued, no open snags, no outstanding dues",
           path: "/crm/handover",
           no: null,
           status: t.HandoverStatus || null,
@@ -249,18 +254,15 @@ function buildWorkflowModel(t: any): WorkflowModel {
           // would reject the submission.
           isLocked: !afsGate
             || t.PossessionNoticeStatus !== "Acknowledged"
-            || ["Pending", "Approved"].includes(t.BankNocStatus)
-            || ["Pending", "Approved"].includes(t.OrgNocStatus)
+            || ["Pending", "Approved"].includes(nocStatus)
             || t.HasOutstandingDues === 1,
           unlockedHint: !afsGate
             ? "Requires the Agreement for Sale to be Registered"
             : t.PossessionNoticeStatus !== "Acknowledged"
               ? "Unlocks once the Possession Notice is Acknowledged by the customer"
-              : ["Pending", "Approved"].includes(t.BankNocStatus)
-                ? "Requires the Bank NOC to be Issued first"
-                : ["Pending", "Approved"].includes(t.OrgNocStatus)
-                  ? "Requires the Organisation NOC to be Issued first"
-                  : "Requires all payment milestones to be paid or waived first",
+              : ["Pending", "Approved"].includes(nocStatus)
+                ? `Requires the ${nocType} NOC to be Issued first`
+                : "Requires all payment milestones to be paid or waived first",
         },
       ],
     },
@@ -344,8 +346,11 @@ function buildWorkflowModel(t: any): WorkflowModel {
   // Flat list of every applicable stage across every applicable phase —
   // the single feed for both the progress dots and the left-panel journey
   // label, so those two views can never drift out of sync with each other
-  // or with what the detail panel actually shows.
-  const applicableStages = phases.filter((p) => p.isApplicable).flatMap((p) => p.stages);
+  // or with what the detail panel actually shows. A stage marked
+  // isApplicable: false (e.g. Bank NOC for a self-funded booking) is
+  // excluded here too — it must never count as a pending item blocking
+  // "Journey Complete" for a step that was never going to happen.
+  const applicableStages = phases.filter((p) => p.isApplicable).flatMap((p) => p.stages).filter((s) => s.isApplicable !== false);
 
   const progressChecks = [
     { label: "Agreement signed", done: agreementDone },
@@ -392,6 +397,27 @@ const StageRow: React.FC<{
   const { isDone, isLocked } = stage;
   const hasRecord = !!stage.status;
   const actionLabel = isDone ? "Open" : hasRecord ? "Continue" : isLocked ? "View" : "Start →";
+
+  // Not applicable to this specific booking (e.g. Bank NOC for a self-funded
+  // purchase) — render as a plainly dimmed, non-actionable row instead of a
+  // normal Start/Continue action, so staff never gets an inviting "Start →"
+  // button for a step that will never happen for this booking.
+  if (stage.isApplicable === false) {
+    return (
+      <div className="relative flex gap-4 pb-5 last:pb-0">
+        {!isLast && <div className="absolute left-[15px] top-8 bottom-0 w-0.5 bg-border" />}
+        <div className="shrink-0 z-10 mt-1">
+          <div className="w-8 h-8 rounded-full bg-muted/40 border-2 border-dashed border-border flex items-center justify-center">
+            <span className="text-muted-foreground/50 text-xs">—</span>
+          </div>
+        </div>
+        <div className="flex-1 rounded-xl border border-dashed border-border bg-muted/10 px-4 py-3 opacity-70">
+          <span className="text-sm font-semibold text-muted-foreground line-through decoration-muted-foreground/40">{stage.label}</span>
+          <div className="text-[12px] text-muted-foreground mt-0.5">Not applicable — {stage.notApplicableReason}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex gap-4 pb-5 last:pb-0">
@@ -559,9 +585,10 @@ const CrmLegalMilestones: React.FC = () => {
     staleTime: 30_000,
   });
   const { data: bookings = [] } = useQuery({
-    queryKey: ["crm-bookings"],
-    queryFn: fetchBookings,
-    staleTime: 5 * 60_000,
+    queryKey: ["crm-legal-milestones-eligible-bookings"],
+    queryFn: fetchEligibleBookings,
+    staleTime: 60_000,
+    enabled: newDialog,
   });
 
   // Auto-select from ?bookingId= URL param (deep-link from stage buttons on this page)
@@ -574,8 +601,9 @@ const CrmLegalMilestones: React.FC = () => {
   }, [sp, trackers]);
 
   const selected = (trackers as any[]).find((t: any) => t.Id === selectedId);
-  const trackedBookingIds = new Set((trackers as any[]).map((t: any) => t.BookingId));
-  const startableBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
+  // /eligible-bookings already applies the real POST gate (Approved, active,
+  // not frozen, has an Agreement, no tracker yet) — no client-side filtering needed.
+  const startableBookings = bookings as any[];
 
   const handleStart = async () => {
     if (!bookingId) { toast.error("Booking is required"); return; }
@@ -592,6 +620,7 @@ const CrmLegalMilestones: React.FC = () => {
       setNewDialog(false);
       setBookingId("");
       qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones-eligible-bookings"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -807,7 +836,7 @@ const CrmLegalMilestones: React.FC = () => {
               </select>
               {startableBookings.length === 0 && (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Every booking either already has a legal workflow or has no agreement yet — trackers start automatically once an agreement (or, for Ready-to-Move units, a Sale Deed) is created.
+                  No booking is eligible right now — a booking needs to be fully Approved, active, unfrozen, have an Agreement on file, and not already have a legal workflow tracker.
                 </p>
               )}
             </div>
