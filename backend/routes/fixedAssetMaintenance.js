@@ -99,13 +99,20 @@ router.get("/assets", requirePageRight(PAGE, "view"), async (req, res) => {
 });
 
 // ── GET /vendors — active ledger heads usable as a vendor ───────────────────
+// A repair/maintenance bill is payable to an external party — a Supplier,
+// Contractor or (for a direct payment) a Bank. GL heads are deliberately
+// excluded: they are the P&L / balance-sheet control accounts (Accumulated
+// Depreciation A/c, Purchase A/c, GST ledgers, share capital, …), never a
+// payee. resolveVendorHead() enforces the same restriction server-side.
+const VENDOR_HEAD_TYPES = ["S", "C", "CN", "B"];
 router.get("/vendors", requirePageRight(PAGE, "view"), async (_req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT LHeadId AS id, ISNULL(DisplayName, LHeadName) AS label, LHeadCode AS code, LHeadType AS type
       FROM dbo.AccountHeadMaster
-      WHERE ISNULL(LHeadStatus, 1) = 1 AND LHeadType IN ('S', 'C', 'CN', 'B', 'GL')
+      WHERE ISNULL(LHeadStatus, 1) = 1
+        AND LHeadType IN (${VENDOR_HEAD_TYPES.map((t) => `'${t}'`).join(", ")})
       ORDER BY label
     `);
     res.json(result.recordset);
