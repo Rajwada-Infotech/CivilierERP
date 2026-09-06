@@ -23,15 +23,22 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.rajwadainfotech.civiliererpsupplier",
-      "usesCleartextTraffic": true
+      "package": "com.rajwadainfotech.civiliererpsupplier"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-secure-store",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "owner": "grenxnja",
     "extra": {

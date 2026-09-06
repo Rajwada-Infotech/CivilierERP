@@ -23,8 +23,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.rajwadainfotech.civiliererpfixedasset",
-      "usesCleartextTraffic": true
+      "package": "com.rajwadainfotech.civiliererpfixedasset"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -32,7 +31,15 @@
     "plugins": [
       "expo-secure-store",
       "expo-font",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "owner": "grenxnja"
   }
