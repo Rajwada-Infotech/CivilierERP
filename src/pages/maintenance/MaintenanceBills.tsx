@@ -12,12 +12,9 @@ import {
   Ban,
   X,
   Loader2,
-  UserCircle2,
-  ListChecks,
-  CheckCircle2,
-  Circle,
-  Calculator,
+  Trash2,
 } from "lucide-react";
+import { numberToWordsIndian } from "@/lib/numberToWords";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaintenanceShell, MAINTENANCE_ACCENT as ACCENT } from "@/components/maintenance/MaintenanceShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -320,6 +317,199 @@ export default function MaintenanceBills() {
 
 // ─── Create/Edit dialog ─────────────────────────────────────────────────────
 
+interface LedgerLine {
+  chargeHeadId: number;
+  description: string;
+  amount: number;
+}
+
+// ── Shared "printed bill" ledger sheet — a bordered grid matching the
+// standard housing-society maintenance bill format (Bill No/Date/Flat/Due
+// Date header, Period, Sr.No/Description/Amount table, Total Payable,
+// Amount in Words, Notes, signature line). Used read-only by the view/print
+// modal and, with the edit props, as the Create/Edit form itself. ──────────
+function LedgerSheet({
+  companyName,
+  companyAddress,
+  companyGstNo,
+  billNo,
+  billDate,
+  unitLabel,
+  dueDate,
+  customerName,
+  lines,
+  totalPayable,
+  notes,
+  status,
+  cancelReason,
+  edit,
+}: {
+  companyName: string;
+  companyAddress: string;
+  companyGstNo?: string | null;
+  billNo: string;
+  billDate: string;
+  unitLabel: string;
+  dueDate: string;
+  customerName: string;
+  lines: LedgerLine[];
+  totalPayable: number;
+  notes: string;
+  status?: "Active" | "Cancelled";
+  cancelReason?: string | null;
+  edit?: {
+    availableChargeHeads: ChargeHeadRow[];
+    onAddChargeHead: (id: number) => void;
+    onRemoveChargeHead: (chargeHeadId: number) => void;
+    onDueDateChange: (v: string) => void;
+    onNotesChange: (v: string) => void;
+  };
+}) {
+  return (
+    <div className="border border-border rounded-lg overflow-hidden text-sm">
+      {/* Society-style header */}
+      <div className="text-center px-4 py-3.5 border-b border-border">
+        <p className="font-heading font-bold text-base text-foreground">{companyName}</p>
+        {companyAddress && <p className="text-xs text-muted-foreground mt-0.5">{companyAddress}</p>}
+        {companyGstNo && <p className="text-xs text-muted-foreground mt-0.5">GSTIN: {companyGstNo}</p>}
+      </div>
+
+      {/* Bill No / Bill Date / Flat No / Due Date */}
+      <div className="grid grid-cols-4 divide-x divide-border border-b border-border">
+        {[
+          { label: "Bill No.", value: billNo, mono: true },
+          { label: "Bill Date", value: billDate },
+          { label: "Flat No.", value: unitLabel },
+        ].map((f) => (
+          <div key={f.label} className="px-3 py-2">
+            <p className="text-[9px] uppercase tracking-widest text-muted-foreground">{f.label}</p>
+            <p className={`text-xs font-semibold text-foreground mt-0.5 ${f.mono ? "font-mono" : ""}`}>{f.value || "—"}</p>
+          </div>
+        ))}
+        <div className="px-3 py-2">
+          <p className="text-[9px] uppercase tracking-widest text-muted-foreground">Due Date</p>
+          {edit ? (
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => edit.onDueDateChange(e.target.value)}
+              className="w-full mt-0.5 text-xs font-semibold bg-transparent border-none p-0 text-foreground focus:outline-none"
+            />
+          ) : (
+            <p className="text-xs font-semibold text-foreground mt-0.5">{dueDate || "—"}</p>
+          )}
+        </div>
+      </div>
+
+      {/* Name */}
+      <div className="px-3 py-2 border-b border-border">
+        <p className="text-[9px] uppercase tracking-widest text-muted-foreground">Name</p>
+        <p className="text-sm font-semibold text-foreground mt-0.5">{customerName || "—"}</p>
+      </div>
+
+      {/* Sr.No / Description / Amount */}
+      <table className="w-full text-xs">
+        <thead className="bg-muted/30">
+          <tr>
+            <th className="w-10 text-left px-2 py-1.5 border-b border-border text-[9px] uppercase tracking-widest text-muted-foreground">Sr.</th>
+            <th className="text-left px-2 py-1.5 border-b border-border text-[9px] uppercase tracking-widest text-muted-foreground">Description</th>
+            <th className="w-28 text-right px-3 py-1.5 border-b border-border text-[9px] uppercase tracking-widest text-muted-foreground">Amount</th>
+            {edit && <th className="w-8 border-b border-border" />}
+          </tr>
+        </thead>
+        <tbody>
+          {lines.length === 0 && (
+            <tr>
+              <td colSpan={edit ? 4 : 3} className="px-3 py-4 text-center text-muted-foreground">
+                No charge heads added yet.
+              </td>
+            </tr>
+          )}
+          {lines.map((l, i) => (
+            <tr key={l.chargeHeadId} className="border-b border-border/60">
+              <td className="px-2 py-1.5 text-muted-foreground">{i + 1}</td>
+              <td className="px-2 py-1.5 text-foreground">{l.description}</td>
+              <td className="px-3 py-1.5 text-right font-mono tabular-nums">{fmt(l.amount)}</td>
+              {edit && (
+                <td className="px-1 py-1.5 text-center">
+                  <button onClick={() => edit.onRemoveChargeHead(l.chargeHeadId)} title="Remove"
+                    className="text-muted-foreground hover:text-destructive transition-colors">
+                    <Trash2 size={12} />
+                  </button>
+                </td>
+              )}
+            </tr>
+          ))}
+          {edit && (
+            <tr>
+              <td className="px-2 py-1.5" />
+              <td className="px-2 py-1.5" colSpan={edit ? 3 : 2}>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) edit.onAddChargeHead(Number(e.target.value));
+                  }}
+                  className="w-full text-xs bg-muted/30 border border-dashed border-border rounded px-2 py-1 text-muted-foreground focus:outline-none"
+                >
+                  <option value="">+ Add Charge Head…</option>
+                  {edit.availableChargeHeads.map((ch) => (
+                    <option key={ch.Id} value={ch.Id}>
+                      {ch.Name} — {fmt(ch.Rate)} ({ch.TaxPct || 0}% tax)
+                    </option>
+                  ))}
+                </select>
+              </td>
+            </tr>
+          )}
+        </tbody>
+        <tfoot>
+          <tr className="border-t-2 border-border bg-muted/20">
+            <td colSpan={2} className="px-2 py-2 text-right font-heading font-bold text-foreground">Total Payable</td>
+            <td className="px-3 py-2 text-right font-mono font-bold text-foreground tabular-nums">{fmt(totalPayable)}</td>
+            {edit && <td />}
+          </tr>
+        </tfoot>
+      </table>
+
+      {/* Amount in words */}
+      <div className="px-3 py-2 border-t border-border text-xs">
+        <span className="text-muted-foreground">Amount In Words: </span>
+        <span className="font-medium text-foreground">{numberToWordsIndian(totalPayable)}</span>
+      </div>
+
+      {status === "Cancelled" && (
+        <div className="px-3 py-2 border-t border-border bg-destructive/5 text-xs text-destructive">
+          Cancelled{cancelReason ? ` — ${cancelReason}` : ""}
+        </div>
+      )}
+
+      {/* Notes */}
+      <div className="px-3 py-2.5 border-t border-border">
+        <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">Notes</p>
+        {edit ? (
+          <textarea
+            value={notes}
+            onChange={(e) => edit.onNotesChange(e.target.value)}
+            rows={3}
+            placeholder="e.g. Cheque should be drawn in favour of the society only. Interest @ 18% p.a. will be charged for delayed payments."
+            className="w-full text-xs bg-muted/20 border border-border rounded px-2 py-1.5 text-foreground focus:outline-none resize-none"
+          />
+        ) : notes ? (
+          <p className="text-xs text-foreground whitespace-pre-line">{notes}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground italic">—</p>
+        )}
+      </div>
+
+      {/* Signature footer */}
+      <div className="px-3 py-4 border-t border-border text-right">
+        <p className="text-sm font-heading font-bold text-foreground">For {companyName}</p>
+        <p className="text-[10px] text-muted-foreground mt-6">Secretary / Chairman / Treasurer</p>
+      </div>
+    </div>
+  );
+}
+
 function BillFormDialog({
   billId,
   onClose,
@@ -332,6 +522,8 @@ function BillFormDialog({
   const isEdit = billId !== null;
   const [bookingId, setBookingId] = useState<string>("");
   const [selectedChargeHeadIds, setSelectedChargeHeadIds] = useState<number[]>([]);
+  const [dueDate, setDueDate] = useState("");
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
   const { data: directory } = useQuery({
@@ -355,22 +547,25 @@ function BillFormDialog({
     if (existingBill) {
       setBookingId(String(existingBill.BookingId));
       setSelectedChargeHeadIds(existingBill.items.map((i) => i.ChargeHeadId));
+      setDueDate(existingBill.DueDate ? existingBill.DueDate.slice(0, 10) : "");
+      setNotes(existingBill.Notes || "");
     }
   }, [existingBill]);
 
   const directoryRows = Array.isArray(directory) ? directory : [];
   const chargeHeadRows: ChargeHeadRow[] = chargeHeads || [];
-
-  const toggleChargeHead = (id: number) => {
-    setSelectedChargeHeadIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  };
+  const selectedCustomer = isEdit
+    ? existingBill
+    : directoryRows.find((c) => String(c.Id) === bookingId);
 
   const selectedRows = chargeHeadRows.filter((ch) => selectedChargeHeadIds.includes(ch.Id));
-  const subtotal = selectedRows.reduce((s, ch) => s + (Number(ch.Rate) || 0), 0);
-  const totalTax = selectedRows.reduce((s, ch) => s + ((Number(ch.Rate) || 0) * (Number(ch.TaxPct) || 0)) / 100, 0);
-  const grandTotal = subtotal + totalTax;
+  const availableChargeHeads = chargeHeadRows.filter((ch) => !selectedChargeHeadIds.includes(ch.Id));
+  const lines: LedgerLine[] = selectedRows.map((ch) => {
+    const rate = Number(ch.Rate) || 0;
+    const taxAmt = (rate * (Number(ch.TaxPct) || 0)) / 100;
+    return { chargeHeadId: ch.Id, description: ch.Name, amount: rate + taxAmt };
+  });
+  const grandTotal = lines.reduce((s, l) => s + l.amount, 0);
 
   const handleSave = async () => {
     if (!isEdit && !bookingId) {
@@ -378,16 +573,17 @@ function BillFormDialog({
       return;
     }
     if (selectedChargeHeadIds.length === 0) {
-      toast.error("Select at least one Charge Head");
+      toast.error("Add at least one Charge Head");
       return;
     }
     setSaving(true);
+    const extras = { dueDate: dueDate || null, notes: notes || null };
     try {
       if (isEdit) {
-        await updateMaintenanceBill(billId!, selectedChargeHeadIds);
+        await updateMaintenanceBill(billId!, selectedChargeHeadIds, extras);
         toast.success("Bill updated");
       } else {
-        await createMaintenanceBill(Number(bookingId), selectedChargeHeadIds);
+        await createMaintenanceBill(Number(bookingId), selectedChargeHeadIds, extras);
         toast.success("Bill created");
       }
       onSaved();
@@ -398,14 +594,25 @@ function BillFormDialog({
     }
   };
 
-  const selectedCustomer = isEdit
-    ? existingBill
-    : directoryRows.find((c) => String(c.Id) === bookingId);
+  const companyName = (isEdit ? existingBill?.CompanyName : undefined) || "Maintenance Bill";
+  const companyAddress = isEdit
+    ? [existingBill?.CompanyAddress, existingBill?.CompanyAddressLine2, existingBill?.CompanyCity, existingBill?.CompanyState, existingBill?.CompanyPincode].filter(Boolean).join(", ")
+    : "";
+  const unitLabel = isEdit
+    ? [existingBill?.BlockName, existingBill?.UnitNo].filter(Boolean).join(" / ")
+    : [selectedCustomer && "BlockName" in selectedCustomer ? selectedCustomer.BlockName : "", selectedCustomer && "UnitNo" in selectedCustomer ? selectedCustomer.UnitNo : ""].filter(Boolean).join(" / ");
+  const customerName = isEdit ? existingBill?.CustomerName || "" : (selectedCustomer as any)?.CustomerName || "";
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-xl max-h-[88vh] overflow-y-auto p-0 gap-0">
-        <div className="sticky top-0 z-10 bg-card border-b border-border px-6 py-4 flex items-center gap-3">
+      <DialogContent
+        className="max-w-3xl max-h-[88vh] overflow-hidden p-0 gap-0 flex flex-col"
+        style={{ background: "hsl(var(--card))" }}
+      >
+        <div
+          className="shrink-0 border-b border-border pl-6 pr-12 py-4 flex items-center gap-3"
+          style={{ background: "hsl(var(--card))" }}
+        >
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
             style={{ background: `${ACCENT}18`, border: `1px solid ${ACCENT}30` }}
@@ -425,135 +632,52 @@ function BillFormDialog({
         {isEdit && loadingExisting ? (
           <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>
         ) : (
-          <div className="px-6 py-5 space-y-5">
-            {/* ── Customer ─────────────────────────────────────────────── */}
-            <FormSection icon={UserCircle2} label="Customer / Flat" accentColor={ACCENT}>
-              {isEdit ? (
-                <div className="flex items-center gap-3 px-3.5 py-3 rounded-xl border border-border bg-muted/20">
-                  <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 font-heading font-bold text-xs"
-                    style={{ background: `${ACCENT}18`, border: `1px solid ${ACCENT}30`, color: ACCENT }}
-                  >
-                    {(existingBill?.CustomerName || "?").trim().charAt(0).toUpperCase()}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{existingBill?.CustomerName}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {[existingBill?.BlockName, existingBill?.UnitNo].filter(Boolean).join(" / ") || "Unit not set"} · {existingBill?.BookingNo}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="relative">
-                  <select
-                    value={bookingId}
-                    onChange={(e) => setBookingId(e.target.value)}
-                    className="w-full appearance-none px-3.5 py-2.5 rounded-xl text-sm font-body bg-muted/40 border border-border focus:outline-none focus:ring-2 text-foreground"
-                    style={{ "--tw-ring-color": ACCENT } as React.CSSProperties}
-                  >
-                    <option value="">Select customer…</option>
-                    {directoryRows.map((c) => (
-                      <option key={c.Id} value={c.Id}>
-                        {c.CustomerName} — {[c.BlockName, c.UnitNo].filter(Boolean).join(" / ")} ({c.BookingNo})
-                      </option>
-                    ))}
-                  </select>
-                  {selectedCustomer && (
-                    <p className="text-xs text-muted-foreground mt-1.5">
-                      {selectedCustomer.ContactNumber ? `Contact: ${selectedCustomer.ContactNumber}` : ""}
-                    </p>
-                  )}
-                </div>
-              )}
-            </FormSection>
-
-            {/* ── Charge heads ─────────────────────────────────────────── */}
-            <FormSection icon={ListChecks} label="Charge Heads" accentColor={ACCENT}>
-              {chargeHeadRows.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border py-6 flex flex-col items-center gap-1.5 text-center px-6">
-                  <ListChecks size={18} className="text-muted-foreground" />
-                  <p className="text-xs text-muted-foreground">No active Charge Heads — add one in Setup → Charge Head.</p>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-border divide-y divide-border max-h-52 overflow-y-auto">
-                  {chargeHeadRows.map((ch) => {
-                    const checked = selectedChargeHeadIds.includes(ch.Id);
-                    return (
-                      <label
-                        key={ch.Id}
-                        className={`flex items-center gap-3 px-3.5 py-2.5 text-sm cursor-pointer transition-colors ${checked ? "bg-muted/30" : "hover:bg-muted/15"}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleChargeHead(ch.Id)}
-                          className="sr-only"
-                        />
-                        {checked ? (
-                          <CheckCircle2 size={17} style={{ color: ACCENT }} className="shrink-0" />
-                        ) : (
-                          <Circle size={17} className="text-muted-foreground/40 shrink-0" />
-                        )}
-                        <span className={`flex-1 ${checked ? "font-medium text-foreground" : "text-foreground/90"}`}>{ch.Name}</span>
-                        <span className="text-xs text-muted-foreground font-mono tabular-nums">
-                          {fmt(ch.Rate)} + {ch.TaxPct || 0}%
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
-            </FormSection>
-
-            {/* ── Bill summary ─────────────────────────────────────────── */}
-            {selectedRows.length > 0 && (
-              <FormSection icon={Calculator} label="Bill Summary" accentColor={ACCENT}>
-                <div className="rounded-xl border border-border overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/40 uppercase tracking-widest text-muted-foreground font-heading">
-                      <tr>
-                        <th className="text-left px-3.5 py-2">Charge Head</th>
-                        <th className="text-right px-3.5 py-2">Rate</th>
-                        <th className="text-right px-3.5 py-2">Tax</th>
-                        <th className="text-right px-3.5 py-2">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {selectedRows.map((ch) => {
-                        const rate = Number(ch.Rate) || 0;
-                        const taxAmt = (rate * (Number(ch.TaxPct) || 0)) / 100;
-                        return (
-                          <tr key={ch.Id}>
-                            <td className="px-3.5 py-1.5">{ch.Name}</td>
-                            <td className="px-3.5 py-1.5 text-right font-mono">{fmt(rate)}</td>
-                            <td className="px-3.5 py-1.5 text-right font-mono">{fmt(taxAmt)}</td>
-                            <td className="px-3.5 py-1.5 text-right font-mono font-medium">{fmt(rate + taxAmt)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  <div className="border-t border-border px-3.5 py-3 space-y-1.5" style={{ background: `${ACCENT}08` }}>
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Subtotal</span>
-                      <span className="font-mono">{fmt(subtotal)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Total Tax</span>
-                      <span className="font-mono">{fmt(totalTax)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm font-heading font-bold text-foreground pt-1 border-t border-border/60">
-                      <span>Bill Total</span>
-                      <span className="font-mono tabular-nums">{fmt(grandTotal)}</span>
-                    </div>
-                  </div>
-                </div>
-              </FormSection>
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+            {!isEdit && (
+              <div>
+                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Customer / Flat
+                </label>
+                <select
+                  value={bookingId}
+                  onChange={(e) => setBookingId(e.target.value)}
+                  className="w-full appearance-none px-3.5 py-2.5 rounded-xl text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 text-foreground"
+                  style={{ "--tw-ring-color": ACCENT } as React.CSSProperties}
+                >
+                  <option value="">Select customer…</option>
+                  {directoryRows.map((c) => (
+                    <option key={c.Id} value={c.Id}>
+                      {c.CustomerName} — {[c.BlockName, c.UnitNo].filter(Boolean).join(" / ")} ({c.BookingNo})
+                    </option>
+                  ))}
+                </select>
+              </div>
             )}
+
+            <LedgerSheet
+              companyName={companyName}
+              companyAddress={companyAddress}
+              companyGstNo={isEdit ? existingBill?.CompanyGstNo : undefined}
+              billNo={isEdit ? existingBill?.BillNo || "" : "Auto-generated on save"}
+              billDate={isEdit ? fmtDate(existingBill?.BillDate || null) : fmtDate(new Date().toISOString())}
+              unitLabel={unitLabel || "—"}
+              dueDate={dueDate}
+              customerName={customerName}
+              lines={lines}
+              totalPayable={grandTotal}
+              notes={notes}
+              edit={{
+                availableChargeHeads,
+                onAddChargeHead: (id) => setSelectedChargeHeadIds((prev) => [...prev, id]),
+                onRemoveChargeHead: (id) => setSelectedChargeHeadIds((prev) => prev.filter((x) => x !== id)),
+                onDueDateChange: setDueDate,
+                onNotesChange: setNotes,
+              }}
+            />
           </div>
         )}
 
-        <div className="sticky bottom-0 bg-card border-t border-border px-6 py-3.5 flex justify-end gap-2">
+        <div className="shrink-0 border-t border-border px-6 py-3.5 flex justify-end gap-2" style={{ background: "hsl(var(--card))" }}>
           <button
             onClick={onClose}
             className="px-3.5 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
@@ -571,34 +695,6 @@ function BillFormDialog({
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function FormSection({
-  icon: Icon,
-  label,
-  accentColor,
-  children,
-}: {
-  icon: typeof UserCircle2;
-  label: string;
-  accentColor: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <div
-          className="w-5 h-5 rounded-md flex items-center justify-center shrink-0"
-          style={{ background: `${accentColor}18`, border: `1px solid ${accentColor}30` }}
-        >
-          <Icon size={11} style={{ color: accentColor }} />
-        </div>
-        <span className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">{label}</span>
-        <div className="flex-1 h-px bg-gradient-to-r from-border to-transparent" />
-      </div>
-      {children}
-    </div>
   );
 }
 
@@ -640,10 +736,20 @@ function BillViewModal({
             background: white !important;
           }
           .mb-print-modal .sticky { position: static !important; }
+          /* Force a real black-on-white printed page — the app's theme
+             tokens resolve to light text in dark mode, which is invisible
+             once forced onto white paper above. */
+          .mb-print-modal, .mb-print-modal * { color: #000 !important; border-color: #999 !important; }
         }
       `}</style>
-      <div className="mb-print-modal bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
-        <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
+      <div
+        className="mb-print-modal border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto"
+        style={{ background: "hsl(var(--card))" }}
+      >
+        <div
+          className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-border"
+          style={{ background: "hsl(var(--card))" }}
+        >
           <div>
             <h2 className="font-heading font-bold text-base">{bill?.BillNo || "Bill"}</h2>
             <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">Maintenance Bill</p>
@@ -679,78 +785,25 @@ function BillViewModal({
           </div>
         </div>
 
-        <div className="p-5 sm:p-6 space-y-5">
+        <div className="p-5 sm:p-6">
           {isLoading || !bill ? (
             <div className="py-8 text-center text-sm text-muted-foreground">Loading…</div>
           ) : (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: "Bill No", value: bill.BillNo, mono: true },
-                  { label: "Bill Date", value: fmtDate(bill.BillDate) },
-                  { label: "Customer", value: bill.CustomerName || "—" },
-                  { label: "Flat/Unit", value: [bill.BlockName, bill.UnitNo].filter(Boolean).join(" / ") || "—" },
-                  { label: "Booking No", value: bill.BookingNo, mono: true },
-                  { label: "Status", value: bill.Status },
-                ].map(({ label, value, mono }) => (
-                  <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
-                    <p className={`text-xs font-semibold ${mono ? "font-mono" : ""} text-foreground`}>{value}</p>
-                  </div>
-                ))}
-              </div>
-
-              {bill.Status === "Cancelled" && bill.CancelReason && (
-                <div className="px-3 py-2.5 rounded-xl bg-destructive/5 border border-destructive/20 text-xs text-destructive">
-                  Cancelled — {bill.CancelReason}
-                </div>
-              )}
-
-              <div>
-                <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-2">Charge Breakdown</p>
-                <div className="rounded-xl border border-border overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/40 uppercase tracking-widest text-muted-foreground font-heading">
-                      <tr>
-                        <th className="text-left px-3 py-2">Charge Head</th>
-                        <th className="text-right px-3 py-2">Rate</th>
-                        <th className="text-right px-3 py-2">Tax %</th>
-                        <th className="text-right px-3 py-2">Tax Amt</th>
-                        <th className="text-right px-3 py-2">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {bill.items.map((it) => (
-                        <tr key={it.Id}>
-                          <td className="px-3 py-1.5">
-                            {it.ChargeHeadName}
-                            {it.HsnCode && <span className="text-muted-foreground ml-1">({it.HsnCode})</span>}
-                          </td>
-                          <td className="px-3 py-1.5 text-right font-mono">{fmt(it.Rate)}</td>
-                          <td className="px-3 py-1.5 text-right font-mono">{it.TaxPct}%</td>
-                          <td className="px-3 py-1.5 text-right font-mono">{fmt(it.TaxAmount)}</td>
-                          <td className="px-3 py-1.5 text-right font-mono font-medium">{fmt(it.TotalAmount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-muted/20">
-                      <tr>
-                        <td colSpan={4} className="px-3 py-1.5 text-right text-muted-foreground">Subtotal</td>
-                        <td className="px-3 py-1.5 text-right font-mono">{fmt(bill.Subtotal)}</td>
-                      </tr>
-                      <tr>
-                        <td colSpan={4} className="px-3 py-1.5 text-right text-muted-foreground">Total Tax</td>
-                        <td className="px-3 py-1.5 text-right font-mono">{fmt(bill.TotalTax)}</td>
-                      </tr>
-                      <tr>
-                        <td colSpan={4} className="px-3 py-1.5 text-right font-heading font-bold text-foreground">Bill Total</td>
-                        <td className="px-3 py-1.5 text-right font-mono font-bold text-foreground">{fmt(bill.GrandTotal)}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </div>
-            </>
+            <LedgerSheet
+              companyName={bill.CompanyName || "Maintenance Bill"}
+              companyAddress={[bill.CompanyAddress, bill.CompanyAddressLine2, bill.CompanyCity, bill.CompanyState, bill.CompanyPincode].filter(Boolean).join(", ")}
+              companyGstNo={bill.CompanyGstNo}
+              billNo={bill.BillNo}
+              billDate={fmtDate(bill.BillDate)}
+              unitLabel={[bill.BlockName, bill.UnitNo].filter(Boolean).join(" / ") || "—"}
+              dueDate={fmtDate(bill.DueDate)}
+              customerName={bill.CustomerName || ""}
+              lines={bill.items.map((it) => ({ chargeHeadId: it.ChargeHeadId, description: it.ChargeHeadName, amount: it.TotalAmount }))}
+              totalPayable={bill.GrandTotal}
+              notes={bill.Notes || ""}
+              status={bill.Status}
+              cancelReason={bill.CancelReason}
+            />
           )}
         </div>
       </div>

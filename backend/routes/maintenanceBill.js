@@ -8,17 +8,23 @@ const { getNextDocNumber } = require("../services/docNumber");
 
 const LIST_SELECT = `
   SELECT
-    b.Id, b.BillNo, b.BillDate, b.Subtotal, b.TotalTax, b.GrandTotal, b.Status,
+    b.Id, b.BillNo, b.BillDate, b.DueDate, b.PeriodFrom, b.PeriodTo, b.Notes,
+    b.Subtotal, b.TotalTax, b.GrandTotal, b.Status,
     b.CancelReason, b.CreatedAt,
     a.ApplicantName AS CustomerName,
     COALESCE(um.UnitName, cb.UnitNo) AS UnitNo,
     COALESCE(blk.BlockName, cb.BlockName) AS BlockName,
-    cb.Id AS BookingId, cb.BookingNo
+    cb.Id AS BookingId, cb.BookingNo,
+    comp.name AS CompanyName, comp.address AS CompanyAddress,
+    comp.address_line2 AS CompanyAddressLine2, comp.city AS CompanyCity,
+    comp.state AS CompanyState, comp.pincode AS CompanyPincode,
+    comp.gst_no AS CompanyGstNo
   FROM dbo.MaintenanceBill b
   JOIN dbo.CrmBooking cb ON cb.Id = b.BookingId
   JOIN dbo.CrmApplication a ON a.Id = cb.ApplicationId
   LEFT JOIN dbo.UnitMaster um   ON um.Id  = cb.UnitId
   LEFT JOIN dbo.BlockMaster blk ON blk.Id = um.BlockId
+  LEFT JOIN dbo.enterprise  comp ON comp.id = cb.CompanyId AND comp.business_type = 'C'
 `;
 
 router.get("/", requirePageRight("maintenance-bills", "view"), async (req, res) => {
@@ -138,6 +144,7 @@ async function resolveBillItems(pool, chargeHeadIds) {
 router.post("/", requirePageRight("maintenance-bills", "create"), async (req, res) => {
   const bookingId = parseInt(req.body?.bookingId, 10);
   const chargeHeadIds = req.body?.chargeHeadIds;
+  const { dueDate, periodFrom, periodTo, notes } = req.body || {};
   if (!Number.isFinite(bookingId)) return res.status(400).json({ error: "bookingId is required" });
   const createdBy = req.user?.userId ?? req.user?.id ?? null;
   if (!createdBy) return res.status(401).json({ error: "User context missing — please sign in again." });
@@ -162,6 +169,10 @@ router.post("/", requirePageRight("maintenance-bills", "create"), async (req, re
         .input("BillNo", sql.NVarChar, billNo)
         .input("BookingId", sql.Int, bookingId)
         .input("BillDate", sql.Date, new Date())
+        .input("DueDate", sql.Date, dueDate || null)
+        .input("PeriodFrom", sql.Date, periodFrom || null)
+        .input("PeriodTo", sql.Date, periodTo || null)
+        .input("Notes", sql.NVarChar(1000), notes || null)
         .input("Subtotal", sql.Decimal(18, 2), subtotal)
         .input("TotalTax", sql.Decimal(18, 2), totalTax)
         .input("GrandTotal", sql.Decimal(18, 2), grandTotal)
@@ -169,9 +180,9 @@ router.post("/", requirePageRight("maintenance-bills", "create"), async (req, re
         .input("CreatedAt", sql.DateTime, new Date())
         .query(`
           INSERT INTO dbo.MaintenanceBill
-            (BillNo, BookingId, BillDate, Subtotal, TotalTax, GrandTotal, Status, CreatedBy, CreatedAt)
+            (BillNo, BookingId, BillDate, DueDate, PeriodFrom, PeriodTo, Notes, Subtotal, TotalTax, GrandTotal, Status, CreatedBy, CreatedAt)
           OUTPUT INSERTED.Id
-          VALUES (@BillNo, @BookingId, @BillDate, @Subtotal, @TotalTax, @GrandTotal, 'Active', @CreatedBy, @CreatedAt)
+          VALUES (@BillNo, @BookingId, @BillDate, @DueDate, @PeriodFrom, @PeriodTo, @Notes, @Subtotal, @TotalTax, @GrandTotal, 'Active', @CreatedBy, @CreatedAt)
         `);
       const billId = billResult.recordset[0].Id;
 
@@ -209,6 +220,7 @@ router.post("/", requirePageRight("maintenance-bills", "create"), async (req, re
 router.put("/:id", requirePageRight("maintenance-bills", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const chargeHeadIds = req.body?.chargeHeadIds;
+  const { dueDate, periodFrom, periodTo, notes } = req.body || {};
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid bill id" });
   const updatedBy = req.user?.userId ?? req.user?.id ?? null;
 
@@ -252,6 +264,10 @@ router.put("/:id", requirePageRight("maintenance-bills", "edit"), async (req, re
       await tx
         .request()
         .input("Id", sql.Int, id)
+        .input("DueDate", sql.Date, dueDate || null)
+        .input("PeriodFrom", sql.Date, periodFrom || null)
+        .input("PeriodTo", sql.Date, periodTo || null)
+        .input("Notes", sql.NVarChar(1000), notes || null)
         .input("Subtotal", sql.Decimal(18, 2), subtotal)
         .input("TotalTax", sql.Decimal(18, 2), totalTax)
         .input("GrandTotal", sql.Decimal(18, 2), grandTotal)
@@ -259,6 +275,7 @@ router.put("/:id", requirePageRight("maintenance-bills", "edit"), async (req, re
         .input("UpdatedAt", sql.DateTime, new Date())
         .query(`
           UPDATE dbo.MaintenanceBill SET
+            DueDate = @DueDate, PeriodFrom = @PeriodFrom, PeriodTo = @PeriodTo, Notes = @Notes,
             Subtotal = @Subtotal, TotalTax = @TotalTax, GrandTotal = @GrandTotal,
             UpdatedBy = @UpdatedBy, UpdatedAt = @UpdatedAt
           WHERE Id = @Id
