@@ -31,6 +31,7 @@ export const crmNavItems: NavItem[] = [
       { label: "Applications",            path: "/crm/applications",          pageKey: "crm-applications"        },
       { label: "Applications & Bookings", path: "/crm/bookings",              pageKey: "crm-bookings"            },
       { label: "Welcome Calls",           path: "/crm/welcome-calls",         pageKey: "crm-welcome-calls"       },
+      { label: "Booking Amendments",       path: "/crm/booking-amendments",    pageKey: "crm-bookings"            },
       { label: "Communication Log",       path: "/crm/communication",         pageKey: "crm-communication"       },
       { label: "Customer Bank & Nominee", path: "/crm/customer-bank-details", pageKey: "crm-customer-bank-details" },
     ],

@@ -7,7 +7,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
-const { recalculateRemainingMilestones, isLegalWorkStarted, requireActiveBooking, isBookingFullySettled } = require("../services/crmWorkflowGuards");
+const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst, EXTRA_WORK_HSN_CODE, getHsnRate } = require("../services/crmGst");
 
@@ -93,25 +93,35 @@ async function applyAddExtraCharge(pool, bookingId, b, actorUserId) {
 
 async function applyEditExtraCharge(pool, id, b, actorUserId) {
   const row = await pool.request().input("id", sql.Int, id)
-    .query("SELECT BookingId, Description, TotalAmount FROM dbo.CrmExtraCharge WHERE Id = @id AND IsActive = 1");
+    .query("SELECT BookingId, ApplicationId, Description, TotalAmount FROM dbo.CrmExtraCharge WHERE Id = @id AND IsActive = 1");
   if (!row.recordset.length) throw chargeError("Extra charge not found", 404);
-  const { BookingId } = row.recordset[0];
+  const { BookingId, ApplicationId } = row.recordset[0];
 
-  const activeErr = await requireActiveBooking(pool, BookingId);
-  if (activeErr) throw chargeError(activeErr);
+  if (BookingId) {
+    const activeErr = await requireActiveBooking(pool, BookingId);
+    if (activeErr) throw chargeError(activeErr);
+  } else if (ApplicationId) {
+    const app = await pool.request().input("aid", sql.Int, ApplicationId)
+      .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
+    if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.recordset[0].Status)) {
+      throw chargeError(`Cannot change this application's extra work once it is ${app.recordset[0].Status} — this is locked after approval.`);
+    }
+  }
 
   // Legacy shape (created before charges were folded into the shared
   // milestones): a dedicated CrmPaymentMilestone still exists for this
   // charge — keep using ITS Status exactly as before, never touch the new
   // blended model for a booking edited this way. New-shape charges (no
   // linked milestone) fall through to the booking-wide settled check.
-  const milestone = await pool.request().input("ecid", sql.Int, id)
-    .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ExtraChargeId = @ecid ORDER BY Id DESC");
+  const milestone = BookingId
+    ? await pool.request().input("ecid", sql.Int, id)
+        .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ExtraChargeId = @ecid ORDER BY Id DESC")
+    : { recordset: [] };
   if (milestone.recordset.length) {
     if (milestone.recordset[0].Status === CrmStatus.PAID) {
       throw chargeError("This charge has already been paid and cannot be edited", 409);
     }
-  } else if (await isBookingFullySettled(pool, BookingId)) {
+  } else if (BookingId && await isBookingFullySettled(pool, BookingId)) {
     throw chargeError("This booking is fully paid off — charges can no longer be edited", 409);
   }
 
@@ -153,10 +163,16 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
       .query(`UPDATE dbo.CrmPaymentMilestone SET MilestoneName = @name, AmountDue = @amt, UpdatedAt = SYSDATETIME() WHERE Id = @mid`);
   }
 
-  await rollupBookingTotals(pool, BookingId);
+  if (BookingId) {
+    await rollupBookingTotals(pool, BookingId);
   await logCrmAudit(pool, "Booking", BookingId, actorUserId, [
     { field: "ExtraCharge", oldVal: row.recordset[0].Description, newVal: `${b.Description.trim()} = ₹${totalAmount}` },
-  ]);
+    ]);
+  } else if (ApplicationId) {
+    await logCrmAudit(pool, "Application", ApplicationId, actorUserId, [
+      { field: "ExtraWork", oldVal: row.recordset[0].Description, newVal: `${b.Description.trim()} = ${totalAmount}` },
+    ]);
+  }
 
   return { TotalAmount: totalAmount };
 }
@@ -176,7 +192,7 @@ async function applyAddExtraChargeToApplication(pool, applicationId, b, actorUse
   if (!app.recordset.length) throw chargeError("Application not found", 404);
   // Same Draft/Pending gate as Parking's Application-stage step
   // (ParkingSelectionStep) — free to change pre-approval, locked after.
-  if (![CrmStatus.DRAFT, CrmStatus.PENDING].includes(app.recordset[0].Status)) {
+  if (![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.recordset[0].Status)) {
     throw chargeError(`Cannot change this application's extra work once it is ${app.recordset[0].Status} — this is locked after approval.`);
   }
 
@@ -213,6 +229,13 @@ async function applyAddExtraChargeToApplication(pool, applicationId, b, actorUse
   return { id: extraChargeId, TotalAmount: totalAmount };
 }
 
+async function shouldQueueExtraChargeAmendment(pool, bookingId) {
+  // Queue only when Agreement is Executed/Registered — not at earlier
+  // workflow stages like DirectorApproval/Confirmed where values are
+  // still being finalised and should flow through without a queue.
+  return isLegalWorkStarted(pool, bookingId);
+}
+
 async function applyReleaseExtraCharge(pool, id) {
   const row = await pool.request().input("id", sql.Int, id)
     .query("SELECT BookingId, ApplicationId FROM dbo.CrmExtraCharge WHERE Id = @id AND IsActive = 1");
@@ -227,7 +250,7 @@ async function applyReleaseExtraCharge(pool, id) {
     if (ApplicationId) {
       const app = await pool.request().input("aid", sql.Int, ApplicationId)
         .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
-      if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING].includes(app.recordset[0].Status)) {
+      if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.recordset[0].Status)) {
         throw chargeError(`Cannot change this application's extra work once it is ${app.recordset[0].Status} — this is locked after approval.`);
       }
     }
@@ -330,7 +353,10 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    if (await isLegalWorkStarted(pool, bookingId)) {
+    if (await isSaleDeedRegistered(pool, bookingId))
+      return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Extra charges in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
+
+    if (await shouldQueueExtraChargeAmendment(pool, bookingId)) {
       if (!b.Reason?.trim()) return res.status(400).json({ error: "A reason is required to request this change — legal documents are already under verification for this booking" });
       const requestId = await createAmendmentRequest(pool, {
         bookingId, changeType: "ExtraCharge", action: "Add", targetId: null,
@@ -353,7 +379,7 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
 // the new total onto the linked milestone via the real ExtraChargeId FK —
 // no more re-guessing which milestone belongs to this charge. Gated the
 // same way as POST once legal work has started.
-router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
@@ -364,10 +390,18 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     if (!row.recordset.length) return res.status(404).json({ error: "Extra charge not found" });
     const bookingId = row.recordset[0].BookingId;
 
+    if (!bookingId) {
+      const result = await applyEditExtraCharge(pool, id, b, actorId(req));
+      return res.json({ success: true, ...result });
+    }
+
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    if (await isLegalWorkStarted(pool, bookingId)) {
+    if (await isSaleDeedRegistered(pool, bookingId))
+      return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Extra charges in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
+
+    if (await shouldQueueExtraChargeAmendment(pool, bookingId)) {
       if (!b.Reason?.trim()) return res.status(400).json({ error: "A reason is required to request this change — legal documents are already under verification for this booking" });
       const requestId = await createAmendmentRequest(pool, {
         bookingId, changeType: "ExtraCharge", action: "Edit", targetId: id,
@@ -411,7 +445,10 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    if (await isLegalWorkStarted(pool, bookingId)) {
+    if (await isSaleDeedRegistered(pool, bookingId))
+      return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Extra charges in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
+
+    if (await shouldQueueExtraChargeAmendment(pool, bookingId)) {
       if (!reason?.trim()) return res.status(400).json({ error: "A reason is required to request this change — legal documents are already under verification for this booking" });
       const requestId = await createAmendmentRequest(pool, {
         bookingId, changeType: "ExtraCharge", action: "Release", targetId: id,

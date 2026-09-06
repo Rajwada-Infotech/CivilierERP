@@ -250,6 +250,13 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/noc",
     label: "CRM NOC",
   },
+  "crm-booking-amendment": {
+    icon: Car,
+    color: "text-amber-500 bg-amber-500/10",
+    navPath: "/crm/booking-amendments",
+    apiEndpoint: "/api/crm/booking-amendments",
+    label: "Booking Amendments",
+  },
   // Was missing entirely — without this, ApprovalActions fell back to
   // `/api/${item.Module}` = "/api/contracts" (plural), a 404: the route is
   // mounted at "/api/contract" (singular). Approve/Reject on Contract rows

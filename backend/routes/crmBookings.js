@@ -2120,7 +2120,8 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
     // agRegistered is the strict gate Pre-Possession and Handover actually require.
     const agDone       = ag  && [CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(ag.Status);
     const agRegistered = ag  && ag.Status === CrmStatus.REGISTERED;
-    const sdDone  = sd  && sd.CustomerApprovalStatus === CrmStatus.APPROVED;
+    // Sale Deed "done" = director approved (full approval chain completed).
+    const sdDone  = sd  && sd.DirectorApprovalStatus === CrmStatus.APPROVED;
     const qpDone  = qp  && qp.Status === "Confirmed";
     const ppDone  = pp  && pp.Status === "Ready";
     const pnDone  = pn  && pn.Status === "Acknowledged";
@@ -2128,11 +2129,23 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
     const regDone = reg && reg.Status === "Completed";
     const mutDone = mut && mut.Status === "Approved";
 
+    // Possession sub-steps (Pre-Possession + Possession Notice) are tracked on
+    // their dedicated pages; here we show one "Handover" chip whose gate reflects
+    // the full sequence: Agreement Registered → Pre-Possession → Possession Notice
+    // → Handover. Active once Agreement is Registered; done only when Handover is Completed.
+    const possessionActive = agRegistered;
+    const possessionDone   = hoDone;
+    const possessionInProgress = pp || pn || ho;
+
     const { nocType: resolvedNocType } = await resolveNocType(pool, id);
     const activeNoc = resolvedNocType === "Bank" ? bankNoc : orgNoc;
 
     const d = (v) => v ? String(v).slice(0, 10) : null;
 
+    // Minimal high-level lifecycle — 9 stages.
+    // Sub-step detail (Legal Milestones, Pre-Possession, Possession Notice,
+    // Query Payment) lives on each step's own dedicated page; the bar here
+    // shows only the major milestones so it stays readable at a glance.
     const steps = [
       {
         key: "application",
@@ -2159,6 +2172,9 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         blockedBy: null,
       },
       {
+        // Covers the full Agreement phase: AFS registration, legal milestones,
+        // all Agreement sub-steps. Detail is on the dedicated Agreement and
+        // Legal Milestones pages — this chip shows only the headline status.
         key: "agreement",
         label: "Agreement",
         status: agDone ? "done" : ag ? "active" : wc ? "active" : "locked",
@@ -2167,102 +2183,59 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         blockedBy: wc ? null : "Welcome Call must be completed first",
       },
       {
-        key: "legal_milestones",
-        label: "Legal Milestones",
-        // Real gate (crmLegalMilestones.js POST /): agreement must exist (no status
-        // check), so gate on `ag` not `agDone`.
-        status: lm && lm.OverallStatus === "Cleared" ? "done"
-               : lm ? "active"
-               : ag ? "active"
-               : "locked",
-        date: lm ? d(lm.CreatedAt) : null,
-        link: "/crm/legal-milestones",
-        blockedBy: ag ? null : "Agreement must exist first",
-      },
-      {
         key: "noc",
-        label: resolvedNocType === "Bank" ? "Bank NOC" : "Org NOC",
-        // Both NOC types require Agreement to be physically registered (crmNoc.js POST).
-        // Since a booking only ever gets one NOC (based on financing), we dynamically
-        // resolve the type and show only the applicable one here.
+        label: resolvedNocType === "Bank" ? "Bank NOC" : "NOC",
         status: activeNoc && activeNoc.Status === "Issued" ? "done"
                : activeNoc ? "active"
                : agRegistered ? "active"
                : "locked",
         date: activeNoc ? d(activeNoc.CreatedAt) : null,
         link: `/crm/noc?bookingId=${id}`,
-        blockedBy: agRegistered ? null : "Agreement must be Registered at Sub-Registrar first",
-      },
-      // ─── Physical possession sequence: real gate is Agreement Registered, not
-      // anything to do with Sale Deed (which comes AFTER handover in this chain).
-      // The old lifecycle placed Sales Deed before these three steps — exactly
-      // backwards from every real gate in crmPrePossession.js, crmHandover.js,
-      // and crmSalesDeed.js's own comment ("AFS registered → possession → handover
-      // → Sale Deed drafted → registered.").
-      {
-        key: "pre_possession",
-        label: "Pre-Possession",
-        // Real gate (crmPrePossession.js POST /): Agreement.Status = 'Registered'.
-        status: ppDone ? "done" : pp ? "active" : agRegistered ? "active" : "locked",
-        date: pp ? d(pp.CreatedAt) : null,
-        link: "/crm/pre-possession",
         blockedBy: agRegistered ? null : "Agreement must be Registered first",
       },
       {
-        key: "possession_notice",
-        label: "Possession Notice",
-        status: pnDone ? "done" : pn ? "active" : ppDone ? "active" : "locked",
-        date: pn ? d(pn.OfferedDate || pn.CreatedAt) : null,
-        link: "/crm/possession-notice",
-        blockedBy: ppDone ? null : "Pre-Possession inspection must be Ready first",
-      },
-      {
+        // Single "Handover" chip covers: Pre-Possession inspection → Possession
+        // Notice → Handover. Sub-step detail is on the Pre-Possession and
+        // Possession Notice pages; this chip is done when Handover is Completed.
         key: "handover",
         label: "Handover",
-        // Real gate (crmHandover.js POST /): Agreement Registered AND Possession
-        // Notice Acknowledged AND no open NOC.
-        status: hoDone ? "done" : ho ? "active" : pnDone ? "active" : "locked",
-        date: ho ? d(ho.ActualHandoverDate || ho.CreatedAt) : null,
+        status: possessionDone ? "done"
+               : possessionInProgress ? "active"
+               : possessionActive ? "active"
+               : "locked",
+        date: ho ? d(ho.ActualHandoverDate || ho.CreatedAt)
+             : pn ? d(pn.OfferedDate || pn.CreatedAt)
+             : pp ? d(pp.CreatedAt) : null,
         link: "/crm/handover",
-        blockedBy: pnDone ? null : "Possession Notice must be Acknowledged first",
+        blockedBy: agRegistered ? null : "Agreement must be Registered first",
       },
-      // ─── Post-handover legal/financial sequence.
       {
         key: "sales_deed",
-        label: "Sales Deed",
-        // Real gate (crmSalesDeed.js POST /): Handover Completed (+ Agreement
-        // Registered + Loan Processing cleared — Loan Processing isn't yet a
-        // separate tracked step here, so sales_deed can show active once hoDone
-        // even if Loan Processing is still outstanding; acceptable known gap).
+        label: "Sale Deed",
         status: sdDone ? "done" : sd ? "active" : hoDone ? "active" : "locked",
         date: sd ? d(sd.CreatedAt) : null,
         link: `/crm/sales-deed?bookingId=${id}`,
         blockedBy: hoDone ? null : "Handover must be Completed first",
       },
       {
-        key: "query_payment",
-        label: "Query Payment",
-        // Real gate (crmQueryPayment.js POST /): Sale Deed must exist.
-        status: qpDone ? "done" : qp ? "active" : sd ? "active" : "locked",
-        date: qp ? d(qp.CreatedAt) : null,
-        link: `/crm/query-payment?bookingId=${id}`,
-        blockedBy: sd ? null : "Sales Deed must be created first",
-      },
-      {
+        // Single "Registry" chip covers: Query Payment → Registry appointment
+        // → completion. Query Payment detail is on its own dedicated page.
         key: "registry",
         label: "Registry",
-        // Real gate (crmRegistry.js POST /): QueryPayment.Status = 'Confirmed'.
-        status: regDone ? "done" : reg ? "active" : qpDone ? "active" : "locked",
-        date: reg ? d(reg.CompletedDate || reg.ScheduledDate || reg.CreatedAt) : null,
+        status: regDone ? "done"
+               : reg ? "active"
+               : qpDone ? "active"
+               : qp ? "active"
+               : sd ? "active"
+               : "locked",
+        date: reg ? d(reg.CompletedDate || reg.ScheduledDate || reg.CreatedAt)
+             : qp ? d(qp.CreatedAt) : null,
         link: `/crm/registry?bookingId=${id}`,
-        blockedBy: qpDone ? null : "Query Payment must be Confirmed first",
+        blockedBy: sd ? null : "Sale Deed must be created first",
       },
       {
         key: "mutation",
         label: "Mutation",
-        // Real gate (crmMutation.js POST /): Registry.Status = 'Completed'.
-        // Was not tracked at all in the old lifecycle — chain silently ended at
-        // Registry. Mutation is the final ownership-transfer step.
         status: mutDone ? "done" : mut ? "active" : regDone ? "active" : "locked",
         date: mut ? d(mut.CreatedAt) : null,
         link: `/crm/mutation?bookingId=${id}`,

@@ -197,11 +197,128 @@ function PdfPreviewDialog({ pdfUrl, title, subtitle, filename, onClose }: {
   );
 }
 
+// ─── Verification checklist helpers for Parking & Extra Charges tab ─────────
+// Lightweight inline version of the welcome-call ChecklistItemRow / Section
+// block, scoped to just the Parking and ExtraCharges sections. The full
+// checklist with Submit/Reopen controls remains on the Welcome Call page;
+// here staff can tick/untick those two items without navigating away.
+
+const VC_API = "/api/crm/welcome-checklist";
+
+function ParkingVcItem({
+  item, bookingId, locked, onChanged,
+}: { item: any; bookingId: number; locked: boolean; onChanged: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const [showRemarks, setShowRemarks] = useState(false);
+  const [remarks, setRemarks] = useState(item.Remarks || "");
+  const isOpenRecheck = item.RecheckStatus === "Open";
+
+  const toggle = async () => {
+    if (locked || isOpenRecheck || saving) return;
+    setSaving(true);
+    try {
+      const r = await fetchWithAuth(`${VC_API}/${bookingId}/items/${item.ItemKey}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ IsChecked: !item.IsChecked, Remarks: remarks }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Save failed");
+      onChanged();
+    } catch (e: any) { toast.error(translateError(e.message)); } finally { setSaving(false); }
+  };
+
+  const saveRemarks = async () => {
+    setSaving(true);
+    try {
+      const r = await fetchWithAuth(`${VC_API}/${bookingId}/items/${item.ItemKey}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ IsChecked: item.IsChecked, Remarks: remarks }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Save failed");
+      toast.success("Remarks saved");
+      setShowRemarks(false);
+      onChanged();
+    } catch (e: any) { toast.error(translateError(e.message)); } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-start gap-2">
+        {locked ? (
+          item.IsChecked
+            ? <span className="shrink-0 mt-0.5 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center"><Check size={10} strokeWidth={3} /></span>
+            : <span className="shrink-0 mt-0.5 w-4 h-4 rounded-full border-2 border-dashed border-border" />
+        ) : (
+          <input type="checkbox" checked={!!item.IsChecked} disabled={saving || isOpenRecheck}
+            onChange={toggle}
+            className="shrink-0 mt-0.5 w-4 h-4 accent-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
+        )}
+        <div className="flex-1 min-w-0">
+          <span className={`text-xs leading-snug ${item.IsChecked ? "text-foreground" : "text-muted-foreground"}`}>{item.Label}</span>
+          {isOpenRecheck && (
+            <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-400">Recheck pending</span>
+          )}
+          {item.Remarks && !showRemarks && (
+            <p className="text-[10px] text-muted-foreground mt-0.5 italic truncate">"{item.Remarks}"</p>
+          )}
+        </div>
+        {!locked && (
+          <button onClick={() => setShowRemarks((v) => !v)}
+            className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground transition-colors mt-0.5">
+            {showRemarks ? "✕" : "note"}
+          </button>
+        )}
+      </div>
+      {showRemarks && (
+        <div className="flex gap-1.5 ml-6">
+          <input value={remarks} onChange={(e) => setRemarks(e.target.value)}
+            placeholder="Add a remark…"
+            className="flex-1 text-xs border border-border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+          <button onClick={saveRemarks} disabled={saving}
+            className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded disabled:opacity-40">Save</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ParkingVcSection({
+  vc, sectionKey, bookingId, onChanged,
+}: { vc: any; sectionKey: string; bookingId: number; onChanged: () => void }) {
+  if (!vc) return null;
+  const sec = (vc.sections as any[])?.find((s: any) => s.section === sectionKey);
+  if (!sec) return null;
+  const locked = !!vc.submission?.IsLocked;
+  return (
+    <div className="mt-3 pt-3 border-t border-border space-y-2">
+      <div className="flex items-center justify-between">
+        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+          <ClipboardCheck size={12} className="text-primary" /> Verify: {sec.label}
+        </h4>
+        {sec.complete && (
+          <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+            <ShieldCheck size={11} /> Confirmed
+          </span>
+        )}
+      </div>
+      <div className="space-y-2">
+        {(sec.items as any[]).map((item: any) => (
+          <ParkingVcItem key={item.ItemKey} item={item} bookingId={bookingId} locked={locked} onChanged={onChanged} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; onClose: () => void }) {
   const qc = useQueryClient();
   usePageRights("crm-bookings");
   const { canDoAction, currentUser } = useAuth();
-  const isAmendmentApprover = AMENDMENT_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase());
+  const isAmendmentApprover = AMENDMENT_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase())
+    || canDoAction("approval-inbox" as any, "edit");
   const canEdit = canDoAction("crm-bookings", "edit");
   const [tab, setTab] = useState<Tab>("Booking");
   const [saving, setSaving] = useState(false);
@@ -312,11 +429,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [checklistFlagRemark, setChecklistFlagRemark] = useState("");
   // customer is available via data?.customer if needed in future tabs
   const agreement = data?.agreement;
-  // Once the booking's Agreement has at least one uploaded document, Unit/
-  // Parking/Extra-Charge changes route through the amendment-approval queue
-  // instead of applying directly (see isLegalWorkStarted in the backend) —
-  // the numbers may already be baked into a document under review.
-  const legalWorkStarted = !!(agreement && agreement.DocumentCount > 0);
+  // Amendment reason is required only after the Agreement is Executed or
+  // Registered (physically signed by all parties). Before that — even with
+  // draft documents being prepared — parking and extra-charge values are
+  // still in flux and should be freely editable without an amendment queue.
+  // Mirrors isLegalWorkStarted() in backend/services/crmWorkflowGuards.js.
+  const legalWorkStarted = !!(agreement && ["Executed", "Registered"].includes(agreement.Status));
   // paymentSummary available via data?.paymentSummary if reinstated
 
   const { data: projectBanks = [] } = useQuery({
@@ -438,6 +556,17 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     enabled: tab === "Parking & Extra Charges",
     staleTime: 15_000,
   });
+  // Verification checklist — only the Parking & ExtraCharges sections are
+  // shown on this tab; the full checklist lives on the Welcome Call page.
+  const { data: parkingChecklist, refetch: refetchParkingChecklist } = useQuery({
+    queryKey: ["crm-welcome-verification-checklist", bookingId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`/api/crm/welcome-checklist/${bookingId}`);
+      return r.ok ? r.json() : null;
+    },
+    enabled: tab === "Parking & Extra Charges" && !!bookingId,
+    staleTime: 30_000,
+  });
   const { data: availableParking = { rates: [], unratedTypesWithInventory: [] } } = useQuery({
     queryKey: ["crm-parking-available", booking?.ProjectId, booking?.BlockId],
     queryFn: async () => {
@@ -450,11 +579,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     enabled: tab === "Parking & Extra Charges" && addingParking && !!booking?.ProjectId,
     staleTime: 30_000,
   });
-  const [reviewingAmendmentId, setReviewingAmendmentId] = useState<number | null>(null);
+
   const [reasonDialog, setReasonDialog] = useState<{
     title: string; label: string; required: boolean;
     onConfirm: (reason: string) => Promise<void>;
   } | null>(null);
+  const [reasonText, setReasonText] = useState("");
 
   // Bank/KYC/Nominee — same shape and API as CrmApplication.tsx's own bank
   // form (both read/write the one CrmCustomerBankDetail row keyed by
@@ -537,41 +667,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     qc.invalidateQueries({ queryKey: ["crm-booking-amendments", bookingId] });
   };
 
-  const handleApproveAmendment = async (id: number) => {
-    setReviewingAmendmentId(id);
-    try {
-      const res = await fetchWithAuth(`${AMEND_API}/${id}/approve`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-      const resData = await res.json();
-      if (!res.ok) throw new Error(resData.error);
-      toast.success("Amendment approved and applied");
-      invalidateCharges();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setReviewingAmendmentId(null);
-    }
-  };
-
-  const handleRejectAmendment = (id: number) => {
-    setReasonDialog({
-      title: "Reject Amendment", label: "Reason for rejection (optional)", required: false,
-      onConfirm: async (notes) => {
-        setReviewingAmendmentId(id);
-        try {
-          const res = await fetchWithAuth(`${AMEND_API}/${id}/reject`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Notes: notes || undefined }) });
-          const resData = await res.json();
-          if (!res.ok) throw new Error(resData.error);
-          toast.success("Amendment rejected");
-          invalidateCharges();
-        } catch (e: any) {
-          toast.error(translateError(e.message));
-        } finally {
-          setReviewingAmendmentId(null);
-        }
-      },
-    });
-  };
-
   const handleAddParkingFromDetail = async () => {
     if (!addParkingForm.ParkingType) { toast.error("Select a parking type"); return; }
     if (legalWorkStarted && !addParkingForm.Reason.trim()) { toast.error("A reason is required — legal documents are already under verification"); return; }
@@ -646,14 +741,24 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   };
 
   const handleRemoveParking = (id: number) => {
-    // Reason is mandatory unconditionally — backend enforces this regardless
-    // of legal-work state. The dialog label adapts to whether it's an
-    // immediate release or an amendment-queue submission.
+    if (!legalWorkStarted) {
+      // Direct release — no reason dialog needed before agreement is Executed.
+      (async () => {
+        try {
+          const res = await fetchWithAuth(`/api/crm/parking/${id}`, { method: "DELETE" });
+          const resData = await res.json();
+          if (!res.ok) throw new Error(resData.error);
+          toast.success("Parking allotment released");
+          invalidateCharges();
+        } catch (e: any) { toast.error(translateError(e.message)); }
+      })();
+      return;
+    }
+    // Agreement is Executed/Registered — change needs amendment queue + reason.
+    setReasonText("");
     setReasonDialog({
       title: "Release Parking Allotment",
-      label: legalWorkStarted
-        ? "Legal documents are under verification — this will queue an amendment for approval. State the reason:"
-        : "State the reason for releasing this parking allotment. This is recorded in the audit trail:",
+      label: "Agreement is already executed — this will queue an amendment for approval. State the reason:",
       required: true,
       onConfirm: async (reason) => {
         try {
@@ -724,6 +829,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       })();
       return;
     }
+    setReasonText("");
     setReasonDialog({
       title: "Remove Extra Charge",
       label: "Legal documents are already under verification. Enter a reason for removing this charge:",
@@ -1185,13 +1291,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
   return (<>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto thin-scroll"
-        onPointerDownOutside={(e) => {
-          if ((e.target as HTMLElement)?.closest?.("[data-overlay-portal]")) e.preventDefault();
-        }}
-        onInteractOutside={(e) => {
-          if ((e.target as HTMLElement)?.closest?.("[data-overlay-portal]")) e.preventDefault();
-        }}>
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto thin-scroll">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
               <DialogTitle className="font-heading flex items-center gap-2">
@@ -1927,27 +2027,23 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             {tab === "Parking & Extra Charges" && (
               <div className="space-y-4 pt-2">
                 {/* Pending amendments banner */}
-                {isAmendmentApprover && (pendingAmendments as any[]).length > 0 && (
+                {(pendingAmendments as any[]).length > 0 && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
-                    <h3 className="text-xs font-semibold flex items-center gap-1.5 text-amber-800"><ShieldAlert size={14} /> Pending Amendments ({pendingAmendments.length})</h3>
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-semibold flex items-center gap-1.5 text-amber-800"><ShieldAlert size={14} /> Pending Amendments ({pendingAmendments.length})</h3>
+                      {isAmendmentApprover && (
+                        <a href="/admin/approval/inbox" className="text-[10px] text-amber-700 underline underline-offset-2 hover:text-amber-900">
+                          Review in Approval Inbox →
+                        </a>
+                      )}
+                    </div>
                     {(pendingAmendments as any[]).map((a: any) => (
-                      <div key={a.Id} className="text-xs bg-white rounded-lg p-2 border border-amber-100 flex items-start justify-between gap-2">
-                        <div>
-                          <span className="font-medium">{a.FieldName}</span> — {a.NewValue ? `→ ${a.NewValue}` : "Removed"}
-                          <span className="text-muted-foreground"> by {a.CreatedByName}</span>
-                          {a.CreatedAt && <span className="text-muted-foreground"> · {new Date(a.CreatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
-                          {a.Notes && <div className="text-muted-foreground mt-0.5 italic">"{a.Notes}"</div>}
-                        </div>
-                        <div className="flex gap-1 shrink-0">
-                          <button onClick={() => handleApproveAmendment(a.Id)} disabled={reviewingAmendmentId === a.Id}
-                            className="px-2 py-0.5 text-[10px] bg-green-600 text-white rounded font-medium hover:bg-green-700 disabled:opacity-40">
-                            Approve
-                          </button>
-                          <button onClick={() => handleRejectAmendment(a.Id)} disabled={reviewingAmendmentId === a.Id}
-                            className="px-2 py-0.5 text-[10px] bg-red-600 text-white rounded font-medium hover:bg-red-700 disabled:opacity-40">
-                            Reject
-                          </button>
-                        </div>
+                      <div key={a.Id} className="text-xs bg-white rounded-lg p-2 border border-amber-100">
+                        <span className="font-medium">{a.ChangeType === "ParkingAllotment" ? "Parking" : a.ChangeType === "ExtraCharge" ? "Extra Charge" : a.ChangeType}</span>
+                        {" — "}{a.Action}
+                        <span className="text-muted-foreground"> by {a.RequestedByName || "—"}</span>
+                        {a.RequestedAt && <span className="text-muted-foreground"> · {new Date(a.RequestedAt.replace(/Z$/, "")).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+                        {a.Reason && <div className="text-muted-foreground mt-0.5 italic">"{a.Reason}"</div>}
                       </div>
                     ))}
                   </div>
@@ -1986,6 +2082,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </div>
                   );
                 })()}
+
 
                 {/* Parking */}
                 <div className="rounded-xl border border-border p-4 space-y-2">
@@ -2231,6 +2328,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       ))}
                     </div>
                   )}
+                  {(parking as any[]).length > 0 && (
+                    <ParkingVcSection vc={parkingChecklist} sectionKey="Parking" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                  )}
                 </div>
 
                 {/* Extra Charges */}
@@ -2329,6 +2429,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         <ExtraWorkGstPreview amount={Number(extraForm.Amount)} />
                       )}
                     </>
+                  )}
+                  {(extras as any[]).length > 0 && (
+                    <ParkingVcSection vc={parkingChecklist} sectionKey="ExtraCharges" bookingId={bookingId} onChanged={refetchParkingChecklist} />
                   )}
                 </div>
               </div>
@@ -2979,32 +3082,33 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       </div>,
       document.body,
     )}
-    {reasonDialog && createPortal(
-      <div data-overlay-portal className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4"
-        style={{ pointerEvents: "auto" }}
-        onClick={() => setReasonDialog(null)} onPointerDown={(e) => e.stopPropagation()}>
-        <div className="bg-background border border-border rounded-xl shadow-xl w-full max-w-md p-5 space-y-4"
-          onClick={(e) => e.stopPropagation()}>
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">{reasonDialog.title}</h3>
-            <p className="text-xs text-muted-foreground mt-1">{reasonDialog.label}</p>
+    <Dialog open={!!reasonDialog} onOpenChange={(o) => { if (!o) { setReasonDialog(null); setReasonText(""); } }}>
+      <DialogContent hideCloseButton className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-sm font-semibold">{reasonDialog?.title}</DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground -mt-2">{reasonDialog?.label}</p>
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          if (!reasonDialog) return;
+          if (reasonDialog.required && !reasonText.trim()) { toast.error("Reason is required"); return; }
+          await reasonDialog.onConfirm(reasonText);
+          setReasonDialog(null);
+          setReasonText("");
+        }} className="space-y-4">
+          <textarea
+            rows={4}
+            value={reasonText}
+            onChange={(e) => setReasonText(e.target.value)}
+            className="w-full border border-border rounded-lg p-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => { setReasonDialog(null); setReasonText(""); }} className="px-4 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button type="submit" className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">Confirm</button>
           </div>
-          <form onSubmit={async (e) => {
-            e.preventDefault();
-            const reason = (e.currentTarget.elements.namedItem("reason") as HTMLTextAreaElement).value;
-            if (reasonDialog.required && !reason.trim()) { toast.error("Reason is required"); return; }
-            await reasonDialog.onConfirm(reason);
-            setReasonDialog(null);
-          }}>
-            <textarea name="reason" rows={3} className="w-full border border-border rounded-lg p-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" autoFocus />
-            <div className="flex justify-end gap-2 mt-4">
-              <button type="button" onClick={() => setReasonDialog(null)} className="px-4 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button type="submit" className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">Confirm</button>
-            </div>
-          </form>
-        </div>
-      </div>,
-      document.body,
-    )}
+        </form>
+      </DialogContent>
+    </Dialog>
   </>);
 }

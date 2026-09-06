@@ -698,6 +698,28 @@ async function transition(
   return result;
 }
 
+/**
+ * Check whether a user may approve/reject a booking amendment.
+ * Mirrors the same two-path logic transition() uses for CRM modules:
+ *   1. Role is in CRM_APPROVER_ROLES, OR
+ *   2. User holds "edit" on approval-inbox page AND the active workflow
+ *      for "crm-booking-amendment" (if one exists) permits their role/userId.
+ */
+async function canApproveBookingAmendment(userId, userRole) {
+  const role = (userRole || "").toLowerCase();
+  if (CRM_APPROVER_ROLES.includes(role)) return true;
+  if (!(await hasApprovalInboxEditRight(userId))) return false;
+  // If a workflow is configured for this module, check its level defs too.
+  const workflow = await getWorkflow("crm-booking-amendment");
+  if (!workflow || !workflow.LevelDefs?.length) return true; // no restriction beyond page right
+  const levelDef = workflow.LevelDefs[0];
+  const roleOk = !Array.isArray(levelDef?.roles) || !levelDef.roles.length ||
+    levelDef.roles.map(r => String(r).toLowerCase()).includes(role);
+  const userOk = !Array.isArray(levelDef?.userIds) || !levelDef.userIds.length ||
+    userId == null || levelDef.userIds.includes(userId);
+  return roleOk && userOk;
+}
+
 module.exports = {
   transition,
   guardEdit,
@@ -708,6 +730,8 @@ module.exports = {
   recordGLPosting,
   writeAuditLog,
   CRM_APPROVER_ROLES,
+  canApproveBookingAmendment,
+  hasApprovalInboxEditRight,
   // Canonical module → {table, pk, status} / GL poster maps — the single
   // source of truth for what each module's identity/status column is.
   MODULE_MAP,

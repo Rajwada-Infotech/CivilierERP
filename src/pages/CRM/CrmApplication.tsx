@@ -3344,10 +3344,15 @@ const ParkingSelectionStep: React.FC<{
           <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><ParkingSquare size={13} /> Selected Parking</label>
           {!canEdit && (
             <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
-              <Lock size={11} /> Locked ({wizardAppStatus})
+              <Lock size={11} /> {wizardAppStatus === "Approved" ? "Manage from Booking" : `Locked (${wizardAppStatus})`}
             </span>
           )}
         </div>
+        {!canEdit && wizardAppStatus === "Approved" && (
+          <p className="text-[11px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
+            This application has been approved and a Booking has been created. To add, edit, or remove parking slots, open the Booking and go to the <strong>Parking &amp; Extra Charges</strong> tab.
+          </p>
+        )}
         {(allotments as any[]).length > 0 ? (
           <div className="space-y-1.5">
             {(allotments as any[]).map((a: any) => (
@@ -3591,10 +3596,15 @@ const ExtraWorkSelectionStep: React.FC<{
           <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Wallet size={13} /> Extra Charges</label>
           {!canEdit && (
             <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
-              <Lock size={11} /> Locked ({wizardAppStatus})
+              <Lock size={11} /> {wizardAppStatus === "Approved" ? "Manage from Booking" : `Locked (${wizardAppStatus})`}
             </span>
           )}
         </div>
+        {!canEdit && wizardAppStatus === "Approved" && (
+          <p className="text-[11px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
+            This application has a Booking — add or edit extra charges from the Booking's <strong>Parking &amp; Extra Charges</strong> tab.
+          </p>
+        )}
         {(charges as any[]).length > 0 ? (
           <div className="space-y-1.5">
             {(charges as any[]).map((c: any) => (

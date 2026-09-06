@@ -765,6 +765,34 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "crm-booking-amendment") {
+      queries.push(`
+        SELECT
+          'crm-booking-amendment'               AS Module,
+          'Booking Amendment'                   AS ModuleLabel,
+          CAST(r.Id AS NVARCHAR)                AS RecordId,
+          CONCAT(b.BookingNo, ' – ', r.ChangeType, ' ', r.Action) AS Reference,
+          r.RequestedAt                         AS RecordDate,
+          r.Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))           AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(u_req.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
+          ISNULL(CAST(u_rev.name AS NVARCHAR(255)), '') AS ApprovedBy,
+          ISNULL(CAST(r.ReviewedAt AS NVARCHAR), '')    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ISNULL(CAST(r.ReviewNotes AS NVARCHAR(MAX)), '') AS RejectionNote,
+          r.RequestedAt                         AS LastModified
+        FROM dbo.CrmBookingAmendmentRequest r
+        JOIN dbo.CrmBooking b     ON b.Id = r.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.Users u_req ON u_req.id = r.RequestedBy
+        LEFT JOIN dbo.Users u_rev ON u_rev.id = r.ReviewedBy
+        WHERE r.Status = 'Pending'
+      `);
+    }
+
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =

@@ -12,7 +12,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { CRM_APPROVER_ROLES } = require("../services/approvalService");
+const { canApproveBookingAmendment } = require("../services/approvalService");
 const { emitNotification } = require("../services/notify");
 const extraChargesRouter = require("./crmExtraCharges");
 const parkingRouter = require("./crmParking");
@@ -20,10 +20,6 @@ const coApplicantRouter = require("./crmCoApplicant");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
-
-function isApprover(req) {
-  return CRM_APPROVER_ROLES.includes(String(req.user?.role || "").toLowerCase());
-}
 
 const LIST_SELECT = `
   SELECT r.*,
@@ -80,7 +76,8 @@ router.get("/booking/:bookingId", requirePageRight("crm-bookings", "view"), asyn
 // know to check whether anything needs re-issuing. Admin/super_admin/
 // marketing_head only, same approver set crm-bookings itself uses.
 router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req, res) => {
-  if (!isApprover(req)) return res.status(403).json({ error: "Only admin, super_admin, or marketing_head can approve a booking amendment" });
+  if (!(await canApproveBookingAmendment(req.user?.id, req.user?.role)))
+    return res.status(403).json({ error: "You are not authorised to approve booking amendments" });
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
@@ -109,7 +106,9 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
     } else if (reqRow.ChangeType === "ParkingAllotment") {
       if (reqRow.Action === "Add") applyResult = await parkingRouter.applyAddParking(pool, reqRow.BookingId, proposedChange, actor);
       else if (reqRow.Action === "Edit") applyResult = await parkingRouter.applyEditParking(pool, reqRow.TargetId, proposedChange);
-      else if (reqRow.Action === "Release") applyResult = await parkingRouter.applyReleaseParking(pool, reqRow.TargetId);
+      // force=true: admin has approved this post-Agreement change; bypasses
+      // the "already paid" guard and returns a creditAmount if applicable.
+      else if (reqRow.Action === "Release") applyResult = await parkingRouter.applyReleaseParking(pool, reqRow.TargetId, actor, reqRow.Reason, true);
       else return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType ParkingAllotment` });
     } else if (reqRow.ChangeType === "CoApplicant") {
       if (reqRow.Action === "Add") applyResult = await coApplicantRouter.applyAddCoApplicant(pool, reqRow.BookingId, proposedChange, actor);
@@ -142,6 +141,15 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
         ag.Id, "crm_agreement");
     }
 
+    // If releasing parking on a fully-paid booking generated a credit,
+    // notify the approver so the accounts team can process the refund.
+    if (applyResult?.creditAmount) {
+      await emitNotification(pool, actor, "crm_booking_amendment_credit",
+        "Refund Required — Parking Released Post-Payment",
+        applyResult.creditNote,
+        reqRow.BookingId, "crm_booking");
+    }
+
     res.json({ success: true, ...applyResult });
   } catch (e) {
     console.error("[crm-booking-amendments] approve error:", e.message);
@@ -151,7 +159,8 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
 
 // PUT /:id/reject — close the request without applying anything.
 router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, res) => {
-  if (!isApprover(req)) return res.status(403).json({ error: "Only admin, super_admin, or marketing_head can reject a booking amendment" });
+  if (!(await canApproveBookingAmendment(req.user?.id, req.user?.role)))
+    return res.status(403).json({ error: "You are not authorised to reject booking amendments" });
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);

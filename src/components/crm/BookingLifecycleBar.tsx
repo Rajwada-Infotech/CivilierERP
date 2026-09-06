@@ -72,30 +72,30 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
         </span>
       </div>
 
-      {/* steps — wraps freely, never scrolls */}
-      <div className="flex flex-wrap items-center gap-1">
+      {/* steps — single row that wraps only if truly needed (9 chips fit comfortably) */}
+      <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1">
         {data.steps.map((step, i) => {
           const clickable = !!step.link && step.status !== "locked";
-          const isLastInGroup = i === data.steps.length - 1;
+          const isLast = i === data.steps.length - 1;
           return (
             <React.Fragment key={step.key}>
               <button
                 onClick={clickable ? () => navigate(step.link!) : undefined}
                 disabled={!clickable}
                 title={step.blockedBy ?? (step.date ? `${step.label} — ${step.date}` : step.label)}
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] leading-none transition-colors
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] leading-none transition-colors
                   ${step.status === "done" ? "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-400" : ""}
                   ${step.status === "active" ? "border-primary/40 bg-primary/10 text-foreground font-semibold" : ""}
-                  ${step.status === "locked" ? "border-transparent bg-muted/50 text-muted-foreground/50" : ""}
-                  ${clickable ? "hover:shadow-sm cursor-pointer" : step.status === "locked" ? "cursor-not-allowed" : ""}
+                  ${step.status === "locked" ? "border-transparent bg-muted/30 text-muted-foreground/40" : ""}
+                  ${clickable ? "hover:shadow-sm cursor-pointer" : step.status === "locked" ? "cursor-default" : ""}
                 `}
               >
-                {step.status === "done" && <CheckCircle2 size={11} className="shrink-0" />}
-                {step.status === "active" && <Circle size={7} className="fill-primary text-primary shrink-0 animate-pulse" />}
-                {step.status === "locked" && <Lock size={9} className="shrink-0" />}
+                {step.status === "done" && <CheckCircle2 size={10} className="shrink-0" />}
+                {step.status === "active" && <Circle size={6} className="fill-primary text-primary shrink-0 animate-pulse" />}
+                {step.status === "locked" && <Lock size={8} className="shrink-0" />}
                 {step.label}
               </button>
-              {!isLastInGroup && <span className="text-muted-foreground/25 text-[10px] select-none">—</span>}
+              {!isLast && <span className="text-muted-foreground/20 text-[10px] select-none mx-0.5">›</span>}
             </React.Fragment>
           );
         })}

@@ -97,13 +97,44 @@ async function requireApprovedBooking(pool, bookingId) {
 // auto-created, nothing uploaded yet" from "under review" either. A real
 // uploaded document is the first unambiguous sign legal work has begun.
 async function isLegalWorkStarted(pool, bookingId) {
+  // Amendment reason is only required once the Agreement is physically
+  // executed (signed by all parties) or registered at the Sub-Registrar.
+  // Before that point — even if agreement documents are being prepared —
+  // parking and extra-charge values are still in flux and the team must
+  // be able to adjust them freely without an amendment queue.
   const row = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT COUNT(*) AS DocCount
-    FROM dbo.CrmAgreementDocument d
-    JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
-    WHERE ag.BookingId = @bid
+    SELECT COUNT(*) AS Cnt
+    FROM dbo.CrmAgreement
+    WHERE BookingId = @bid AND Status IN ('Executed', 'Registered')
   `);
-  return row.recordset[0].DocCount > 0;
+  return row.recordset[0].Cnt > 0;
+}
+
+// Returns true when the Sale Deed for this booking has been registered at
+// the Sub-Registrar's office (Status = 'Registered'). Once registered, the
+// parking and extra-charge details in it are a government-recorded property
+// right — they cannot be modified through the ERP. Any change requires a
+// Deed of Rectification executed and registered at the Sub-Registrar.
+async function isSaleDeedRegistered(pool, bookingId) {
+  const row = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT COUNT(*) AS Cnt
+    FROM dbo.CrmSalesDeed
+    WHERE BookingId = @bid AND Status = 'Registered'
+  `);
+  return row.recordset[0].Cnt > 0;
+}
+
+async function isBookingPastFirstApproval(pool, bookingId) {
+  const row = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT Status, WorkflowStage, MarketingHeadApprovedAt
+    FROM dbo.CrmBooking
+    WHERE Id = @bid
+  `);
+  const b = row.recordset[0];
+  if (!b) return false;
+  return b.Status === "Approved"
+    || ["DirectorApproval", "Confirmed"].includes(b.WorkflowStage)
+    || b.MarketingHeadApprovedAt != null;
 }
 
 async function getBookingWorkflowContext(pool, bookingId) {
@@ -1187,6 +1218,8 @@ module.exports = {
   requireApprovedBooking,
   recalculateRemainingMilestones,
   isLegalWorkStarted,
+  isSaleDeedRegistered,
+  isBookingPastFirstApproval,
   isBookingFullySettled,
   syncParkingPaymentStatus,
 };
