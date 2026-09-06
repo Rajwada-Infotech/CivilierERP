@@ -1083,6 +1083,7 @@ const Payment: React.FC = () => {
       return;
     }
     setDisbursingCustomerLoan(loan);
+    const isChequeMode = loan.PaymentMode === "Cheque" || loan.PaymentMode === "Post-Dated Cheque";
     setForm((f) => ({
       ...f,
       // Company wasn't being pre-filled — the picker itself is scoped by
@@ -1095,8 +1096,20 @@ const Payment: React.FC = () => {
       partyId: loan.BorrowerCustomerId,
       amount: loan.Amount,
       paymentName: f.paymentName || `Loan disbursement — ${loan.LoanNo}`,
+      // The loan already recorded which bank/cheque it was disbursed
+      // through at sanction time — carry all of it over instead of leaving
+      // the Bank field on whatever was last selected (previously this left
+      // the wrong bank showing, and the cheque number blank/unpickable
+      // since it had already been deducted from the lot under this loan).
+      bankId: loan.LenderBankAccountId ?? f.bankId,
+      mode: loan.PaymentMode || f.mode,
+      chequeLotId: isChequeMode ? (loan.ChequeLotId ?? f.chequeLotId) : f.chequeLotId,
+      chequeLotNumber: isChequeMode ? (loan.ChequeLotNumber || f.chequeLotNumber) : f.chequeLotNumber,
+      chequeNo: isChequeMode ? (loan.ChequeNo || f.chequeNo) : f.chequeNo,
+      chequeDate: isChequeMode ? (loan.ChequeDate ? loan.ChequeDate.slice(0, 10) : f.chequeDate) : f.chequeDate,
+      isPostDated: isChequeMode ? !!loan.IsPostDated : f.isPostDated,
     }));
-    toast.success(`${loan.LoanNo} selected — fill in the bank/mode below, then save to disburse.`);
+    toast.success(`${loan.LoanNo} selected — bank/cheque carried over from the loan. Review and save to disburse.`);
   };
 
 

@@ -319,6 +319,16 @@ export interface UndisbursedLoan {
   BorrowerCustomerSource: "CRM" | "AH" | null;
   BorrowerCompanyName: string | null;
   BorrowerCustomerName: string | null;
+  // Captured on the loan itself at sanction time — carried onto the Payment
+  // form when this loan is picked for disbursement, so the bank/cheque
+  // don't have to be re-entered (and re-deducted from a different lot).
+  PaymentMode: string | null;
+  ChequeLotId: number | null;
+  ChequeLotNumber: string | null;
+  ChequeNo: string | null;
+  ChequeDate: string | null;
+  IsPostDated: boolean | null;
+  DigitalRefNumber: string | null;
 }
 
 export interface UndisbursedIncomingLoan {
