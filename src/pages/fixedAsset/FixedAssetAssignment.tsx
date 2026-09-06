@@ -5,8 +5,9 @@ import { toast } from "sonner";
 import {
   Plus, ArrowLeft, Search, Building2, Package, Calendar, FileText, Hash,
   Check, X, Boxes, User, ChevronsUpDown, Loader2, ImagePlus, UserRound,
-  Eye, Pencil, Trash2, AlertTriangle, ArrowLeftRight,
+  Eye, Pencil, Trash2, AlertTriangle, ArrowLeftRight, Camera,
 } from "lucide-react";
+import { CameraCaptureModal } from "@/components/CameraCaptureModal";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -225,6 +226,7 @@ export default function FixedAssetAssignment() {
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [form, setForm] = useState<FormState>(emptyForm(activeFinYear));
   const [userImage, setUserImage] = useState<string | null>(null);
+  const [camOpen, setCamOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [viewingId, setViewingId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
@@ -564,17 +566,23 @@ export default function FixedAssetAssignment() {
                 </div>
               )}
               <div className="space-y-1.5">
-                <label className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all cursor-pointer">
-                  <ImagePlus size={13} /> {userImage ? "Change Image" : "Upload Image"}
-                  <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
-                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={() => setCamOpen(true)}
+                    className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 text-white hover:shadow transition-all">
+                    <Camera size={13} /> {userImage ? "Retake with Camera" : "Capture with Camera"}
+                  </button>
+                  <label className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all cursor-pointer">
+                    <ImagePlus size={13} /> {userImage ? "Change Image" : "Upload Image"}
+                    <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
+                  </label>
+                </div>
                 {userImage && (
                   <button type="button" onClick={() => setUserImage(null)}
                     className="block text-xs text-muted-foreground hover:text-destructive transition-colors">
                     Remove image
                   </button>
                 )}
-                <p className="text-[11px] text-muted-foreground">Optional — JPEG/PNG/WebP, under 400 KB.</p>
+                <p className="text-[11px] text-muted-foreground">Optional — capture live or upload JPEG/PNG/WebP, under 400 KB.</p>
               </div>
             </div>
           </div>
@@ -584,6 +592,19 @@ export default function FixedAssetAssignment() {
             <input type="text" value={form.remarks} onChange={(e) => setField("remarks", e.target.value)}
               placeholder="Optional remarks…" className={inputCls} />
           </div>
+
+          {camOpen && (
+            <CameraCaptureModal
+              onClose={() => setCamOpen(false)}
+              onCapture={(dataUrl) => {
+                if (dataUrl.length > 550_000) {
+                  toast.error("Captured photo is too large — try again in better light");
+                  return;
+                }
+                setUserImage(dataUrl);
+              }}
+            />
+          )}
         </div>
 
         {/* ── preview ── */}
