@@ -112,6 +112,7 @@ router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async 
         MAX(gle.VoucherDate) AS LastTransactionDate
       FROM dbo.GeneralLedgerEntry gle
       WHERE gle.LHeadId = @Id AND gle.IsReversed = 0
+        AND gle.SourceType NOT IN ('GRN', 'GRNPosting')
     `);
 
     const row = result.recordset[0] || {};
@@ -220,6 +221,7 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
                SELECT SUM(g.DebitAmount) - SUM(g.CreditAmount)
                FROM dbo.GeneralLedgerEntry g
                WHERE g.LHeadId = @Id AND g.IsReversed = 0
+                 AND g.SourceType NOT IN ('GRN', 'GRNPosting')
                  AND @From IS NOT NULL AND g.VoucherDate < @From
              ), 0) AS WindowOpening
       FROM dbo.AccountHeadMaster ahm
@@ -258,6 +260,7 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
       LEFT JOIN dbo.LoanSanction ls
         ON gle.SourceType = 'LoanPosting' AND ls.LoanId = gle.SourceId
       WHERE gle.LHeadId = @Id AND gle.IsReversed = 0
+        AND gle.SourceType NOT IN ('GRN', 'GRNPosting')
         AND (@From IS NULL OR gle.VoucherDate >= @From)
         AND (@To IS NULL OR gle.VoucherDate <= @To)
     `);
@@ -358,6 +361,7 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
       LEFT JOIN dbo.LoanSanction ls
         ON gle.SourceType = 'LoanPosting' AND ls.LoanId = gle.SourceId
       WHERE gle.IsReversed = 0
+        AND gle.SourceType NOT IN ('GRN', 'GRNPosting')
         AND (@From IS NULL OR gle.VoucherDate >= @From)
         AND (@To IS NULL OR gle.VoucherDate <= @To)
     `);
