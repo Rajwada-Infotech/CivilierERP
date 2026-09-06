@@ -208,6 +208,10 @@ async function postMaintenance(pool, record, userEmail) {
     companyId: record.CompanyId,
     projectId: record.ProjectId,
     createdBy: userEmail,
+    // Direct Fixed-Asset linkage on every GL leg (migration 404)
+    assetId: record.AssetId,
+    finYear: record.FinYear,
+    faItemCode: record.FAItemCode,
   });
   return { posted: true, voucherNo: plan.voucherNo, gst: plan.gst };
 }

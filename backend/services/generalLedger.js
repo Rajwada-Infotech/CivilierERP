@@ -114,6 +114,12 @@ async function postVoucher(pool, {
   projectId = null,
   costCenterId = null,
   createdBy = null,
+  // Optional direct Fixed-Asset linkage (migration 404) — set by the
+  // depreciation / FA-maintenance posting services, NULL for every other
+  // module. Stamped onto every leg of the voucher.
+  assetId = null,
+  finYear = null,
+  faItemCode = null,
 }) {
   if (!legs || legs.length < 2) {
     throw new Error("postVoucher requires at least 2 legs");
@@ -151,13 +157,18 @@ async function postVoucher(pool, {
         .input("CompanyId", sql.Int, companyId)
         .input("ProjectId", sql.Int, projectId)
         .input("CostCenterId", sql.Int, leg.costCenterId ?? costCenterId)
-        .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
+        .input("CreatedBy", sql.NVarChar(150), createdBy)
+        .input("AssetId", sql.Int, assetId)
+        .input("FinYear", sql.NVarChar(20), finYear)
+        .input("FAItemCode", sql.NVarChar(200), faItemCode).query(`
           INSERT INTO dbo.GeneralLedgerEntry
             (VoucherNo, VoucherDate, LHeadId, DebitAmount, CreditAmount, Narration,
-             SourceType, SourceId, CompanyId, ProjectId, CostCenterId, CreatedBy)
+             SourceType, SourceId, CompanyId, ProjectId, CostCenterId, CreatedBy,
+             AssetId, FinYear, FAItemCode)
           VALUES
             (@VoucherNo, @VoucherDate, @LHeadId, @DebitAmount, @CreditAmount, @Narration,
-             @SourceType, @SourceId, @CompanyId, @ProjectId, @CostCenterId, @CreatedBy)
+             @SourceType, @SourceId, @CompanyId, @ProjectId, @CostCenterId, @CreatedBy,
+             @AssetId, @FinYear, @FAItemCode)
         `);
     }
     await tx.commit();

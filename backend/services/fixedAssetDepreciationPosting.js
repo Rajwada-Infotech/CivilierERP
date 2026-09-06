@@ -247,6 +247,10 @@ async function postDepreciation(pool, asset, year, month, userEmail, lockDocNo) 
       companyId: asset.CompanyId ?? null,
       projectId: asset.ProjectId ?? null,
       createdBy: userEmail,
+      // Direct Fixed-Asset linkage on every GL leg (migration 404)
+      assetId: asset.AssetId,
+      finYear: dep.finYear,
+      faItemCode: asset.FAItemCode ?? null,
     });
   } catch (e) {
     // GL posting failed — roll back the entry row so the month can be retried.
