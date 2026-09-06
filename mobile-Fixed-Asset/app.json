@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "CivilierERP Fixed Asset",
+    "name": "Civilier Fixed Asset",
     "slug": "mobile-fixed-asset",
     "scheme": "civiliererpfixedasset",
     "version": "1.0.0",
@@ -23,8 +23,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.rajwadainfotech.civiliererpfixedasset",
-      "usesCleartextTraffic": true
+      "package": "com.rajwadainfotech.civiliererpfixedasset"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -32,8 +31,21 @@
     "plugins": [
       "expo-secure-store",
       "expo-font",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
-    "owner": "grenxnja"
+    "owner": "grenxnja",
+    "extra": {
+      "eas": {
+        "projectId": "809729c5-d9be-4615-8ec2-83d84ba5e1a3"
+      }
+    }
   }
 }

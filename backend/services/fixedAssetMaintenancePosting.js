@@ -57,18 +57,28 @@ async function resolveExpenseHead(pool, repairExpenseType) {
   return { lHeadId: id, name };
 }
 
-/** Resolve the vendor's own ledger head (any active AccountHeadMaster row). */
+// A repair bill is payable to an external party only — Supplier, Contractor,
+// or a Bank for a direct payment. GL heads (Accumulated Depreciation A/c,
+// Purchase A/c, GST / share-capital control accounts, …) are never a payee;
+// routes/fixedAssetMaintenance.js's /vendors picker filters to the same set.
+const VENDOR_HEAD_TYPES = ["S", "C", "CN", "B"];
+
+/** Resolve the vendor's own ledger head — must be a Supplier/Contractor/Bank
+ * head, never a GL control account. */
 async function resolveVendorHead(pool, vendorId) {
   const r = await pool
     .request()
     .input("Id", sql.Int, vendorId)
     .query(`
-      SELECT LHeadId, ISNULL(DisplayName, LHeadName) AS Name
+      SELECT LHeadId, LHeadType, ISNULL(DisplayName, LHeadName) AS Name
       FROM dbo.AccountHeadMaster
       WHERE LHeadId = @Id AND ISNULL(LHeadStatus, 1) = 1
     `);
   const row = r.recordset[0];
   if (!row) throw cfgErr("Vendor Account is not configured: the selected Vendor has no active ledger account.");
+  if (!VENDOR_HEAD_TYPES.includes(row.LHeadType)) {
+    throw cfgErr(`"${row.Name}" is a ${row.LHeadType} ledger account and cannot be used as a Vendor — pick a Supplier, Contractor or Bank.`);
+  }
   return { lHeadId: row.LHeadId, name: row.Name };
 }
 
@@ -198,6 +208,10 @@ async function postMaintenance(pool, record, userEmail) {
     companyId: record.CompanyId,
     projectId: record.ProjectId,
     createdBy: userEmail,
+    // Direct Fixed-Asset linkage on every GL leg (migration 404)
+    assetId: record.AssetId,
+    finYear: record.FinYear,
+    faItemCode: record.FAItemCode,
   });
   return { posted: true, voucherNo: plan.voucherNo, gst: plan.gst };
 }

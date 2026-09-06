@@ -117,6 +117,37 @@ export const getFixedAssets = (params?: {
 export const getFixedAsset = (id: number): Promise<FixedAssetDetail> =>
   getJson(`/api/fixed-assets/${id}`, "Failed to load asset");
 
+// ── Reports — Total Depreciation (FA Item Code wise) ─────────────────────────
+export interface DepreciationSummaryRow {
+  AssetId: number;
+  FAItemCode: string | null;
+  AssetName: string | null;
+  AssetCode: string | null;
+  AssetCategory: string | null;
+  CompanyName: string | null;
+  ProjectName: string | null;
+  DepreciationType: string | null;
+  DepreciationRate: number | null;
+  PurchaseCost: number;
+  MonthsPosted: number;
+  TotalDepreciation: number;
+  LatestClosingBV: number | null;
+  BookValue: number;
+  FirstPeriod: string | null;
+  LastPeriod: string | null;
+}
+
+export const getDepreciationSummary = (params?: {
+  companyId?: number; finYear?: string; fromDate?: string; toDate?: string;
+}): Promise<DepreciationSummaryRow[]> => {
+  const qs = new URLSearchParams();
+  if (params?.companyId) qs.set("companyId", String(params.companyId));
+  if (params?.finYear) qs.set("finYear", params.finYear);
+  if (params?.fromDate) qs.set("fromDate", params.fromDate);
+  if (params?.toDate) qs.set("toDate", params.toDate);
+  return getJson(`/api/fixed-assets/depreciation-summary${qs.toString() ? `?${qs}` : ""}`, "Failed to load depreciation summary");
+};
+
 async function mutate<T>(url: string, method: string, body: unknown, fallback: string): Promise<T> {
   const res = await fetchWithAuth(url, {
     method,

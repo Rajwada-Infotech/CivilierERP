@@ -278,7 +278,7 @@ router.get("/", requirePageRight("asset-transfer", "view"), async (req, res) => 
 
     if (req.query.companyId)  { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10));  where.push("h.CompanyId = @CompanyId"); }
     if (req.query.projectId)  { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10));  where.push("h.ProjectId = @ProjectId"); }
-    if (req.query.finYear)    { request.input("FinYear", sql.NVarChar(20), req.query.finYear);           where.push("h.FinYear = @FinYear"); }
+    if (req.query.finYear)    { request.input("FinYear", sql.NVarChar(20), String(req.query.finYear));   where.push("h.FinYear = COALESCE((SELECT FName FROM dbo.FinYear WHERE FId = TRY_CONVERT(int, @FinYear)), @FinYear)"); }
     if (req.query.assetId)    { request.input("AssetId", sql.Int, parseInt(req.query.assetId, 10));      where.push("h.AssetId = @AssetId"); }
     if (req.query.fromUserId) { request.input("FromUserId", sql.Int, parseInt(req.query.fromUserId, 10)); where.push("h.FromUserId = @FromUserId"); }
     if (req.query.toUserId)   { request.input("ToUserId", sql.Int, parseInt(req.query.toUserId, 10));     where.push("h.ToUserId = @ToUserId"); }

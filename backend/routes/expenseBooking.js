@@ -1106,8 +1106,20 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
       totalBookedAmount += parseFloat(row.totalAmount) || 0;
     }
 
+    // Direct/DINV bookings record their Expense Head(s) via the multi-head
+    // ExpenseHeadAllocation table (migration 303), not the legacy single
+    // EGLAccountId column — this list route never attached that data before,
+    // so every row's "Expense Head" always came back empty even for bookings
+    // that do have one. Batch-fetched (one query for the whole page) rather
+    // than per-row to avoid an N+1.
+    const allocMap = await getAllocationsForMany(pool, sql, "ExpenseBooking", rows.map((r) => r.Eid));
+    const rowsWithExpenseHead = rows.map((r) => ({
+      ...r,
+      EExpenseHeadNames: (allocMap.get(r.Eid) || []).map((a) => a.lHeadName).join(", ") || null,
+    }));
+
     res.json({
-      data: rows.map(({ _total, ...r }) => r),
+      data: rowsWithExpenseHead.map(({ _total, ...r }) => r),
       page,
       limit,
       total,
@@ -4193,6 +4205,18 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const alreadyPosted = await pool.request().input("SrcId", sql.Int, ebId)
       .query(`SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType='InvoicePosting' AND SourceId=@SrcId AND IsReversed=0`);
     if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This invoice has already been posted to GL." });
+
+    // This route (SourceType='InvoicePosting') is the authoritative posting
+    // path for an invoice — postExpenseBookingApproval (SourceType=
+    // 'ExpenseBooking', fires automatically on approval) independently
+    // guards against re-entry the same way, but neither ever checked for
+    // the OTHER's posting, so an approved-then-manually-posted invoice got
+    // double-credited to the vendor under two different accounting
+    // treatments (see migration 409's cleanup of the historical cases).
+    // Reverse any stale ExpenseBooking posting for this invoice before
+    // superseding it here, so InvoicePosting always wins going forward.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    await reversePostingBySource(pool, "ExpenseBooking", ebId);
 
     const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
     let baseAmount = 0, taxAmount = 0, totalAmount = 0;

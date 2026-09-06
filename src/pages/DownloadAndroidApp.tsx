@@ -37,6 +37,15 @@ const APPS = [
     downloadName: "CivilierERP-Supplier.apk",
     version: "1.0.0",
   },
+  {
+    key: "fixed-asset",
+    title: "Civilier Fixed Asset",
+    description:
+      "For asset custodians — scan or download to install the Fixed Asset tagging & tracking app on your device.",
+    apkPath: "/downloads/CivilierERPFixedAsset.apk",
+    downloadName: "CivilierERP-FixedAsset.apk",
+    version: "1.0.0",
+  },
 ] as const;
 
 function AppCard({ title, description, apkPath, downloadName, version }: (typeof APPS)[number]) {

@@ -114,6 +114,12 @@ async function postVoucher(pool, {
   projectId = null,
   costCenterId = null,
   createdBy = null,
+  // Optional direct Fixed-Asset linkage (migration 404) — set by the
+  // depreciation / FA-maintenance posting services, NULL for every other
+  // module. Stamped onto every leg of the voucher.
+  assetId = null,
+  finYear = null,
+  faItemCode = null,
 }) {
   if (!legs || legs.length < 2) {
     throw new Error("postVoucher requires at least 2 legs");
@@ -151,13 +157,18 @@ async function postVoucher(pool, {
         .input("CompanyId", sql.Int, companyId)
         .input("ProjectId", sql.Int, projectId)
         .input("CostCenterId", sql.Int, leg.costCenterId ?? costCenterId)
-        .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
+        .input("CreatedBy", sql.NVarChar(150), createdBy)
+        .input("AssetId", sql.Int, assetId)
+        .input("FinYear", sql.NVarChar(20), finYear)
+        .input("FAItemCode", sql.NVarChar(200), faItemCode).query(`
           INSERT INTO dbo.GeneralLedgerEntry
             (VoucherNo, VoucherDate, LHeadId, DebitAmount, CreditAmount, Narration,
-             SourceType, SourceId, CompanyId, ProjectId, CostCenterId, CreatedBy)
+             SourceType, SourceId, CompanyId, ProjectId, CostCenterId, CreatedBy,
+             AssetId, FinYear, FAItemCode)
           VALUES
             (@VoucherNo, @VoucherDate, @LHeadId, @DebitAmount, @CreditAmount, @Narration,
-             @SourceType, @SourceId, @CompanyId, @ProjectId, @CostCenterId, @CreatedBy)
+             @SourceType, @SourceId, @CompanyId, @ProjectId, @CostCenterId, @CreatedBy,
+             @AssetId, @FinYear, @FAItemCode)
         `);
     }
     await tx.commit();
@@ -379,6 +390,17 @@ async function postGRNApproval(pool, grnId, userEmail) {
 async function postExpenseBookingApproval(pool, ebId, userEmail) {
   if (await hasPosting(pool, "ExpenseBooking", ebId))
     return { posted: true, reason: "already posted (idempotent)" };
+
+  // routes/expenseBooking.js's POST /:id/post-to-gl (SourceType='InvoicePosting')
+  // is the authoritative posting path for an invoice — it independently
+  // guards against re-entry the same way this function does, but neither
+  // ever checked for the OTHER's posting, so an invoice approved (auto-
+  // posting here) and later run through the manual "Post to GL" action got
+  // double-credited to the vendor under two different accounting treatments
+  // (see migration 409's cleanup of the historical cases this caused). If
+  // InvoicePosting already handled this invoice, defer to it entirely.
+  if (await hasPosting(pool, "InvoicePosting", ebId))
+    return { posted: true, reason: "already posted via InvoicePosting (authoritative)" };
 
   const result = await pool.request().input("Eid", sql.Int, ebId).query(`
     SELECT eb.Eid, eb.EDocNo, eb.EDocDate, eb.EAmount, eb.ENetAmount,
