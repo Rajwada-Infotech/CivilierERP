@@ -118,6 +118,10 @@ export interface ExpenseRecord {
   projectSite: string;
   materialCategory: string;
   invoiceReference: string;
+  /** GL head (AccountHeadMaster.LHeadName via EGLAccountId) this expense is
+   *  booked against, e.g. "Repairs & Maintenance" — shown as "Expense Head"
+   *  on the invoice export. */
+  expenseHeadName: string;
   basicAmount: number;
   cgstRate: number;
   sgstRate: number;

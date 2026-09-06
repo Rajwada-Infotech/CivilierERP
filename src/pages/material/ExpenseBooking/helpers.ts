@@ -433,6 +433,7 @@ export function dbToRecord(row: any): ExpenseRecord {
     projectName: row.EProjectDisplayName || row.projectName || "",
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
+    expenseHeadName: row.EGLAccountName ?? row.EGLAccount ?? "",
     // For GRN-linked bookings, basicAmount = qty × rate (no GST) stored in EAmount.
     // EGrnTotalAmount is the incl-GST total used only for netAmount display.
     basicAmount: parseFloat(row.EAmount) || 0,

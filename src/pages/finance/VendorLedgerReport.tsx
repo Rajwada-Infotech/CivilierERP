@@ -220,6 +220,18 @@ export function VendorLedgerReportBody() {
     enabled: !headId,
   });
 
+  // Export must pull every matching transaction, not just the 1000/2000-row
+  // display cap (see the warning banner below) — re-requests with a much
+  // higher limit instead of reusing the already-capped query data.
+  const fetchAllTransactionsForExport = React.useCallback(async (): Promise<Record<string, unknown>[]> => {
+    if (headId) {
+      const res = await getLedgerTransactions(headId, { from: fromDate || undefined, to: toDate || undefined, limit: 100000 });
+      return res.transactions as unknown as Record<string, unknown>[];
+    }
+    const res = await getAllLedgerTransactions({ from: fromDate || undefined, to: toDate || undefined, limit: 10000 });
+    return res.transactions as unknown as Record<string, unknown>[];
+  }, [headId, fromDate, toDate]);
+
   const showParty = !headId;
   const transactions: LedgerEntry[] = showParty
     ? allTransactionsQuery.data?.transactions ?? []
@@ -437,6 +449,7 @@ export function VendorLedgerReportBody() {
           </p>
           <ExportMenu
             data={transactions as unknown as Record<string, unknown>[]}
+            fetchData={fetchAllTransactionsForExport}
             columns={exportColumns(showParty, !showParty)}
             title={selectedHead ? `Vendor Ledger — ${selectedHead.Name ?? ""}` : "Vendor Ledger — All Transactions"}
             filename="vendor-ledger-report"

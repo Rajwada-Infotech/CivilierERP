@@ -15,6 +15,7 @@ import type { ExportColumn } from "@/lib/export";
 import { WorkerAttendanceLogGroups } from "@/pages/civilworkdpr/WorkerAttendance";
 import type { AttendanceReportRow } from "@/api/workerAttendanceApi";
 import { VendorLedgerReportBody } from "@/pages/finance/VendorLedgerReport";
+import { getProjects as fetchProjectOptions } from "@/api/grnApi";
 import {
   Building2,
   Calendar,
@@ -79,6 +80,7 @@ type DateMode = "single" | "range";
 
 interface FilterState {
   companyId: string;
+  projectId: string;
   finYearId: string;
   dateMode: DateMode;
   singleDate: string;
@@ -102,6 +104,14 @@ interface FilterConfig {
   companyParam?: string | null;
   /** Backend param name for financial year ID, or null to skip. Default: null (most routes don't have it) */
   finYearParam?: string | null;
+  /** Backend param name for project filter, or null to skip. Default: null —
+   *  most report routes have no project scoping; only opt in reports that
+   *  actually read this param server-side. */
+  projectParam?: string | null;
+  /** Whether `projectParam`'s value is the project's numeric id (most
+   *  routes) or its plain name (routes doing a LIKE match on a stored name
+   *  column, e.g. New Payment's `PProject`). Default: "id" */
+  projectValueType?: "id" | "name";
   /** Backend param name for single-day date filter, or null to skip. Default: "dateFrom" */
   singleDateParam?: string | null;
   /** Backend param name for range-start date, or null to skip. Default: "dateFrom" */
@@ -133,13 +143,13 @@ interface ModuleSection {
   reportIds: string[];
 }
 
+// Every ExportColumn accessor below feeds both the on-screen preview table
+// AND the exported CSV/Excel file (same accessor, no separate formatter) —
+// no ₹ glyph and no thousands separators, so exported amounts stay real,
+// Excel-parseable numbers instead of text (matches the convention already
+// used in Vendor Ledger's and Expense Booking's own exports).
 const fmt = (n: number | undefined | null) =>
-  n == null
-    ? "—"
-    : "₹" +
-      new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(
-        Number(n),
-      );
+  n == null ? "—" : Number(n).toFixed(2);
 
 // ── All report definitions ────────────────────────────────────────────────────
 
@@ -153,12 +163,15 @@ const ALL_REPORTS: ReportDef[] = [
     apiPath: "/api/new-payment",
     // newPayment: company filter is text-based (PCompany name), skip it.
     // Fin-year filter uses ?finYear=<id>. Single-date uses ?date=. No range.
+    // Project filter is also text-based (?project=<name>, LIKE match).
     filterConfig: {
       companyParam: null,
       finYearParam: "finYear",
       singleDateParam: "date",
       dateFromParam: null,
       dateToParam: null,
+      projectParam: "project",
+      projectValueType: "name",
     },
     columns: [
       {
@@ -302,6 +315,8 @@ const ALL_REPORTS: ReportDef[] = [
       singleDateParam: "date",
       dateFromParam: null,
       dateToParam: null,
+      projectParam: "project",
+      projectValueType: "name",
     },
     columns: [
       { header: "Doc No", accessor: "DocNo" },
@@ -313,6 +328,48 @@ const ALL_REPORTS: ReportDef[] = [
       { header: "Amount", accessor: (r) => fmt(r.PAmount as number) },
       { header: "Mode", accessor: "PMode" },
       { header: "Status", accessor: "Status" },
+    ],
+  },
+  {
+    id: "expense-register",
+    label: "Expense Register",
+    description: "Every booked invoice/expense, with GL head and GST breakup",
+    icon: Receipt,
+    color: "#0d9488",
+    apiPath: "/api/expense-booking",
+    // expenseBooking.js's GET / accepts companyId/projectName(name match)/
+    // from/to/finYear(label, not id — skipped here since this catalog's
+    // Financial Year filter sends the numeric FId).
+    filterConfig: {
+      companyParam: "companyId",
+      finYearParam: null,
+      singleDateParam: "from",
+      dateFromParam: "from",
+      dateToParam: "to",
+      projectParam: "projectName",
+      projectValueType: "name",
+    },
+    columns: [
+      { header: "Date", accessor: (r) => (r.EDocDate ? String(r.EDocDate).slice(0, 10) : "—") },
+      { header: "Doc No", accessor: (r) => (r.EDocNo ?? "—") as string },
+      { header: "Vendor", accessor: (r) => (r.ESupplierName ?? "—") as string },
+      { header: "Company", accessor: (r) => (r.ECompanyName ?? "—") as string },
+      { header: "Project", accessor: (r) => (r.EProjectDisplayName ?? "—") as string },
+      { header: "Expense Head", accessor: (r) => (r.EGLAccountName ?? "—") as string },
+      { header: "Basic Amount", accessor: (r) => fmt(Number(r.EAmount) || 0) },
+      {
+        header: "GST %",
+        accessor: (r) => {
+          const igst = Number(r.EIgstRate) || 0;
+          if (igst > 0) return `${igst}%`;
+          return `${(Number(r.ECgstRate) || 0) + (Number(r.ESgstRate) || 0)}%`;
+        },
+      },
+      {
+        header: "Net Amount",
+        accessor: (r) => fmt(Number(r.ENetAmount ?? r.EGrnTotalAmount ?? r.EAmount) || 0),
+      },
+      { header: "Status", accessor: (r) => (r.EStatus ?? "—") as string },
     ],
   },
   {
@@ -446,6 +503,7 @@ const ALL_REPORTS: ReportDef[] = [
       singleDateParam: "dateFrom",
       dateFromParam: "dateFrom",
       dateToParam: "dateTo",
+      projectParam: "projectId",
     },
     columns: [
       { header: "JV No", accessor: (r) => (r.JVNo ?? `JV-${r.JVID}`) as string },
@@ -1040,12 +1098,14 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Wallet,
     color: "#10b981",
     apiPath: "/api/on-account/report",
+    // onAccount.js's /report accepts companyId/projectId/partyId/dateFrom/dateTo.
     filterConfig: {
       companyParam: "companyId",
       finYearParam: null,
       singleDateParam: null,
       dateFromParam: "dateFrom",
       dateToParam: "dateTo",
+      projectParam: "projectId",
     },
     columns: [
       { header: "Date",     accessor: (r) => (r.TxnDate ? String(r.TxnDate).slice(0, 10) : "—") },
@@ -1727,6 +1787,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "received-payment",
       "emi-register",
       "pending-payment",
+      "expense-register",
       "vendor-ledger-report",
       "bank-report",
       "brs-report",
@@ -1853,6 +1914,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
 
 const SectionFilters: React.FC<{
   companies: CompanyOption[];
+  projects: { id: number; name: string }[];
   finYears: FinYearOption[];
   filters: FilterState;
   onChange: (patch: Partial<FilterState>) => void;
@@ -1860,6 +1922,7 @@ const SectionFilters: React.FC<{
   onClearAll: () => void;
 }> = ({
   companies,
+  projects,
   finYears,
   filters,
   onChange,
@@ -1887,6 +1950,35 @@ const SectionFilters: React.FC<{
             {companies.map((c) => (
               <option key={c.id} value={String(c.id)}>
                 {c.name}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={11}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+        </div>
+      </div>
+
+      {/* Project */}
+      <div className="min-w-[160px] flex-1 max-w-[210px]">
+        <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+          Project
+        </label>
+        <div className="relative">
+          <Building2
+            size={11}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <select
+            value={filters.projectId}
+            onChange={(e) => onChange({ projectId: e.target.value })}
+            className="w-full appearance-none pl-7 pr-6 py-2 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+          >
+            <option value="">All Projects</option>
+            {projects.map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.name}
               </option>
             ))}
           </select>
@@ -2022,8 +2114,9 @@ const SectionFilters: React.FC<{
 const ReportTable: React.FC<{
   report: ReportDef;
   filters: FilterState;
+  projects: { id: number; name: string }[];
   onClose: () => void;
-}> = ({ report, filters, onClose }) => {
+}> = ({ report, filters, projects, onClose }) => {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2082,6 +2175,21 @@ const ReportTable: React.FC<{
     // Default param name is "companyId". If filterConfig.companyParam is null, skip.
     const compParam = "companyParam" in fc ? fc.companyParam : "companyId";
     if (compParam && filters.companyId) f[compParam] = filters.companyId;
+
+    // ── Project ───────────────────────────────────────────────────────────────
+    // Default is null (skip) — most report routes have no project scoping;
+    // only opt-in reports (filterConfig.projectParam set) actually read it.
+    // A few routes filter by the project's NAME via a LIKE match rather than
+    // its id (projectValueType: "name") — resolve that from the picked id.
+    const projParam = "projectParam" in fc ? fc.projectParam : null;
+    if (projParam && filters.projectId) {
+      if (fc.projectValueType === "name") {
+        const p = projects.find((x) => String(x.id) === filters.projectId);
+        if (p) f[projParam] = p.name;
+      } else {
+        f[projParam] = filters.projectId;
+      }
+    }
 
     // ── Financial year / Date ─────────────────────────────────────────────────
     // fin-year takes priority over calendar dates (same as the UI logic).
@@ -2147,18 +2255,67 @@ const ReportTable: React.FC<{
   }, [
     report.id,
     filters.companyId,
+    filters.projectId,
     filters.finYearId,
     filters.singleDate,
     filters.rangeFrom,
     filters.rangeTo,
     godownId,
     reasonFilter,
+    projects,
   ]);
 
   useEffect(() => {
     load();
     setPage(1);
   }, [load]);
+
+  // Export must pull every matching row, not just the 500-row on-screen cap
+  // `load()` uses for the paginated table. A single bigger-limit request
+  // isn't enough on its own — several of these routes (e.g. expense-booking)
+  // hard-cap `limit` server-side regardless of what's asked for — so this
+  // pages through with `page`/`limit` (the same params `load()` already
+  // sends) until a page comes back short of a full page, a `total`/
+  // `totalPages` field in the response says there's no more, or a safety
+  // cap of 100 pages is hit (whichever first), then concatenates everything.
+  const fetchAllForExport = useCallback(async (): Promise<Record<string, unknown>[]> => {
+    if (isVendorLedger) return rows; // has its own export path, not reached here
+    const dataKey = report.filterConfig?.dataKey ?? "data";
+    const baseParams = { ...report.defaultParams, ...buildParams() };
+    const pageSize = 500;
+    const all: Record<string, unknown>[] = [];
+    let prevFirstRowKey: string | null = null;
+    for (let page = 1; page <= 100; page++) {
+      const params = new URLSearchParams({ ...baseParams, limit: String(pageSize), page: String(page) });
+      const res = await fetchWithAuth(`${report.apiPath}?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const batch: Record<string, unknown>[] = Array.isArray(json)
+        ? json
+        : (json[dataKey] ?? json.data ?? json.records ?? []);
+      // A route that silently ignores `page` (always returns the same
+      // window) would otherwise loop up to 100x re-adding the same rows —
+      // bail the moment a "next" page's first row is identical to the
+      // previous page's, rather than trusting the loop to terminate any
+      // other way.
+      const firstRowKey = batch.length ? JSON.stringify(batch[0]) : null;
+      if (page > 1 && firstRowKey !== null && firstRowKey === prevFirstRowKey) break;
+      prevFirstRowKey = firstRowKey;
+
+      all.push(...batch);
+      const totalPages = typeof json?.totalPages === "number" ? json.totalPages : null;
+      const total = typeof json?.total === "number" ? json.total : null;
+      const doneByPageCount = totalPages != null && page >= totalPages;
+      const doneByTotal = total != null && all.length >= total;
+      // A plain-array response (no pagination metadata at all) never
+      // supports `page` — one request is all there is, so stop after it
+      // regardless of how many rows came back.
+      const noPaginationMetadata = Array.isArray(json);
+      if (batch.length === 0 || batch.length < pageSize || doneByPageCount || doneByTotal || noPaginationMetadata) break;
+    }
+    return all;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, rows, projects]);
 
   const totalPages = Math.ceil(rows.length / PAGE_SIZE);
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -2266,6 +2423,7 @@ const ReportTable: React.FC<{
           {!isVendorLedger && (
           <ExportMenu
             data={rows as unknown as Record<string, unknown>[]}
+            fetchData={fetchAllForExport}
             columns={report.columns}
             title={report.label}
             filename={report.id}
@@ -2486,11 +2644,13 @@ const Reports: React.FC = () => {
       : MODULE_SECTIONS;
 
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
+  const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [finYears, setFinYears] = useState<FinYearOption[]>([]);
   const [openSection, setOpenSection] = useState<string | null>(null);
   const [activeReport, setActiveReport] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>({
     companyId: "",
+    projectId: "",
     finYearId: "",
     dateMode: "single",
     singleDate: "",
@@ -2512,12 +2672,29 @@ const Reports: React.FC = () => {
       .catch(() => {});
   }, []);
 
+  // Projects re-scope to whichever company is selected (same convention as
+  // every other Company→Project cascade in the app) — cleared automatically
+  // below whenever the company changes so a stale cross-company project id
+  // never lingers in the filter.
+  useEffect(() => {
+    fetchProjectOptions(filters.companyId || undefined)
+      .then((l) => setProjects(Array.isArray(l) ? l : []))
+      .catch(() => setProjects([]));
+  }, [filters.companyId]);
+
   const patchFilters = (patch: Partial<FilterState>) =>
-    setFilters((prev) => ({ ...prev, ...patch }));
+    setFilters((prev) => ({
+      ...prev,
+      ...patch,
+      // Changing company invalidates any previously-picked project unless
+      // this same patch is also setting a new one.
+      ...(("companyId" in patch) && !("projectId" in patch) ? { projectId: "" } : {}),
+    }));
 
   const clearFilters = () =>
     setFilters({
       companyId: "",
+      projectId: "",
       finYearId: "",
       dateMode: "single",
       singleDate: "",
@@ -2533,6 +2710,14 @@ const Reports: React.FC = () => {
       activeFilters.push({
         label: c.name,
         clear: () => patchFilters({ companyId: "" }),
+      });
+  }
+  if (filters.projectId) {
+    const p = projects.find((x) => String(x.id) === filters.projectId);
+    if (p)
+      activeFilters.push({
+        label: p.name,
+        clear: () => patchFilters({ projectId: "" }),
       });
   }
   if (filters.finYearId) {
@@ -2699,6 +2884,7 @@ const Reports: React.FC = () => {
                   <div className="p-3 border-b border-border/50">
                     <SectionFilters
                       companies={companies}
+                      projects={projects}
                       finYears={finYears}
                       filters={filters}
                       onChange={patchFilters}
@@ -2727,6 +2913,7 @@ const Reports: React.FC = () => {
                           key={activeReportDef.id}
                           report={activeReportDef}
                           filters={filters}
+                          projects={projects}
                           onClose={() => setActiveReport(null)}
                         />
                       )}

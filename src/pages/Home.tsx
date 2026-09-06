@@ -726,7 +726,7 @@ export default function HomePage() {
 
   // ── KPI pills (wrap → scale with module count) ───────────────────────────
   const kpis = [
-    access.finance && { label: "Transferred all-time", value: isLoading ? null : Math.round((fin?.payments?.totalAmount ?? 0) / 100000), prefix: "₹", suffix: "L", color: "#10b981", icon: IndianRupee },
+    access.finance && { label: "Transferred all-time", value: isLoading ? null : ((fin?.payments?.totalAmount ?? 0) / 1e7).toFixed(2), prefix: "₹", suffix: "Cr", color: "#10b981", icon: IndianRupee },
     (access.material || access.finance) && { label: "Open PO value", value: isLoading ? null : Math.round((mat?.purchaseOrders?.openValue ?? fin?.purchaseOrders?.openValue ?? 0) / 100000), prefix: "₹", suffix: "L", color: "#f59e0b", icon: Layers },
     access.material && { label: "GRNs this month", value: isLoading ? null : (mat?.grns?.thisMonth ?? 0), color: "#8b5cf6", icon: Warehouse },
     { label: "Active projects", value: isLoading ? null : (eng?.projects?.active ?? 0), color: "#06b6d4", icon: Building2 },

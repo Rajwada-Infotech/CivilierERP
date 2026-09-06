@@ -179,6 +179,7 @@ const INVOICE_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Vendor", accessor: (r: any) => r.supplier || "—" },
   { header: "Company", accessor: (r: any) => r.companyName || "—" },
   { header: "Project", accessor: (r: any) => r.projectName || "—" },
+  { header: "Expense Head", accessor: (r: any) => r.expenseHeadName || "—" },
   { header: "Basic Amt", accessor: (r: any) => (r.status === "Draft" ? "—" : `Rs. ${fmt(r.basicAmount)}`) },
   { header: "GST %", accessor: (r: any) => (r.status === "Draft" ? "—" : (r.igstRate ?? 0) > 0 ? `${r.igstRate}%` : `${(r.cgstRate ?? 0) + (r.sgstRate ?? 0)}%`) },
   { header: "Net Amt", accessor: (r: any) => `Rs. ${fmt(computeEffectiveNet(r))}` },
