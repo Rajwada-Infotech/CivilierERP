@@ -391,6 +391,17 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
   if (await hasPosting(pool, "ExpenseBooking", ebId))
     return { posted: true, reason: "already posted (idempotent)" };
 
+  // routes/expenseBooking.js's POST /:id/post-to-gl (SourceType='InvoicePosting')
+  // is the authoritative posting path for an invoice — it independently
+  // guards against re-entry the same way this function does, but neither
+  // ever checked for the OTHER's posting, so an invoice approved (auto-
+  // posting here) and later run through the manual "Post to GL" action got
+  // double-credited to the vendor under two different accounting treatments
+  // (see migration 409's cleanup of the historical cases this caused). If
+  // InvoicePosting already handled this invoice, defer to it entirely.
+  if (await hasPosting(pool, "InvoicePosting", ebId))
+    return { posted: true, reason: "already posted via InvoicePosting (authoritative)" };
+
   const result = await pool.request().input("Eid", sql.Int, ebId).query(`
     SELECT eb.Eid, eb.EDocNo, eb.EDocDate, eb.EAmount, eb.ENetAmount,
            eb.ESourceType, eb.ESourceId, eb.EName, eb.ECompanyId, eb.EProjectName
