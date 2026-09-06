@@ -517,7 +517,7 @@ export default function FixedAssetAssignment() {
                     />
                     {!loadingAssets && scopedAssets.length === 0 && (
                       <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1.5">
-                        No unassigned FA Item Codes{form.companyId ? " for the selected company/project" : ""}. A code already assigned here is hidden until that assignment is deleted or the asset is transferred.
+                        No unassigned FA Item Codes{form.companyId ? " for the selected company/project" : ""}. A code is hidden once it has an assignment — delete that assignment (or the transfer that created it) to free it.
                       </p>
                     )}
                   </>

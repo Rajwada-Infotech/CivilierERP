@@ -22,12 +22,12 @@ function toInt(val) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-// ── GET /fa-item-codes — Fixed Asset Records available for a NEW manual
-// assignment. An FA Item Code drops off this list the moment it is assigned
-// through New Assignment and only comes back when that assignment is deleted
-// or the asset is moved on by a User-Wise Asset Transfer. Transfer-sourced
-// assignment rows (SourceTransferId IS NOT NULL) never block — a transferred
-// asset is available to be manually (re)assigned again.
+// ── GET /fa-item-codes — Fixed Asset Records available for a NEW assignment.
+// An FA Item Code drops off this list the moment it has ANY live (non-Deleted)
+// FixedAssetAssignment row — whether created here or auto-created by a
+// User-Wise Asset Transfer. It comes back only when that assignment is
+// deleted (New Assignment: delete the record; transfer: delete the transfer,
+// which soft-deletes its linked assignment).
 router.get("/fa-item-codes", requirePageRight("fixed-asset-assignment", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -43,10 +43,7 @@ router.get("/fa-item-codes", requirePageRight("fixed-asset-assignment", "view"),
       WHERE fa.FAItemCode IS NOT NULL AND fa.AssetCode IS NOT NULL AND fa.Status <> 'Deleted'
         AND NOT EXISTS (
           SELECT 1 FROM dbo.FixedAssetAssignment a
-          WHERE a.AssetId = fa.AssetId
-            AND a.Status <> 'Deleted'
-            AND a.SourceTransferId IS NULL
-            AND a.UserId = fa.CustodianUserId
+          WHERE a.AssetId = fa.AssetId AND a.Status <> 'Deleted'
         )
       ORDER BY fa.FAItemCode
     `);
@@ -189,25 +186,24 @@ router.post("/", requirePageRight("fixed-asset-assignment", "create"), async (re
         return res.status(400).json({ error: "This FA Item Code does not exist or is no longer a valid Fixed Asset Record" });
       }
 
-      // One live manual assignment per FA Item Code — the same rule the
+      // One live assignment per FA Item Code — the same rule the
       // /fa-item-codes picker enforces, guarded here so a stale client or a
       // crafted request can't create a duplicate. Cleared by deleting the
-      // existing assignment or by a User-Wise Asset Transfer.
+      // existing assignment (or the transfer that created it).
       const dupe = await tx.request().input("AssetId", sql.Int, assetIdVal).query(`
-        SELECT TOP 1 a.DocNo, u.name AS UserName
+        SELECT TOP 1 a.DocNo, a.SourceTransferId, u.name AS UserName
         FROM dbo.FixedAssetAssignment a
-        JOIN dbo.FixedAssetRecord fa ON fa.AssetId = a.AssetId
         LEFT JOIN dbo.users u ON u.id = a.UserId
-        WHERE a.AssetId = @AssetId
-          AND a.Status <> 'Deleted'
-          AND a.SourceTransferId IS NULL
-          AND a.UserId = fa.CustodianUserId
+        WHERE a.AssetId = @AssetId AND a.Status <> 'Deleted'
       `);
       if (dupe.recordset[0]) {
         await tx.rollback();
         const d = dupe.recordset[0];
+        const how = d.SourceTransferId
+          ? "delete that transfer"
+          : "delete that assignment";
         return res.status(409).json({
-          error: `${asset.FAItemCode} is already assigned to ${d.UserName || "a user"}${d.DocNo ? ` (${d.DocNo})` : ""}. Delete that assignment or transfer the asset before assigning it again.`,
+          error: `${asset.FAItemCode} is already assigned to ${d.UserName || "a user"}${d.DocNo ? ` (${d.DocNo})` : ""}. ${how[0].toUpperCase() + how.slice(1)} before assigning it again.`,
         });
       }
 
