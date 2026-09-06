@@ -41,6 +41,11 @@
         }
       ]
     ],
-    "owner": "grenxnja"
+    "owner": "grenxnja",
+    "extra": {
+      "eas": {
+        "projectId": "809729c5-d9be-4615-8ec2-83d84ba5e1a3"
+      }
+    }
   }
 }
