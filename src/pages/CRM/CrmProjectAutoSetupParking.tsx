@@ -18,8 +18,14 @@ const API = "/api/crm/project-auto-setup";
 const PROJECTS_API = "/api/unit-master/projects";
 const DROPDOWN_API = "/api/business/dropdown";
 
-const PARKING_TYPES = ["Open", "Covered", "Stack", "Basement"];
-type ParkingTemplateRow = { ParkingType: string; Count: string };
+type ParkingTemplateRow = { ParkingType: string; Count: string; Charge: string; GstRate: string };
+
+async function fetchParkingTypes(): Promise<string[]> {
+  try {
+    const r = await fetchWithAuth("/api/parking-master/types");
+    return r.ok ? r.json() : [];
+  } catch { return []; }
+}
 
 async function fetchProjects(): Promise<any[]> {
   try { const r = await fetchWithAuth(PROJECTS_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -68,6 +74,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
   // that page's data or vice versa.
   const { data: companies = [] } = useQuery({ queryKey: ["business-dropdown-companies"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
   const { data: projects = [] } = useQuery({ queryKey: ["crm-auto-project-setup-parking-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
+  const { data: parkingTypes = [] } = useQuery<string[]>({ queryKey: ["parking-master-types"], queryFn: fetchParkingTypes, staleTime: 10 * 60_000 });
   const projectsForCompany = useMemo(
     () => (companyId ? (projects as any[]).filter((p: any) => String(p.CompanyId) === companyId) : []),
     [projects, companyId],
@@ -98,8 +105,13 @@ const CrmProjectAutoSetupParking: React.FC = () => {
         const r = await fetchWithAuth(`${API}/blocks/${b.Id}/parking-template`);
         const data = r.ok ? await r.json() : { items: [] };
         const rows: ParkingTemplateRow[] = (data.items || []).length
-          ? data.items.map((it: any) => ({ ParkingType: it.ParkingType, Count: String(it.Count) }))
-          : [{ ParkingType: "Open", Count: "1" }];
+          ? data.items.map((it: any) => ({
+              ParkingType: it.ParkingType,
+              Count: String(it.Count),
+              Charge: it.Charge != null ? String(it.Charge) : "",
+              GstRate: it.GstRate != null ? String(it.GstRate) : "",
+            }))
+          : [{ ParkingType: parkingTypes[0] ?? "", Count: "1", Charge: "", GstRate: "" }];
         setParkingTemplates((m) => ({ ...m, [b.Id]: rows }));
       } catch { /* leave unset — user can still add rows manually */ }
     });
@@ -110,7 +122,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
     (parkingTemplates[blockId] || []).reduce((s, r) => s + (parseInt(r.Count, 10) || 0), 0);
 
   const addTemplateRow = (blockId: number) =>
-    setParkingTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { ParkingType: "Open", Count: "1" }] }));
+    setParkingTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { ParkingType: parkingTypes[0] ?? "", Count: "1", Charge: "", GstRate: "" }] }));
   const removeTemplateRow = (blockId: number, idx: number) =>
     setParkingTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).filter((_, i) => i !== idx) }));
   const updateTemplateRow = (blockId: number, idx: number, patch: Partial<ParkingTemplateRow>) =>
@@ -125,7 +137,14 @@ const CrmProjectAutoSetupParking: React.FC = () => {
       const res = await fetchWithAuth(`${API}/blocks/${blockId}/parking-template`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Items: rows.map((r) => ({ ParkingType: r.ParkingType, Count: r.Count })) }),
+        body: JSON.stringify({
+          Items: rows.map((r) => ({
+            ParkingType: r.ParkingType,
+            Count: r.Count,
+            Charge: r.Charge,
+            GstRate: r.GstRate,
+          })),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to save parking template");
@@ -198,7 +217,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
 
   const startEditSlot = (slot: any) => {
     setEditingSlotId(slot.Id);
-    setEditingSlot({ SlotNo: slot.SlotNo || "", ParkingType: slot.ParkingType || "Open" });
+    setEditingSlot({ SlotNo: slot.SlotNo || "", ParkingType: slot.ParkingType || parkingTypes[0] || "" });
   };
 
   const handleSaveSlot = async (blockId: number, slot: any) => {
@@ -298,14 +317,26 @@ const CrmProjectAutoSetupParking: React.FC = () => {
 
                   <div className="space-y-1.5">
                     {rows.map((row, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
+                      <div key={idx} className="flex items-center gap-2 flex-wrap">
                         <select value={row.ParkingType} onChange={(e) => updateTemplateRow(b.Id, idx, { ParkingType: e.target.value })}
-                          className={`${inputCls} !py-1 flex-1`}>
-                          {PARKING_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                          className={`${inputCls} !py-1 flex-1 min-w-[90px]`}>
+                          {parkingTypes.map((t) => <option key={t} value={t}>{t}</option>)}
                         </select>
                         <input type="number" min={1} max={500} placeholder="Count" value={row.Count}
                           onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })}
                           className={`${inputCls} !py-1 !w-20`} />
+                        <div className="relative flex items-center">
+                          <span className="absolute left-2.5 text-xs text-muted-foreground">₹</span>
+                          <input type="number" min={0} placeholder="Charge" value={row.Charge}
+                            onChange={(e) => updateTemplateRow(b.Id, idx, { Charge: e.target.value })}
+                            className={`${inputCls} !py-1 !w-28 pl-6`} />
+                        </div>
+                        <div className="relative flex items-center">
+                          <input type="number" min={0} max={100} step={0.01} placeholder="GST%" value={row.GstRate}
+                            onChange={(e) => updateTemplateRow(b.Id, idx, { GstRate: e.target.value })}
+                            className={`${inputCls} !py-1 !w-20 pr-6`} />
+                          <span className="absolute right-2.5 text-xs text-muted-foreground">%</span>
+                        </div>
                         <button onClick={() => removeTemplateRow(b.Id, idx)} className="text-muted-foreground hover:text-red-600 shrink-0">
                           <X size={12} />
                         </button>
@@ -331,6 +362,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
                       editingSlotId={editingSlotId}
                       editingSlot={editingSlot}
                       savingSlotId={savingSlotId}
+                      parkingTypes={parkingTypes}
                       onStartEdit={startEditSlot}
                       onEditChange={(patch) => setEditingSlot((s) => s ? { ...s, ...patch } : s)}
                       onCancelEdit={() => { setEditingSlotId(null); setEditingSlot(null); }}
@@ -345,10 +377,13 @@ const CrmProjectAutoSetupParking: React.FC = () => {
             })}
           </div>
 
-          {rights.canCreate && (
+          {/* Only show when at least one block has ungenerated slots — mirrors
+              the unit setup's "only show when something is eligible" pattern.
+              Once all templates are fully generated the button disappears. */}
+          {rights.canCreate && blocks.some((b) => templateTotal(b.Id) > (b.ParkingSlotCount || 0)) && (
             <button onClick={handleGenerate} disabled={generating}
               className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              Generate Parking Slots
+              {generating ? "Generating…" : "Generate Parking Slots"}
             </button>
           )}
         </div>
@@ -367,6 +402,7 @@ const ParkingSlotList: React.FC<{
   editingSlotId: number | null;
   editingSlot: { SlotNo: string; ParkingType: string } | null;
   savingSlotId: number | null;
+  parkingTypes: string[];
   onStartEdit: (slot: any) => void;
   onEditChange: (patch: Partial<{ SlotNo: string; ParkingType: string }>) => void;
   onCancelEdit: () => void;
@@ -374,7 +410,7 @@ const ParkingSlotList: React.FC<{
   onDelete: (blockId: number, slot: any) => void;
   canEdit: boolean;
   canDelete: boolean;
-}> = ({ blockId, slots, loading, editingSlotId, editingSlot, savingSlotId, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete, canEdit, canDelete }) => (
+}> = ({ blockId, slots, loading, editingSlotId, editingSlot, savingSlotId, parkingTypes, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete, canEdit, canDelete }) => (
   <div className="ml-4 mt-1 space-y-1 border-l border-border pl-3">
     {loading ? (
       <div className="text-[11px] text-muted-foreground">Loading...</div>
@@ -396,7 +432,7 @@ const ParkingSlotList: React.FC<{
               <select value={editingSlot.ParkingType}
                 onChange={(e) => onEditChange({ ParkingType: e.target.value })}
                 className="h-7 rounded border border-border bg-background px-1 outline-none focus:border-primary">
-                {PARKING_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                {parkingTypes.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </span>
           ) : (

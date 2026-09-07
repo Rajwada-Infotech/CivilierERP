@@ -681,63 +681,85 @@ router.post("/agreement/respond", async (req, res) => {
     const agreementRow = ag.recordset[0];
     const agreementId = agreementRow.Id;
 
-    if (decision === "Approve") {
-      await pool.request()
-        .input("id", sql.Int, agreementId)
-        .query(`
-          UPDATE dbo.CrmAgreement SET
-            CustomerApprovalStatus = '${CrmStatus.APPROVED}', CustomerApprovedAt = SYSDATETIME()
-          WHERE Id = @id
-        `);
-      // proposedDate here is optional — the customer approving content and
-      // proposing/responding on the date in one step. Not a hard requirement:
-      // if turn-taking blocks it (e.g. nothing's been proposed by the
-      // company yet), that's a real validation error and should surface,
-      // not be silently dropped, since money/date info would otherwise
-      // vanish without the customer knowing.
-      if (proposedDate) {
-        await proposeAgreementDate(pool, agreementId, "Customer", proposedDate, null);
+    // Customer-initiated, legally meaningful state change spanning up to 3
+    // tables (Agreement status, Revision snapshot on Recheck, Approval log)
+    // — wrapped so a dropped connection mid-sequence can never leave the
+    // agreement's approval status out of sync with its own revision/audit
+    // trail. Notifications stay outside the tx (pure websocket, no DB write).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      if (decision === "Approve") {
+        await tx.request()
+          .input("id", sql.Int, agreementId)
+          .query(`
+            UPDATE dbo.CrmAgreement SET
+              CustomerApprovalStatus = '${CrmStatus.APPROVED}', CustomerApprovedAt = SYSDATETIME()
+            WHERE Id = @id
+          `);
+        // proposedDate here is optional — the customer approving content and
+        // proposing/responding on the date in one step. Not a hard requirement:
+        // if turn-taking blocks it (e.g. nothing's been proposed by the
+        // company yet), that's a real validation error and should surface,
+        // not be silently dropped, since money/date info would otherwise
+        // vanish without the customer knowing.
+        if (proposedDate) {
+          await proposeAgreementDate(tx, agreementId, "Customer", proposedDate, null);
+        }
+        await syncLegalMilestoneStep(tx, agreementRow.BookingId, "MutualAgreement", null);
+      } else {
+        await tx.request()
+          .input("id",  sql.Int, agreementId)
+          .input("rem", sql.NVarChar(sql.MAX), remarks || null)
+          .query(`
+            UPDATE dbo.CrmAgreement SET
+              CustomerApprovalStatus = 'RecheckRequested',
+              RecheckCount = RecheckCount + 1,
+              CustomerApprovedAt = NULL,
+              LastRecheckRemarks = @rem
+            WHERE Id = @id
+          `);
+
+        await tx.request()
+          .input("agid", sql.Int, agreementId)
+          .input("ver",  sql.Int, agreementRow.VersionNo)
+          .input("adt",  sql.Date, agreementRow.AgreementDate)
+          .input("lname",sql.NVarChar(300), agreementRow.LegalName)
+          .input("laddr",sql.NVarChar(sql.MAX), agreementRow.LegalAddress)
+          .input("pan",  sql.NVarChar(20), agreementRow.PanNo)
+          .input("aadh", sql.NVarChar(20), agreementRow.AadhaarNo)
+          .input("note", sql.NVarChar(sql.MAX), agreementRow.Notes)
+          .input("reason", sql.NVarChar(500), `Customer recheck requested: ${remarks}`)
+          .query(`
+            INSERT INTO dbo.CrmAgreementRevision
+              (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
+            VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, NULL, SYSDATETIME())
+          `);
       }
-      await syncLegalMilestoneStep(pool, agreementRow.BookingId, "MutualAgreement", null);
-    } else {
-      await pool.request()
-        .input("id",  sql.Int, agreementId)
-        .input("rem", sql.NVarChar(sql.MAX), remarks || null)
-        .query(`
-          UPDATE dbo.CrmAgreement SET
-            CustomerApprovalStatus = 'RecheckRequested',
-            RecheckCount = RecheckCount + 1,
-            CustomerApprovedAt = NULL,
-            LastRecheckRemarks = @rem
-          WHERE Id = @id
-        `);
 
-      await pool.request()
+      await tx.request()
         .input("agid", sql.Int, agreementId)
-        .input("ver",  sql.Int, agreementRow.VersionNo)
-        .input("adt",  sql.Date, agreementRow.AgreementDate)
-        .input("lname",sql.NVarChar(300), agreementRow.LegalName)
-        .input("laddr",sql.NVarChar(sql.MAX), agreementRow.LegalAddress)
-        .input("pan",  sql.NVarChar(20), agreementRow.PanNo)
-        .input("aadh", sql.NVarChar(20), agreementRow.AadhaarNo)
-        .input("note", sql.NVarChar(sql.MAX), agreementRow.Notes)
-        .input("reason", sql.NVarChar(500), `Customer recheck requested: ${remarks}`)
+        .input("act",  sql.NVarChar(30), decision === "Approve" ? "CustomerApprove" : "CustomerRecheck")
+        .input("rem",  sql.NVarChar(sql.MAX), remarks || null)
+        .input("aname",sql.NVarChar(200), req.portalUser.email)
         .query(`
-          INSERT INTO dbo.CrmAgreementRevision
-            (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
-          VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, NULL, SYSDATETIME())
+          INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, Remarks, ActorType, ActorId, ActorName, CreatedAt)
+          VALUES (@agid, @act, @rem, 'Customer', NULL, @aname, SYSDATETIME())
         `);
-    }
 
-    await pool.request()
-      .input("agid", sql.Int, agreementId)
-      .input("act",  sql.NVarChar(30), decision === "Approve" ? "CustomerApprove" : "CustomerRecheck")
-      .input("rem",  sql.NVarChar(sql.MAX), remarks || null)
-      .input("aname",sql.NVarChar(200), req.portalUser.email)
-      .query(`
-        INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, Remarks, ActorType, ActorId, ActorName, CreatedAt)
-        VALUES (@agid, @act, @rem, 'Customer', NULL, @aname, SYSDATETIME())
-      `);
+      await logCommunication(tx, {
+        bookingId: agreementRow.BookingId, direction: "Inbound",
+        subject: decision === "Approve" ? "Customer approved the agreement" : "Customer requested a recheck",
+        summary: decision === "Approve"
+          ? `${agreementRow.ApplicantName} approved ${agreementRow.AgreementNo}.`
+          : `${agreementRow.ApplicantName} requested a recheck on ${agreementRow.AgreementNo}: ${remarks}`,
+      });
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     if (agreementRow.AssignedTo) {
       await emitNotification(pool, agreementRow.AssignedTo,
@@ -748,13 +770,6 @@ router.post("/agreement/respond", async (req, res) => {
           : `${agreementRow.ApplicantName} requested a recheck on agreement ${agreementRow.AgreementNo} (${agreementRow.BookingNo}): ${remarks}`,
         agreementId, "crm_agreement");
     }
-    await logCommunication(pool, {
-      bookingId: agreementRow.BookingId, direction: "Inbound",
-      subject: decision === "Approve" ? "Customer approved the agreement" : "Customer requested a recheck",
-      summary: decision === "Approve"
-        ? `${agreementRow.ApplicantName} approved ${agreementRow.AgreementNo}.`
-        : `${agreementRow.ApplicantName} requested a recheck on ${agreementRow.AgreementNo}: ${remarks}`,
-    });
 
     res.json({ success: true });
   } catch (e) {
@@ -786,7 +801,24 @@ router.post("/agreement/propose-date", async (req, res) => {
     }
     const agreementId = agreementRow.Id;
 
-    await proposeAgreementDate(pool, agreementId, "Customer", proposedDate, null);
+    // proposeAgreementDate does 2 writes (DateHistory insert + Agreement
+    // update) plus the comm log here — wrapped so a failure between them
+    // can never leave the negotiation status pointing at a date history
+    // entry that was never actually recorded, or vice versa.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await proposeAgreementDate(tx, agreementId, "Customer", proposedDate, null);
+      await logCommunication(tx, {
+        bookingId: agreementRow.BookingId, direction: "Inbound",
+        subject: `Customer proposed a date — ${proposedDate}`,
+        summary: `${agreementRow.AgreementNo}: ${agreementRow.ApplicantName} proposed ${proposedDate}.`,
+      });
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     if (agreementRow.AssignedTo) {
       await emitNotification(pool, agreementRow.AssignedTo,
@@ -794,11 +826,6 @@ router.post("/agreement/propose-date", async (req, res) => {
         `${agreementRow.ApplicantName} proposed ${proposedDate} for ${agreementRow.AgreementNo} (${agreementRow.BookingNo}) — review and confirm or revise.`,
         agreementId, "crm_agreement");
     }
-    await logCommunication(pool, {
-      bookingId: agreementRow.BookingId, direction: "Inbound",
-      subject: `Customer proposed a date — ${proposedDate}`,
-      summary: `${agreementRow.AgreementNo}: ${agreementRow.ApplicantName} proposed ${proposedDate}.`,
-    });
 
     res.json({ success: true });
   } catch (e) {
@@ -831,7 +858,23 @@ router.post("/agreement/date/accept", async (req, res) => {
     }
     const agreementId = agreementRow.Id;
 
-    await acceptAgreementDate(pool, agreementId, "Customer");
+    // acceptAgreementDate does 2 writes (Agreement status update + approval
+    // log insert) plus the comm log here — same atomicity concern as
+    // propose-date above.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await acceptAgreementDate(tx, agreementId, "Customer");
+      await logCommunication(tx, {
+        bookingId: agreementRow.BookingId, direction: "Inbound",
+        subject: "Customer accepted the proposed date — sent for approval",
+        summary: `${agreementRow.AgreementNo}: ${agreementRow.ApplicantName} accepted ${String(agreementRow.ProposedDate).slice(0, 10)}, sent for super admin sign-off.`,
+      });
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     if (agreementRow.AssignedTo) {
       await emitNotification(pool, agreementRow.AssignedTo,
@@ -839,11 +882,6 @@ router.post("/agreement/date/accept", async (req, res) => {
         `${agreementRow.ApplicantName} accepted our proposed date for ${agreementRow.AgreementNo} (${agreementRow.BookingNo}) — awaiting super admin sign-off.`,
         agreementId, "crm_agreement");
     }
-    await logCommunication(pool, {
-      bookingId: agreementRow.BookingId, direction: "Inbound",
-      subject: "Customer accepted the proposed date — sent for approval",
-      summary: `${agreementRow.AgreementNo}: ${agreementRow.ApplicantName} accepted ${String(agreementRow.ProposedDate).slice(0, 10)}, sent for super admin sign-off.`,
-    });
 
     res.json({ success: true });
   } catch (e) {
@@ -950,28 +988,64 @@ router.post("/sales-deed/respond", async (req, res) => {
     }
     const deedRow = deed.recordset[0];
 
-    if (decision === "Approve") {
-      await pool.request()
-        .input("id", sql.Int, deedRow.Id)
-        .query(`
-          UPDATE dbo.CrmSalesDeed SET
-            CustomerApprovalStatus = '${CrmStatus.APPROVED}',
-            CustomerApprovedAt = SYSDATETIME(),
-            CustomerRecheckRemarks = NULL,
-            DirectorApprovalStatus = '${CrmStatus.PENDING}'
-          WHERE Id = @id
-        `);
-    } else {
-      await pool.request()
-        .input("id", sql.Int, deedRow.Id)
-        .input("rem", sql.NVarChar(sql.MAX), remarks)
-        .query(`
-          UPDATE dbo.CrmSalesDeed SET
-            CustomerApprovalStatus = 'RecheckRequested',
-            CustomerApprovedAt = NULL,
-            CustomerRecheckRemarks = @rem
-          WHERE Id = @id
-        `);
+    // Customer-initiated, legally meaningful state change spanning the deed
+    // status, the communication log, and the approval-log timeline — wrapped
+    // so a dropped connection mid-sequence can never leave the deed's
+    // approval status out of sync with its own audit trail. Notification
+    // stays outside the tx (pure websocket, no DB write).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      if (decision === "Approve") {
+        await tx.request()
+          .input("id", sql.Int, deedRow.Id)
+          .query(`
+            UPDATE dbo.CrmSalesDeed SET
+              CustomerApprovalStatus = '${CrmStatus.APPROVED}',
+              CustomerApprovedAt = SYSDATETIME(),
+              CustomerRecheckRemarks = NULL,
+              DirectorApprovalStatus = '${CrmStatus.PENDING}'
+            WHERE Id = @id
+          `);
+      } else {
+        await tx.request()
+          .input("id", sql.Int, deedRow.Id)
+          .input("rem", sql.NVarChar(sql.MAX), remarks)
+          .query(`
+            UPDATE dbo.CrmSalesDeed SET
+              CustomerApprovalStatus = 'RecheckRequested',
+              CustomerApprovedAt = NULL,
+              CustomerRecheckRemarks = @rem
+            WHERE Id = @id
+          `);
+      }
+
+      await logCommunication(tx, {
+        bookingId: deedRow.BookingId, direction: "Inbound",
+        subject: decision === "Approve" ? "Customer approved the sales deed" : "Customer requested a recheck on sales deed",
+        summary: decision === "Approve"
+          ? `${deedRow.ApplicantName} approved ${deedRow.DeedNo}.`
+          : `${deedRow.ApplicantName} requested a recheck on ${deedRow.DeedNo}: ${remarks}`,
+      });
+
+      // Record in the deed-specific approval audit log for the UI timeline.
+      // Kept best-effort (caught, not rethrown) exactly as before — an older
+      // install missing this table shouldn't block the deed's own status
+      // update — but on the same tx so a genuine deadlock/connection-loss
+      // here still rolls back cleanly instead of a partial commit.
+      try {
+        await tx.request()
+          .input("did", sql.Int, deedRow.Id)
+          .input("act", sql.NVarChar(40), decision === "Approve" ? "CustomerApprove" : "CustomerRecheck")
+          .input("rem", sql.NVarChar(sql.MAX), remarks || null)
+          .query(`INSERT INTO dbo.CrmSalesDeedApprovalLog (SalesDeedId, Action, Remarks, ActorType, CreatedAt)
+                  VALUES (@did, @act, @rem, 'Customer', SYSDATETIME())`);
+      } catch (_) { /* non-fatal — table may not exist on older installs */ }
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
 
     if (deedRow.AssignedTo) {
@@ -983,23 +1057,6 @@ router.post("/sales-deed/respond", async (req, res) => {
           : `${deedRow.ApplicantName} requested a recheck on sale deed ${deedRow.DeedNo} (${deedRow.BookingNo}): ${remarks}`,
         deedRow.Id, "crm_sales_deed");
     }
-    await logCommunication(pool, {
-      bookingId: deedRow.BookingId, direction: "Inbound",
-      subject: decision === "Approve" ? "Customer approved the sales deed" : "Customer requested a recheck on sales deed",
-      summary: decision === "Approve"
-        ? `${deedRow.ApplicantName} approved ${deedRow.DeedNo}.`
-        : `${deedRow.ApplicantName} requested a recheck on ${deedRow.DeedNo}: ${remarks}`,
-    });
-
-    // Record in the deed-specific approval audit log for the UI timeline
-    try {
-      await pool.request()
-        .input("did", sql.Int, deedRow.Id)
-        .input("act", sql.NVarChar(40), decision === "Approve" ? "CustomerApprove" : "CustomerRecheck")
-        .input("rem", sql.NVarChar(sql.MAX), remarks || null)
-        .query(`INSERT INTO dbo.CrmSalesDeedApprovalLog (SalesDeedId, Action, Remarks, ActorType, CreatedAt)
-                VALUES (@did, @act, @rem, 'Customer', SYSDATETIME())`);
-    } catch (_) { /* non-fatal — table may not exist on older installs */ }
 
     res.json({ success: true });
 
@@ -1035,11 +1092,28 @@ router.post("/possession-notice/respond", async (req, res) => {
       return res.status(400).json({ error: `Cannot respond to a notice in status '${row.Status}'` });
     }
 
-    await pool.request().input("id", sql.Int, row.Id).input("reason", sql.NVarChar(sql.MAX), reason || null).query(
-      decision === "Acknowledge"
-        ? "UPDATE dbo.CrmPossessionNotice SET Status = 'Acknowledged', AcknowledgedAt = SYSDATETIME() WHERE Id = @id"
-        : "UPDATE dbo.CrmPossessionNotice SET Status = 'Disputed', DisputedAt = SYSDATETIME(), DisputeReason = @reason WHERE Id = @id"
-    );
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, row.Id).input("reason", sql.NVarChar(sql.MAX), reason || null).query(
+        decision === "Acknowledge"
+          ? "UPDATE dbo.CrmPossessionNotice SET Status = 'Acknowledged', AcknowledgedAt = SYSDATETIME() WHERE Id = @id"
+          : "UPDATE dbo.CrmPossessionNotice SET Status = 'Disputed', DisputedAt = SYSDATETIME(), DisputeReason = @reason WHERE Id = @id"
+      );
+
+      await logCommunication(tx, {
+        bookingId: row.BookingId, direction: "Inbound",
+        subject: decision === "Acknowledge" ? "Customer acknowledged possession notice" : "Customer disputed possession notice",
+        summary: decision === "Acknowledge"
+          ? `${row.ApplicantName} acknowledged ${row.NoticeNo}.`
+          : `${row.ApplicantName} disputed ${row.NoticeNo}: ${reason}`,
+      });
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     if (row.AssignedTo) {
       await emitNotification(pool, row.AssignedTo,
@@ -1050,13 +1124,6 @@ router.post("/possession-notice/respond", async (req, res) => {
           : `${row.ApplicantName} disputed ${row.NoticeNo} (${row.BookingNo}): ${reason}`,
         row.Id, "crm_possession_notice");
     }
-    await logCommunication(pool, {
-      bookingId: row.BookingId, direction: "Inbound",
-      subject: decision === "Acknowledge" ? "Customer acknowledged possession notice" : "Customer disputed possession notice",
-      summary: decision === "Acknowledge"
-        ? `${row.ApplicantName} acknowledged ${row.NoticeNo}.`
-        : `${row.ApplicantName} disputed ${row.NoticeNo}: ${reason}`,
-    });
 
     res.json({ success: true });
   } catch (e) {

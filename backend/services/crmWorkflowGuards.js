@@ -206,7 +206,7 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
     SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
   `);
   if (!milestone1.recordset.length || milestone1.recordset[0].Status !== "Paid") {
-    errors.push("Booking Amount (Milestone 1) must be fully paid before agreement preparation");
+    errors.push("Booking Amount (Milestone 1) must be fully paid before agreement preparation — if the customer's payment is showing under On Account, apply it to this milestone first via On Account Adjustment");
   }
 
   // Financing Type must be explicitly declared (Self-funded / Loan-financed)

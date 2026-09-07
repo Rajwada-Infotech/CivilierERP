@@ -188,8 +188,16 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   //     conversion rolls back too, leaving the slot still held and retryable.
   //     Previously guardAndConvertHold ran outside the tx: a failed INSERT
   //     would permanently orphan the conversion (hold gone, slot unallotted).
-  const tx = pool.transaction();
-  await tx.begin();
+  //
+  // Callers can pass either a plain pool (the normal case — this function
+  // opens and owns its own transaction below) or an already-open Transaction
+  // (e.g. crmBookingAmendments.js's approve route, which needs this INSERT
+  // to commit/rollback together with its own Status='Approved' write). An
+  // mssql Transaction has no .transaction() factory — only ConnectionPool
+  // does — so that's the reliable way to tell which was handed in.
+  const ownsTransaction = typeof pool.transaction === "function";
+  const tx = ownsTransaction ? pool.transaction() : pool;
+  if (ownsTransaction) await tx.begin();
   let allotmentId;
   try {
     await assertSlotAvailable(tx, parkingSlotId);
@@ -215,9 +223,11 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
         VALUES (@bid, @aid, @pmid, @sid, @slot, @qty, @rate, @gstr, @gsta, @tot, 'Pending', @note, @cb, SYSDATETIME())
       `);
     allotmentId = result.recordset[0].Id;
-    await tx.commit();
+    if (ownsTransaction) await tx.commit();
   } catch (txErr) {
-    try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    if (ownsTransaction) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    }
     throw txErr;
   }
   // ── END ATOMIC SECTION ──────────────────────────────────────────────────
@@ -829,6 +839,8 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
+    // applyAddParking owns its own transaction internally (see the function
+    // for why — slot-lock atomicity), so a plain pool is correct here.
     const result = await applyAddParking(pool, bookingId, b, actorId(req));
     res.status(201).json({ success: true, ...result });
   } catch (e) {
@@ -866,8 +878,20 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
-    const result = await applyEditParking(pool, id, b);
-    res.json({ success: true, ...result });
+    // applyEditParking does UPDATE allotment + (optional) milestone UPDATE +
+    // rollupBookingTotals + syncParkingPaymentStatus — wrapped so a failure
+    // partway through can't leave the allotment's new quantity/rate out of
+    // sync with the booking's rolled-up totals or payment-status flag.
+    const tx = pool.transaction();
+    try {
+      await tx.begin();
+      const result = await applyEditParking(tx, id, b);
+      await tx.commit();
+      res.json({ success: true, ...result });
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
   } catch (e) {
     console.error("[crm-parking] PUT error:", e.message);
     res.status(e.status || 500).json({ error: e.message });
@@ -954,8 +978,19 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
-    const result = await applyReleaseParking(pool, id, actorId(req), reason);
-    res.json({ success: true, ...result });
+    // applyReleaseParking does UPDATE allotment + (optional) milestone DELETE
+    // + rollupBookingTotals + syncParkingPaymentStatus + audit log — same
+    // atomicity concern as PUT above.
+    const tx = pool.transaction();
+    try {
+      await tx.begin();
+      const result = await applyReleaseParking(tx, id, actorId(req), reason);
+      await tx.commit();
+      res.json({ success: true, ...result });
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
   } catch (e) {
     console.error("[crm-parking] DELETE error:", e.message);
     res.status(e.status || 500).json({ error: e.message });

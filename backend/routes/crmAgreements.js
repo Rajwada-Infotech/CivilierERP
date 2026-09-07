@@ -187,9 +187,18 @@ router.get("/eligible-bookings", requirePageRight("crm-agreements", "create"), a
   try {
     const pool = getPool();
     const candidates = await pool.request().query(`
-      SELECT b.Id, b.BookingNo, a.ApplicantName
+      SELECT b.Id, b.BookingNo, a.ApplicantName,
+             cust.CustomerName AS LegalName,
+             cust.PanNo, cust.AadhaarNo,
+             NULLIF(LTRIM(RTRIM(CONCAT_WS(', ',
+               NULLIF(LTRIM(RTRIM(cust.Address)), ''),
+               NULLIF(LTRIM(RTRIM(cust.City)), ''),
+               NULLIF(LTRIM(RTRIM(cust.State)), ''),
+               NULLIF(LTRIM(RTRIM(cust.Pincode)), '')
+             ))), '') AS LegalAddress
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.CrmCustomer cust ON cust.Id = a.CustomerId
       WHERE b.Status = '${CrmStatus.APPROVED}' AND b.IsActive = 1
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id)
       ORDER BY b.BookingNo
@@ -198,7 +207,12 @@ router.get("/eligible-bookings", requirePageRight("crm-agreements", "create"), a
     const eligible = [];
     for (const c of candidates.recordset) {
       const prereq = await validateAgreementPreparationPrerequisites(pool, c.Id);
-      if (prereq.ok) eligible.push({ Id: c.Id, BookingNo: c.BookingNo, ApplicantName: c.ApplicantName });
+      if (prereq.ok) eligible.push({
+        Id: c.Id, BookingNo: c.BookingNo, ApplicantName: c.ApplicantName,
+        LegalName: c.LegalName || c.ApplicantName || "",
+        PanNo: c.PanNo || "", AadhaarNo: c.AadhaarNo || "",
+        LegalAddress: c.LegalAddress || "",
+      });
     }
     res.json(eligible);
   } catch (e) {
@@ -324,50 +338,66 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
     // /:id/date/accept, or POST /agreement/propose-date + /agreement/respond
     // on the portal side). A field that let staff type a date directly here
     // would silently bypass that mandate.
-    const result = await pool.request()
-      .input("agno",  sql.NVarChar(50),  agNo)
-      .input("bid",   sql.Int,           parseInt(b.BookingId))
-      .input("lname", sql.NVarChar(300), b.LegalName     || null)
-      .input("laddr", sql.NVarChar(sql.MAX), b.LegalAddress  || null)
-      .input("pan",   sql.NVarChar(20),  b.PanNo         || null)
-      .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
-      .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("leg",   sql.Int,           b.LegalExecutiveId ? parseInt(b.LegalExecutiveId) : null)
-      .input("pd",    sql.Date,          preferredDate)
-      .input("cb",    sql.Int,           actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmAgreement
-          (AgreementNo, BookingId, LegalName, LegalAddress, PanNo, AadhaarNo, Status, Notes, LegalExecutiveId, ProposedDate, ProposedDateStatus, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@agno, @bid, @lname, @laddr, @pan, @aadh, 'Draft', @note, @leg, @pd, CASE WHEN @pd IS NOT NULL THEN 'PendingCustomerReview' ELSE NULL END, @cb, SYSDATETIME())
-      `);
-    const agreementId = result.recordset[0].Id;
-    
-    if (preferredDate) {
-      await pool.request()
-        .input("agid", sql.Int, agreementId)
-        .input("pd",   sql.Date, preferredDate)
-        .input("cb",   sql.Int, actorId(req))
+    // The Agreement row, its optional initial date-history entry, and its
+    // mandatory SaleAgreement document placeholder are one creation event —
+    // wrapped so a failure partway through can't leave an Agreement with no
+    // mandatory-document row (which would then never gate execution) or a
+    // ProposedDateStatus pointing at a date-history entry that was never
+    // actually written.
+    const tx0 = pool.transaction();
+    await tx0.begin();
+    let agreementId;
+    try {
+      const result = await tx0.request()
+        .input("agno",  sql.NVarChar(50),  agNo)
+        .input("bid",   sql.Int,           parseInt(b.BookingId))
+        .input("lname", sql.NVarChar(300), b.LegalName     || null)
+        .input("laddr", sql.NVarChar(sql.MAX), b.LegalAddress  || null)
+        .input("pan",   sql.NVarChar(20),  b.PanNo         || null)
+        .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
+        .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("leg",   sql.Int,           b.LegalExecutiveId ? parseInt(b.LegalExecutiveId) : null)
+        .input("pd",    sql.Date,          preferredDate)
+        .input("cb",    sql.Int,           actorId(req))
         .query(`
-          INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
-          VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
+          INSERT INTO dbo.CrmAgreement
+            (AgreementNo, BookingId, LegalName, LegalAddress, PanNo, AadhaarNo, Status, Notes, LegalExecutiveId, ProposedDate, ProposedDateStatus, CreatedBy, CreatedAt)
+          OUTPUT INSERTED.Id
+          VALUES (@agno, @bid, @lname, @laddr, @pan, @aadh, 'Draft', @note, @leg, @pd, CASE WHEN @pd IS NOT NULL THEN 'PendingCustomerReview' ELSE NULL END, @cb, SYSDATETIME())
         `);
-    }
+      agreementId = result.recordset[0].Id;
 
-    // Same standing SaleAgreement request maybeAutoCreateAgreement() seeds
-    // for the normal (auto-created) path — this manual "New Agreement"
-    // dialog is the fallback path (e.g. no unit preselected on the
-    // Application), and must guarantee the same baseline: every agreement,
-    // however it was created, always has the real legal paperwork tracked
-    // as a mandatory document from day one.
-    await pool.request()
-      .input("agid", sql.Int, agreementId)
-      .input("cb", sql.Int, actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmAgreementDocument
-          (AgreementId, DocumentType, Label, IsMandatory, Status, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
-        VALUES (@agid, 'SaleAgreement', 'Sale Agreement (Legal Paperwork)', 1, 'Requested', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
-      `);
+      if (preferredDate) {
+        await tx0.request()
+          .input("agid", sql.Int, agreementId)
+          .input("pd",   sql.Date, preferredDate)
+          .input("cb",   sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
+            VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
+          `);
+      }
+
+      // Same standing SaleAgreement request maybeAutoCreateAgreement() seeds
+      // for the normal (auto-created) path — this manual "New Agreement"
+      // dialog is the fallback path (e.g. no unit preselected on the
+      // Application), and must guarantee the same baseline: every agreement,
+      // however it was created, always has the real legal paperwork tracked
+      // as a mandatory document from day one.
+      await tx0.request()
+        .input("agid", sql.Int, agreementId)
+        .input("cb", sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreementDocument
+            (AgreementId, DocumentType, Label, IsMandatory, Status, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
+          VALUES (@agid, 'SaleAgreement', 'Sale Agreement (Legal Paperwork)', 1, 'Requested', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
+        `);
+
+      await tx0.commit();
+    } catch (txErr) {
+      try { await tx0.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     // Same auto-start maybeAutoCreateAgreement() does for the normal path —
     // this manual dialog must not leave the booking without a Legal
@@ -756,16 +786,29 @@ router.put("/:id/date/reject", requirePageRight("crm-agreements", "edit"), async
     const pool = getPool();
     const lockReason = await getAgreementBookingLockReason(pool, id);
     if (lockReason) return res.status(409).json({ error: `Cannot reject a date — ${lockReason}. Cancel the agreement instead.` });
+    // approvalTransition owns its own internal transaction/locking and must
+    // run on the plain pool (same established pattern as elsewhere in this
+    // file) — but the reset + approval-log write that follow it are wrapped
+    // together so a failure between them can't leave the negotiation reset
+    // with no trace of the rejection in the approval log.
     const result = await approvalTransition("crm-agreement-date", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks);
-    await resetAgreementDateNegotiation(pool, id);
-    await pool.request()
-      .input("agid", sql.Int, id)
-      .input("rem", sql.NVarChar(sql.MAX), remarks)
-      .input("aid", sql.Int, actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, Remarks, ActorType, ActorId, CreatedAt)
-        VALUES (@agid, 'AgreementDateRejected', @rem, 'Staff', @aid, SYSDATETIME())
-      `);
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await resetAgreementDateNegotiation(tx, id);
+      await tx.request()
+        .input("agid", sql.Int, id)
+        .input("rem", sql.NVarChar(sql.MAX), remarks)
+        .input("aid", sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, Remarks, ActorType, ActorId, CreatedAt)
+          VALUES (@agid, 'AgreementDateRejected', @rem, 'Staff', @aid, SYSDATETIME())
+        `);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     const info = await pool.request().input("id", sql.Int, id).query(`
       SELECT ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo FROM dbo.CrmAgreement ag JOIN dbo.CrmBooking b ON b.Id = ag.BookingId WHERE ag.Id = @id
@@ -837,48 +880,61 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
       return res.status(400).json({ error: "Upload at least one agreement document before sending it to the customer portal" });
     }
 
-    // Preserve the prior proposed date (if any) in history before it's
-    // overwritten — nothing about the negotiation is ever lost. If
-    // proposedDate is omitted, leave whatever's currently on ProposedDate/
-    // ProposedDateStatus alone (e.g. resending after recheck without
-    // changing the date already on the table).
-    if (proposedDate) {
-      await pool.request()
-        .input("agid", sql.Int, id)
-        .input("pd",   sql.Date, proposedDate)
-        .input("cb",   sql.Int, actorId(req))
-        .query(`
-          INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
-          VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
-        `);
-      await pool.request()
-        .input("id", sql.Int, id)
-        .input("pd", sql.Date, proposedDate)
+    // Up to 5 writes describing one event (send-to-customer, optionally
+    // carrying a fresh proposed date) — wrapped so a failure partway through
+    // can't leave the Agreement marked SentToCustomer with no approval-log
+    // entry, or a ProposedDate set with no matching history row.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      // Preserve the prior proposed date (if any) in history before it's
+      // overwritten — nothing about the negotiation is ever lost. If
+      // proposedDate is omitted, leave whatever's currently on ProposedDate/
+      // ProposedDateStatus alone (e.g. resending after recheck without
+      // changing the date already on the table).
+      if (proposedDate) {
+        await tx.request()
+          .input("agid", sql.Int, id)
+          .input("pd",   sql.Date, proposedDate)
+          .input("cb",   sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
+            VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
+          `);
+        await tx.request()
+          .input("id", sql.Int, id)
+          .input("pd", sql.Date, proposedDate)
+          .query(`
+            UPDATE dbo.CrmAgreement SET
+              ProposedDate = @pd, ProposedDateStatus = '${CrmStatus.PENDING_CUSTOMER_REVIEW}'
+            WHERE Id = @id
+          `);
+      }
+
+      await tx.request()
+        .input("id",  sql.Int, id)
         .query(`
           UPDATE dbo.CrmAgreement SET
-            ProposedDate = @pd, ProposedDateStatus = '${CrmStatus.PENDING_CUSTOMER_REVIEW}'
+            SentToCustomerAt = SYSDATETIME(),
+            CustomerApprovalStatus = '${CrmStatus.PENDING}',
+            CustomerApprovedAt = NULL
           WHERE Id = @id
         `);
+
+      await tx.request()
+        .input("agid", sql.Int, id)
+        .input("aid",  sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, ActorType, ActorId, CreatedAt)
+          VALUES (@agid, 'SendToCustomer', 'Staff', @aid, SYSDATETIME())
+        `);
+      await syncLegalMilestoneStep(tx, ag.recordset[0].BookingId, "DocShared", actorId(req));
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
-
-    await pool.request()
-      .input("id",  sql.Int, id)
-      .query(`
-        UPDATE dbo.CrmAgreement SET
-          SentToCustomerAt = SYSDATETIME(),
-          CustomerApprovalStatus = '${CrmStatus.PENDING}',
-          CustomerApprovedAt = NULL
-        WHERE Id = @id
-      `);
-
-    await pool.request()
-      .input("agid", sql.Int, id)
-      .input("aid",  sql.Int, actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, ActorType, ActorId, CreatedAt)
-        VALUES (@agid, 'SendToCustomer', 'Staff', @aid, SYSDATETIME())
-      `);
-    await syncLegalMilestoneStep(pool, ag.recordset[0].BookingId, "DocShared", actorId(req));
 
     res.json({ success: true });
   } catch (e) {
@@ -1025,56 +1081,73 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
       }
     }
 
-    if (touchesLegalContent) {
-      await pool.request()
-        .input("agid", sql.Int, id)
-        .input("ver",  sql.Int, oldRow.VersionNo)
-        .input("adt",  sql.Date, oldRow.AgreementDate)
-        .input("lname",sql.NVarChar(300), oldRow.LegalName)
-        .input("laddr",sql.NVarChar(sql.MAX), oldRow.LegalAddress)
-        .input("pan",  sql.NVarChar(20), oldRow.PanNo)
-        .input("aadh", sql.NVarChar(20), oldRow.AadhaarNo)
-        .input("note", sql.NVarChar(sql.MAX), oldRow.Notes)
-        .input("reason", sql.NVarChar(200), b.RevisionReason || "Staff correction")
-        .input("cb",   sql.Int, actor)
-        .query(`
-          INSERT INTO dbo.CrmAgreementRevision
-            (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
-          VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, @cb, SYSDATETIME())
-        `);
-    }
-
     const newLegalExecutiveId = b.LegalExecutiveId !== undefined
       ? (b.LegalExecutiveId ? parseInt(b.LegalExecutiveId) : null)
       : oldRow.LegalExecutiveId;
 
-    await pool.request()
-      .input("id",    sql.Int,           id)
-      .input("lname", sql.NVarChar(300), b.LegalName     || null)
-      .input("laddr", sql.NVarChar(sql.MAX), b.LegalAddress  || null)
-      .input("pan",   sql.NVarChar(20),  b.PanNo         || null)
-      .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
-      .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("bump",  sql.Int,           touchesLegalContent ? 1 : 0)
-      .input("leg",   sql.Int,           newLegalExecutiveId)
-      .input("ub",    sql.Int,           actor)
-      .query(`
-        UPDATE dbo.CrmAgreement SET
-          LegalName = ISNULL(@lname, LegalName),
-          LegalAddress = ISNULL(@laddr, LegalAddress),
-          PanNo = ISNULL(@pan, PanNo),
-          AadhaarNo = ISNULL(@aadh, AadhaarNo),
-          Notes = @note, VersionNo = VersionNo + @bump,
-          LegalExecutiveId = @leg,
-          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
+    // The pre-edit Revision snapshot and the actual VersionNo bump on the
+    // Agreement row must land together — wrapped so a failure between them
+    // can't leave a Revision row referencing a VersionNo that was never
+    // actually superseded (or the reverse: a bumped VersionNo with no
+    // snapshot of what the prior version looked like).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      if (touchesLegalContent) {
+        await tx.request()
+          .input("agid", sql.Int, id)
+          .input("ver",  sql.Int, oldRow.VersionNo)
+          .input("adt",  sql.Date, oldRow.AgreementDate)
+          .input("lname",sql.NVarChar(300), oldRow.LegalName)
+          .input("laddr",sql.NVarChar(sql.MAX), oldRow.LegalAddress)
+          .input("pan",  sql.NVarChar(20), oldRow.PanNo)
+          .input("aadh", sql.NVarChar(20), oldRow.AadhaarNo)
+          .input("note", sql.NVarChar(sql.MAX), oldRow.Notes)
+          .input("reason", sql.NVarChar(200), b.RevisionReason || "Staff correction")
+          .input("cb",   sql.Int, actor)
+          .query(`
+            INSERT INTO dbo.CrmAgreementRevision
+              (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
+            VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, @cb, SYSDATETIME())
+          `);
+      }
+
+      await tx.request()
+        .input("id",    sql.Int,           id)
+        .input("lname", sql.NVarChar(300), b.LegalName     || null)
+        .input("laddr", sql.NVarChar(sql.MAX), b.LegalAddress  || null)
+        .input("pan",   sql.NVarChar(20),  b.PanNo         || null)
+        .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
+        .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("bump",  sql.Int,           touchesLegalContent ? 1 : 0)
+        .input("leg",   sql.Int,           newLegalExecutiveId)
+        .input("ub",    sql.Int,           actor)
+        .query(`
+          UPDATE dbo.CrmAgreement SET
+            LegalName = ISNULL(@lname, LegalName),
+            LegalAddress = ISNULL(@laddr, LegalAddress),
+            PanNo = ISNULL(@pan, PanNo),
+            AadhaarNo = ISNULL(@aadh, AadhaarNo),
+            Notes = @note, VersionNo = VersionNo + @bump,
+            LegalExecutiveId = @leg,
+            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+
+      if (newLegalExecutiveId && newLegalExecutiveId !== oldRow.LegalExecutiveId) {
+        await syncLegalMilestoneStep(tx, oldRow.BookingId, "LegalReview", actor);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     // Notify the legal executive the moment they're assigned/reassigned —
     // same as at creation time — so the handoff to "the legal person" is
     // never just a silent database field nobody checks.
     if (newLegalExecutiveId && newLegalExecutiveId !== oldRow.LegalExecutiveId) {
-      await syncLegalMilestoneStep(pool, oldRow.BookingId, "LegalReview", actor);
       await emitNotification(pool, newLegalExecutiveId, "crm_agreement_legal_assigned",
         "Agreement Assigned For Preparation",
         `${oldRow.AgreementNo} assigned to you for legal preparation.`,
@@ -1114,15 +1187,26 @@ router.put("/:id/assign-legal", requirePageRight("crm-agreements", "edit"), asyn
       return res.status(400).json({ error: `Cannot reassign a legal executive on an agreement that is already ${oldRow.Status}` });
     }
 
-    await pool.request().input("id", sql.Int, id).input("leg", sql.Int, newId).input("ub", sql.Int, actor)
-      .query("UPDATE dbo.CrmAgreement SET LegalExecutiveId = @leg, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).input("leg", sql.Int, newId).input("ub", sql.Int, actor)
+        .query("UPDATE dbo.CrmAgreement SET LegalExecutiveId = @leg, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id");
 
-    await logCrmAudit(pool, "Agreement", id, actor, [
-      { field: "LegalExecutiveId", oldVal: oldRow.LegalExecutiveId ? String(oldRow.LegalExecutiveId) : null, newVal: newId ? String(newId) : null },
-    ]);
+      await logCrmAudit(tx, "Agreement", id, actor, [
+        { field: "LegalExecutiveId", oldVal: oldRow.LegalExecutiveId ? String(oldRow.LegalExecutiveId) : null, newVal: newId ? String(newId) : null },
+      ]);
+
+      if (newId && newId !== oldRow.LegalExecutiveId) {
+        await syncLegalMilestoneStep(tx, oldRow.BookingId, "LegalReview", actor);
+      }
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     if (newId && newId !== oldRow.LegalExecutiveId) {
-      await syncLegalMilestoneStep(pool, oldRow.BookingId, "LegalReview", actor);
       await emitNotification(pool, newId, "crm_agreement_legal_assigned",
         "Agreement Assigned For Preparation",
         `${oldRow.AgreementNo} assigned to you for legal preparation.`,
@@ -1335,17 +1419,25 @@ router.put("/:id/cancel", requirePageRight("crm-agreements", "edit"), async (req
       return res.status(400).json({ error: `Cannot cancel an agreement in status '${cur.recordset[0].Status}'` });
     }
 
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("ub", sql.Int, actor)
-      .query(`
-        UPDATE dbo.CrmAgreement SET Status = '${CrmStatus.CANCELLED}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("ub", sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmAgreement SET Status = '${CrmStatus.CANCELLED}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
 
-    await logCrmAudit(pool, "Agreement", id, actor, [
-      { field: "Status", oldVal: cur.recordset[0].Status, newVal: CrmStatus.CANCELLED },
-    ]);
+      await logCrmAudit(tx, "Agreement", id, actor, [
+        { field: "Status", oldVal: cur.recordset[0].Status, newVal: CrmStatus.CANCELLED },
+      ]);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     res.json({ success: true, status: CrmStatus.CANCELLED });
   } catch (e) {
@@ -1376,25 +1468,41 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
       .query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
     const nextVersion = ver.recordset[0].N;
 
-    const inserted = await pool.request()
-      .input("agid",  sql.Int,            agreementId)
-      .input("dtype", sql.NVarChar(100),  b.DocumentType)
-      .input("url",   sql.NVarChar(2000), b.DocumentUrl  || null)
-      .input("fname", sql.NVarChar(300),  b.FileName     || null)
-      .input("iby",   sql.NVarChar(200),  b.IssuedBy     || null)
-      .input("st",    sql.NVarChar(30),   b.Status || "Uploaded")
-      .input("rem",   sql.NVarChar(sql.MAX), b.Remarks   || null)
-      .input("uat",   sql.DateTime2(3),   b.UploadedAt   || null)
-      .input("ver",   sql.Int,            nextVersion)
-      .input("cb",    sql.Int,            actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmAgreementDocument
-          (AgreementId, DocumentType, DocumentUrl, FileName, IssuedBy, Status, Remarks, UploadedAt, VersionNo, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@agid, @dtype, @url, @fname, @iby, @st, @rem, ISNULL(@uat, SYSDATETIME()), @ver, @cb, SYSDATETIME())
-      `);
-    await syncLegalMilestoneFromDocument(pool, inserted.recordset[0].Id, actorId(req));
-    res.status(201).json({ success: true, version: nextVersion });
+    // The document INSERT and the legal-milestone sync it can trigger are
+    // wrapped together so a failure in the sync step can't report a 500 back
+    // to the client for a document that, from the DB's perspective, was
+    // already successfully attached — which would otherwise invite a retry
+    // that silently creates a duplicate version.
+    const tx = pool.transaction();
+    await tx.begin();
+    let docId, nextVersionOut;
+    try {
+      const inserted = await tx.request()
+        .input("agid",  sql.Int,            agreementId)
+        .input("dtype", sql.NVarChar(100),  b.DocumentType)
+        .input("url",   sql.NVarChar(2000), b.DocumentUrl  || null)
+        .input("fname", sql.NVarChar(300),  b.FileName     || null)
+        .input("iby",   sql.NVarChar(200),  b.IssuedBy     || null)
+        .input("st",    sql.NVarChar(30),   b.Status || "Uploaded")
+        .input("rem",   sql.NVarChar(sql.MAX), b.Remarks   || null)
+        .input("uat",   sql.DateTime2(3),   b.UploadedAt   || null)
+        .input("ver",   sql.Int,            nextVersion)
+        .input("cb",    sql.Int,            actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreementDocument
+            (AgreementId, DocumentType, DocumentUrl, FileName, IssuedBy, Status, Remarks, UploadedAt, VersionNo, CreatedBy, CreatedAt)
+          OUTPUT INSERTED.Id
+          VALUES (@agid, @dtype, @url, @fname, @iby, @st, @rem, ISNULL(@uat, SYSDATETIME()), @ver, @cb, SYSDATETIME())
+        `);
+      docId = inserted.recordset[0].Id;
+      nextVersionOut = nextVersion;
+      await syncLegalMilestoneFromDocument(tx, docId, actorId(req));
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+    res.status(201).json({ success: true, version: nextVersionOut });
   } catch (e) {
     console.error("[crm-agreements] POST documents error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -1503,29 +1611,37 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
         .query("SELECT ISNULL(MAX(VersionNo), 0) AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
       let nextVersion = ver.recordset[0].N;
 
+      const tx = pool.transaction();
+      await tx.begin();
       const inserted = [];
-      for (const file of req.files) {
-        nextVersion += 1;
-        const result = await pool.request()
-          .input("agid",  sql.Int, agreementId)
-          .input("dtype", sql.NVarChar(100), docType)
-          .input("fname", sql.NVarChar(300), file.originalname)
-          .input("fb64",  sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
-          .input("fs",    sql.BigInt, file.size)
-          .input("mt",    sql.NVarChar(150), file.mimetype)
-          .input("iby",   sql.NVarChar(200), req.body?.IssuedBy || null)
-          .input("rem",   sql.NVarChar(sql.MAX), req.body?.Remarks || null)
-          .input("ver",   sql.Int, nextVersion)
-          .input("cb",    sql.Int, actorId(req))
-          .query(`
-            INSERT INTO dbo.CrmAgreementDocument
-              (AgreementId, DocumentType, FileName, FileBase64, FileSize, MimeType, IssuedBy, Status, Remarks, UploadedAt, VersionNo, CreatedBy, CreatedAt)
-            OUTPUT INSERTED.Id
-            VALUES (@agid, @dtype, @fname, @fb64, @fs, @mt, @iby, 'Uploaded', @rem, SYSDATETIME(), @ver, @cb, SYSDATETIME())
-          `);
-        inserted.push(result.recordset[0].Id);
+      try {
+        for (const file of req.files) {
+          nextVersion += 1;
+          const result = await tx.request()
+            .input("agid",  sql.Int, agreementId)
+            .input("dtype", sql.NVarChar(100), docType)
+            .input("fname", sql.NVarChar(300), file.originalname)
+            .input("fb64",  sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
+            .input("fs",    sql.BigInt, file.size)
+            .input("mt",    sql.NVarChar(150), file.mimetype)
+            .input("iby",   sql.NVarChar(200), req.body?.IssuedBy || null)
+            .input("rem",   sql.NVarChar(sql.MAX), req.body?.Remarks || null)
+            .input("ver",   sql.Int, nextVersion)
+            .input("cb",    sql.Int, actorId(req))
+            .query(`
+              INSERT INTO dbo.CrmAgreementDocument
+                (AgreementId, DocumentType, FileName, FileBase64, FileSize, MimeType, IssuedBy, Status, Remarks, UploadedAt, VersionNo, CreatedBy, CreatedAt)
+              OUTPUT INSERTED.Id
+              VALUES (@agid, @dtype, @fname, @fb64, @fs, @mt, @iby, 'Uploaded', @rem, SYSDATETIME(), @ver, @cb, SYSDATETIME())
+            `);
+          inserted.push(result.recordset[0].Id);
+        }
+        if (inserted.length) await syncLegalMilestoneFromDocument(tx, inserted[inserted.length - 1], actorId(req));
+        await tx.commit();
+      } catch (txErr) {
+        try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+        throw txErr;
       }
-      if (inserted.length) await syncLegalMilestoneFromDocument(pool, inserted[inserted.length - 1], actorId(req));
       res.status(201).json({ success: true, ids: inserted, count: inserted.length });
     } catch (e) {
       console.error("[crm-agreements] upload documents error:", e.message);
@@ -1566,20 +1682,28 @@ router.post("/:id/documents/:docId/attach", requirePageRight("crm-documents", "c
       const execLockReason = await agreementExecutedLockReason(pool, agreementId);
       if (execLockReason) return res.status(409).json({ error: `Cannot upload a document — ${execLockReason}.` });
 
-      await pool.request()
-        .input("id", sql.Int, docId)
-        .input("fname", sql.NVarChar(300), req.file.originalname)
-        .input("fb64", sql.NVarChar(sql.MAX), req.file.buffer.toString("base64"))
-        .input("fs", sql.BigInt, req.file.size)
-        .input("mt", sql.NVarChar(150), req.file.mimetype)
-        .input("cb", sql.Int, actorId(req))
-        .query(`
-          UPDATE dbo.CrmAgreementDocument SET
-            FileName = @fname, FileBase64 = @fb64, FileSize = @fs, MimeType = @mt,
-            Status = 'Uploaded', Remarks = NULL, UploadedAt = SYSDATETIME(), UploadedByType = 'Staff', CreatedBy = ISNULL(CreatedBy, @cb)
-          WHERE Id = @id
-        `);
-      await syncLegalMilestoneFromDocument(pool, docId, actorId(req));
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await tx.request()
+          .input("id", sql.Int, docId)
+          .input("fname", sql.NVarChar(300), req.file.originalname)
+          .input("fb64", sql.NVarChar(sql.MAX), req.file.buffer.toString("base64"))
+          .input("fs", sql.BigInt, req.file.size)
+          .input("mt", sql.NVarChar(150), req.file.mimetype)
+          .input("cb", sql.Int, actorId(req))
+          .query(`
+            UPDATE dbo.CrmAgreementDocument SET
+              FileName = @fname, FileBase64 = @fb64, FileSize = @fs, MimeType = @mt,
+              Status = 'Uploaded', Remarks = NULL, UploadedAt = SYSDATETIME(), UploadedByType = 'Staff', CreatedBy = ISNULL(CreatedBy, @cb)
+            WHERE Id = @id
+          `);
+        await syncLegalMilestoneFromDocument(tx, docId, actorId(req));
+        await tx.commit();
+      } catch (txErr) {
+        try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+        throw txErr;
+      }
 
       res.json({ success: true });
     } catch (e) {
@@ -1702,21 +1826,29 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
       if (execLockReason) return res.status(409).json({ error: `Cannot reject — ${execLockReason}. The document can no longer be re-uploaded, so rejecting it now would leave it permanently stuck.` });
     }
 
-    await pool.request()
-      .input("id",  sql.Int,          docId)
-      .input("st",  sql.NVarChar(30), b.Status || null)
-      .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
-      .query(`
-        UPDATE dbo.CrmAgreementDocument SET
-          Status = ISNULL(@st, Status), Remarks = @rem
-        WHERE Id = @id
-      `);
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",  sql.Int,          docId)
+        .input("st",  sql.NVarChar(30), b.Status || null)
+        .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
+        .query(`
+          UPDATE dbo.CrmAgreementDocument SET
+            Status = ISNULL(@st, Status), Remarks = @rem
+          WHERE Id = @id
+        `);
 
-    if (b.Status && b.Status !== oldRow.Status) {
-      await logCrmAudit(pool, "AgreementDocument", docId, actor, [
-        { field: "Status", oldVal: oldRow.Status, newVal: b.Status },
-      ]);
-      await syncLegalMilestoneFromDocument(pool, docId, actor);
+      if (b.Status && b.Status !== oldRow.Status) {
+        await logCrmAudit(tx, "AgreementDocument", docId, actor, [
+          { field: "Status", oldVal: oldRow.Status, newVal: b.Status },
+        ]);
+        await syncLegalMilestoneFromDocument(tx, docId, actor);
+      }
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
 
     res.json({ success: true });
@@ -1777,31 +1909,40 @@ router.put("/:id/proxy-customer-approve", requirePageRight("crm-agreements", "ed
       .query("SELECT name FROM dbo.Users WHERE id = @uid");
     const actorName = actorRow.recordset[0]?.name || "Staff";
 
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("ub", sql.Int, actor)
-      .query(`
-        UPDATE dbo.CrmAgreement SET
-          CustomerApprovalStatus = '${CrmStatus.APPROVED}',
-          CustomerApprovedAt = SYSDATETIME(),
-          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("ub", sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmAgreement SET
+            CustomerApprovalStatus = '${CrmStatus.APPROVED}',
+            CustomerApprovedAt = SYSDATETIME(),
+            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
 
-    await pool.request()
-      .input("agid",   sql.Int,           id)
-      .input("actor",  sql.Int,           actor)
-      .input("aname",  sql.NVarChar(200), actorName)
-      .input("method", sql.NVarChar(30),  ProxyMethod)
-      .input("rem",    sql.NVarChar(sql.MAX), ProxyRemarks.trim())
-      .query(`
-        INSERT INTO dbo.CrmAgreementApprovalLog
-          (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
-        VALUES (@agid, 'CustomerApprove', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
-      `);
+      await tx.request()
+        .input("agid",   sql.Int,           id)
+        .input("actor",  sql.Int,           actor)
+        .input("aname",  sql.NVarChar(200), actorName)
+        .input("method", sql.NVarChar(30),  ProxyMethod)
+        .input("rem",    sql.NVarChar(sql.MAX), ProxyRemarks.trim())
+        .query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog
+            (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+          VALUES (@agid, 'CustomerApprove', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+        `);
 
-    if (a.BookingId) {
-      await syncLegalMilestoneStep(pool, a.BookingId, "MutualAgreement", actor);
+      if (a.BookingId) {
+        await syncLegalMilestoneStep(tx, a.BookingId, "MutualAgreement", actor);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
 
     res.json({ success: true });
@@ -1852,19 +1993,31 @@ router.put("/:id/proxy-date-accept", requirePageRight("crm-agreements", "edit"),
 
     // Treat this as if the customer called acceptAgreementDate — same DB
     // mutations, same DateApprovalStatus transition, just logged differently.
-    await acceptAgreementDate(pool, id, actor);
+    // acceptAgreementDate itself does 2 writes; wrapped together with the
+    // proxy approval-log entry so a failure between them can't leave the
+    // date negotiation Matched with no record of who accepted it or how.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await acceptAgreementDate(tx, id, actor);
 
-    await pool.request()
-      .input("agid",   sql.Int,           id)
-      .input("actor",  sql.Int,           actor)
-      .input("aname",  sql.NVarChar(200), actorName)
-      .input("method", sql.NVarChar(30),  ProxyMethod)
-      .input("rem",    sql.NVarChar(sql.MAX), ProxyRemarks.trim())
-      .query(`
-        INSERT INTO dbo.CrmAgreementApprovalLog
-          (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
-        VALUES (@agid, 'DateAccept', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
-      `);
+      await tx.request()
+        .input("agid",   sql.Int,           id)
+        .input("actor",  sql.Int,           actor)
+        .input("aname",  sql.NVarChar(200), actorName)
+        .input("method", sql.NVarChar(30),  ProxyMethod)
+        .input("rem",    sql.NVarChar(sql.MAX), ProxyRemarks.trim())
+        .query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog
+            (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+          VALUES (@agid, 'DateAccept', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     res.json({ success: true });
   } catch (e) {
@@ -1901,42 +2054,55 @@ router.put("/:id/proxy-customer-recheck", requirePageRight("crm-agreements", "ed
     const actorName = actorRow.recordset[0]?.name || "Staff";
     const remarksTrimmed = ProxyRemarks.trim();
 
-    await pool.request().input("id", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), remarksTrimmed).query(`
-      UPDATE dbo.CrmAgreement SET
-        CustomerApprovalStatus = 'RecheckRequested',
-        RecheckCount = RecheckCount + 1,
-        CustomerApprovedAt = NULL,
-        LastRecheckRemarks = @rem
-      WHERE Id = @id
-    `);
-
-    await pool.request()
-      .input("agid",  sql.Int, id)
-      .input("ver",   sql.Int, a.VersionNo)
-      .input("adt",   sql.Date, a.AgreementDate)
-      .input("lname", sql.NVarChar(300), a.LegalName)
-      .input("laddr", sql.NVarChar(sql.MAX), a.LegalAddress)
-      .input("pan",   sql.NVarChar(20), a.PanNo)
-      .input("aadh",  sql.NVarChar(20), a.AadhaarNo)
-      .input("note",  sql.NVarChar(sql.MAX), a.Notes)
-      .input("reason",sql.NVarChar(500), `Customer recheck requested via ${ProxyMethod}: ${remarksTrimmed}`)
-      .query(`
-        INSERT INTO dbo.CrmAgreementRevision
-          (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
-        VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, NULL, SYSDATETIME())
+    // Status flip + Revision snapshot + approval-log entry describe one
+    // event — wrapped so a failure partway through can't leave the
+    // RecheckRequested status set with no Revision snapshot of what was
+    // being rechecked, or no log entry explaining who recorded it and how.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), remarksTrimmed).query(`
+        UPDATE dbo.CrmAgreement SET
+          CustomerApprovalStatus = 'RecheckRequested',
+          RecheckCount = RecheckCount + 1,
+          CustomerApprovedAt = NULL,
+          LastRecheckRemarks = @rem
+        WHERE Id = @id
       `);
 
-    await pool.request()
-      .input("agid",  sql.Int, id)
-      .input("actor", sql.Int, actor)
-      .input("aname", sql.NVarChar(200), actorName)
-      .input("method",sql.NVarChar(30), ProxyMethod)
-      .input("rem",   sql.NVarChar(sql.MAX), remarksTrimmed)
-      .query(`
-        INSERT INTO dbo.CrmAgreementApprovalLog
-          (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
-        VALUES (@agid, 'CustomerRecheck', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
-      `);
+      await tx.request()
+        .input("agid",  sql.Int, id)
+        .input("ver",   sql.Int, a.VersionNo)
+        .input("adt",   sql.Date, a.AgreementDate)
+        .input("lname", sql.NVarChar(300), a.LegalName)
+        .input("laddr", sql.NVarChar(sql.MAX), a.LegalAddress)
+        .input("pan",   sql.NVarChar(20), a.PanNo)
+        .input("aadh",  sql.NVarChar(20), a.AadhaarNo)
+        .input("note",  sql.NVarChar(sql.MAX), a.Notes)
+        .input("reason",sql.NVarChar(500), `Customer recheck requested via ${ProxyMethod}: ${remarksTrimmed}`)
+        .query(`
+          INSERT INTO dbo.CrmAgreementRevision
+            (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
+          VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, NULL, SYSDATETIME())
+        `);
+
+      await tx.request()
+        .input("agid",  sql.Int, id)
+        .input("actor", sql.Int, actor)
+        .input("aname", sql.NVarChar(200), actorName)
+        .input("method",sql.NVarChar(30), ProxyMethod)
+        .input("rem",   sql.NVarChar(sql.MAX), remarksTrimmed)
+        .query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog
+            (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+          VALUES (@agid, 'CustomerRecheck', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     res.json({ success: true });
   } catch (e) {
@@ -1974,22 +2140,34 @@ router.put("/:id/proxy-propose-date", requirePageRight("crm-agreements", "edit")
       return res.status(400).json({ error: "A customer-proposed date is already pending company review" });
     }
 
-    await proposeAgreementDate(pool, id, "Customer", ProposedDate, null);
-
     const actorRow = await pool.request().input("uid", sql.Int, actor).query("SELECT TOP 1 name FROM dbo.Users WHERE id = @uid");
     const actorName = actorRow.recordset[0]?.name || "Staff";
 
-    await pool.request()
-      .input("agid",  sql.Int, id)
-      .input("actor", sql.Int, actor)
-      .input("aname", sql.NVarChar(200), actorName)
-      .input("method",sql.NVarChar(30), ProxyMethod)
-      .input("rem",   sql.NVarChar(sql.MAX), `Customer proposed date ${ProposedDate} via ${ProxyMethod}: ${ProxyRemarks.trim()}`)
-      .query(`
-        INSERT INTO dbo.CrmAgreementApprovalLog
-          (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
-        VALUES (@agid, 'CustomerProposeDate', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
-      `);
+    // proposeAgreementDate itself does 2 writes; wrapped together with the
+    // proxy approval-log entry so a failure between them can't leave the
+    // negotiation state changed with no record of who proposed it or how.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await proposeAgreementDate(tx, id, "Customer", ProposedDate, null);
+
+      await tx.request()
+        .input("agid",  sql.Int, id)
+        .input("actor", sql.Int, actor)
+        .input("aname", sql.NVarChar(200), actorName)
+        .input("method",sql.NVarChar(30), ProxyMethod)
+        .input("rem",   sql.NVarChar(sql.MAX), `Customer proposed date ${ProposedDate} via ${ProxyMethod}: ${ProxyRemarks.trim()}`)
+        .query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog
+            (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+          VALUES (@agid, 'CustomerProposeDate', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     res.json({ success: true });
   } catch (e) {
@@ -2032,28 +2210,37 @@ router.post("/:id/documents/:docId/proxy-attach",
         ? `[Submitted on behalf of customer via ${ProxyMethod}] ${ProxyRemarks.trim()}`
         : `[Submitted on behalf of customer via ${ProxyMethod}]`;
 
-      await pool.request()
-        .input("id",     sql.Int,              docId)
-        .input("b64",    sql.NVarChar(sql.MAX), fileBase64)
-        .input("fname",  sql.NVarChar(300),     req.file.originalname)
-        .input("fsize",  sql.BigInt,            req.file.size)
-        .input("mime",   sql.NVarChar(150),     req.file.mimetype)
-        .input("rem",    sql.NVarChar(sql.MAX), proxyNote)
-        .input("ub",     sql.Int,              actor)
-        .query(`
-          UPDATE dbo.CrmAgreementDocument SET
-            FileBase64 = @b64, FileName = @fname, FileSize = @fsize, MimeType = @mime,
-            Status = 'Uploaded', Remarks = @rem, UploadedAt = SYSDATETIME(),
-            UploadedByType = 'StaffProxy'
-          WHERE Id = @id
-        `);
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await tx.request()
+          .input("id",     sql.Int,              docId)
+          .input("b64",    sql.NVarChar(sql.MAX), fileBase64)
+          .input("fname",  sql.NVarChar(300),     req.file.originalname)
+          .input("fsize",  sql.BigInt,            req.file.size)
+          .input("mime",   sql.NVarChar(150),     req.file.mimetype)
+          .input("rem",    sql.NVarChar(sql.MAX), proxyNote)
+          .input("ub",     sql.Int,              actor)
+          .query(`
+            UPDATE dbo.CrmAgreementDocument SET
+              FileBase64 = @b64, FileName = @fname, FileSize = @fsize, MimeType = @mime,
+              Status = 'Uploaded', Remarks = @rem, UploadedAt = SYSDATETIME(),
+              UploadedByType = 'StaffProxy'
+            WHERE Id = @id
+          `);
 
-      await syncLegalMilestoneFromDocument(pool, docId, actor);
+        await syncLegalMilestoneFromDocument(tx, docId, actor);
 
-      await logCrmAudit(pool, "CrmAgreementDocument", docId, actor, [
-        { field: "Status", oldVal: "Requested", newVal: "Uploaded" },
-        { field: "ProxyMethod", oldVal: null, newVal: `${ProxyMethod}${ProxyRemarks ? " — " + ProxyRemarks.trim() : ""}` },
-      ]);
+        await logCrmAudit(tx, "CrmAgreementDocument", docId, actor, [
+          { field: "Status", oldVal: "Requested", newVal: "Uploaded" },
+          { field: "ProxyMethod", oldVal: null, newVal: `${ProxyMethod}${ProxyRemarks ? " — " + ProxyRemarks.trim() : ""}` },
+        ]);
+
+        await tx.commit();
+      } catch (txErr) {
+        try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+        throw txErr;
+      }
 
       res.json({ success: true });
     } catch (e) {
@@ -2152,12 +2339,25 @@ router.put("/documents/bulk-review", requirePageRight("crm-documents", "edit"), 
           if (execLockReason) { results.skipped.push({ docId, reason: execLockReason }); continue; }
         }
 
-        await pool.request().input("id", sql.Int, docId).input("st", sql.NVarChar(30), status).input("rem", sql.NVarChar(sql.MAX), remarks || null)
-          .query("UPDATE dbo.CrmAgreementDocument SET Status = @st, Remarks = @rem WHERE Id = @id");
+        // Each row's own UPDATE + audit log + milestone sync is wrapped —
+        // independent of the other docIds in this batch (that per-row
+        // independence is the whole point of this endpoint, see comment
+        // above) but atomic within itself, so one row's review can't half-
+        // apply if the audit/milestone step fails after the status flip.
+        const rowTx = pool.transaction();
+        await rowTx.begin();
+        try {
+          await rowTx.request().input("id", sql.Int, docId).input("st", sql.NVarChar(30), status).input("rem", sql.NVarChar(sql.MAX), remarks || null)
+            .query("UPDATE dbo.CrmAgreementDocument SET Status = @st, Remarks = @rem WHERE Id = @id");
 
-        if (status !== row.Status) {
-          await logCrmAudit(pool, "AgreementDocument", docId, actor, [{ field: "Status", oldVal: row.Status, newVal: status }]);
-          await syncLegalMilestoneFromDocument(pool, docId, actor);
+          if (status !== row.Status) {
+            await logCrmAudit(rowTx, "AgreementDocument", docId, actor, [{ field: "Status", oldVal: row.Status, newVal: status }]);
+            await syncLegalMilestoneFromDocument(rowTx, docId, actor);
+          }
+          await rowTx.commit();
+        } catch (rowTxErr) {
+          try { await rowTx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+          throw rowTxErr;
         }
         results.succeeded.push(docId);
       } catch (innerErr) {

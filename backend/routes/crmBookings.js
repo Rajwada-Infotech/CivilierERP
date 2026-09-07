@@ -374,61 +374,75 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       }
     }
 
-    await pool.request()
-      .input("id",    sql.Int,           id)
-      .input("pid",   sql.Int,           b.ProjectId   ? parseInt(b.ProjectId) : null)
-      .input("pname", sql.NVarChar(200), b.ProjectName || null)
-      .input("unit",  sql.NVarChar(100), b.UnitNo || null)
-      .input("blk",   sql.NVarChar(100), b.BlockName   || null)
-      .input("flr",   sql.NVarChar(100), b.FloorName   || null)
-      .input("rate",  sql.Decimal(18,2), rate)
-      .input("tot",   sql.Decimal(18,2), total)
-      .input("bamt",  sql.Decimal(18,2), b.BookingAmount  != null ? parseFloat(b.BookingAmount) : null)
-      .input("bdate", sql.Date,          b.BookingDate || null)
-      .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
-      .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
-      .input("ppid",  sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
-      .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("ub",    sql.Int,           actorId(req))
-      .query(`
-        UPDATE dbo.CrmBooking SET
-          ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
-          UnitNo = ISNULL(@unit, UnitNo), BlockName = @blk, FloorName = @flr,
-          RatePerSqFt = ISNULL(@rate, RatePerSqFt),
-          TotalValue = ISNULL(@tot, TotalValue),
-          BookingAmount = ISNULL(@bamt, BookingAmount),
-          BookingDate = ISNULL(@bdate, BookingDate), PaymentMode = ISNULL(@pmode, PaymentMode),
-          AssignedTo = ISNULL(@asgn, AssignedTo),
-          PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
-          -- HsnCode is no longer settable here — it's fully auto-resolved by
-          -- recalculateBookingGst below (Unit+Parking value decides 1% vs
-          -- 5%), never a manual per-booking input. See migration 283.
-          -- GrandTotal tracks TotalValue changes without disturbing the
-          -- already-rolled-up Parking/ExtraCharges totals.
-          GrandTotal = ISNULL(@tot, TotalValue) + ParkingTotal + ExtraChargesTotal,
-          Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id AND IsActive = 1
-      `);
+    // The booking field UPDATE, GST recalc, and (on a plan switch) the full
+    // delete-and-regenerate of the payment schedule are one financial event
+    // — wrapped so a failure partway through can never leave a booking on a
+    // new PaymentPlanId/TotalValue with its old milestones deleted and no
+    // replacement schedule generated (a booking with zero payment schedule).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",    sql.Int,           id)
+        .input("pid",   sql.Int,           b.ProjectId   ? parseInt(b.ProjectId) : null)
+        .input("pname", sql.NVarChar(200), b.ProjectName || null)
+        .input("unit",  sql.NVarChar(100), b.UnitNo || null)
+        .input("blk",   sql.NVarChar(100), b.BlockName   || null)
+        .input("flr",   sql.NVarChar(100), b.FloorName   || null)
+        .input("rate",  sql.Decimal(18,2), rate)
+        .input("tot",   sql.Decimal(18,2), total)
+        .input("bamt",  sql.Decimal(18,2), b.BookingAmount  != null ? parseFloat(b.BookingAmount) : null)
+        .input("bdate", sql.Date,          b.BookingDate || null)
+        .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
+        .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
+        .input("ppid",  sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
+        .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("ub",    sql.Int,           actorId(req))
+        .query(`
+          UPDATE dbo.CrmBooking SET
+            ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
+            UnitNo = ISNULL(@unit, UnitNo), BlockName = @blk, FloorName = @flr,
+            RatePerSqFt = ISNULL(@rate, RatePerSqFt),
+            TotalValue = ISNULL(@tot, TotalValue),
+            BookingAmount = ISNULL(@bamt, BookingAmount),
+            BookingDate = ISNULL(@bdate, BookingDate), PaymentMode = ISNULL(@pmode, PaymentMode),
+            AssignedTo = ISNULL(@asgn, AssignedTo),
+            PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
+            -- HsnCode is no longer settable here — it's fully auto-resolved by
+            -- recalculateBookingGst below (Unit+Parking value decides 1% vs
+            -- 5%), never a manual per-booking input. See migration 283.
+            -- GrandTotal tracks TotalValue changes without disturbing the
+            -- already-rolled-up Parking/ExtraCharges totals.
+            GrandTotal = ISNULL(@tot, TotalValue) + ParkingTotal + ExtraChargesTotal,
+            Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id AND IsActive = 1
+        `);
 
-    // TotalValue may have just moved — Unit+Parking could have crossed the
-    // Rs. 45L GST bracket.
-    await recalculateBookingGst(pool, id);
+      // TotalValue may have just moved — Unit+Parking could have crossed the
+      // Rs. 45L GST bracket.
+      await recalculateBookingGst(tx, id);
 
-    await logCrmAudit(pool, "Booking", id, actor, [
-      { field: "AssignedTo", oldVal: oldRow.AssignedTo, newVal: b.AssignedTo },
-    ]);
+      await logCrmAudit(tx, "Booking", id, actor, [
+        { field: "AssignedTo", oldVal: oldRow.AssignedTo, newVal: b.AssignedTo },
+      ]);
 
-    if (planIsChanging) {
-      await pool.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
-      const effectiveTotal = total || oldRow.TotalValue;
-      const effectiveBookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : oldRow.BookingAmount;
-      await generateMilestonesForBooking(pool, id, effectiveTotal, newPlanId, b.BookingDate || null, actor, effectiveBookingAmount);
-    } else if (total != null && total !== oldRow.TotalValue) {
-      // TotalValue moved (rate correction) without a plan switch — the
-      // existing schedule's ₹/% no longer add up to what's actually owed.
-      // A plan switch already regenerates the whole schedule from scratch
-      // above, so this only fires on the "same plan, new total" path.
-      await recalculateRemainingMilestones(pool, id);
+      if (planIsChanging) {
+        await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+        const effectiveTotal = total || oldRow.TotalValue;
+        const effectiveBookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : oldRow.BookingAmount;
+        await generateMilestonesForBooking(tx, id, effectiveTotal, newPlanId, b.BookingDate || null, actor, effectiveBookingAmount);
+      } else if (total != null && total !== oldRow.TotalValue) {
+        // TotalValue moved (rate correction) without a plan switch — the
+        // existing schedule's ₹/% no longer add up to what's actually owed.
+        // A plan switch already regenerates the whole schedule from scratch
+        // above, so this only fires on the "same plan, new total" path.
+        await recalculateRemainingMilestones(tx, id);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
 
     res.json({ success: true, milestonesRegenerated: planIsChanging });
@@ -515,69 +529,85 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
                : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
     const area = unitRow.AreaSqFt != null ? Number(unitRow.AreaSqFt) : null;
     const total = area && rate ? Math.round(area * rate) : oldRow.TotalValue;
-    await pool.request()
-      .input("id",    sql.Int, id)
-      .input("uid",   sql.Int, newUnitId)
-      .input("pid",   sql.Int, unitRow.ProjectId || null)
-      .input("pname", sql.NVarChar(200), unitRow.ProjectName || null)
-      .input("cid",   sql.Int, unitRow.CompanyId || null)
-      .input("unit",  sql.NVarChar(100), unitRow.UnitName)
-      .input("blk",   sql.NVarChar(100), unitRow.BlockName || null)
-      .input("utype", sql.NVarChar(100), unitRow.UnitType || null)
-      .input("area",  sql.Decimal(18,2), area)
-      .input("carpetArea",       sql.Decimal(18,2), unitRow.CarpetAreaSqFt != null ? Number(unitRow.CarpetAreaSqFt) : null)
-      .input("builtUpArea",      sql.Decimal(18,2), unitRow.BuiltUpAreaSqFt != null ? Number(unitRow.BuiltUpAreaSqFt) : null)
-      .input("superBuiltUpArea", sql.Decimal(18,2), unitRow.SuperBuiltUpAreaSqFt != null ? Number(unitRow.SuperBuiltUpAreaSqFt) : null)
-      .input("openTerraceArea",  sql.Decimal(18,2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
-      .input("rate",             sql.Decimal(18,2), rate)
-      .input("tot",   sql.Decimal(18,2), total)
-      .input("ppid",  sql.Int, newPlanId)
-      .input("ub",    sql.Int, actor)
-      .query(`
-        UPDATE dbo.CrmBooking SET
-          UnitId = @uid, ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
-          CompanyId = @cid, UnitNo = @unit, BlockName = @blk, UnitType = @utype, AreaSqFt = @area,
-          CarpetAreaSqFt = @carpetArea, BuiltUpAreaSqFt = @builtUpArea, SuperBuiltUpAreaSqFt = @superBuiltUpArea, OpenTerraceAreaSqFt = @openTerraceArea,
-          RatePerSqFt = ISNULL(@rate, RatePerSqFt),
-          TotalValue = @tot,
-          PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
-          GrandTotal = @tot + ParkingTotal + ExtraChargesTotal,
-          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
+    // Re-pointing a real legal transaction to a different physical unit,
+    // its GST recalc, the (conditional) full payment-schedule regeneration,
+    // the permanent change-log entry, and the audit log are one event —
+    // wrapped so a failure partway through can never leave a booking
+    // pointing at a new unit with its old milestones deleted and no
+    // regenerated schedule, or a UnitId change with no CrmUnitChangeLog
+    // entry to explain it.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",    sql.Int, id)
+        .input("uid",   sql.Int, newUnitId)
+        .input("pid",   sql.Int, unitRow.ProjectId || null)
+        .input("pname", sql.NVarChar(200), unitRow.ProjectName || null)
+        .input("cid",   sql.Int, unitRow.CompanyId || null)
+        .input("unit",  sql.NVarChar(100), unitRow.UnitName)
+        .input("blk",   sql.NVarChar(100), unitRow.BlockName || null)
+        .input("utype", sql.NVarChar(100), unitRow.UnitType || null)
+        .input("area",  sql.Decimal(18,2), area)
+        .input("carpetArea",       sql.Decimal(18,2), unitRow.CarpetAreaSqFt != null ? Number(unitRow.CarpetAreaSqFt) : null)
+        .input("builtUpArea",      sql.Decimal(18,2), unitRow.BuiltUpAreaSqFt != null ? Number(unitRow.BuiltUpAreaSqFt) : null)
+        .input("superBuiltUpArea", sql.Decimal(18,2), unitRow.SuperBuiltUpAreaSqFt != null ? Number(unitRow.SuperBuiltUpAreaSqFt) : null)
+        .input("openTerraceArea",  sql.Decimal(18,2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
+        .input("rate",             sql.Decimal(18,2), rate)
+        .input("tot",   sql.Decimal(18,2), total)
+        .input("ppid",  sql.Int, newPlanId)
+        .input("ub",    sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmBooking SET
+            UnitId = @uid, ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
+            CompanyId = @cid, UnitNo = @unit, BlockName = @blk, UnitType = @utype, AreaSqFt = @area,
+            CarpetAreaSqFt = @carpetArea, BuiltUpAreaSqFt = @builtUpArea, SuperBuiltUpAreaSqFt = @superBuiltUpArea, OpenTerraceAreaSqFt = @openTerraceArea,
+            RatePerSqFt = ISNULL(@rate, RatePerSqFt),
+            TotalValue = @tot,
+            PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
+            GrandTotal = @tot + ParkingTotal + ExtraChargesTotal,
+            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
 
-    // New unit means a new TotalValue — Unit+Parking could have crossed the
-    // Rs. 45L GST bracket.
-    await recalculateBookingGst(pool, id);
+      // New unit means a new TotalValue — Unit+Parking could have crossed the
+      // Rs. 45L GST bracket.
+      await recalculateBookingGst(tx, id);
 
-    if (newPlanId) {
-      // Only the %-based schedule steps get wiped and regenerated — a
-      // Parking/Extra-Charge milestone is a fixed line item tied to a real
-      // allotment/charge row elsewhere (see the same exclusion in
-      // recalculateRemainingMilestones), not part of the plan schedule, and
-      // deleting it here would silently orphan that charge's own payment
-      // tracking.
-      await pool.request().input("bid", sql.Int, id).query(`
-        DELETE FROM dbo.CrmPaymentMilestone
-        WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
-      `);
-      await generateMilestonesForBooking(pool, id, total, newPlanId, null, actor, oldRow.BookingAmount);
+      if (newPlanId) {
+        // Only the %-based schedule steps get wiped and regenerated — a
+        // Parking/Extra-Charge milestone is a fixed line item tied to a real
+        // allotment/charge row elsewhere (see the same exclusion in
+        // recalculateRemainingMilestones), not part of the plan schedule, and
+        // deleting it here would silently orphan that charge's own payment
+        // tracking.
+        await tx.request().input("bid", sql.Int, id).query(`
+          DELETE FROM dbo.CrmPaymentMilestone
+          WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
+        `);
+        await generateMilestonesForBooking(tx, id, total, newPlanId, null, actor, oldRow.BookingAmount);
+      }
+
+      await tx.request()
+        .input("bid",    sql.Int, id)
+        .input("oldUid", sql.Int, oldUnitId || null)
+        .input("newUid", sql.Int, newUnitId)
+        .input("reason", sql.NVarChar(sql.MAX), b.Reason.trim())
+        .input("cb",     sql.Int, actor)
+        .query(`
+          INSERT INTO dbo.CrmUnitChangeLog (BookingId, OldUnitId, NewUnitId, Reason, ChangedBy, ChangedAt)
+          VALUES (@bid, @oldUid, @newUid, @reason, @cb, SYSDATETIME())
+        `);
+
+      await logCrmAudit(tx, "Booking", id, actor, [
+        { field: "UnitId", oldVal: oldUnitId, newVal: newUnitId },
+      ]);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
-
-    await pool.request()
-      .input("bid",    sql.Int, id)
-      .input("oldUid", sql.Int, oldUnitId || null)
-      .input("newUid", sql.Int, newUnitId)
-      .input("reason", sql.NVarChar(sql.MAX), b.Reason.trim())
-      .input("cb",     sql.Int, actor)
-      .query(`
-        INSERT INTO dbo.CrmUnitChangeLog (BookingId, OldUnitId, NewUnitId, Reason, ChangedBy, ChangedAt)
-        VALUES (@bid, @oldUid, @newUid, @reason, @cb, SYSDATETIME())
-      `);
-
-    await logCrmAudit(pool, "Booking", id, actor, [
-      { field: "UnitId", oldVal: oldUnitId, newVal: newUnitId },
-    ]);
 
     res.json({ success: true, unitNo: unitRow.UnitName, paymentPlanUpdated: !!newPlanId });
   } catch (e) {
@@ -1636,6 +1666,114 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       return res.status(500).json({ error: "Database schema is out of date — ask your administrator to run: node migrate.js up" });
     }
     console.error("[crm-bookings] POST /:id/invoices error at step=%s sqlNum=%s:", _diagStep.step, e.number, e.message, "| ctx:", JSON.stringify(_diagStep));
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// Shared by POST /bookings/invoices/bulk-generate below. Deliberately a
+// narrower re-implementation of the "Milestone"/"Booking" branch of
+// POST /:id/invoices above (same validation, same amount/date sourcing,
+// same standard INV-YYYY-NNNNN numbering) rather than a refactor of that
+// route into calling this — the single-invoice route also supports
+// CustomInvoiceNo/InvoicePrefix and several other manual-entry types
+// (Maintenance/Other/OnAccount) that bulk-generation has no use for;
+// making it depend on this narrower helper would risk regressing a
+// route that already works, for no benefit bulk-generation actually needs.
+// Runs on its own transaction per milestone so one row's failure in a batch
+// can never partially apply (insert without commit, etc.) — the caller loops
+// this per-row, matching the same independent-per-row pattern already used
+// by crmAgreements.js/crmSalesDeed.js's PUT /documents/bulk-review.
+async function generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, actorUserId) {
+  const activeErr = await requireActiveBooking(pool, bookingId);
+  if (activeErr) { const e = new Error(activeErr); e.status = 400; throw e; }
+
+  const m = await pool.request().input("mid", sql.Int, milestoneId).input("bid", sql.Int, bookingId).query(`
+    SELECT Id, MilestoneName, AmountDue, DemandStatus, DemandRaisedOn FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
+  `);
+  const mRow = m.recordset[0];
+  if (!mRow) { const e = new Error("Milestone not found on this booking"); e.status = 404; throw e; }
+  if (mRow.DemandStatus === CrmStatus.PENDING) {
+    const e = new Error(`A demand must be raised for "${mRow.MilestoneName}" before its invoice can be generated`);
+    e.status = 400; throw e;
+  }
+  const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid AND Status <> 'Void'");
+  if (already.recordset.length) { const e = new Error(`"${mRow.MilestoneName}" already has an invoice`); e.status = 400; throw e; }
+
+  const amount = Number(mRow.AmountDue);
+  const invoiceDate = mRow.DemandRaisedOn || null;
+  const description = `${mRow.MilestoneName} — invoice`;
+  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
+
+  const tx = pool.transaction();
+  await tx.begin();
+  let invoiceId;
+  try {
+    const result = await tx.request()
+      .input("no",   sql.NVarChar(30),  invoiceNo)
+      .input("bid",  sql.Int,           bookingId)
+      .input("type", sql.NVarChar(30),  "Milestone")
+      .input("amt",  sql.Decimal(18,2), amount)
+      .input("dt",   sql.Date,          invoiceDate)
+      .input("desc", sql.NVarChar(500), description)
+      .input("cb",   sql.Int,           actorUserId)
+      .input("mid",  sql.Int,           milestoneId)
+      .query(`
+        INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt, MilestoneId)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME(), @mid)
+      `);
+    invoiceId = result.recordset[0].Id;
+    await tx.commit();
+  } catch (txErr) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    if (txErr.number === 2601 || txErr.number === 2627) {
+      const e = new Error(`"${mRow.MilestoneName}" already has an invoice`); e.status = 400; throw e;
+    }
+    throw txErr;
+  }
+
+  try {
+    await generateInvoicePdf(pool, invoiceId);
+  } catch (pdfErr) {
+    console.error("[crm-bookings] bulk invoice PDF generation failed:", pdfErr.message);
+  }
+
+  return { id: invoiceId, InvoiceNo: invoiceNo, MilestoneName: mRow.MilestoneName };
+}
+
+// POST /bookings/invoices/bulk-generate — generate invoices for several
+// ready milestones (possibly across different bookings) in one call, for
+// the Invoices page's bulk-select action. Each row is processed
+// independently — one bad row (already invoiced, demand not raised since
+// the list was loaded, booking no longer active) doesn't block the rest;
+// same "keep going, report what happened" shape as crmAgreements.js's
+// PUT /documents/bulk-review.
+router.post("/invoices/bulk-generate", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) return res.status(400).json({ error: "items is required" });
+    if (items.length > 200) return res.status(400).json({ error: "Cannot process more than 200 at once" });
+
+    const actor = actorId(req);
+    const results = { succeeded: [], skipped: [] };
+    for (const item of items) {
+      const bookingId = parseInt(item?.bookingId, 10);
+      const milestoneId = parseInt(item?.milestoneId, 10);
+      if (!bookingId || !milestoneId) {
+        results.skipped.push({ bookingId: item?.bookingId, milestoneId: item?.milestoneId, reason: "Invalid bookingId/milestoneId" });
+        continue;
+      }
+      try {
+        const outcome = await generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, actor);
+        results.succeeded.push({ bookingId, milestoneId, ...outcome });
+      } catch (itemErr) {
+        results.skipped.push({ bookingId, milestoneId, reason: itemErr.message });
+      }
+    }
+    res.json(results);
+  } catch (e) {
+    console.error("[crm-bookings] POST /invoices/bulk-generate error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });

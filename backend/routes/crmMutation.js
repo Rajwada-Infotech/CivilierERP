@@ -58,8 +58,8 @@ const MANDATORY_DOC_TEMPLATE = [
   { type: "PropertyTaxReceipt", label: "Latest Property Tax Receipt" },
 ];
 
-async function logMutationHistory(mutationId, action, remarks, actorIdVal, actorType = 'Staff') {
-  const pool = getPool();
+async function logMutationHistory(mutationId, action, remarks, actorIdVal, actorType = 'Staff', executor = null) {
+  const pool = executor || getPool();
   await pool.request()
     .input('mid', sql.Int, mutationId)
     .input('act', sql.NVarChar(40), action)
@@ -299,30 +299,41 @@ router.put("/:id/query", requirePageRight("crm-mutation", "edit"), async (req, r
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    await pool.request().input("id", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), remarks.trim()).input("ub", sql.Int, actorId(req)).query(`
-      UPDATE dbo.CrmMutation SET Status = 'QueryRaised', QueryRemarks = @rem, QueryRaisedAt = SYSDATETIME(),
-        UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-      WHERE Id = @id
-    `);
+    // Multi-table write (Mutation status + bulk document reset + history) —
+    // wrapped so a failure partway through can never leave the tracker in
+    // QueryRaised with its mandatory documents still sitting Verified.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), remarks.trim()).input("ub", sql.Int, actorId(req)).query(`
+        UPDATE dbo.CrmMutation SET Status = 'QueryRaised', QueryRemarks = @rem, QueryRaisedAt = SYSDATETIME(),
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
 
-    // Only reset staff-uploaded documents (not the ones synced automatically
-    // from Registry) — a query is about what the applicant/staff submitted,
-    // not about the registration itself. NULL Remarks is the NORMAL case for
-    // any document nobody has rejected yet — `Remarks NOT LIKE '...'` alone
-    // evaluates to NULL (not TRUE) for a NULL Remarks row in SQL Server, so
-    // that condition silently excluded exactly the common case from ever
-    // being reset, leaving the mandatory document sitting there Verified
-    // through an entire query-raised cycle. Confirmed live: a document with
-    // no Remarks stayed Verified after a query was raised on it.
-    await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).query(`
-      UPDATE dbo.CrmMutationDocument SET
-        Status = 'Requested', FileBase64 = NULL, FileName = NULL, MimeType = NULL, FileSize = NULL,
-        UploadedByType = NULL, UploadedAt = NULL, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-      WHERE MutationId = @id AND IsMandatory = 1
-        AND (Remarks IS NULL OR Remarks NOT LIKE 'Synced automatically%')
-    `);
+      // Only reset staff-uploaded documents (not the ones synced automatically
+      // from Registry) — a query is about what the applicant/staff submitted,
+      // not about the registration itself. NULL Remarks is the NORMAL case for
+      // any document nobody has rejected yet — `Remarks NOT LIKE '...'` alone
+      // evaluates to NULL (not TRUE) for a NULL Remarks row in SQL Server, so
+      // that condition silently excluded exactly the common case from ever
+      // being reset, leaving the mandatory document sitting there Verified
+      // through an entire query-raised cycle. Confirmed live: a document with
+      // no Remarks stayed Verified after a query was raised on it.
+      await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).query(`
+        UPDATE dbo.CrmMutationDocument SET
+          Status = 'Requested', FileBase64 = NULL, FileName = NULL, MimeType = NULL, FileSize = NULL,
+          UploadedByType = NULL, UploadedAt = NULL, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE MutationId = @id AND IsMandatory = 1
+          AND (Remarks IS NULL OR Remarks NOT LIKE 'Synced automatically%')
+      `);
 
-    await logMutationHistory(id, 'QueryRaised', remarks.trim(), actorId(req));
+      await logMutationHistory(id, 'QueryRaised', remarks.trim(), actorId(req), 'Staff', tx);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-mutation] PUT /:id/query error:", e.message);
@@ -391,29 +402,40 @@ router.put("/:id/approve", requirePageRight("crm-mutation", "edit"), validateBod
       return res.status(400).json({ error: `${Verified || 0}/${Required} mandatory documents verified — all must be verified before approval` });
     }
 
-    await pool.request()
-      .input("id",   sql.Int, id)
-      .input("apno", sql.NVarChar(100), b.ApprovedNo   || null)
-      .input("apd",  sql.Date,          b.ApprovedDate || null)
-      .input("nkhata", sql.NVarChar(100), b.NewKhataNo.trim())
-      .input("rem",  sql.NVarChar(sql.MAX), b.Remarks  || null)
-      .input("ub",   sql.Int,           actorId(req))
-      .query(`
-        UPDATE dbo.CrmMutation SET
-          Status       = 'Approved',
-          ApprovedNo   = ISNULL(@apno, ApprovedNo),
-          ApprovedDate = ISNULL(@apd,  CONVERT(DATE, SYSDATETIME())),
-          NewKhataNo   = @nkhata,
-          Remarks      = ISNULL(@rem,  Remarks),
-          UpdatedBy    = @ub,
-          UpdatedAt    = SYSDATETIME()
-        WHERE Id = @id
-      `);
+    // Terminal, one-way transition (Applied -> Approved cannot be reversed) —
+    // wrapped so a failure between the status flip, the audit row, and the
+    // history entry can never leave the mutation Approved with no trail of it.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",   sql.Int, id)
+        .input("apno", sql.NVarChar(100), b.ApprovedNo   || null)
+        .input("apd",  sql.Date,          b.ApprovedDate || null)
+        .input("nkhata", sql.NVarChar(100), b.NewKhataNo.trim())
+        .input("rem",  sql.NVarChar(sql.MAX), b.Remarks  || null)
+        .input("ub",   sql.Int,           actorId(req))
+        .query(`
+          UPDATE dbo.CrmMutation SET
+            Status       = 'Approved',
+            ApprovedNo   = ISNULL(@apno, ApprovedNo),
+            ApprovedDate = ISNULL(@apd,  CONVERT(DATE, SYSDATETIME())),
+            NewKhataNo   = @nkhata,
+            Remarks      = ISNULL(@rem,  Remarks),
+            UpdatedBy    = @ub,
+            UpdatedAt    = SYSDATETIME()
+          WHERE Id = @id
+        `);
 
-    await logCrmAudit(pool, "Mutation", id, actorId(req), [
-      { field: "Status", oldVal: cur.recordset[0].Status, newVal: "Approved" },
-    ]);
-    await logMutationHistory(id, 'Approved', `New Khata No. ${b.NewKhataNo.trim()}`, actorId(req));
+      await logCrmAudit(tx, "Mutation", id, actorId(req), [
+        { field: "Status", oldVal: cur.recordset[0].Status, newVal: "Approved" },
+      ]);
+      await logMutationHistory(id, 'Approved', `New Khata No. ${b.NewKhataNo.trim()}`, actorId(req), 'Staff', tx);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     res.json({ success: true });
   } catch (e) {

@@ -13,7 +13,13 @@ router.use(authMiddleware);
 router.use(apiRateLimit);
 
 const PN_SELECT = `
-  SELECT n.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile
+  SELECT n.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
+    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
+     WHERE m.BookingId = n.BookingId AND m.Status NOT IN ('Paid','Waived')
+       AND m.AmountDue > ISNULL(m.AmountPaid, 0)) AS OutstandingMilestones,
+    ISNULL((SELECT SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)) FROM dbo.CrmPaymentMilestone m
+     WHERE m.BookingId = n.BookingId AND m.Status NOT IN ('Paid','Waived')
+       AND m.AmountDue > ISNULL(m.AmountPaid, 0)), 0) AS OutstandingBalance
   FROM dbo.CrmPossessionNotice n
   JOIN dbo.CrmBooking b ON b.Id = n.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId

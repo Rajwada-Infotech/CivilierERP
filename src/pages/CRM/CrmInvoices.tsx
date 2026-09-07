@@ -10,7 +10,10 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
-import { FileText, Download, Search, ExternalLink, Plus, ChevronDown, ChevronRight, Building2, Info, CheckCircle2, Clock, AlertCircle, Ban } from "lucide-react";
+import {
+  FileText, Download, Search, ExternalLink, Plus, ChevronDown, ChevronRight, Building2, Info,
+  CheckCircle2, AlertCircle, Ban, ChevronLeft, LayoutGrid, Rows3, Wallet,
+} from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 
 // Same approver set the backend's INVOICE_VOID_ROLES enforces
@@ -32,6 +35,7 @@ interface InvoiceRow {
   VoidReason: string | null;
   CreatedAt: string;
   BookingId: number;
+  MilestoneId?: number | null;
   BookingNo: string;
   ProjectName: string | null;
   UnitNo: string;
@@ -40,7 +44,20 @@ interface InvoiceRow {
   CreatedByName: string | null;
 }
 
+interface BookingGroup {
+  BookingId: number;
+  BookingNo: string;
+  ProjectName: string | null;
+  UnitNo: string;
+  ApplicantName: string;
+  Mobile: string | null;
+  MilestoneTotal: number;
+  MilestoneInvoiced: number;
+  Invoices: InvoiceRow[];
+}
+
 const TYPES = ["Milestone", "Maintenance", "Other", "OnAccount", "Agreement", "Possession"];
+const PAGE_SIZE = 20;
 
 function fmtMoney(v?: number | null) {
   if (v == null) return "—";
@@ -52,10 +69,26 @@ function fmtDate(v?: string | null) {
   return Number.isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toLocaleDateString("en-IN");
 }
 
-async function fetchInvoices(type: string, search: string): Promise<InvoiceRow[]> {
+// Shared filter shape for the main list — both the grouped and flat views
+// read off the same committed filter set + page, so switching between them
+// never shows disagreeing data.
+interface ListFilters {
+  type: string; search: string; projectId: string; blockId: string;
+  invoicedStatus: string; dateFrom: string; dateTo: string;
+}
+
+async function fetchInvoiceList(view: "grouped" | "flat", filters: ListFilters, page: number): Promise<any> {
   const q = new URLSearchParams();
-  if (type) q.set("type", type);
-  if (search) q.set("search", search);
+  q.set("view", view);
+  q.set("page", String(page));
+  q.set("pageSize", String(PAGE_SIZE));
+  if (filters.type) q.set("type", filters.type);
+  if (filters.search) q.set("search", filters.search);
+  if (filters.projectId) q.set("projectId", filters.projectId);
+  if (filters.blockId) q.set("blockId", filters.blockId);
+  if (view === "grouped" && filters.invoicedStatus) q.set("invoicedStatus", filters.invoicedStatus);
+  if (filters.dateFrom) q.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) q.set("dateTo", filters.dateTo);
   const res = await fetchWithAuth(`${API}?${q}`);
   if (!res.ok) throw new Error("Failed to load invoices");
   return res.json();
@@ -78,6 +111,24 @@ async function fetchOnAccount(id: number): Promise<any | null> {
   return res.ok ? res.json() : null;
 }
 
+// Every query that a booking's invoice/milestone state feeds — invalidated
+// together on generate/void so the list, the modal, and a bulk-generate
+// result can never disagree with each other or go stale independently of
+// one another (previously only "crm-invoices" was invalidated, leaving the
+// modal's own three queries stale if it stayed open).
+function invalidateInvoiceRelatedQueries(qc: ReturnType<typeof useQueryClient>, bookingId?: number) {
+  qc.invalidateQueries({ queryKey: ["crm-invoices"] });
+  if (bookingId != null) {
+    qc.invalidateQueries({ queryKey: ["crm-invoice-gen-existing", bookingId] });
+    qc.invalidateQueries({ queryKey: ["crm-invoice-gen-booking-detail", bookingId] });
+    qc.invalidateQueries({ queryKey: ["crm-invoice-gen-on-account", bookingId] });
+  } else {
+    qc.invalidateQueries({ queryKey: ["crm-invoice-gen-existing"] });
+    qc.invalidateQueries({ queryKey: ["crm-invoice-gen-booking-detail"] });
+    qc.invalidateQueries({ queryKey: ["crm-invoice-gen-on-account"] });
+  }
+}
+
 type MilestoneTone = "ready" | "invoiced" | "partial" | "unpaid" | "demand" | "excluded";
 interface MilestoneInsight { tone: MilestoneTone; message: string; icon: typeof CheckCircle2; }
 
@@ -85,6 +136,12 @@ interface MilestoneInsight { tone: MilestoneTone; message: string; icon: typeof 
 // both the eligibility filter (which type the dialog defaults to) and the
 // row's own message/icon read off this same function, so they can never
 // disagree the way two separately-maintained checks eventually would.
+// This is BILLING eligibility (has a Demand been raised, is it already
+// invoiced) — a separate axis from PAYMENT settlement (milestoneStatusPill,
+// below), which is why both are now explicitly labeled where they render
+// together, instead of reading as a contradiction ("Paid" + "Ready to
+// invoice" on the same row used to look like a bug — it's two different
+// questions with two different, both-correct answers).
 function getMilestoneInsight(m: any, existingInvoices: any[]): MilestoneInsight {
   if (Number(m.MilestoneNo) === 1) {
     return { tone: "excluded", message: "Booking Amount — generated from the Booking page", icon: ExternalLink as any };
@@ -218,8 +275,10 @@ function VoidInvoiceDialog({ invoice, onClose, onVoided }: { invoice: InvoiceRow
 // milestone's status right there, so picking what to invoice against means
 // looking at real numbers, not guessing from a bare dropdown. Numbering is
 // three-way: auto (INV-YYYY-NNNNN), a custom prefix that still auto-
-// increments, or one fully custom number.
-function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { initialBookingId: number | null; onClose: () => void; onGenerated: () => void }) {
+// increments, or one fully custom number. Also supports selecting several
+// "ready" milestones at once and generating all their invoices in a single
+// bulk action.
+function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { initialBookingId: number | null; onClose: () => void; onGenerated: (bookingId: number) => void }) {
   const [bookingId, setBookingId] = useState<number | null>(initialBookingId);
   const [bookingSearch, setBookingSearch] = useState("");
   // Classic drill-down: Company -> Project -> Block. Built entirely from
@@ -247,6 +306,11 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
   // explicitly confirms they know it won't touch that balance — resets
   // whenever they switch type/booking so a stale ack can't carry over.
   const [ackUnlinked, setAckUnlinked] = useState(false);
+  // Bulk selection — ready-milestone IDs picked for "generate all at once".
+  // Independent of the single-select InvoiceType/MilestoneId flow above;
+  // choosing bulk rows doesn't touch the single-generate form at all.
+  const [bulkSelected, setBulkSelected] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const { data: bookings = [], isLoading: bookingsLoading } = useQuery({
     queryKey: ["crm-bookings-for-invoice-picker"],
@@ -264,7 +328,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
     queryFn: () => fetchOnAccount(bookingId as number),
     enabled: !!bookingId,
   });
-  const { data: existingInvoices = [] } = useQuery({
+  const { data: existingInvoices = [], refetch: refetchExisting } = useQuery({
     queryKey: ["crm-invoice-gen-existing", bookingId],
     queryFn: async () => {
       const r = await fetchWithAuth(`${BKG_API}/${bookingId}/invoices`);
@@ -363,7 +427,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to generate invoice");
       toast.success(`Invoice ${data.InvoiceNo} generated`);
-      onGenerated();
+      onGenerated(bookingId as number);
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -371,12 +435,51 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
     }
   }
 
+  function toggleBulk(id: number) {
+    setBulkSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleBulkGenerate() {
+    if (!bulkSelected.size || !bookingId) return;
+    setBulkBusy(true);
+    try {
+      const items = Array.from(bulkSelected).map((milestoneId) => ({ bookingId, milestoneId }));
+      const res = await fetchWithAuth(`${BKG_API}/invoices/bulk-generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Bulk generation failed");
+      const succeeded = data.succeeded?.length || 0;
+      const skipped = data.skipped?.length || 0;
+      if (succeeded) toast.success(`${succeeded} invoice${succeeded !== 1 ? "s" : ""} generated`);
+      if (skipped) toast.error(`${skipped} skipped — ${data.skipped.map((s: any) => s.reason).join("; ")}`);
+      setBulkSelected(new Set());
+      refetchExisting();
+      onGenerated(bookingId);
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   // Milestone status pill styling, shared by the payment-plan table below.
+  // Labeled "Payment" here (as opposed to the Billing label on the insight
+  // message below it) so the two independent axes read as two answers, not
+  // a contradiction — a milestone can be Payment: Paid (settled via On
+  // Account Adjustment) while still Billing: Ready to invoice never having
+  // happened, or vice versa, and both are simultaneously true statements.
   function milestoneStatusPill(m: any) {
-    if (m.Status === CrmStatus.PAID) return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-emerald-700 bg-emerald-50 border-emerald-200">Paid</span>;
-    if (m.Status === "Waived") return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">Waived</span>;
-    if (Number(m.AmountPaid) > 0) return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">Partially Paid</span>;
-    return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">Pending</span>;
+    if (m.Status === CrmStatus.PAID) return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-emerald-700 bg-emerald-50 border-emerald-200">Payment: Paid</span>;
+    if (m.Status === "Waived") return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">Payment: Waived</span>;
+    if (Number(m.AmountPaid) > 0) return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">Payment: Partial</span>;
+    return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">Payment: Pending</span>;
   }
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -460,7 +563,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
               <div className="flex items-center justify-between">
                 <span className="font-mono text-sm font-semibold text-primary">{booking.BookingNo}</span>
                 {!initialBookingId && (
-                  <button onClick={() => { setBookingId(null); setAckUnlinked(false); }} className="text-xs text-muted-foreground hover:text-foreground">Change</button>
+                  <button onClick={() => { setBookingId(null); setAckUnlinked(false); setBulkSelected(new Set()); }} className="text-xs text-muted-foreground hover:text-foreground">Change</button>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
@@ -473,28 +576,26 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
 
             {/* Payment Plan, right here — the whole point is seeing real
                 status before picking what to invoice, not guessing from a
-                bare dropdown. Only Paid + Demanded + not-yet-invoiced rows
-                are clickable; everything else shows why it isn't, in place. */}
-            {/* Invoice Type — ONE control, not two. The milestone list and the
-                Maintenance/Other/On-Account pills are all the same single-select
-                field (form.InvoiceType) under the hood, but used to render as two
-                separate bordered boxes with two different selection styles, which
-                read as two unrelated widgets. Now they share one outer border and
-                one header, with the pill row visually continuing the list below a
-                divider — "pick one row, or one pill below" instead of two cards
-                that happen to affect each other. */}
+                bare dropdown. Only Demanded + not-yet-invoiced rows are
+                clickable (see getMilestoneInsight — gated on DemandStatus,
+                not on the milestone being Paid/Settled, since an invoice is
+                generated from a Demand, before On Account Adjustment ever
+                settles anything); everything else shows why it isn't, in
+                place. Each eligible row also carries a checkbox for the bulk
+                "select several, generate all at once" action below. */}
             <div className="rounded-lg border border-border overflow-hidden">
               <div className="px-3 py-1.5 bg-muted/30 border-b border-border text-xs font-semibold flex items-center justify-between">
                 <span>Invoice Type</span>
-                <span className="text-muted-foreground font-normal">Choose one — a milestone below, or a type further down</span>
+                <span className="text-muted-foreground font-normal">Choose one row below to generate single, tick boxes to bulk-generate</span>
               </div>
-              <div className="max-h-48 overflow-y-auto thin-scroll divide-y divide-border">
+              <div className="max-h-56 overflow-y-auto thin-scroll divide-y divide-border">
                 {milestones.length === 0 ? (
                   <p className="text-xs text-muted-foreground px-3 py-3">No milestone schedule on this booking.</p>
                 ) : milestones.map((m: any) => {
                   const insight = getMilestoneInsight(m, existingInvoices);
                   const eligible = insight.tone === "ready";
                   const selected = form.InvoiceType === "Milestone" && form.MilestoneId === String(m.Id);
+                  const bulkChecked = bulkSelected.has(m.Id);
                   const pct = Math.min(100, Math.round((Number(m.AmountPaid || 0) / Math.max(Number(m.AmountDue || 0), 1)) * 100));
                   const Icon = insight.icon;
                   const toneText =
@@ -504,30 +605,38 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                     : insight.tone === "demand" ? "text-sky-700 dark:text-sky-400"
                     : "text-muted-foreground";
                   return (
-                    <button key={m.Id} disabled={!eligible}
-                      onClick={() => { setForm((f) => ({ ...f, InvoiceType: "Milestone", MilestoneId: String(m.Id), OnAccountPaymentId: "", Amount: "" })); setAutoSelected(false); setAckUnlinked(false); }}
+                    <div key={m.Id}
                       className={`w-full text-left px-3 py-2 flex items-start gap-2.5 text-xs ${
-                        eligible ? "hover:bg-muted/50 cursor-pointer" : "opacity-75 cursor-not-allowed"
+                        eligible ? "hover:bg-muted/50" : "opacity-75"
                       } ${selected ? "bg-primary/10 border-l-2 border-primary" : "border-l-2 border-transparent"}`}>
-                      <Icon size={13} className={`shrink-0 mt-0.5 ${toneText}`} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-medium">{m.MilestoneNo}. {m.MilestoneName}</span>
+                      {eligible ? (
+                        <input type="checkbox" checked={bulkChecked} onChange={() => toggleBulk(m.Id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-0.5 shrink-0 accent-primary" />
+                      ) : (
+                        <span className="w-[13px] shrink-0" />
+                      )}
+                      <button disabled={!eligible}
+                        onClick={() => { setForm((f) => ({ ...f, InvoiceType: "Milestone", MilestoneId: String(m.Id), OnAccountPaymentId: "", Amount: "" })); setAutoSelected(false); setAckUnlinked(false); }}
+                        className={`min-w-0 flex-1 text-left ${eligible ? "cursor-pointer" : "cursor-not-allowed"}`}>
+                        <Icon size={13} className={`inline-block mr-1.5 -mt-0.5 ${toneText}`} />
+                        <span className="font-medium">{m.MilestoneNo}. {m.MilestoneName}</span>
+                        <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
                           {milestoneStatusPill(m)}
                           {selected && <span className="text-primary font-medium">✓ Selected</span>}
                         </div>
-                        <div className={`mt-0.5 ${toneText}`}>{insight.message}</div>
+                        <div className={`mt-0.5 ${toneText}`}>Billing: {insight.message}</div>
                         {(insight.tone === "partial" || insight.tone === "unpaid") && (
                           <div className="h-1 rounded-full bg-muted overflow-hidden mt-1.5 max-w-[160px]">
                             <div className="h-full rounded-full bg-amber-500" style={{ width: `${pct}%` }} />
                           </div>
                         )}
-                      </div>
+                      </button>
                       <div className="text-right shrink-0">
                         <div className="font-semibold">{fmtMoney(m.AmountDue)}</div>
                         <div className="text-[10px] text-muted-foreground">Paid {fmtMoney(m.AmountPaid)}</div>
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -558,14 +667,41 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
               )}
             </div>
 
+            {/* Sticky bulk-action bar — appears only once at least one
+                eligible row above is checked. Independent of the single
+                Invoice Type selection; picking bulk rows doesn't change
+                form.InvoiceType at all. */}
+            {bulkSelected.size > 0 && (
+              <div className="sticky bottom-0 z-10 flex items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2">
+                <span className="text-xs font-medium">{bulkSelected.size} milestone{bulkSelected.size !== 1 ? "s" : ""} selected</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setBulkSelected(new Set())} className="text-xs text-muted-foreground hover:text-foreground">Clear</button>
+                  <button onClick={handleBulkGenerate} disabled={bulkBusy}
+                    className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50">
+                    {bulkBusy ? "Generating…" : `Generate ${bulkSelected.size} Invoice${bulkSelected.size !== 1 ? "s" : ""}`}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {form.InvoiceType === "OnAccount" && (
-              <select value={form.OnAccountPaymentId} onChange={(e) => setForm((f) => ({ ...f, OnAccountPaymentId: e.target.value }))}
-                className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                <option value="">— Select an on-account payment —</option>
-                {eligibleOnAccount.map((p: any) => (
-                  <option key={p.Id} value={String(p.Id)}>{p.ReceiptNo} — {fmtMoney(p.Amount)}</option>
-                ))}
-              </select>
+              <div className="space-y-1.5">
+                {/* On Account balance was fetched but never actually shown —
+                    staff picked a specific past deposit from the dropdown
+                    with no visibility into the customer's total available
+                    balance for context. */}
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-2.5 py-1.5">
+                  <Wallet size={13} className="text-primary shrink-0" />
+                  On Account balance available: <span className="font-semibold text-foreground">{fmtMoney(onAccountData?.availableBalance ?? 0)}</span>
+                </div>
+                <select value={form.OnAccountPaymentId} onChange={(e) => setForm((f) => ({ ...f, OnAccountPaymentId: e.target.value }))}
+                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                  <option value="">— Select an on-account payment —</option>
+                  {eligibleOnAccount.map((p: any) => (
+                    <option key={p.Id} value={String(p.Id)}>{p.ReceiptNo} — {fmtMoney(p.Amount)}</option>
+                  ))}
+                </select>
+              </div>
             )}
             {(form.InvoiceType === "Maintenance" || form.InvoiceType === "Other") && (
               <div className="grid grid-cols-2 gap-2">
@@ -594,7 +730,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                       ? <>"{outstandingMilestones[0].MilestoneName}"</>
                       : `${outstandingMilestones.length} milestones`}.
                     A {form.InvoiceType} invoice is unrelated to the payment plan and won't record a payment against it —
-                    if you're trying to settle that balance, use the payment/receipt flow instead, then generate a Milestone invoice once it's fully paid.
+                    if you're trying to settle that balance, use the payment/receipt flow instead, then generate a Milestone invoice once a Demand has been raised for it.
                   </span>
                 </div>
                 <label className="flex items-center gap-1.5 text-[11px] text-amber-800 dark:text-amber-400 cursor-pointer">
@@ -667,20 +803,101 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
   );
 }
 
+// Small "N of M invoiced" progress bar for a booking's header row in the
+// grouped list — visual convention (gradient bar, height, rounded corners)
+// matches CrmOnAccount.tsx's own per-row utilization bar, for consistency
+// across the two money-tracking pages rather than inventing new styling.
+function MilestoneProgressBar({ total, invoiced }: { total: number; invoiced: number }) {
+  if (!total) return <span className="text-[11px] text-muted-foreground">No milestone schedule</span>;
+  const pct = Math.min(100, Math.round((invoiced / total) * 100));
+  return (
+    <div className="flex items-center gap-1.5 min-w-[110px]">
+      <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden shrink-0">
+        <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-[11px] text-muted-foreground shrink-0">{invoiced} of {total} invoiced</span>
+    </div>
+  );
+}
+
+function PaginationBar({ page, pageSize, total, onPage }: { page: number; pageSize: number; total: number; onPage: (p: number) => void }) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between px-1 py-2 text-xs text-muted-foreground">
+      <span>Page {page} of {totalPages} · {total} total</span>
+      <div className="flex items-center gap-1">
+        <button onClick={() => onPage(Math.max(1, page - 1))} disabled={page <= 1}
+          className="flex items-center gap-1 px-2 py-1 border border-border rounded-md hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed">
+          <ChevronLeft size={12} /> Prev
+        </button>
+        <button onClick={() => onPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages}
+          className="flex items-center gap-1 px-2 py-1 border border-border rounded-md hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed">
+          Next <ChevronRight size={12} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const INVOICED_STATUS_OPTIONS = [
+  { value: "", label: "Any invoicing status" },
+  { value: "full", label: "Fully invoiced" },
+  { value: "partial", label: "Partially invoiced" },
+  { value: "none", label: "Not invoiced yet" },
+];
+
 const CrmInvoices: React.FC = () => {
   const rights = usePageRights("crm-invoices");
   const qc = useQueryClient();
   const { currentUser } = useAuth();
   const canVoid = !!currentUser?.role && INVOICE_VOID_ROLES.includes(currentUser.role);
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const [view, setView] = useState<"grouped" | "flat">("grouped");
   const [type, setType] = useState("");
+  const [invoicedStatus, setInvoicedStatus] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [blockId, setBlockId] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+
   const [preview, setPreview] = useState<InvoiceRow | null>(null);
   const [invoiceDeepLinkOpened, setInvoiceDeepLinkOpened] = useState(false);
   const [voidTarget, setVoidTarget] = useState<InvoiceRow | null>(null);
   const [genBookingId, setGenBookingId] = useState<number | null | undefined>(undefined); // undefined = closed
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  const [flatSort, setFlatSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "CreatedAt", dir: "desc" });
+
+  // Reused for the filter bar's Project/Block dropdowns — same endpoint and
+  // query key the Generate Invoice modal already uses, so React Query
+  // shares one cached fetch between them instead of hitting the bookings
+  // list twice.
+  const { data: bookingsForFilters = [] } = useQuery({
+    queryKey: ["crm-bookings-for-invoice-picker"],
+    queryFn: fetchBookingsForPicker,
+    staleTime: 60_000,
+  });
+  const projectOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const b of bookingsForFilters) {
+      if (b.ProjectId == null || seen.has(String(b.ProjectId))) continue;
+      seen.set(String(b.ProjectId), b.ProjectName || `#${b.ProjectId}`);
+    }
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [bookingsForFilters]);
+  const blockOptions = useMemo(() => {
+    const pool = projectId ? bookingsForFilters.filter((b: any) => String(b.ProjectId) === projectId) : bookingsForFilters;
+    const seen = new Map<string, string>();
+    for (const b of pool) {
+      if (b.BlockId == null || seen.has(String(b.BlockId))) continue;
+      seen.set(String(b.BlockId), b.BlockName || `#${b.BlockId}`);
+    }
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [bookingsForFilters, projectId]);
 
   // Dedicated-usage-area wiring: the Booking page's own Payment & Invoice
   // tab links here with ?bookingId=X for anything beyond the Booking Amount
@@ -713,36 +930,50 @@ const CrmInvoices: React.FC = () => {
     setSearchParams((sp) => { sp.delete("invoiceId"); return sp; }, { replace: true });
   };
 
-  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-invoices", type, search],
-    queryFn: () => fetchInvoices(type, search),
+  const filters: ListFilters = { type, search, projectId, blockId, invoicedStatus, dateFrom, dateTo };
+  const { data, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-invoices", view, filters, page],
+    queryFn: () => fetchInvoiceList(view, filters, page),
     placeholderData: (prev) => prev,
   });
+  const groups: BookingGroup[] = data?.view === "grouped" ? data.groups : [];
+  const flatRows: InvoiceRow[] = data?.view === "flat" ? data.rows : [];
+  const total = data?.total || 0;
+
+  // Any filter change (other than paging itself) resets back to page 1 —
+  // otherwise a narrower result set can leave the user stranded on a page
+  // number that no longer exists.
+  function resetToFirstPage<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
+
+  const sortedFlatRows = useMemo(() => {
+    const rows = [...flatRows];
+    rows.sort((a: any, b: any) => {
+      const av = a[flatSort.key], bv = b[flatSort.key];
+      let cmp = 0;
+      if (flatSort.key === "Amount") cmp = Number(av || 0) - Number(bv || 0);
+      else cmp = String(av ?? "").localeCompare(String(bv ?? ""));
+      return flatSort.dir === "asc" ? cmp : -cmp;
+    });
+    return rows;
+  }, [flatRows, flatSort]);
+
+  function toggleFlatSort(key: string) {
+    setFlatSort((s) => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  }
 
   useEffect(() => {
     const invId = searchParams.get("invoiceId");
-    if (!invId || invoiceDeepLinkOpened || !rows.length) return;
-    const match = rows.find((r) => String(r.Id) === invId);
+    if (!invId || invoiceDeepLinkOpened) return;
+    const pool = view === "grouped" ? groups.flatMap((g) => g.Invoices) : flatRows;
+    if (!pool.length) return;
+    const match = pool.find((r) => String(r.Id) === invId);
     if (match) {
       setInvoiceDeepLinkOpened(true);
       setPreview(match);
     }
-  }, [searchParams, invoiceDeepLinkOpened, rows]);
-
-  // Booking-wise separated — every invoice grouped under the booking it
-  // belongs to, most recently active booking first, instead of one flat
-  // cross-booking table. This is the whole point of a dedicated Invoices
-  // page: see a booking's full invoice history together, and generate the
-  // next one right there.
-  const groups = useMemo(() => {
-    const byBooking = new Map<number, { booking: InvoiceRow; invoices: InvoiceRow[] }>();
-    for (const r of rows) {
-      if (!byBooking.has(r.BookingId)) byBooking.set(r.BookingId, { booking: r, invoices: [] });
-      byBooking.get(r.BookingId)!.invoices.push(r);
-    }
-    return Array.from(byBooking.values()).sort((a, b) =>
-      new Date(b.invoices[0]?.CreatedAt || 0).getTime() - new Date(a.invoices[0]?.CreatedAt || 0).getTime());
-  }, [rows]);
+  }, [searchParams, invoiceDeepLinkOpened, groups, flatRows, view]);
 
   function toggleCollapsed(bookingId: number) {
     setCollapsed((c) => {
@@ -752,9 +983,15 @@ const CrmInvoices: React.FC = () => {
     });
   }
 
-  function handleGenerated() {
+  function handleGenerated(bookingId: number) {
     setGenBookingId(undefined);
-    qc.invalidateQueries({ queryKey: ["crm-invoices"] });
+    invalidateInvoiceRelatedQueries(qc, bookingId);
+  }
+
+  const hasActiveFilters = !!(type || search || projectId || blockId || invoicedStatus || dateFrom || dateTo);
+  function clearFilters() {
+    setType(""); setSearch(""); setSearchInput(""); setProjectId(""); setBlockId("");
+    setInvoicedStatus(""); setDateFrom(""); setDateTo(""); setPage(1);
   }
 
   return (
@@ -769,23 +1006,59 @@ const CrmInvoices: React.FC = () => {
         <div className="relative flex-1 min-w-48">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && setSearch(searchInput.trim())}
+            onKeyDown={(e) => e.key === "Enter" && (setSearch(searchInput.trim()), setPage(1))}
             placeholder="Search invoice no, booking, applicant..."
             className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
-        <select value={type} onChange={(e) => setType(e.target.value)}
+        <select value={type} onChange={(e) => resetToFirstPage(setType)(e.target.value)}
           className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
           <option value="">All Types</option>
           {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
-        <button onClick={() => setSearch(searchInput.trim())} className="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted">Search</button>
-        {(type || search) && (
-          <button onClick={() => { setType(""); setSearch(""); setSearchInput(""); }}
-            className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground">Clear filters</button>
+        <select value={projectId} onChange={(e) => { resetToFirstPage(setProjectId)(e.target.value); setBlockId(""); }}
+          className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
+          <option value="">All Projects</option>
+          {projectOptions.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={blockId} onChange={(e) => resetToFirstPage(setBlockId)(e.target.value)}
+          className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
+          <option value="">All Blocks</option>
+          {blockOptions.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+        {view === "grouped" && (
+          <select value={invoicedStatus} onChange={(e) => resetToFirstPage(setInvoicedStatus)(e.target.value)}
+            className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
+            {INVOICED_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
         )}
+        <input type="date" value={dateFrom} onChange={(e) => resetToFirstPage(setDateFrom)(e.target.value)}
+          title="From date" className="px-2.5 py-2 text-sm border border-border rounded-lg bg-background" />
+        <input type="date" value={dateTo} onChange={(e) => resetToFirstPage(setDateTo)(e.target.value)}
+          title="To date" className="px-2.5 py-2 text-sm border border-border rounded-lg bg-background" />
+        <button onClick={() => { setSearch(searchInput.trim()); setPage(1); }} className="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted">Search</button>
+        {hasActiveFilters && (
+          <button onClick={clearFilters} className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground">Clear filters</button>
+        )}
+
+        {/* Grouped (default, per-booking with progress) vs Flat (sortable,
+            cross-booking table for Finance reconciliation) — same filter
+            state and fetch, just a different render/pagination unit. */}
+        <div className="flex items-center border border-border rounded-lg overflow-hidden ml-auto sm:ml-0">
+          <button onClick={() => { setView("grouped"); setPage(1); }}
+            title="Grouped by booking"
+            className={`px-2.5 py-2 flex items-center gap-1.5 text-xs font-medium ${view === "grouped" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+            <LayoutGrid size={13} /> Grouped
+          </button>
+          <button onClick={() => { setView("flat"); setPage(1); }}
+            title="Flat, sortable table across all bookings"
+            className={`px-2.5 py-2 flex items-center gap-1.5 text-xs font-medium border-l border-border ${view === "flat" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+            <Rows3 size={13} /> Flat
+          </button>
+        </div>
+
         {rights.canCreate && (
           <button onClick={() => setGenBookingId(null)}
-            className="ml-auto flex items-center gap-1.5 px-3 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+            className="flex items-center gap-1.5 px-3 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
             <Plus className="w-4 h-4" /> Generate Invoice
           </button>
         )}
@@ -793,98 +1066,176 @@ const CrmInvoices: React.FC = () => {
 
       {isLoading ? (
         <p className="text-sm text-muted-foreground py-8 text-center">Loading…</p>
-      ) : groups.length === 0 ? (
-        <div className="rounded-xl border border-border bg-card py-12 text-center">
-          <p className="text-sm text-muted-foreground">No invoices generated yet.</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {groups.map(({ booking, invoices }) => {
-            const isCollapsed = collapsed.has(booking.BookingId);
-            const activeInvoices = invoices.filter((i) => i.Status !== "Void");
-            const total = activeInvoices.reduce((sum, i) => sum + Number(i.Amount || 0), 0);
-            return (
-              <div key={booking.BookingId} className="rounded-xl border border-border bg-card overflow-hidden">
-                <button onClick={() => toggleCollapsed(booking.BookingId)}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-muted/30 text-left">
-                  <div className="flex items-center gap-2 min-w-0">
-                    {isCollapsed ? <ChevronRight size={14} className="text-muted-foreground shrink-0" /> : <ChevronDown size={14} className="text-muted-foreground shrink-0" />}
-                    <Building2 size={14} className="text-primary shrink-0" />
-                    <span className="font-mono text-sm font-semibold">{booking.BookingNo}</span>
-                    <span className="text-sm text-muted-foreground truncate">{booking.ApplicantName}</span>
-                    {booking.ProjectName && <span className="text-xs text-muted-foreground truncate hidden sm:inline">· {booking.ProjectName} {booking.UnitNo}</span>}
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0 text-xs">
-                    <span className="text-muted-foreground">
-                      {activeInvoices.length} invoice{activeInvoices.length !== 1 ? "s" : ""} · {fmtMoney(total)}
-                      {invoices.length > activeInvoices.length && ` (+${invoices.length - activeInvoices.length} void)`}
-                    </span>
-                    {rights.canCreate && (
-                      <span
-                        onClick={(e) => { e.stopPropagation(); setGenBookingId(booking.BookingId); }}
-                        className="flex items-center gap-1 px-2 py-1 border border-border rounded-md font-medium hover:bg-muted">
-                        <Plus size={12} /> Add
+      ) : view === "grouped" ? (
+        groups.length === 0 ? (
+          <div className="rounded-xl border border-border bg-card py-12 text-center">
+            <p className="text-sm text-muted-foreground">No bookings match this filter combination.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {groups.map((g) => {
+              const isCollapsed = collapsed.has(g.BookingId);
+              const activeInvoices = g.Invoices.filter((i) => i.Status !== "Void");
+              const invoicedTotal = activeInvoices.reduce((sum, i) => sum + Number(i.Amount || 0), 0);
+              return (
+                <div key={g.BookingId} className="rounded-xl border border-border bg-card overflow-hidden">
+                  <button onClick={() => toggleCollapsed(g.BookingId)}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-muted/30 text-left flex-wrap">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {isCollapsed ? <ChevronRight size={14} className="text-muted-foreground shrink-0" /> : <ChevronDown size={14} className="text-muted-foreground shrink-0" />}
+                      <Building2 size={14} className="text-primary shrink-0" />
+                      <span className="font-mono text-sm font-semibold">{g.BookingNo}</span>
+                      <span className="text-sm text-muted-foreground truncate">{g.ApplicantName}</span>
+                      {g.ProjectName && <span className="text-xs text-muted-foreground truncate hidden sm:inline">· {g.ProjectName} {g.UnitNo}</span>}
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0 text-xs">
+                      <MilestoneProgressBar total={g.MilestoneTotal} invoiced={g.MilestoneInvoiced} />
+                      <span className="text-muted-foreground">
+                        {activeInvoices.length} invoice{activeInvoices.length !== 1 ? "s" : ""} · {fmtMoney(invoicedTotal)}
+                        {g.Invoices.length > activeInvoices.length && ` (+${g.Invoices.length - activeInvoices.length} void)`}
                       </span>
-                    )}
-                    <a href={`/crm/bookings?view=${booking.BookingId}`} onClick={(e) => e.stopPropagation()}
-                      className="flex items-center gap-1 px-2 py-1 border border-border rounded-md font-medium hover:bg-muted">
-                      <ExternalLink size={12} /> Booking
-                    </a>
-                  </div>
-                </button>
-                {!isCollapsed && (
-                  <div className="border-t border-border overflow-x-auto thin-scroll">
-                    <table className="w-full text-sm min-w-[600px]">
-                      <thead>
-                        <tr className="border-b border-border bg-muted/20">
-                          <th className="text-left px-3 py-1.5 text-xs text-muted-foreground font-medium">Invoice No.</th>
-                          <th className="text-left px-3 py-1.5 text-xs text-muted-foreground font-medium">Type</th>
-                          <th className="text-left px-3 py-1.5 text-xs text-muted-foreground font-medium">Amount</th>
-                          <th className="text-left px-3 py-1.5 text-xs text-muted-foreground font-medium">Date</th>
-                          <th className="text-left px-3 py-1.5 text-xs text-muted-foreground font-medium">Generated By</th>
-                          <th className="text-left px-3 py-1.5 text-xs text-muted-foreground font-medium">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {invoices.map((inv) => {
-                          const isVoid = inv.Status === "Void";
-                          return (
-                            <tr key={inv.Id} className={`border-b border-border last:border-0 hover:bg-muted/20 ${isVoid ? "opacity-60" : ""}`}>
-                              <td className="px-3 py-1.5 font-mono text-xs font-semibold text-primary">
-                                <span className={isVoid ? "line-through" : ""}>{inv.InvoiceNo}</span>
-                                {isVoid && (
-                                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-red-700 bg-red-50 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800 no-underline inline-block">Void</span>
-                                )}
-                              </td>
-                              <td className="px-3 py-1.5"><span className="text-xs px-2 py-0.5 rounded-md bg-muted font-medium">{inv.InvoiceType}</span></td>
-                              <td className={`px-3 py-1.5 font-medium ${isVoid ? "line-through" : ""}`}>{fmtMoney(inv.Amount)}</td>
-                              <td className="px-3 py-1.5 text-xs text-muted-foreground">{fmtDate(inv.InvoiceDate)}</td>
-                              <td className="px-3 py-1.5 text-xs text-muted-foreground">{inv.CreatedByName || "—"}</td>
-                              <td className="px-3 py-1.5">
-                                <div className="flex items-center gap-1.5">
-                                  <button onClick={() => openInvoice(inv)}
-                                    className="flex items-center gap-1 px-2 py-1 text-xs border border-border rounded-md hover:bg-muted">
-                                    <FileText className="w-3 h-3" /> View
-                                  </button>
-                                  {!isVoid && canVoid && (
-                                    <button onClick={() => setVoidTarget(inv)}
-                                      className="flex items-center gap-1 px-2 py-1 text-xs border border-red-300 text-red-700 rounded-md hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/30">
-                                      <Ban className="w-3 h-3" /> Void
-                                    </button>
+                      {rights.canCreate && (
+                        <span
+                          onClick={(e) => { e.stopPropagation(); setGenBookingId(g.BookingId); }}
+                          className="flex items-center gap-1 px-2 py-1 border border-border rounded-md font-medium hover:bg-muted">
+                          <Plus size={12} /> Add
+                        </span>
+                      )}
+                      <a href={`/crm/bookings?view=${g.BookingId}`} onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-1 px-2 py-1 border border-border rounded-md font-medium hover:bg-muted">
+                        <ExternalLink size={12} /> Booking
+                      </a>
+                    </div>
+                  </button>
+                  {!isCollapsed && (
+                    g.Invoices.length === 0 ? (
+                      <div className="border-t border-border px-4 py-4 text-xs text-muted-foreground">No invoices generated yet for this booking.</div>
+                    ) : (
+                    <div className="border-t border-border overflow-x-auto thin-scroll">
+                      <table className="w-full text-sm min-w-[600px]">
+                        <thead>
+                          <tr className="border-b border-border bg-muted/20">
+                            <th className="text-left px-3 py-1.5 text-xs text-muted-foreground font-medium">Invoice No.</th>
+                            <th className="text-left px-3 py-1.5 text-xs text-muted-foreground font-medium">Type</th>
+                            <th className="text-left px-3 py-1.5 text-xs text-muted-foreground font-medium">Amount</th>
+                            <th className="text-left px-3 py-1.5 text-xs text-muted-foreground font-medium">Date</th>
+                            <th className="text-left px-3 py-1.5 text-xs text-muted-foreground font-medium">Generated By</th>
+                            <th className="text-left px-3 py-1.5 text-xs text-muted-foreground font-medium">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {g.Invoices.map((inv) => {
+                            const isVoid = inv.Status === "Void";
+                            return (
+                              <tr key={inv.Id} className={`border-b border-border last:border-0 hover:bg-muted/20 ${isVoid ? "opacity-60" : ""}`}>
+                                <td className="px-3 py-1.5 font-mono text-xs font-semibold text-primary">
+                                  <span className={isVoid ? "line-through" : ""}>{inv.InvoiceNo}</span>
+                                  {isVoid && (
+                                    <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-red-700 bg-red-50 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800 no-underline inline-block">Void</span>
                                   )}
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                                </td>
+                                <td className="px-3 py-1.5"><span className="text-xs px-2 py-0.5 rounded-md bg-muted font-medium">{inv.InvoiceType}</span></td>
+                                <td className={`px-3 py-1.5 font-medium ${isVoid ? "line-through" : ""}`}>{fmtMoney(inv.Amount)}</td>
+                                <td className="px-3 py-1.5 text-xs text-muted-foreground">{fmtDate(inv.InvoiceDate)}</td>
+                                <td className="px-3 py-1.5 text-xs text-muted-foreground">{inv.CreatedByName || "—"}</td>
+                                <td className="px-3 py-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <button onClick={() => openInvoice(inv)}
+                                      className="flex items-center gap-1 px-2 py-1 text-xs border border-border rounded-md hover:bg-muted">
+                                      <FileText className="w-3 h-3" /> View
+                                    </button>
+                                    {!isVoid && canVoid && (
+                                      <button onClick={() => setVoidTarget(inv)}
+                                        className="flex items-center gap-1 px-2 py-1 text-xs border border-red-300 text-red-700 rounded-md hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/30">
+                                        <Ban className="w-3 h-3" /> Void
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    )
+                  )}
+                </div>
+              );
+            })}
+            <PaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+          </div>
+        )
+      ) : (
+        // Flat mode — one sortable table across every booking, for
+        // reconciliation. Click a header to sort by that column.
+        flatRows.length === 0 ? (
+          <div className="rounded-xl border border-border bg-card py-12 text-center">
+            <p className="text-sm text-muted-foreground">No invoices match this filter combination.</p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="overflow-x-auto thin-scroll">
+              <table className="w-full text-sm min-w-[820px]">
+                <thead>
+                  <tr className="border-b border-border bg-muted/20">
+                    {[
+                      { key: "InvoiceNo", label: "Invoice No." },
+                      { key: "BookingNo", label: "Booking" },
+                      { key: "ApplicantName", label: "Customer" },
+                      { key: "ProjectName", label: "Project / Unit" },
+                      { key: "InvoiceType", label: "Type" },
+                      { key: "Amount", label: "Amount" },
+                      { key: "InvoiceDate", label: "Date" },
+                    ].map((col) => (
+                      <th key={col.key} onClick={() => toggleFlatSort(col.key)}
+                        className="text-left px-3 py-2 text-xs text-muted-foreground font-medium cursor-pointer select-none hover:text-foreground">
+                        {col.label} {flatSort.key === col.key ? (flatSort.dir === "asc" ? "▲" : "▼") : ""}
+                      </th>
+                    ))}
+                    <th className="text-left px-3 py-2 text-xs text-muted-foreground font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedFlatRows.map((inv) => {
+                    const isVoid = inv.Status === "Void";
+                    return (
+                      <tr key={inv.Id} className={`border-b border-border last:border-0 hover:bg-muted/20 ${isVoid ? "opacity-60" : ""}`}>
+                        <td className="px-3 py-1.5 font-mono text-xs font-semibold text-primary">
+                          <span className={isVoid ? "line-through" : ""}>{inv.InvoiceNo}</span>
+                          {isVoid && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-red-700 bg-red-50 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800 no-underline inline-block">Void</span>}
+                        </td>
+                        <td className="px-3 py-1.5 font-mono text-xs">{inv.BookingNo}</td>
+                        <td className="px-3 py-1.5 text-xs truncate max-w-[160px]">{inv.ApplicantName}</td>
+                        <td className="px-3 py-1.5 text-xs text-muted-foreground truncate max-w-[160px]">{inv.ProjectName || "—"} {inv.UnitNo}</td>
+                        <td className="px-3 py-1.5"><span className="text-xs px-2 py-0.5 rounded-md bg-muted font-medium">{inv.InvoiceType}</span></td>
+                        <td className={`px-3 py-1.5 font-medium ${isVoid ? "line-through" : ""}`}>{fmtMoney(inv.Amount)}</td>
+                        <td className="px-3 py-1.5 text-xs text-muted-foreground">{fmtDate(inv.InvoiceDate)}</td>
+                        <td className="px-3 py-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <button onClick={() => openInvoice(inv)}
+                              className="flex items-center gap-1 px-2 py-1 text-xs border border-border rounded-md hover:bg-muted">
+                              <FileText className="w-3 h-3" /> View
+                            </button>
+                            {!isVoid && canVoid && (
+                              <button onClick={() => setVoidTarget(inv)}
+                                className="flex items-center gap-1 px-2 py-1 text-xs border border-red-300 text-red-700 rounded-md hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/30">
+                                <Ban className="w-3 h-3" /> Void
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-3">
+              <PaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+            </div>
+          </div>
+        )
       )}
 
       {preview && <InvoicePreviewDialog invoice={preview} onClose={closeInvoice} />}
@@ -892,7 +1243,7 @@ const CrmInvoices: React.FC = () => {
         <VoidInvoiceDialog
           invoice={voidTarget}
           onClose={() => setVoidTarget(null)}
-          onVoided={() => { setVoidTarget(null); qc.invalidateQueries({ queryKey: ["crm-invoices"] }); }}
+          onVoided={() => { const bid = voidTarget.BookingId; setVoidTarget(null); invalidateInvoiceRelatedQueries(qc, bid); }}
         />
       )}
       {genBookingId !== undefined && (

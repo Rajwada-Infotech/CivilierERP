@@ -258,36 +258,47 @@ router.post("/:id/info", requirePageRight("crm-query-payment", "edit"), async (r
     }
 
     const actor = actorId(req);
-    for (const file of files) {
-      await pool.request()
-        .input("qpid", sql.Int, id)
-        .input("dtype", sql.NVarChar(20), "Info")
-        .input("fname", sql.NVarChar(255), file.fileName)
-        .input("mtype", sql.NVarChar(100), file.mimeType)
-        .input("fsize", sql.Int, file.buffer.length)
-        .input("fdata", sql.VarBinary(sql.MAX), file.buffer)
-        .input("ub", sql.Int, actor)
-        .query(`
-          INSERT INTO dbo.CrmQueryPaymentAttachments (QueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
-          VALUES (@qpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+    // Same atomicity concern as crmAfsQueryPayment.js's identical route:
+    // multiple attachment INSERTs + the Status flip + comm log, wrapped so a
+    // failure partway through a multi-file upload can't leave a partial set
+    // of files attached while the status already reads InfoSent.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      for (const file of files) {
+        await tx.request()
+          .input("qpid", sql.Int, id)
+          .input("dtype", sql.NVarChar(20), "Info")
+          .input("fname", sql.NVarChar(255), file.fileName)
+          .input("mtype", sql.NVarChar(100), file.mimeType)
+          .input("fsize", sql.Int, file.buffer.length)
+          .input("fdata", sql.VarBinary(sql.MAX), file.buffer)
+          .input("ub", sql.Int, actor)
+          .query(`
+            INSERT INTO dbo.CrmQueryPaymentAttachments (QueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
+            VALUES (@qpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+          `);
+      }
+
+      if (row.Status === CrmStatus.PENDING) {
+        await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actor).query(`
+          UPDATE dbo.CrmQueryPayment SET Status = 'InfoSent', InfoSentAt = SYSDATETIME(), InfoSentBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
         `);
-    }
+      }
 
-    if (row.Status === CrmStatus.PENDING) {
-      await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actor).query(`
-        UPDATE dbo.CrmQueryPayment SET Status = 'InfoSent', InfoSentAt = SYSDATETIME(), InfoSentBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-    }
+      await logCommunication(tx, {
+        bookingId: row.BookingId, direction: "Outbound",
+        subject: "Stamp duty / registration payment details sent to customer",
+        summary: "Required government payment amount and paperwork shared with the customer via portal.",
+        createdBy: actor,
+      });
 
-    const booking = await pool.request().input("bid", sql.Int, row.BookingId)
-      .query("SELECT AssignedTo FROM dbo.CrmBooking WHERE Id = @bid");
-    await logCommunication(pool, {
-      bookingId: row.BookingId, direction: "Outbound",
-      subject: "Stamp duty / registration payment details sent to customer",
-      summary: "Required government payment amount and paperwork shared with the customer via portal.",
-      createdBy: actor,
-    });
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     res.json({ success: true, count: files.length });
   } catch (e) {
@@ -329,40 +340,49 @@ router.post("/:id/confirm", requirePageRight("crm-query-payment", "edit"), async
     }
 
     const actor = actorId(req);
-    if (proof) {
-      await pool.request()
-        .input("qpid", sql.Int, id)
-        .input("dtype", sql.NVarChar(20), "Proof")
-        .input("fname", sql.NVarChar(255), proof.fileName)
-        .input("mtype", sql.NVarChar(100), proof.mimeType)
-        .input("fsize", sql.Int, proof.buffer.length)
-        .input("fdata", sql.VarBinary(sql.MAX), proof.buffer)
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      if (proof) {
+        await tx.request()
+          .input("qpid", sql.Int, id)
+          .input("dtype", sql.NVarChar(20), "Proof")
+          .input("fname", sql.NVarChar(255), proof.fileName)
+          .input("mtype", sql.NVarChar(100), proof.mimeType)
+          .input("fsize", sql.Int, proof.buffer.length)
+          .input("fdata", sql.VarBinary(sql.MAX), proof.buffer)
+          .input("ub", sql.Int, actor)
+          .query(`
+            INSERT INTO dbo.CrmQueryPaymentAttachments (QueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
+            VALUES (@qpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+          `);
+      }
+
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("amt", sql.Decimal(18,2), b.ConfirmedAmount != null ? parseFloat(b.ConfirmedAmount) : null)
+        .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
         .input("ub", sql.Int, actor)
         .query(`
-          INSERT INTO dbo.CrmQueryPaymentAttachments (QueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
-          VALUES (@qpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+          UPDATE dbo.CrmQueryPayment SET
+            Status = 'Confirmed', ConfirmedAt = SYSDATETIME(), ConfirmedBy = @ub,
+            ConfirmedAmount = @amt, Remarks = ISNULL(@rem, Remarks),
+            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
         `);
+
+      await logCommunication(tx, {
+        bookingId: row.BookingId, direction: "Inbound",
+        subject: "Government payment confirmed",
+        summary: "Staff confirmed the customer has remitted stamp duty / registration fee to the Sub-Registrar Office.",
+        createdBy: actor,
+      });
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
-
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("amt", sql.Decimal(18,2), b.ConfirmedAmount != null ? parseFloat(b.ConfirmedAmount) : null)
-      .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
-      .input("ub", sql.Int, actor)
-      .query(`
-        UPDATE dbo.CrmQueryPayment SET
-          Status = 'Confirmed', ConfirmedAt = SYSDATETIME(), ConfirmedBy = @ub,
-          ConfirmedAmount = @amt, Remarks = ISNULL(@rem, Remarks),
-          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-
-    await logCommunication(pool, {
-      bookingId: row.BookingId, direction: "Inbound",
-      subject: "Government payment confirmed",
-      summary: "Staff confirmed the customer has remitted stamp duty / registration fee to the Sub-Registrar Office.",
-      createdBy: actor,
-    });
 
     res.json({ success: true });
   } catch (e) {
@@ -411,25 +431,34 @@ router.post("/:id/proxy-proof",
 
       const proxyNote = `[Proof submitted on behalf of customer via ${ProxyMethod}] ${ProxyRemarks.trim()}`;
 
-      await pool.request()
-        .input("id",    sql.Int,           id)
-        .input("dtype", sql.NVarChar(20),  "Proof")
-        .input("fname", sql.NVarChar(255), req.file.originalname)
-        .input("mime",  sql.NVarChar(100), req.file.mimetype)
-        .input("fsize", sql.Int,           req.file.size)
-        .input("fdata", sql.VarBinary(sql.MAX), req.file.buffer)
-        .input("ub",    sql.Int,           actor)
-        .query(`
-          INSERT INTO dbo.CrmQueryPaymentAttachments
-            (QueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy, UploadedAt)
-          VALUES (@id, @dtype, @fname, @mime, @fsize, @fdata, @ub, SYSDATETIME())
-        `);
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await tx.request()
+          .input("id",    sql.Int,           id)
+          .input("dtype", sql.NVarChar(20),  "Proof")
+          .input("fname", sql.NVarChar(255), req.file.originalname)
+          .input("mime",  sql.NVarChar(100), req.file.mimetype)
+          .input("fsize", sql.Int,           req.file.size)
+          .input("fdata", sql.VarBinary(sql.MAX), req.file.buffer)
+          .input("ub",    sql.Int,           actor)
+          .query(`
+            INSERT INTO dbo.CrmQueryPaymentAttachments
+              (QueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy, UploadedAt)
+            VALUES (@id, @dtype, @fname, @mime, @fsize, @fdata, @ub, SYSDATETIME())
+          `);
 
-      await logCommunication(pool, {
-        bookingId: qp.BookingId, direction: "Inbound",
-        subject: `Payment proof uploaded for ${qp.QPNo} (via ${ProxyMethod})`,
-        summary: proxyNote,
-      });
+        await logCommunication(tx, {
+          bookingId: qp.BookingId, direction: "Inbound",
+          subject: `Payment proof uploaded for ${qp.QPNo} (via ${ProxyMethod})`,
+          summary: proxyNote,
+        });
+
+        await tx.commit();
+      } catch (txErr) {
+        try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+        throw txErr;
+      }
 
       res.json({ success: true });
     } catch (e) {

@@ -351,70 +351,86 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     await assertUniqueCustomerEmail(pool, email, id);
 
     const cur = resolveCurrentAddress(b);
-    await pool.request()
-      .input("id",       sql.Int,           id)
-      .input("name",      sql.NVarChar(200), b.CustomerName || null)
-      .input("mob",       sql.NVarChar(20),  b.Mobile || null)
-      .input("altmob",    sql.NVarChar(20),  b.AltMobile ?? null)
-      .input("email",     sql.NVarChar(200), email)
-      .input("pan",       sql.NVarChar(20),  b.PanNo || null)
-      .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo ?? null)
-      .input("occ",       sql.NVarChar(100), b.Occupation ?? null)
-      .input("income",    sql.Decimal(18, 2), b.AnnualIncome !== "" && b.AnnualIncome != null ? parseFloat(b.AnnualIncome) : null)
-      .input("addr",      sql.NVarChar(500), b.PermanentAddress || null)
-      .input("city",      sql.NVarChar(100), b.PermanentCity ?? null)
-      .input("state",     sql.NVarChar(100), b.PermanentState ?? null)
-      .input("pin",       sql.NVarChar(10),  b.PermanentPincode ?? null)
-      .input("curaddr",   sql.NVarChar(500), cur.currentAddress)
-      .input("curcity",   sql.NVarChar(100), cur.currentCity)
-      .input("curstate",  sql.NVarChar(100), cur.currentState)
-      .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
-      .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
-      .input("dob",       sql.Date,          b.DateOfBirth || null)
-      .input("notes",     sql.NVarChar(sql.MAX), b.Notes ?? null)
-      .input("ub",        sql.Int,           actorId(req))
-      .query(`
-        UPDATE dbo.CrmCustomer SET
-          CustomerName = ISNULL(@name, CustomerName), Mobile = ISNULL(@mob, Mobile),
-          AltMobile = @altmob, Email = @email,
-          PanNo = ISNULL(@pan, PanNo), AadhaarNo = @aadhaar, Occupation = @occ, AnnualIncome = @income,
-          Address = ISNULL(@addr, Address), City = @city, State = @state, Pincode = @pin,
-          CurrentAddress = @curaddr, CurrentCity = @curcity, CurrentState = @curstate, CurrentPincode = @curpin,
-          IsCurrentSameAsPermanent = @cursame,
-          DateOfBirth = ISNULL(@dob, DateOfBirth),
-          Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
 
-    // CrmApplication.Email/Mobile/AltMobile were originally seeded FROM the
-    // customer at application-creation time but are separate copies — left
-    // unsynced, an edit here (e.g. correcting a typo) would silently leave
-    // every linked application, and therefore that application's already-
-    // provisioned portal login lookup, pointing at the stale value. Keep
-    // them in lockstep since CrmCustomer is the canonical identity record.
-    await pool.request()
-      .input("id",     sql.Int,          id)
-      .input("name",   sql.NVarChar(200), b.CustomerName || null)
-      .input("mob",    sql.NVarChar(20), b.Mobile || null)
-      .input("altmob", sql.NVarChar(20), b.AltMobile ?? null)
-      .input("email",  sql.NVarChar(200), email)
-      .query(`
-        UPDATE dbo.CrmApplication SET
-          ApplicantName = ISNULL(@name, ApplicantName),
-          Mobile = ISNULL(@mob, Mobile),
-          AltMobile = @altmob,
-          Email = @email
-        WHERE CustomerId = @id
-      `);
+    // The canonical Customer record and its two denormalized copies
+    // (CrmApplication's ApplicantName/Mobile/Email, CrmCustomerPortalUser's
+    // Email) must stay in lockstep — see the comment below on why. Wrapped
+    // so a failure partway through can't leave the canonical record edited
+    // while a linked application or the portal login still point at the
+    // stale value.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",       sql.Int,           id)
+        .input("name",      sql.NVarChar(200), b.CustomerName || null)
+        .input("mob",       sql.NVarChar(20),  b.Mobile || null)
+        .input("altmob",    sql.NVarChar(20),  b.AltMobile ?? null)
+        .input("email",     sql.NVarChar(200), email)
+        .input("pan",       sql.NVarChar(20),  b.PanNo || null)
+        .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo ?? null)
+        .input("occ",       sql.NVarChar(100), b.Occupation ?? null)
+        .input("income",    sql.Decimal(18, 2), b.AnnualIncome !== "" && b.AnnualIncome != null ? parseFloat(b.AnnualIncome) : null)
+        .input("addr",      sql.NVarChar(500), b.PermanentAddress || null)
+        .input("city",      sql.NVarChar(100), b.PermanentCity ?? null)
+        .input("state",     sql.NVarChar(100), b.PermanentState ?? null)
+        .input("pin",       sql.NVarChar(10),  b.PermanentPincode ?? null)
+        .input("curaddr",   sql.NVarChar(500), cur.currentAddress)
+        .input("curcity",   sql.NVarChar(100), cur.currentCity)
+        .input("curstate",  sql.NVarChar(100), cur.currentState)
+        .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
+        .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
+        .input("dob",       sql.Date,          b.DateOfBirth || null)
+        .input("notes",     sql.NVarChar(sql.MAX), b.Notes ?? null)
+        .input("ub",        sql.Int,           actorId(req))
+        .query(`
+          UPDATE dbo.CrmCustomer SET
+            CustomerName = ISNULL(@name, CustomerName), Mobile = ISNULL(@mob, Mobile),
+            AltMobile = @altmob, Email = @email,
+            PanNo = ISNULL(@pan, PanNo), AadhaarNo = @aadhaar, Occupation = @occ, AnnualIncome = @income,
+            Address = ISNULL(@addr, Address), City = @city, State = @state, Pincode = @pin,
+            CurrentAddress = @curaddr, CurrentCity = @curcity, CurrentState = @curstate, CurrentPincode = @curpin,
+            IsCurrentSameAsPermanent = @cursame,
+            DateOfBirth = ISNULL(@dob, DateOfBirth),
+            Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
 
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("email", sql.NVarChar(200), email)
-      .query(`
-        UPDATE dbo.CrmCustomerPortalUser
-        SET Email = @email
-        WHERE CustomerId = @id
-      `);
+      // CrmApplication.Email/Mobile/AltMobile were originally seeded FROM the
+      // customer at application-creation time but are separate copies — left
+      // unsynced, an edit here (e.g. correcting a typo) would silently leave
+      // every linked application, and therefore that application's already-
+      // provisioned portal login lookup, pointing at the stale value. Keep
+      // them in lockstep since CrmCustomer is the canonical identity record.
+      await tx.request()
+        .input("id",     sql.Int,          id)
+        .input("name",   sql.NVarChar(200), b.CustomerName || null)
+        .input("mob",    sql.NVarChar(20), b.Mobile || null)
+        .input("altmob", sql.NVarChar(20), b.AltMobile ?? null)
+        .input("email",  sql.NVarChar(200), email)
+        .query(`
+          UPDATE dbo.CrmApplication SET
+            ApplicantName = ISNULL(@name, ApplicantName),
+            Mobile = ISNULL(@mob, Mobile),
+            AltMobile = @altmob,
+            Email = @email
+          WHERE CustomerId = @id
+        `);
+
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("email", sql.NVarChar(200), email)
+        .query(`
+          UPDATE dbo.CrmCustomerPortalUser
+          SET Email = @email
+          WHERE CustomerId = @id
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     // Same lockstep guarantee, extended to the "Customer Master" ledger head
     // (dbo.AccountHeadMaster, LHeadType='C') that the Sales module's Customer

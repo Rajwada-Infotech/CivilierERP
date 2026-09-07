@@ -309,12 +309,18 @@ router.get("/application/:applicationId", requirePageRight("crm-applications", "
 // stage. Non-mandatory, same Draft/Pending lock as Parking's own
 // Application-stage step (applyAddExtraChargeToApplication above).
 router.post("/application/:applicationId", requirePageRight("crm-applications", "edit"), async (req, res) => {
+  const pool = getPool();
+  // applyAddExtraChargeToApplication does an INSERT + audit log — wrapped so
+  // a failure between them can't leave a charge row with no trace of it.
+  const tx = pool.transaction();
   try {
-    const pool = getPool();
+    await tx.begin();
     const applicationId = parseInt(req.params.applicationId);
-    const result = await applyAddExtraChargeToApplication(pool, applicationId, req.body, actorId(req));
+    const result = await applyAddExtraChargeToApplication(tx, applicationId, req.body, actorId(req));
+    await tx.commit();
     res.status(201).json({ success: true, ...result });
   } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
     console.error("[crm-extra-charges] POST /application error:", e.message);
     res.status(e.status || 500).json({ error: e.message });
   }
@@ -365,8 +371,19 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
-    const result = await applyAddExtraCharge(pool, bookingId, b, actorId(req));
-    res.status(201).json({ success: true, ...result });
+    // applyAddExtraCharge does INSERT + rollupBookingTotals + audit log —
+    // wrapped so a failure partway through can't leave the charge inserted
+    // with the booking's rolled-up totals/milestones now stale.
+    const tx = pool.transaction();
+    try {
+      await tx.begin();
+      const result = await applyAddExtraCharge(tx, bookingId, b, actorId(req));
+      await tx.commit();
+      res.status(201).json({ success: true, ...result });
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
   } catch (e) {
     console.error("[crm-extra-charges] POST error:", e.message);
     res.status(e.status || 500).json({ error: e.message });
@@ -391,8 +408,16 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], "ed
     const bookingId = row.recordset[0].BookingId;
 
     if (!bookingId) {
-      const result = await applyEditExtraCharge(pool, id, b, actorId(req));
-      return res.json({ success: true, ...result });
+      const tx0 = pool.transaction();
+      try {
+        await tx0.begin();
+        const result = await applyEditExtraCharge(tx0, id, b, actorId(req));
+        await tx0.commit();
+        return res.json({ success: true, ...result });
+      } catch (txErr) {
+        try { await tx0.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+        throw txErr;
+      }
     }
 
     const activeErr = await requireActiveBooking(pool, bookingId);
@@ -410,8 +435,18 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], "ed
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
-    const result = await applyEditExtraCharge(pool, id, b, actorId(req));
-    res.json({ success: true, ...result });
+    // applyEditExtraCharge does UPDATE + (optional) milestone UPDATE +
+    // rollupBookingTotals + audit log — wrapped for the same reason as POST.
+    const tx = pool.transaction();
+    try {
+      await tx.begin();
+      const result = await applyEditExtraCharge(tx, id, b, actorId(req));
+      await tx.commit();
+      res.json({ success: true, ...result });
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
   } catch (e) {
     console.error("[crm-extra-charges] PUT error:", e.message);
     res.status(e.status || 500).json({ error: e.message });
@@ -457,8 +492,19 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], 
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
-    const result = await applyReleaseExtraCharge(pool, id);
-    res.json({ success: true, ...result });
+    // applyReleaseExtraCharge (booking-linked path) does an UPDATE + a
+    // milestone DELETE — wrapped so a failure between them can't leave a
+    // dangling milestone pointing at a now-inactive charge.
+    const tx = pool.transaction();
+    try {
+      await tx.begin();
+      const result = await applyReleaseExtraCharge(tx, id);
+      await tx.commit();
+      res.json({ success: true, ...result });
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
   } catch (e) {
     console.error("[crm-extra-charges] DELETE error:", e.message);
     res.status(e.status || 500).json({ error: e.message });

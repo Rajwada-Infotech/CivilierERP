@@ -345,68 +345,84 @@ router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, re
     }
 
     const bookingId = parseInt(b.BookingId);
-    await pool.request()
-      .input("bid",  sql.Int,           bookingId)
-      .input("cb",   sql.Int,           b.CalledBy ? parseInt(b.CalledBy) : actorId(req))
-      .input("dt",   sql.DateTime2(3),  b.CallDate || null)
-      .input("dur",  sql.Int,           b.DurationSeconds ? parseInt(b.DurationSeconds) : null)
-      .input("out",  sql.NVarChar(50),  b.Outcome || null)
-      .input("ncd",  sql.Date,          b.NextCallDate || null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cf",   sql.NVarChar(sql.MAX), customFieldsJson)
-      .input("pad",  sql.Date,          b.PreferredAgreementDate || null)
-      .input("ppc",  sql.Bit,           b.PaymentPlanConfirmed === true ? 1 : b.PaymentPlanConfirmed === false ? 0 : null)
-      .input("ppcat",sql.DateTime2(3),  b.PaymentPlanConfirmed === true ? new Date() : null)
-      .input("ppr",  sql.NVarChar(500), b.PaymentPlanConfirmed === false ? String(b.PaymentPlanDisputeReason).trim() : null)
-      .input("acb",  sql.Int,           actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmWelcomeCall
-          (BookingId, CalledBy, CallDate, DurationSeconds, Outcome, NextCallDate, Notes, CustomFields, PreferredAgreementDate, PaymentPlanConfirmed, PaymentPlanConfirmedAt, PaymentPlanDisputeReason, CreatedBy, CreatedAt)
-        VALUES (@bid, @cb, ISNULL(@dt, SYSDATETIME()), @dur, @out, @ncd, @note, @cf, @pad, @ppc, @ppcat, @ppr, @acb, SYSDATETIME())
-      `);
-
     const bookingRow = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT BookingNo, ApplicationId, AssignedTo FROM dbo.CrmBooking WHERE Id = @bid");
     const booking = bookingRow.recordset[0];
 
-    // Auto-flow: every logged call is itself a customer touchpoint — seed it
-    // into the Communication Log automatically so that page becomes the
-    // unified, continuing record of "further works and other tasks" instead
-    // of staff having to separately re-log the same call there by hand.
-    if (booking) {
-      await pool.request()
-        .input("aid",  sql.Int, booking.ApplicationId)
-        .input("bid",  sql.Int, bookingId)
-        .input("subj", sql.NVarChar(300), `Welcome Call${b.Outcome ? ` — ${b.Outcome}` : ""}`)
-        .input("sum",  sql.NVarChar(sql.MAX), b.Notes || null)
-        .input("cat",  sql.DateTime2(3), b.CallDate || null)
-        .input("cb",   sql.Int, actorId(req))
+    // The call INSERT, its auto-seeded Communication Log entry, and (on a
+    // decline) the payment-plan-dispute log entry describe one event and
+    // must land together — wrapped so a failure partway through can't leave
+    // the call logged with no trace of it in the Communication Log, or a
+    // dispute recorded on the call but invisible to whoever works that page.
+    // Notification stays outside (pure websocket, no DB write).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("bid",  sql.Int,           bookingId)
+        .input("cb",   sql.Int,           b.CalledBy ? parseInt(b.CalledBy) : actorId(req))
+        .input("dt",   sql.DateTime2(3),  b.CallDate || null)
+        .input("dur",  sql.Int,           b.DurationSeconds ? parseInt(b.DurationSeconds) : null)
+        .input("out",  sql.NVarChar(50),  b.Outcome || null)
+        .input("ncd",  sql.Date,          b.NextCallDate || null)
+        .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("cf",   sql.NVarChar(sql.MAX), customFieldsJson)
+        .input("pad",  sql.Date,          b.PreferredAgreementDate || null)
+        .input("ppc",  sql.Bit,           b.PaymentPlanConfirmed === true ? 1 : b.PaymentPlanConfirmed === false ? 0 : null)
+        .input("ppcat",sql.DateTime2(3),  b.PaymentPlanConfirmed === true ? new Date() : null)
+        .input("ppr",  sql.NVarChar(500), b.PaymentPlanConfirmed === false ? String(b.PaymentPlanDisputeReason).trim() : null)
+        .input("acb",  sql.Int,           actorId(req))
         .query(`
-          INSERT INTO dbo.CrmCommunicationLog
-            (ApplicationId, BookingId, Channel, Direction, Subject, Summary, ContactedAt, CreatedBy, CreatedAt)
-          VALUES (@aid, @bid, 'Call', 'Outbound', @subj, @sum, ISNULL(@cat, SYSDATETIME()), @cb, SYSDATETIME())
+          INSERT INTO dbo.CrmWelcomeCall
+            (BookingId, CalledBy, CallDate, DurationSeconds, Outcome, NextCallDate, Notes, CustomFields, PreferredAgreementDate, PaymentPlanConfirmed, PaymentPlanConfirmedAt, PaymentPlanDisputeReason, CreatedBy, CreatedAt)
+          VALUES (@bid, @cb, ISNULL(@dt, SYSDATETIME()), @dur, @out, @ncd, @note, @cf, @pad, @ppc, @ppcat, @ppr, @acb, SYSDATETIME())
         `);
 
-      // A customer declining the payment plan is a real, open issue — hand
-      // it to the Communication Log as its own entry (Inbound, since it's
-      // the customer's own objection) so whoever works that page next has
-      // something concrete to follow up on, not just a checkbox buried on
-      // this page.
-      if (b.PaymentPlanConfirmed === false) {
-        await logCommunication(pool, {
-          applicationId: booking.ApplicationId, bookingId,
-          direction: "Inbound",
-          subject: "Payment Plan Not Confirmed",
-          summary: String(b.PaymentPlanDisputeReason).trim(),
-          createdBy: actorId(req),
-        });
-        if (booking.AssignedTo) {
-          await emitNotification(pool, booking.AssignedTo, "crm_payment_plan_disputed",
-            "Customer Did Not Agree to Payment Plan",
-            `${booking.BookingNo}: ${String(b.PaymentPlanDisputeReason).trim()}`,
-            bookingId, "crm_booking");
+      // Auto-flow: every logged call is itself a customer touchpoint — seed it
+      // into the Communication Log automatically so that page becomes the
+      // unified, continuing record of "further works and other tasks" instead
+      // of staff having to separately re-log the same call there by hand.
+      if (booking) {
+        await tx.request()
+          .input("aid",  sql.Int, booking.ApplicationId)
+          .input("bid",  sql.Int, bookingId)
+          .input("subj", sql.NVarChar(300), `Welcome Call${b.Outcome ? ` — ${b.Outcome}` : ""}`)
+          .input("sum",  sql.NVarChar(sql.MAX), b.Notes || null)
+          .input("cat",  sql.DateTime2(3), b.CallDate || null)
+          .input("cb",   sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmCommunicationLog
+              (ApplicationId, BookingId, Channel, Direction, Subject, Summary, ContactedAt, CreatedBy, CreatedAt)
+            VALUES (@aid, @bid, 'Call', 'Outbound', @subj, @sum, ISNULL(@cat, SYSDATETIME()), @cb, SYSDATETIME())
+          `);
+
+        // A customer declining the payment plan is a real, open issue — hand
+        // it to the Communication Log as its own entry (Inbound, since it's
+        // the customer's own objection) so whoever works that page next has
+        // something concrete to follow up on, not just a checkbox buried on
+        // this page.
+        if (b.PaymentPlanConfirmed === false) {
+          await logCommunication(tx, {
+            applicationId: booking.ApplicationId, bookingId,
+            direction: "Inbound",
+            subject: "Payment Plan Not Confirmed",
+            summary: String(b.PaymentPlanDisputeReason).trim(),
+            createdBy: actorId(req),
+          });
         }
       }
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    if (booking?.AssignedTo && b.PaymentPlanConfirmed === false) {
+      await emitNotification(pool, booking.AssignedTo, "crm_payment_plan_disputed",
+        "Customer Did Not Agree to Payment Plan",
+        `${booking.BookingNo}: ${String(b.PaymentPlanDisputeReason).trim()}`,
+        bookingId, "crm_booking");
     }
 
     // Auto-flow: a completed welcome call is one of two prerequisites for

@@ -10,7 +10,7 @@ import {
   Plus, AlertTriangle, RotateCcw, UserCircle2,
   CheckCircle2, Send, ShieldAlert, Loader2,
   ChevronRight, FileText, Pencil, Trash2,
-  CalendarDays, Clock, MapPin, ArrowRight, Search, X,
+  CalendarDays, Clock, ArrowRight, Search, X, IndianRupee,
 } from "lucide-react";
 import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -143,6 +143,9 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
                     <span><strong>OC/CC Received</strong> — project Occupancy or Completion Certificate must be on file</span>
                   </li>
                 </ul>
+                <p className="text-[10px] text-amber-600 pt-1 leading-relaxed">
+                  Note: the notice may be issued even if dues are outstanding — it serves as a formal offer with a dues statement attached. All dues must be cleared before the actual <strong>Handover</strong>.
+                </p>
                 <div className="flex gap-4 pt-1">
                   <button onClick={() => { onClose(); navigate("/crm/pre-possession"); }}
                     className="flex items-center gap-1 text-xs text-blue-600 hover:underline font-semibold">
@@ -301,6 +304,26 @@ function NoticeCard({ n, onMarkSent, onEdit, onDelete, onAcknowledge, onDispute,
             )}
           </div>
         </div>
+
+        {/* Outstanding balance — informational, not a gate at notice stage */}
+        {(n.OutstandingMilestones > 0) && (
+          <div className="flex items-center gap-1.5 mt-2 px-2.5 py-1.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium">
+            <IndianRupee size={11} className="shrink-0" />
+            <span>
+              {n.OutstandingMilestones} milestone{n.OutstandingMilestones > 1 ? "s" : ""} outstanding
+              {n.OutstandingBalance > 0 && (
+                <> · ₹{Math.round(n.OutstandingBalance).toLocaleString("en-IN")} due</>
+              )}
+            </span>
+            <span className="ml-auto text-[10px] font-normal text-red-500">Must be cleared before Handover</span>
+          </div>
+        )}
+        {(n.OutstandingMilestones === 0) && (
+          <div className="flex items-center gap-1.5 mt-2 px-2.5 py-1.5 rounded-lg bg-green-50 border border-green-200 text-xs text-green-700 font-medium">
+            <CheckCircle2 size={11} className="shrink-0" />
+            All dues cleared — ready for Handover
+          </div>
+        )}
 
         {/* Action bar */}
         <div className="mt-3 pt-3 border-t border-border/60 flex items-center gap-2 flex-wrap">

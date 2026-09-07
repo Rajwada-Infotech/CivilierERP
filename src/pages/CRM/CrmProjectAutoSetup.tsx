@@ -15,15 +15,23 @@ const DROPDOWN_API = "/api/business/dropdown";
 
 type NamingScheme = "Alphabetical" | "Numeric" | "Custom";
 
-// Same vocabulary as src/pages/followup/UnitMaster.tsx's own UNIT_TYPES, so a
-// type picked here reads back identically once units land on that page.
-const UNIT_TYPES = [
-  "1 BHK", "1.5 BHK", "2 BHK", "2.5 BHK", "3 BHK", "3.5 BHK", "4 BHK", "4+ BHK",
-  "Studio", "Villa", "Plot", "Commercial", "Other",
-];
+async function fetchUnitTypes(): Promise<{ label: string }[]> {
+  try {
+    const r = await fetchWithAuth("/api/unit-bhk-config/types");
+    return r.ok ? r.json() : [];
+  } catch { return []; }
+}
 
 type TemplateRow = { UnitType: string; Count: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
+type PaymentPlan = { Id: number; PlanName: string; IsActive: boolean };
 type UnitEdit = { UnitName: string; UnitType: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
+
+async function fetchApplicablePlans(projectId: string): Promise<PaymentPlan[]> {
+  try {
+    const r = await fetchWithAuth(`/api/unit-master/applicable-payment-plans?projectId=${projectId}`);
+    return r.ok ? r.json() : [];
+  } catch { return []; }
+}
 
 async function fetchProjects(): Promise<any[]> {
   try { const r = await fetchWithAuth(PROJECTS_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -189,9 +197,18 @@ const CrmProjectAutoSetup: React.FC = () => {
   // instead of staying open with nothing left to do. This re-opens it
   // on demand (e.g. to prep the template before adding more floors later).
   const [unitTemplateOpenFor, setUnitTemplateOpenFor] = useState<Record<number, boolean>>({});
+  // Payment plan IDs selected per block — forward-filled to every unit generated in that block.
+  const [blockPaymentPlans, setBlockPaymentPlans] = useState<Record<number, number[]>>({});
 
   const { data: companies = [] } = useQuery({ queryKey: ["business-dropdown-companies"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
   const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
+  const { data: unitTypesMaster = [] } = useQuery<{ label: string }[]>({ queryKey: ["unit-bhk-config-types"], queryFn: fetchUnitTypes, staleTime: 10 * 60_000 });
+  const { data: applicablePlans = [] } = useQuery<PaymentPlan[]>({
+    queryKey: ["applicable-plans-for-project", projectId],
+    queryFn: () => fetchApplicablePlans(projectId),
+    enabled: !!projectId,
+    staleTime: 2 * 60_000,
+  });
   const projectsForCompany = useMemo(
     () => (companyId ? (projects as any[]).filter((p: any) => String(p.CompanyId) === companyId) : []),
     [projects, companyId],
@@ -286,8 +303,11 @@ const CrmProjectAutoSetup: React.FC = () => {
               OpenTerraceAreaSqFt: it.OpenTerraceAreaSqFt != null ? String(it.OpenTerraceAreaSqFt) : "",
               RatePerSqFt: it.RatePerSqFt != null ? String(it.RatePerSqFt) : "",
             }))
-          : [{ UnitType: "2 BHK", Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }];
+          : [{ UnitType: unitTypesMaster[0]?.label ?? "", Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }];
         setTemplates((m) => ({ ...m, [b.Id]: rows }));
+        if (data.paymentPlanIds?.length) {
+          setBlockPaymentPlans((m) => ({ ...m, [b.Id]: data.paymentPlanIds }));
+        }
       } catch { /* leave unset — user can still add rows manually */ }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -468,7 +488,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     setEditingUnitId(unit.Id);
     setEditingUnit({
       UnitName: unit.UnitName || "",
-      UnitType: unit.UnitType || "2 BHK",
+      UnitType: unit.UnitType || unitTypesMaster[0]?.label || "",
       AreaSqFt: unit.AreaSqFt != null ? String(unit.AreaSqFt) : "",
       CarpetAreaSqFt: unit.CarpetAreaSqFt != null ? String(unit.CarpetAreaSqFt) : "",
       BuiltUpAreaSqFt: unit.BuiltUpAreaSqFt != null ? String(unit.BuiltUpAreaSqFt) : "",
@@ -533,7 +553,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   const templateTotal = (blockId: number) => (templates[blockId] || []).reduce((s, r) => s + (parseInt(r.Count, 10) || 0), 0);
 
   const addTemplateRow = (blockId: number) =>
-    setTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { UnitType: "2 BHK", Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }] }));
+    setTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { UnitType: unitTypesMaster[0]?.label ?? "", Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }] }));
   const removeTemplateRow = (blockId: number, idx: number) =>
     setTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).filter((_, i) => i !== idx) }));
   const updateTemplateRow = (blockId: number, idx: number, patch: Partial<TemplateRow>) =>
@@ -548,16 +568,19 @@ const CrmProjectAutoSetup: React.FC = () => {
       const res = await fetchWithAuth(`${API}/blocks/${blockId}/unit-template`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Items: rows.map((r) => ({
-          UnitType: r.UnitType,
-          Count: r.Count,
-          AreaSqFt: r.AreaSqFt || null,
-          CarpetAreaSqFt: r.CarpetAreaSqFt || null,
-          BuiltUpAreaSqFt: r.BuiltUpAreaSqFt || null,
-          SuperBuiltUpAreaSqFt: r.SuperBuiltUpAreaSqFt || null,
-          OpenTerraceAreaSqFt: r.OpenTerraceAreaSqFt || null,
-          RatePerSqFt: r.RatePerSqFt || null,
-        })) }),
+        body: JSON.stringify({
+          Items: rows.map((r) => ({
+            UnitType: r.UnitType,
+            Count: r.Count,
+            AreaSqFt: r.AreaSqFt || null,
+            CarpetAreaSqFt: r.CarpetAreaSqFt || null,
+            BuiltUpAreaSqFt: r.BuiltUpAreaSqFt || null,
+            SuperBuiltUpAreaSqFt: r.SuperBuiltUpAreaSqFt || null,
+            OpenTerraceAreaSqFt: r.OpenTerraceAreaSqFt || null,
+            RatePerSqFt: r.RatePerSqFt || null,
+          })),
+          PaymentPlanIds: blockPaymentPlans[blockId] || [],
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to save template");
@@ -782,6 +805,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 onCancelEditUnit={() => { setEditingUnitId(null); setEditingUnit(null); }}
                                 onSaveUnit={handleSaveUnit}
                                 onDeleteUnit={handleDeleteUnit}
+                                unitTypesMaster={unitTypesMaster}
                               />
                             </div>
                           )}
@@ -891,6 +915,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                     onCancelEditUnit={() => { setEditingUnitId(null); setEditingUnit(null); }}
                     onSaveUnit={handleSaveUnit}
                     onDeleteUnit={handleDeleteUnit}
+                    unitTypesMaster={unitTypesMaster}
                   />
                 </div>
               ))}
@@ -1015,6 +1040,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                   editingUnitId={editingUnitId}
                                   editingUnit={editingUnit}
                                   savingUnitId={savingUnitId}
+                                  unitTypesMaster={unitTypesMaster}
                                   onStartEdit={startEditUnit}
                                   onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
                                   onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
@@ -1067,6 +1093,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                   editingUnitId={editingUnitId}
                                   editingUnit={editingUnit}
                                   savingUnitId={savingUnitId}
+                                  unitTypesMaster={unitTypesMaster}
                                   onStartEdit={startEditUnit}
                                   onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
                                   onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
@@ -1161,6 +1188,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
                                 onSave={handleSaveUnit}
                                 onDelete={handleDeleteUnit}
+                                unitTypesMaster={unitTypesMaster}
                               />
                             ))}
                           </div>
@@ -1187,7 +1215,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                               <div className="flex items-center gap-2">
                                 <select value={row.UnitType} onChange={(e) => updateTemplateRow(b.Id, idx, { UnitType: e.target.value })}
                                   className={`${inputCls} !py-1 flex-1`}>
-                                  {UNIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                                  {unitTypesMaster.map((t) => <option key={t.label} value={t.label}>{t.label}</option>)}
                                 </select>
                                 <input type="number" min={1} max={100} placeholder="Count" value={row.Count}
                                   onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })}
@@ -1252,6 +1280,41 @@ const CrmProjectAutoSetup: React.FC = () => {
                               </button>
                             )}
                           </div>
+                          {applicablePlans.length > 0 && (
+                            <div className="pt-1.5 border-t border-border/40">
+                              <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">
+                                Payment Plans — forward-filled to every unit generated in this block
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {applicablePlans.map((plan) => {
+                                  const selected = (blockPaymentPlans[b.Id] || []).includes(plan.Id);
+                                  return (
+                                    <button
+                                      key={plan.Id}
+                                      onClick={() => setBlockPaymentPlans((m) => ({
+                                        ...m,
+                                        [b.Id]: selected
+                                          ? (m[b.Id] || []).filter((id) => id !== plan.Id)
+                                          : [...(m[b.Id] || []), plan.Id],
+                                      }))}
+                                      className={`text-[11px] px-2 py-0.5 rounded-full border font-medium transition-colors ${
+                                        selected
+                                          ? "bg-primary text-primary-foreground border-primary"
+                                          : "bg-muted/40 border-border text-muted-foreground hover:text-foreground"
+                                      }`}
+                                    >
+                                      {plan.PlanName}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {(blockPaymentPlans[b.Id] || []).length > 0 && (
+                                <div className="text-[10px] text-green-600 mt-1">
+                                  {(blockPaymentPlans[b.Id] || []).length} plan{(blockPaymentPlans[b.Id] || []).length > 1 ? "s" : ""} selected — saved with template
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
 
                         {/* Ground floor stays its own explicit row — never
@@ -1289,6 +1352,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
                                 onSave={handleSaveUnit}
                                 onDelete={handleDeleteUnit}
+                                unitTypesMaster={unitTypesMaster}
                               />
                             )}
                           </div>
@@ -1336,6 +1400,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                     onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
                                     onSave={handleSaveUnit}
                                     onDelete={handleDeleteUnit}
+                                    unitTypesMaster={unitTypesMaster}
                                   />
                                 )}
                               </div>
@@ -1400,7 +1465,8 @@ const BlockFloorTree: React.FC<{
   onCancelEditUnit: () => void;
   onSaveUnit: (floorId: number, unit: any) => void;
   onDeleteUnit: (floorId: number, unit: any) => void;
-}> = ({ blockFloors, expandedFloorId, onToggleFloor, floorUnits, loadingUnitsFloorId, editingUnitId, editingUnit, savingUnitId, onStartEditUnit, onEditUnitChange, onCancelEditUnit, onSaveUnit, onDeleteUnit }) => (
+  unitTypesMaster: { label: string }[];
+}> = ({ blockFloors, expandedFloorId, onToggleFloor, floorUnits, loadingUnitsFloorId, editingUnitId, editingUnit, savingUnitId, onStartEditUnit, onEditUnitChange, onCancelEditUnit, onSaveUnit, onDeleteUnit, unitTypesMaster }) => (
   <div className="space-y-0.5">
     {blockFloors.length === 0 ? (
       <div className="text-muted-foreground py-0.5">No floors yet.</div>
@@ -1436,6 +1502,7 @@ const BlockFloorTree: React.FC<{
               editingUnitId={editingUnitId}
               editingUnit={editingUnit}
               savingUnitId={savingUnitId}
+              unitTypesMaster={unitTypesMaster}
               onStartEdit={onStartEditUnit}
               onEditChange={onEditUnitChange}
               onCancelEdit={onCancelEditUnit}
@@ -1456,12 +1523,13 @@ const FloorUnitList: React.FC<{
   editingUnitId: number | null;
   editingUnit: UnitEdit | null;
   savingUnitId: number | null;
+  unitTypesMaster: { label: string }[];
   onStartEdit: (unit: any) => void;
   onEditChange: (patch: Partial<UnitEdit>) => void;
   onCancelEdit: () => void;
   onSave: (floorId: number, unit: any) => void;
   onDelete: (floorId: number, unit: any) => void;
-}> = ({ floorId, units, loading, editingUnitId, editingUnit, savingUnitId, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete }) => {
+}> = ({ floorId, units, loading, editingUnitId, editingUnit, savingUnitId, unitTypesMaster, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete }) => {
   // Tapping a unit expands it into a small detail panel (status + real
   // Edit/Delete buttons) instead of always showing a bare pencil/× stranded
   // at the far edge of the row. Local to this floor's list — each floor
@@ -1502,7 +1570,7 @@ const FloorUnitList: React.FC<{
                     <select value={editingUnit.UnitType}
                       onChange={(e) => onEditChange({ UnitType: e.target.value })}
                       className="h-7 rounded border border-border bg-background px-1 text-[11px] outline-none focus:border-primary">
-                      {UNIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                      {unitTypesMaster.map((t) => <option key={t.label} value={t.label}>{t.label}</option>)}
                     </select>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-6 gap-1.5">
