@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Plus, Search, ChevronRight, MoreHorizontal, CheckCircle2,
   Eye, Phone, MessageSquare, Landmark, FileSignature, IndianRupee, Repeat, Building2,
-  AlertTriangle, Trash2,
+  AlertTriangle, Trash2, Lock,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -550,8 +550,20 @@ const CrmBooking: React.FC = () => {
       } },
     { accessorKey: "BookingAmount", header: "Booking Amt", size: 110,
       cell: (i) => <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer">{fmt(i.row.original.BookingAmount)}</span> },
-    { accessorKey: "Status", header: "Status", size: 100,
-      cell: (i) => <span onClick={() => openBooking(i.row.original.Id)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+    { accessorKey: "Status", header: "Status", size: 110,
+      cell: (i) => {
+        const b = i.row.original;
+        return (
+          <div onClick={() => openBooking(b.Id)} className="cursor-pointer space-y-1">
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[b.Status] || ""}`}>{b.Status}</span>
+            {b.IsFrozen && (
+              <div className="flex items-center gap-1 text-[10px] font-medium text-red-600 dark:text-red-400">
+                <Lock size={10} /> Frozen
+              </div>
+            )}
+          </div>
+        );
+      } },
     { accessorKey: "BookingDate", header: "Date", size: 95,
       cell: (i) => (
         <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
@@ -647,7 +659,7 @@ const CrmBooking: React.FC = () => {
                 <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)} className="gap-2">
                   <MessageSquare size={14} className="text-amber-700 dark:text-amber-400" /> Communication
                 </DropdownMenuItem>
-                {b.Status !== CrmStatus.CANCELLED && (canRequestCancellation || canEdit) && (
+                {b.Status !== CrmStatus.CANCELLED && b.DeedStatus !== "Registered" && (canRequestCancellation || canEdit) && (
                   <>
                     <DropdownMenuSeparator />
                     {(canRequestCancellation || canEdit) && (

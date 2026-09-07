@@ -597,10 +597,11 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
     .query(`
       SELECT m.BookingId, m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid,
              bk.ProjectId, bk.ProjectName, bk.CompanyId, bk.ApplicationId, bk.BookingNo,
-             a.ApplicantName
+             a.ApplicantName, e.name AS CompanyName
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking bk ON bk.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
+      LEFT JOIN dbo.enterprise e ON e.id = bk.CompanyId
       WHERE m.Id = @id
     `);
   if (!target.recordset.length) throw new ReceiptError("Milestone not found", 404);
@@ -637,6 +638,13 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
   // fills the milestone versus overflows to on-account.
   const { createReceivedPaymentInternal, invalidateReceivedPaymentWorkflowCaches } = require("./receivedPayment");
 
+  const docDate = data.ReceivedDate || null;
+  const finYearRow = docDate
+    ? await pool.request().input("d", sql.Date, new Date(docDate))
+        .query("SELECT TOP 1 FName FROM dbo.FinYear WHERE FStatus = 1 AND @d BETWEEN FStartDate AND FEndDate ORDER BY FStartDate DESC")
+    : null;
+  const rpFinYear = finYearRow?.recordset[0]?.FName || null;
+
   // Insert + Draft->Pending promotion run in one transaction — if either
   // step fails (crash, dropped connection) the whole thing rolls back
   // instead of leaving a Draft row stuck forever, invisible to the Approval
@@ -652,7 +660,9 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
       RPProjectName: targetRow.ProjectName,
       RPProjectId: targetRow.ProjectId,
       RPCompanyId: targetRow.CompanyId,
-      RPDocDate: data.ReceivedDate || null,
+      RPCompanyName: targetRow.CompanyName || null,
+      RPFinYear: rpFinYear,
+      RPDocDate: docDate,
       RPMode: data.PaymentMode || null,
       RPAmount: amount,
       RPTransactionID: data.TransactionRef || null,
@@ -1374,7 +1384,13 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const bkRes = await pool.request().input("bid", sql.Int, bid)
-      .query("SELECT ProjectId, ProjectName, CompanyId, ApplicationId, BookingNo FROM dbo.CrmBooking WHERE Id = @bid");
+      .query(`
+        SELECT bk.ProjectId, bk.ProjectName, bk.CompanyId, bk.ApplicationId, bk.BookingNo,
+               e.name AS CompanyName
+        FROM dbo.CrmBooking bk
+        LEFT JOIN dbo.enterprise e ON e.id = bk.CompanyId
+        WHERE bk.Id = @bid
+      `);
     if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
     const booking = bkRes.recordset[0];
 
@@ -1382,6 +1398,13 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
 
     const actorEmail = req.user?.email || req.user?.name || null;
     const { createReceivedPaymentInternal, invalidateReceivedPaymentWorkflowCaches } = require("./receivedPayment");
+
+    const oaDocDate = b.ReceivedDate || null;
+    const oaFinYearRow = oaDocDate
+      ? await pool.request().input("d", sql.Date, new Date(oaDocDate))
+          .query("SELECT TOP 1 FName FROM dbo.FinYear WHERE FStatus = 1 AND @d BETWEEN FStartDate AND FEndDate ORDER BY FStartDate DESC")
+      : null;
+    const oaFinYear = oaFinYearRow?.recordset[0]?.FName || null;
 
     // Insert + Draft->Pending promotion run in one transaction — if either
     // step fails (crash, dropped connection) the whole thing rolls back
@@ -1397,7 +1420,9 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
         RPProjectName: booking.ProjectName,
         RPProjectId: booking.ProjectId,
         RPCompanyId: booking.CompanyId,
-        RPDocDate: b.ReceivedDate || null,
+        RPCompanyName: booking.CompanyName || null,
+        RPFinYear: oaFinYear,
+        RPDocDate: oaDocDate,
         RPMode: b.PaymentMode || null,
         RPAmount: amount,
         RPTransactionID: b.TransactionRef || null,

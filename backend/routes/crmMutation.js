@@ -9,6 +9,7 @@ const { crmMutationCreateSchema, crmMutationApproveSchema } = require("../valida
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { canPerformCrmGatedAction } = require("../services/approvalService");
 const { logCrmAudit } = require("../services/crmAudit");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const multer = require("multer");
@@ -378,6 +379,8 @@ router.put("/:id/approve", requirePageRight("crm-mutation", "edit"), validateBod
 
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    if (!(await canPerformCrmGatedAction("crm-mutation-approve", actorId(req), req.user?.role)))
+      return res.status(403).json({ error: "You are not authorised to approve a mutation — requires Legal Head or CRM Administrator" });
 
     const docs = await pool.request().input("id", sql.Int, id).query(`
       SELECT COUNT(*) AS Required, SUM(CASE WHEN Status = 'Verified' THEN 1 ELSE 0 END) AS Verified

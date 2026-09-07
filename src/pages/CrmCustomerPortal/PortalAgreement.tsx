@@ -44,11 +44,11 @@ function DateStatusBadge({ label, date, color, active }: { label: string; date?:
 }
 
 function mimeIcon(mime: string | null | undefined, size = 16) {
-  if (!mime) return <FileIcon size={size} className="text-slate-400 shrink-0" />;
+  if (!mime) return <FileIcon size={size} className="shrink-0" style={{ color: TEXT_FAINT }} />;
   if (mime.startsWith("image/")) return <FileImage size={size} className="text-blue-500 shrink-0" />;
   if (mime === "application/pdf") return <FileText size={size} className="text-red-500 shrink-0" />;
   if (mime.includes("sheet") || mime.includes("excel")) return <FileSpreadsheet size={size} className="text-emerald-500 shrink-0" />;
-  return <FileIcon size={size} className="text-slate-400 shrink-0" />;
+  return <FileIcon size={size} className="shrink-0" style={{ color: TEXT_FAINT }} />;
 }
 
 function agreementSteps(ag: any): { label: string; state: StepState; note?: string }[] {
@@ -73,16 +73,16 @@ function agreementSteps(ag: any): { label: string; state: StepState; note?: stri
   ];
 }
 
-function DocPreviewDialog({ doc, onClose }: { doc: any; onClose: () => void }) {
+function DocPreviewDialog({ doc, applicationId, onClose }: { doc: any; applicationId: number; onClose: () => void }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   useEffect(() => {
     let objectUrl: string | null = null;
-    fetch(`${API}/agreement/documents/file/${doc.Id}`, { headers: authHeaders() })
+    fetch(`${API}/agreement/documents/file/${doc.Id}?applicationId=${applicationId}`, { headers: authHeaders() })
       .then((r) => r.blob())
       .then((blob) => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); })
       .catch(() => setBlobUrl(null));
     return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [doc.Id]);
+  }, [doc.Id, applicationId]);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -91,13 +91,13 @@ function DocPreviewDialog({ doc, onClose }: { doc: any; onClose: () => void }) {
           <DialogTitle className="flex items-center gap-2">{mimeIcon(doc.MimeType)} {doc.FileName || doc.DocumentType}</DialogTitle>
           <DialogDescription>{doc.DocumentType?.replace(/([A-Z])/g, " $1").trim()}{doc.VersionNo > 1 ? ` · version ${doc.VersionNo}` : ""}</DialogDescription>
         </DialogHeader>
-        <div className="flex items-center justify-center min-h-[300px] bg-slate-50 rounded-lg overflow-hidden">
-          {!blobUrl ? <span className="text-sm text-slate-400">Loading preview…</span>
+        <div className="flex items-center justify-center min-h-[300px] rounded-lg overflow-hidden" style={{ background: SURFACE_ALT }}>
+          {!blobUrl ? <span className="text-sm" style={{ color: TEXT_FAINT }}>Loading preview…</span>
             : doc.MimeType?.startsWith("image/") ? <img src={blobUrl} alt={doc.FileName} className="max-w-full max-h-[60vh] object-contain" />
             : doc.MimeType === "application/pdf" ? <iframe src={blobUrl} title={doc.FileName} className="w-full h-[60vh] border-0" />
-            : <div className="flex flex-col items-center gap-2 py-8 text-slate-400 text-sm">{mimeIcon(doc.MimeType, 28)} Preview not available for this file type.</div>}
+            : <div className="flex flex-col items-center gap-2 py-8 text-sm" style={{ color: TEXT_FAINT }}>{mimeIcon(doc.MimeType, 28)} Preview not available for this file type.</div>}
         </div>
-        <div className="flex justify-between items-center text-xs text-slate-400 pt-1">
+        <div className="flex justify-between items-center text-xs pt-1" style={{ color: TEXT_FAINT }}>
           <span>{fmtBytes(doc.FileSize)}</span>
           {blobUrl && (
             <a href={blobUrl} download={doc.FileName} style={{ color: GOLD }} className="hover:underline flex items-center gap-1">
@@ -130,13 +130,13 @@ function QpAttachmentPreviewDialog({ att, applicationId, onClose }: { att: any; 
           <DialogTitle className="flex items-center gap-2">{mimeIcon(att.MimeType)} {att.FileName}</DialogTitle>
           <DialogDescription>{att.DocType === "Proof" ? "Your payment proof" : "Sent by our team"}</DialogDescription>
         </DialogHeader>
-        <div className="flex items-center justify-center min-h-[300px] bg-slate-50 rounded-lg overflow-hidden">
-          {!blobUrl ? <span className="text-sm text-slate-400">Loading preview…</span>
+        <div className="flex items-center justify-center min-h-[300px] rounded-lg overflow-hidden" style={{ background: SURFACE_ALT }}>
+          {!blobUrl ? <span className="text-sm" style={{ color: TEXT_FAINT }}>Loading preview…</span>
             : att.MimeType?.startsWith("image/") ? <img src={blobUrl} alt={att.FileName} className="max-w-full max-h-[60vh] object-contain" />
             : att.MimeType === "application/pdf" ? <iframe src={blobUrl} title={att.FileName} className="w-full h-[60vh] border-0" />
-            : <div className="flex flex-col items-center gap-2 py-8 text-slate-400 text-sm">{mimeIcon(att.MimeType, 28)} Preview not available for this file type.</div>}
+            : <div className="flex flex-col items-center gap-2 py-8 text-sm" style={{ color: TEXT_FAINT }}>{mimeIcon(att.MimeType, 28)} Preview not available for this file type.</div>}
         </div>
-        <div className="flex justify-between items-center text-xs text-slate-400 pt-1">
+        <div className="flex justify-between items-center text-xs pt-1" style={{ color: TEXT_FAINT }}>
           <span>{fmtBytes(att.FileSize)}</span>
           {blobUrl && (
             <a href={blobUrl} download={att.FileName} style={{ color: GOLD }} className="hover:underline flex items-center gap-1">
@@ -195,7 +195,7 @@ function UploadDocDialog({ doc, applicationId, onClose, onUploaded }: { doc: any
         </label>
 
         <div className="flex justify-end gap-2 pt-1">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">Cancel</button>
+          <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-lg hover:opacity-80" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT_MUTED }}>Cancel</button>
           <button onClick={submit} disabled={saving || !file}
             className="px-4 py-1.5 text-sm text-white rounded-lg font-medium disabled:opacity-40" style={{ background: INK }}>
             {saving ? "Uploading..." : "Submit"}
@@ -238,9 +238,9 @@ function ProposeDateDialog({
           </DialogDescription>
         </DialogHeader>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-          className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2" style={{ color: TEXT, background: SURFACE }} />
+          className="w-full text-sm rounded-lg px-3 py-2 outline-none" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT, background: SURFACE_ALT }} />
         <div className="flex justify-end gap-2 pt-2">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg" style={{ color: TEXT_MUTED }}>Cancel</button>
+          <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-lg hover:opacity-80" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT_MUTED }}>Cancel</button>
           <button onClick={submit} disabled={saving}
             className="px-4 py-1.5 text-sm text-white rounded-lg font-medium disabled:opacity-40" style={{ background: INK }}>
             {saving ? "Sending..." : "Submit"}
@@ -273,9 +273,9 @@ function RespondDialog({
           </DialogHeader>
           <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={4}
             placeholder="e.g. My name is spelled incorrectly, the unit area is wrong..."
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 resize-none" />
+            className="w-full text-sm rounded-lg px-3 py-2 resize-none outline-none" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT, background: SURFACE_ALT }} />
           <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => setMode("choose")} className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">Back</button>
+            <button onClick={() => setMode("choose")} className="px-3 py-1.5 text-sm rounded-lg hover:opacity-80" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT_MUTED }}>Back</button>
             <button onClick={() => { if (!remarks.trim()) { toast.error("Remarks are required"); return; } onSubmit("Recheck", remarks); }}
               className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700">Submit Recheck Request</button>
           </div>
@@ -302,7 +302,7 @@ function RespondDialog({
           ))}
         </div>
 
-        <label className="flex items-start gap-2 text-xs text-slate-500 pt-1 cursor-pointer">
+        <label className="flex items-start gap-2 text-xs pt-1 cursor-pointer" style={{ color: TEXT_MUTED }}>
           <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5" />
           I have reviewed all attached documents and the details above are correct.
         </label>
@@ -318,13 +318,13 @@ function RespondDialog({
             <span className="block text-[11px] font-normal opacity-80">Everything looks correct</span>
           </button>
           <button onClick={() => setMode("recheck")}
-            className="px-4 py-2.5 text-sm border border-slate-200 rounded-lg font-medium hover:bg-slate-50 text-left">
+            className="px-4 py-2.5 text-sm rounded-lg font-medium text-left" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT }}>
             Request a Recheck
-            <span className="block text-[11px] font-normal text-slate-500">Something needs to be corrected</span>
+            <span className="block text-[11px] font-normal" style={{ color: TEXT_MUTED }}>Something needs to be corrected</span>
           </button>
         </div>
         <div className="flex justify-end pt-1">
-          <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">Cancel</button>
+          <button onClick={onClose} className="text-xs hover:opacity-80" style={{ color: TEXT_FAINT }}>Cancel</button>
         </div>
       </DialogContent>
     </Dialog>
@@ -517,7 +517,8 @@ const PortalAgreement: React.FC = () => {
                           {acceptingDate ? "Accepting..." : "Accept This Date"}
                         </button>
                         <button onClick={() => setProposeDateOpen(true)}
-                          className="px-5 py-2.5 text-sm font-semibold rounded-lg border border-slate-200 hover:bg-slate-50 flex items-center gap-1.5" style={{ color: TEXT }}>
+                          className="px-5 py-2.5 text-sm font-semibold rounded-lg flex items-center gap-1.5 transition-colors hover:opacity-80"
+                          style={{ border: `1px solid ${HAIRLINE}`, color: TEXT, background: SURFACE }}>
                           <CalendarCheck2 size={15} /> Propose a Different Date
                         </button>
                       </div>
@@ -544,7 +545,7 @@ const PortalAgreement: React.FC = () => {
       )}
 
       {needsAction.length > 0 && (
-        <Card className="overflow-hidden border-amber-300">
+        <Card className="overflow-hidden" style={{ borderColor: GOLD }}>
           <CardHeader icon={UploadCloud} title={`Documents Needed From You (${needsAction.length})`} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
             {needsAction.map((d: any) => {
@@ -717,7 +718,7 @@ const PortalAgreement: React.FC = () => {
         </Card>
       )}
 
-      {previewDoc && <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
+      {previewDoc && <DocPreviewDialog doc={previewDoc} applicationId={applicationId} onClose={() => setPreviewDoc(null)} />}
       {qpPreviewAttachment && <QpAttachmentPreviewDialog att={qpPreviewAttachment} applicationId={applicationId} onClose={() => setQpPreviewAttachment(null)} />}
       {proposeDateOpen && agreement && (
         <ProposeDateDialog

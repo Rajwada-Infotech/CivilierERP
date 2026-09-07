@@ -179,6 +179,11 @@ const BOOKING_SELECT = `
     FROM dbo.CrmAgreement
     WHERE BookingId = b.Id ORDER BY CreatedAt DESC
   ) ag
+  OUTER APPLY (
+    SELECT TOP 1 Status AS DeedStatus
+    FROM dbo.CrmSalesDeed
+    WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+  ) sd
 `;
 
 // GET / — all bookings. By default, Cancelled/Rejected bookings are
@@ -1452,11 +1457,13 @@ router.get("/:id/invoices", requirePageRight("crm-bookings", "view"), async (req
 // step — an invoice is a record of a real transaction, not a draft that
 // needs sign-off like the Agreement/Sales Deed documents).
 router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const _diagStep = { step: "init" };
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
     const b = req.body;
     const type = b.InvoiceType || "Maintenance";
+    _diagStep.step = "activeCheck"; _diagStep.type = type; _diagStep.body = b;
 
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -1511,11 +1518,13 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       if (mRow.DemandStatus === CrmStatus.PENDING) {
         return res.status(400).json({ error: `A demand must be raised for "${mRow.MilestoneName}" (from the Demands page) before its invoice can be generated` });
       }
+      _diagStep.step = "dupCheck"; _diagStep.mid = milestoneId;
       const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid AND Status <> 'Void'");
       if (already.recordset.length) return res.status(400).json({ error: `"${mRow.MilestoneName}" already has an invoice` });
       amount = Number(mRow.AmountDue);
       invoiceDate = mRow.DemandRaisedOn || null;
       description = b.Description || `${mRow.MilestoneName} — invoice`;
+      _diagStep.step = "dupCheckPassed"; _diagStep.amount = amount;
     } else {
       amount = parseFloat(b.Amount);
       if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
@@ -1580,8 +1589,10 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       if (rawPrefix.length > 10) return res.status(400).json({ error: "Invoice prefix must be 10 characters or fewer" });
       invoiceNo = await getNextDocNumber(pool, rawPrefix, rawPrefix);
     } else {
+      _diagStep.step = "getNextDocNumber";
       invoiceNo = await getNextDocNumber(pool, "INV", "INV");
     }
+    _diagStep.step = "insert"; _diagStep.invoiceNo = invoiceNo;
     const result = await pool.request()
       .input("no",   sql.NVarChar(30),  invoiceNo)
       .input("bid",  sql.Int,           id)
@@ -1597,6 +1608,7 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
         OUTPUT INSERTED.Id
         VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME(), @mid, @oaid)
       `);
+    _diagStep.step = "pdfGen";
     const invoiceId = result.recordset[0].Id;
     // Best-effort, same request — the invoice record itself is the source of
     // truth and must not fail to create just because PDF rendering hit a
@@ -1619,7 +1631,11 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     if (e.number === 2601 || e.number === 2627) {
       return res.status(400).json({ error: "An invoice already exists for this milestone, on-account payment, or billing period — it can't be generated twice" });
     }
-    console.error("[crm-bookings] POST /:id/invoices error:", e.message);
+    if (e.number === 207) {
+      console.error("[crm-bookings] POST /:id/invoices schema error (run pending migrations): ", e.message);
+      return res.status(500).json({ error: "Database schema is out of date — ask your administrator to run: node migrate.js up" });
+    }
+    console.error("[crm-bookings] POST /:id/invoices error at step=%s sqlNum=%s:", _diagStep.step, e.number, e.message, "| ctx:", JSON.stringify(_diagStep));
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });

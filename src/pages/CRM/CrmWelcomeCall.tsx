@@ -640,7 +640,7 @@ const InlineVerify: React.FC<{
 // ChecklistSubmitFooter are the non-section chrome; ChecklistSectionBlock
 // renders exactly one section's items and is dropped in directly under that
 // section's own data card, wherever that card actually lives on the page.
-function useVerificationChecklist(bookingId: number) {
+function useVerificationChecklist(bookingId: number, onAfterSubmit?: () => void) {
   const { data: vc, refetch } = useQuery({
     queryKey: ["crm-welcome-verification-checklist", bookingId],
     queryFn: () => fetchVerificationChecklist(bookingId),
@@ -656,7 +656,8 @@ function useVerificationChecklist(bookingId: number) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to submit");
       toast.success("Welcome call verification submitted and locked");
-      refetch();
+      await refetch();
+      onAfterSubmit?.();
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -743,18 +744,26 @@ const ChecklistSectionBlock: React.FC<{
 // themselves render, not the gate itself.
 const ChecklistSubmitFooter: React.FC<{
   vc: any; locked: boolean; submitting: boolean; reopening: boolean;
-  onSubmit: () => void; onReopen: () => void;
-}> = ({ vc, locked, submitting, reopening, onSubmit, onReopen }) => {
+  onSubmit: () => void; onReopen: () => void; onContinue?: () => void;
+}> = ({ vc, locked, submitting, reopening, onSubmit, onReopen, onContinue }) => {
   if (!vc) return null;
   return (
     <div className="rounded-xl border border-border p-3.5 space-y-2">
       {locked ? (
         <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
           <span className="flex items-center gap-1.5 font-medium"><Lock size={12} /> Submitted and locked{vc.submission?.SubmittedAt ? ` — ${String(vc.submission.SubmittedAt).slice(0, 16).replace("T", " ")}` : ""}</span>
-          <button type="button" onClick={onReopen} disabled={reopening}
-            className="flex items-center gap-1 font-medium text-emerald-700 hover:underline disabled:opacity-40">
-            <Unlock size={12} /> {reopening ? "Reopening..." : "Reopen"}
-          </button>
+          <div className="flex items-center gap-3">
+            {onContinue && (
+              <button type="button" onClick={onContinue}
+                className="flex items-center gap-1 font-medium text-emerald-800 hover:underline">
+                <ChevronRight size={12} /> Continue to Communication Log
+              </button>
+            )}
+            <button type="button" onClick={onReopen} disabled={reopening}
+              className="flex items-center gap-1 font-medium text-emerald-700 hover:underline disabled:opacity-40">
+              <Unlock size={12} /> {reopening ? "Reopening..." : "Reopen"}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="flex items-center justify-between gap-2">
@@ -824,6 +833,8 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerRunning]);
   const fmtTimer = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const [paymentPlanConfirmed, setPaymentPlanConfirmed] = useState<true | false | null>(null);
+  const [paymentPlanDisputeReason, setPaymentPlanDisputeReason] = useState("");
   const [coForm, setCoForm] = useState({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "", Reason: "" });
   const [addingCo, setAddingCo] = useState(false);
 
@@ -890,13 +901,12 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
     queryKey: ["crm-welcome-extra-charges", booking.BookingId],
     queryFn: () => fetchExtraCharges(booking.BookingId),
   });
-  // Only fetched once its card is actually expanded — no point loading the
-  // full milestone schedule / full loan record on every call just to show a
-  // one-line teaser.
+  // Fetched eagerly (no `enabled` condition) because milestones are used for
+  // the overdue count in FinancialStatusBar even when the plan card is collapsed.
+  // The expanded plan card view also reads from this same query.
   const { data: milestones = [] } = useQuery({
     queryKey: ["crm-welcome-milestones", booking.BookingId],
     queryFn: () => fetchBookingMilestones(booking.BookingId),
-    enabled: expandedCard === "plan",
   });
   const { data: loanDetail, isLoading: loanLoading } = useQuery({
     queryKey: ["crm-welcome-loan", booking.BookingId],
@@ -936,6 +946,10 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
     // the call, so a blank one is a useless log entry masquerading as a
     // real one.
     if (!form.Outcome) { toast.error("Select an outcome before logging the call"); return; }
+    if (paymentPlanConfirmed === false && !paymentPlanDisputeReason.trim()) {
+      toast.error("Describe the customer's objection before logging — required when payment plan is not confirmed");
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -954,29 +968,32 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
           Notes: form.Notes || null,
           PreferredAgreementDate: form.PreferredAgreementDate || null,
           CustomFields: customFields,
+          PaymentPlanConfirmed: paymentPlanConfirmed,
+          PaymentPlanDisputeReason: paymentPlanConfirmed === false ? paymentPlanDisputeReason.trim() : null,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to log call");
       setForm({ ...EMPTY_FORM, CalledBy: currentUser?.id || "", CallDate: nowLocal() });
       setCustomFields([]);
+      setPaymentPlanConfirmed(null);
+      setPaymentPlanDisputeReason("");
       setTimerRunning(false);
       setTimerSeconds(0);
       refetchChecklist();
+      vcState.refetch();
       invalidateQueue();
       qc.invalidateQueries({ queryKey: ["crm-welcome-calls-history"] });
       qc.invalidateQueries({ queryKey: ["crm-communication"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
 
-      // Auto-flow: every logged call is seeded into the Communication Log
-      // server-side already — once the customer is actually Welcomed, hand
-      // the whole flow off to that page for ongoing follow-up/tasks instead
-      // of leaving staff sitting on this dialog.
       if (form.Outcome === "Welcomed") {
-        toast.success("Welcome call logged — continuing in Communication Log");
-        onClose();
-        navigate(`/crm/communication?bookingId=${booking.BookingId}`);
+        // Stay in the dialog so the user can complete the verification checklist —
+        // closing immediately was the bug: the dialog disappeared before staff had
+        // a chance to tick any checklist items, leaving the submission permanently
+        // blocked. Navigate to Communication Log only after they finish and close.
+        toast.success("Welcome call logged — complete the verification checklist below to finish");
       } else if (["NotReachable", "Busy", "SwitchedOff", "VoiceMail"].includes(form.Outcome)) {
         // Auto-set next call date to tomorrow so the booking doesn't
         // silently fall out of queue without a follow-up scheduled.
@@ -985,7 +1002,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
         tomorrow.setMinutes(tomorrow.getMinutes() - tomorrow.getTimezoneOffset());
         const tomorrowStr = tomorrow.toISOString().slice(0, 16);
         setForm((f) => ({ ...f, NextCallDate: f.NextCallDate || tomorrowStr }));
-        toast.info("Call logged. Next call auto-scheduled for tomorrow — edit if needed.");
+        toast.info("Call logged. Next call date pre-filled for tomorrow — update if needed before the next log.");
       } else {
         toast.success("Welcome call logged");
       }
@@ -1020,6 +1037,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
       if (!res.ok) throw new Error(data.error || "Failed to update call");
       toast.success("Call updated");
       refetchChecklist();
+      vcState.refetch();
       invalidateQueue();
       qc.invalidateQueries({ queryKey: ["crm-welcome-calls-history"] });
       onCancelEdit?.();
@@ -1039,6 +1057,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
       if (!res.ok) throw new Error(data.error || "Failed to remove call log");
       toast.success("Call log removed");
       refetchChecklist();
+      vcState.refetch();
       invalidateQueue();
       qc.invalidateQueries({ queryKey: ["crm-welcome-calls-history"] });
       onCancelEdit?.();
@@ -1279,6 +1298,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
         <ChecklistSubmitFooter
           vc={vcState.vc} locked={vcState.locked} submitting={vcState.submitting} reopening={vcState.reopening}
           onSubmit={vcState.handleSubmit} onReopen={vcState.handleReopen}
+          onContinue={() => { onClose(); navigate(`/crm/communication?bookingId=${booking.BookingId}`); }}
         />
 
         {/* F3 — Escalation banner: fires when customer has been unreachable 3+ consecutive times */}
@@ -1424,6 +1444,38 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                   ))}
                 </div>
               </div>
+
+              {/* Payment plan confirmation — captured once per call, stored in
+                  CrmWelcomeCall.PaymentPlanConfirmed, and surfaced in the
+                  Communication Log when the customer disputes. Sending null
+                  (not answered) is valid — not every call reaches this question. */}
+              {!isEditingCall && (
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1.5">Payment Plan Confirmed by Customer?</label>
+                  <div className="flex items-center gap-2">
+                    {([true, false] as const).map((v) => (
+                      <button key={String(v)} type="button"
+                        onClick={() => { setPaymentPlanConfirmed((prev) => prev === v ? null : v); if (v === true) setPaymentPlanDisputeReason(""); }}
+                        className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${
+                          paymentPlanConfirmed === v
+                            ? v ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-red-300 bg-red-50 text-red-700"
+                            : "border-border text-muted-foreground hover:bg-muted/40"
+                        }`}>
+                        {paymentPlanConfirmed === v && <Check size={11} className="inline mr-1 -mt-0.5" />}{v ? "Yes — confirmed" : "No — disputed"}
+                      </button>
+                    ))}
+                    {paymentPlanConfirmed !== null && (
+                      <button type="button" onClick={() => { setPaymentPlanConfirmed(null); setPaymentPlanDisputeReason(""); }}
+                        className="text-[11px] text-muted-foreground hover:underline">Clear</button>
+                    )}
+                  </div>
+                  {paymentPlanConfirmed === false && (
+                    <textarea value={paymentPlanDisputeReason} onChange={(e) => setPaymentPlanDisputeReason(e.target.value)}
+                      placeholder="What is the customer's objection to the payment plan? (required)"
+                      rows={2} className="mt-1.5 w-full text-xs border border-red-300 rounded px-2 py-1.5 bg-background resize-none" />
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-1 gap-3">
                 <div>

@@ -1298,7 +1298,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 <Building2 size={16} className="text-amber-600 dark:text-amber-400" />
                 {booking ? `${booking.BookingNo} — ${booking.ApplicantName}` : "Booking Detail"}
               </DialogTitle>
-              {booking && booking.Status !== 'Cancelled' && (
+              {booking && booking.Status !== 'Cancelled' && booking.DeedStatus === 'Registered' && (
+                <span className="shrink-0 px-3 py-1.5 text-xs text-muted-foreground border border-border rounded-lg" title="Sale deed is Registered — title has legally transferred; standard cancellation is not applicable">
+                  Deed Registered — cancellation not applicable
+                </span>
+              )}
+              {booking && booking.Status !== 'Cancelled' && booking.DeedStatus !== 'Registered' && (
                 <button onClick={() => { onClose(); window.location.href = `/crm/cancellations?bookingId=${bookingId}`; }} className="shrink-0 px-3 py-1.5 text-xs border border-red-500 text-red-600 rounded-lg font-medium hover:bg-red-50 flex items-center gap-1.5">
                   <AlertTriangle size={14} /> Request Cancellation
                 </button>
@@ -1321,6 +1326,22 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 )}
               </div>
             </div>
+
+            {booking.IsFrozen && (
+              <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/40 px-3 py-2.5 text-xs">
+                <Lock size={13} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-semibold text-red-700 dark:text-red-400">Booking Frozen</span>
+                  {booking.FreezeReason && <span className="text-red-700 dark:text-red-400"> — {booking.FreezeReason}</span>}
+                  {booking.FreezeExpiresAt && (
+                    <span className="text-red-600 dark:text-red-400 block mt-0.5">
+                      Freeze expires {new Date(booking.FreezeExpiresAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                    </span>
+                  )}
+                  <span className="text-red-600/80 dark:text-red-400/70 block mt-0.5">All changes are blocked — contact an admin to unfreeze.</span>
+                </div>
+              </div>
+            )}
 
             {/* ── Financial Status Bar ── always visible across all tabs ── */}
             {(() => {
@@ -2970,7 +2991,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {!isLastTab ? (
                   <button onClick={() => goStep(1)}
                     className="px-4 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted flex items-center gap-1">
-                    Save &amp; Next <ArrowRight size={14} />
+                    Next <ArrowRight size={14} />
                   </button>
                 ) : booking.Status === CrmStatus.APPROVED ? (
                   <button disabled

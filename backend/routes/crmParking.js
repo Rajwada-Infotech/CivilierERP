@@ -351,7 +351,7 @@ async function applyReleaseParking(pool, id, actorUserId = null, reason = null, 
   // milestone) fall back to the booking-wide settled check instead, since
   // their value has no isolated "paid" point of its own once blended.
   const milestone = await pool.request().input("paid", sql.Int, id)
-    .query("SELECT TOP 1 Id, Status, Amount FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid ORDER BY Id DESC");
+    .query("SELECT TOP 1 Id, Status, AmountDue AS Amount FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid ORDER BY Id DESC");
 
   let creditAmount = 0;
 

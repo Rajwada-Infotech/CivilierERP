@@ -10,6 +10,7 @@ const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { canPerformCrmGatedAction } = require("../services/approvalService");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const multer = require("multer");
 
@@ -348,6 +349,8 @@ router.put("/:id/complete", requirePageRight("crm-registry", "edit"), async (req
     }
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    if (!(await canPerformCrmGatedAction("crm-registry-complete", actorId(req), req.user?.role)))
+      return res.status(403).json({ error: "You are not authorised to complete a registry — requires Legal Head or CRM Administrator" });
 
     const docs = await pool.request().input("id", sql.Int, id).query(`
       SELECT COUNT(*) AS Required, SUM(CASE WHEN Status = 'Verified' THEN 1 ELSE 0 END) AS Verified
@@ -436,6 +439,8 @@ router.put("/:id/cancel", requirePageRight("crm-registry", "edit"), async (req, 
     if (["Completed", "Cancelled"].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot cancel a registry that is already ${cur.recordset[0].Status}` });
     }
+    if (!(await canPerformCrmGatedAction("crm-registry-cancel", actorId(req), req.user?.role)))
+      return res.status(403).json({ error: "You are not authorised to cancel a registry" });
 
     await pool.request()
       .input("id", sql.Int, id)

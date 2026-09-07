@@ -621,6 +621,7 @@ function AppRoutes() {
       <Route path="/crm-client-portal/login" element={<Suspense fallback={<PageSkeleton />}><PortalLogin /></Suspense>} />
       <Route path="/crm-client-portal/change-password" element={<Suspense fallback={<PageSkeleton />}><PortalChangePassword /></Suspense>} />
       <Route path="/crm-client-portal" element={<Suspense fallback={<PageSkeleton />}><PortalLayout /></Suspense>}>
+        <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<PortalOverview />} />
         <Route path="booking" element={<PortalBooking />} />
         <Route path="agreement" element={<PortalAgreement />} />

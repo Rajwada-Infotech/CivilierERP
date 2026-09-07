@@ -10,6 +10,7 @@ const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
+const { canPerformCrmGatedAction } = require("../services/approvalService");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const uploadQP = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 } });
 
@@ -195,6 +196,43 @@ router.post("/", requirePageRight("crm-query-payment", "create"), async (req, re
   }
 });
 
+// PUT /:id — update Remarks while Status is still Pending.
+// StampDuty and RegistrationFee are NOT stored on this table — they live on
+// CrmSalesDeed and are read live via the QP_SELECT join. Only Remarks can be
+// changed here, and only before the paperwork has been sent to the customer
+// (InfoSent locks it — the customer relied on what was communicated).
+router.put("/:id", requirePageRight("crm-query-payment", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const b = req.body;
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId, Status FROM dbo.CrmQueryPayment WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
+    const row = cur.recordset[0];
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+    if (row.Status !== CrmStatus.PENDING) {
+      return res.status(400).json({ error: "Remarks can no longer be edited once the paperwork has been sent to the customer" });
+    }
+    await pool.request()
+      .input("id",  sql.Int,               id)
+      .input("rem", sql.NVarChar(sql.MAX),  b.Remarks !== undefined ? (b.Remarks || null) : null)
+      .input("ub",  sql.Int,               actorId(req))
+      .query(`
+        UPDATE dbo.CrmQueryPayment SET
+          Remarks   = ISNULL(@rem, Remarks),
+          UpdatedBy = @ub,
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-query-payment] PUT /:id error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /:id/info — upload the paperwork/instructions for the customer and
 // flip Status -> InfoSent. This is the outbound half: staff sending the
 // customer what they need, not a document request FROM the customer (the
@@ -278,6 +316,8 @@ router.post("/:id/confirm", requirePageRight("crm-query-payment", "edit"), async
     }
     const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    if (!(await canPerformCrmGatedAction("crm-query-payment-confirm", actorId(req), req.user?.role)))
+      return res.status(403).json({ error: "You are not authorised to confirm query payment — requires Legal Head or CRM Administrator" });
 
     let proof = null;
     if (b.proof) {

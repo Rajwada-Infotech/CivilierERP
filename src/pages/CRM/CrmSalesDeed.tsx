@@ -119,8 +119,8 @@ function deedStepStates(d: any, documents: any[] | undefined, context: any): { l
   const custApproved = d?.CustomerApprovalStatus === "Approved";
   const dirApproved = d?.DirectorApprovalStatus === "Approved";
   const qpConfirmed = context?.queryPaymentStatus === "Confirmed";
-  const executed = !!d?.ExecutedBy;
-  const registered = !!d?.RegistrationNo;
+  const executed = !!d?.ExecutedBy || d?.Status === "Executed" || d?.Status === "Registered";
+  const registered = !!d?.RegistrationNo || d?.Status === "Registered";
 
   // Each step used to read its own "done" flag straight off the record and
   // its "current" flag off just the PRECEDING step's flag, independently —
