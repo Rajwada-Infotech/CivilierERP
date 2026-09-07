@@ -3674,16 +3674,33 @@ export default function GRN() {
                       // broken out per received item instead of lumped into
                       // one cumulative figure, so a reviewer can see exactly
                       // what each line item contributed.
-                      const buildRows = (idx: string, base: number, gst: number): PostRow[] => [
-                        { key: `purchase-base-${idx}`, label: purchaseLabel, code: purchaseCode, side: "debit", amount: base },
-                        { key: `pgrn-${idx}`, label: pgrnLabel, code: pgrnCode, side: "credit", amount: base },
-                        ...(gst > 0
-                          ? [
-                              { key: `provisional-${idx}`, label: provisionalLabel, code: provisionalCode, side: "debit" as const, amount: gst },
-                              { key: `purchase-tax-${idx}`, label: purchaseLabel, code: purchaseCode, side: "credit" as const, amount: gst },
-                            ]
-                          : []),
-                      ];
+                      // Each item posts its base/tax legs to its OWN tagged
+                      // GL Account (Item Master → GL Account) when one is
+                      // set, not the shared Purchase A/c — mirrors the
+                      // backend's /post-to-gl leg construction exactly.
+                      const buildRows = (idx: string, base: number, gst: number, glLabel?: string | null, glCode?: string | null, glIsExplicitTag?: boolean): PostRow[] => {
+                        // Show the item's tagged GL Account (e.g. "Raw
+                        // Material - Iron") alongside "Purchase A/c" in the
+                        // same row, rather than replacing it — the reviewer
+                        // sees both the actual posted account and the
+                        // system ledger it's standing in for. This only
+                        // applies to an explicit item-level tag; a Fixed
+                        // Asset item's "Fixed Assets A/c" fallback replaces
+                        // Purchase A/c outright (it was never a Purchase
+                        // A/c candidate) so it's shown alone.
+                        const baseLabel = glLabel ? (glIsExplicitTag ? `${glLabel} — ${purchaseLabel}` : glLabel) : purchaseLabel;
+                        const baseCode = glLabel ? (glCode ?? null) : purchaseCode;
+                        return [
+                          { key: `purchase-base-${idx}`, label: baseLabel, code: baseCode, side: "debit", amount: base },
+                          { key: `pgrn-${idx}`, label: pgrnLabel, code: pgrnCode, side: "credit", amount: base },
+                          ...(gst > 0
+                            ? [
+                                { key: `provisional-${idx}`, label: provisionalLabel, code: provisionalCode, side: "debit" as const, amount: gst },
+                                { key: `purchase-tax-${idx}`, label: baseLabel, code: baseCode, side: "credit" as const, amount: gst },
+                              ]
+                            : []),
+                        ];
+                      };
 
                       type ItemGroup = { key: string; itemName: string | null; qty: number | null; rate: number | null; uom: string | null; costCentre: { id: number; name: string; code: string | null } | null; rows: PostRow[] };
                       const itemGroups: ItemGroup[] =
@@ -3695,7 +3712,7 @@ export default function GRN() {
                               rate: it.rate ?? null,
                               uom: it.uom ?? null,
                               costCentre: it.costCentre ?? null,
-                              rows: buildRows(String(it.itemId ?? idx), Number(it.baseAmount) || 0, Number(it.gstAmount) || 0),
+                              rows: buildRows(String(it.itemId ?? idx), Number(it.baseAmount) || 0, Number(it.gstAmount) || 0, it.glHeadName ?? null, it.glHeadCode ?? null, !!it.glHeadIsExplicitTag),
                             }))
                           : [{ key: "lumped", itemName: null, qty: null, rate: null, uom: null, costCentre: null, rows: buildRows("lumped", baseAmount, taxAmount) }];
 
